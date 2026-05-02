@@ -49,6 +49,11 @@ final class com.vynatix.vault.testing.bridge/FakeKvStore : com.vynatix.vault.bri
     final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.testing.bridge/FakeKvStore.snapshot|snapshot(){}[0]
 }
 
+final class com.vynatix.vault.testing.concurrency/Barrier { // com.vynatix.vault.testing.concurrency/Barrier|null[0]
+    final suspend fun arrive() // com.vynatix.vault.testing.concurrency/Barrier.arrive|arrive(){}[0]
+    final suspend fun await() // com.vynatix.vault.testing.concurrency/Barrier.await|await(){}[0]
+}
+
 final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
     final val backgroundScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope|{}backgroundScope[0]
         final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
@@ -62,4 +67,9 @@ final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/Corout
     final fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture = ...): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultTestScope.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
 }
 
+final fun (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/barrier(kotlin/Int, kotlin.time/Duration = ...): com.vynatix.vault.testing.concurrency/Barrier // com.vynatix.vault.testing.concurrency/barrier|barrier@com.vynatix.vault.testing.VaultTestScope(kotlin.Int;kotlin.time.Duration){}[0]
+final fun (kotlin/Function0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.Function0<kotlin.Unit>(kotlin.time.Duration){}[0]
 final fun com.vynatix.vault.testing/vaultTest(kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction1<com.vynatix.vault.testing/VaultTestScope, kotlin/Unit>) // com.vynatix.vault.testing/vaultTest|vaultTest(kotlin.time.Duration;kotlin.coroutines.SuspendFunction1<com.vynatix.vault.testing.VaultTestScope,kotlin.Unit>){}[0]
+final suspend fun (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/eventually(kotlin.time/Duration = ..., kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction0<kotlin/Unit>) // com.vynatix.vault.testing.concurrency/eventually|eventually@com.vynatix.vault.testing.VaultTestScope(kotlin.time.Duration;kotlin.time.Duration;kotlin.coroutines.SuspendFunction0<kotlin.Unit>){}[0]
+final suspend fun (kotlin.coroutines/SuspendFunction0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.coroutines.SuspendFunction0<kotlin.Unit>(kotlin.time.Duration){}[0]
+final suspend fun <#A: kotlin/Any?> (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/parallel(kotlin/Int, kotlinx.coroutines/CoroutineDispatcher = ..., kotlin.coroutines/SuspendFunction1<kotlin/Int, #A>): kotlin.collections/List<#A> // com.vynatix.vault.testing.concurrency/parallel|parallel@com.vynatix.vault.testing.VaultTestScope(kotlin.Int;kotlinx.coroutines.CoroutineDispatcher;kotlin.coroutines.SuspendFunction1<kotlin.Int,0:0>){0§<kotlin.Any?>}[0]

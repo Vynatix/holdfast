@@ -1,6 +1,7 @@
 package com.vynatix.vault.testing
 
 import com.vynatix.vault.Vault
+import com.vynatix.vault.testing.internal.BarrierRegistry
 import com.vynatix.vault.testing.internal.HandleRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -30,6 +31,7 @@ class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineS
     val backgroundScope: CoroutineScope get() = testScope.backgroundScope
 
     private val registry = HandleRegistry()
+    private val barriers = BarrierRegistry()
 
     /**
      * Register [vault] in this scope and return its [VaultHandle]. Calling
@@ -41,7 +43,10 @@ class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineS
      */
     fun <V : Vault<V>> track(vault: V, capture: Capture = Capture.All): VaultHandle<V> = registry.getOrCreate(vault, capture)
 
+    internal fun barrierRegistry(): BarrierRegistry = barriers
+
     internal fun tearDown() {
         registry.clear()
+        barriers.cancelAll()
     }
 }
