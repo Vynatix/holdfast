@@ -6,6 +6,11 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-testing>
+sealed interface com.vynatix.vault.testing/BridgeEvent : com.vynatix.vault.testing/VaultEvent { // com.vynatix.vault.testing/BridgeEvent|null[0]
+    abstract val state // com.vynatix.vault.testing/BridgeEvent.state|{}state[0]
+        abstract fun <get-state>(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/BridgeEvent.state.<get-state>|<get-state>(){}[0]
+}
+
 sealed interface com.vynatix.vault.testing/Capture { // com.vynatix.vault.testing/Capture|null[0]
     final class RingBuffer : com.vynatix.vault.testing/Capture { // com.vynatix.vault.testing/Capture.RingBuffer|null[0]
         constructor <init>(kotlin/Int) // com.vynatix.vault.testing/Capture.RingBuffer.<init>|<init>(kotlin.Int){}[0]
@@ -25,15 +30,48 @@ sealed interface com.vynatix.vault.testing/Capture { // com.vynatix.vault.testin
     final object None : com.vynatix.vault.testing/Capture // com.vynatix.vault.testing/Capture.None|null[0]
 }
 
-final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing/VaultHandle : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.vault.testing/VaultHandle|null[0]
+sealed interface com.vynatix.vault.testing/MiddlewareEvent : com.vynatix.vault.testing/VaultEvent { // com.vynatix.vault.testing/MiddlewareEvent|null[0]
+    abstract val middleware // com.vynatix.vault.testing/MiddlewareEvent.middleware|{}middleware[0]
+        abstract fun <get-middleware>(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareEvent.middleware.<get-middleware>|<get-middleware>(){}[0]
+    abstract val transaction // com.vynatix.vault.testing/MiddlewareEvent.transaction|{}transaction[0]
+        abstract fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareEvent.transaction.<get-transaction>|<get-transaction>(){}[0]
+}
+
+sealed interface com.vynatix.vault.testing/TransactionEvent : com.vynatix.vault.testing/VaultEvent { // com.vynatix.vault.testing/TransactionEvent|null[0]
+    abstract val transaction // com.vynatix.vault.testing/TransactionEvent.transaction|{}transaction[0]
+        abstract fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionEvent.transaction.<get-transaction>|<get-transaction>(){}[0]
+}
+
+sealed interface com.vynatix.vault.testing/VaultEvent { // com.vynatix.vault.testing/VaultEvent|null[0]
+    abstract val timestamp // com.vynatix.vault.testing/VaultEvent.timestamp|{}timestamp[0]
+        abstract fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/VaultEvent.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing.matcher/StateMatcher { // com.vynatix.vault.testing.matcher/StateMatcher|null[0]
+    final fun <#A1: kotlin/Any> (kotlin.reflect/KProperty1<#A, com.vynatix.vault/State<#A1>>).shouldEqual(#A1) // com.vynatix.vault.testing.matcher/StateMatcher.shouldEqual|shouldEqual@kotlin.reflect.KProperty1<1:0,com.vynatix.vault.State<0:0>>(0:0){0§<kotlin.Any>}[0]
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing/VaultHandle { // com.vynatix.vault.testing/VaultHandle|null[0]
     final val captureMode // com.vynatix.vault.testing/VaultHandle.captureMode|{}captureMode[0]
         final fun <get-captureMode>(): com.vynatix.vault.testing/Capture // com.vynatix.vault.testing/VaultHandle.captureMode.<get-captureMode>|<get-captureMode>(){}[0]
+    final val lastResult // com.vynatix.vault.testing/VaultHandle.lastResult|{}lastResult[0]
+        final fun <get-lastResult>(): com.vynatix.vault/TransactionResult<*>? // com.vynatix.vault.testing/VaultHandle.lastResult.<get-lastResult>|<get-lastResult>(){}[0]
+    final val lastTransaction // com.vynatix.vault.testing/VaultHandle.lastTransaction|{}lastTransaction[0]
+        final fun <get-lastTransaction>(): com.vynatix.vault/Transaction? // com.vynatix.vault.testing/VaultHandle.lastTransaction.<get-lastTransaction>|<get-lastTransaction>(){}[0]
+    final val timeline // com.vynatix.vault.testing/VaultHandle.timeline|{}timeline[0]
+        final fun <get-timeline>(): kotlin.collections/List<com.vynatix.vault.testing/VaultEvent> // com.vynatix.vault.testing/VaultHandle.timeline.<get-timeline>|<get-timeline>(){}[0]
+    final val transactions // com.vynatix.vault.testing/VaultHandle.transactions|{}transactions[0]
+        final fun <get-transactions>(): kotlin.collections/List<com.vynatix.vault.testing/TransactionEvent> // com.vynatix.vault.testing/VaultHandle.transactions.<get-transactions>|<get-transactions>(){}[0]
     final val vault // com.vynatix.vault.testing/VaultHandle.vault|{}vault[0]
         final fun <get-vault>(): #A // com.vynatix.vault.testing/VaultHandle.vault.<get-vault>|<get-vault>(){}[0]
 
+    final fun <#A1: com.vynatix.vault/Middleware<#A>> middlewareEventsOf(#A1): kotlin.collections/List<com.vynatix.vault.testing/MiddlewareEvent> // com.vynatix.vault.testing/VaultHandle.middlewareEventsOf|middlewareEventsOf(0:0){0§<com.vynatix.vault.Middleware<1:0>>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault.testing/VaultHandle.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> read(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault.testing/VaultHandle.read|read(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun bridgeEvents(kotlin.reflect/KProperty1<#A, com.vynatix.vault/State<*>>): kotlin.collections/List<com.vynatix.vault.testing/BridgeEvent> // com.vynatix.vault.testing/VaultHandle.bridgeEvents|bridgeEvents(kotlin.reflect.KProperty1<1:0,com.vynatix.vault.State<*>>){}[0]
     final fun consumeAllPendingErrors() // com.vynatix.vault.testing/VaultHandle.consumeAllPendingErrors|consumeAllPendingErrors(){}[0]
+    final fun emissions(kotlin.reflect/KProperty1<#A, com.vynatix.vault/State<*>>): kotlin.collections/List<com.vynatix.vault.testing/EmissionEvent> // com.vynatix.vault.testing/VaultHandle.emissions|emissions(kotlin.reflect.KProperty1<1:0,com.vynatix.vault.State<*>>){}[0]
+    final inline fun <#A1: reified com.vynatix.vault/Middleware<#A>> middlewareEventsOf(): kotlin.collections/List<com.vynatix.vault.testing/MiddlewareEvent> // com.vynatix.vault.testing/VaultHandle.middlewareEventsOf|middlewareEventsOf(){0§<com.vynatix.vault.Middleware<1:0>>}[0]
     final suspend fun <#A1: kotlin/Any?> suspendAction(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault.testing/VaultHandle.suspendAction|suspendAction(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
 }
 
@@ -53,6 +91,193 @@ final class com.vynatix.vault.testing.bridge/FakeKvStore : com.vynatix.vault.bri
 final class com.vynatix.vault.testing.concurrency/Barrier { // com.vynatix.vault.testing.concurrency/Barrier|null[0]
     final suspend fun arrive() // com.vynatix.vault.testing.concurrency/Barrier.arrive|arrive(){}[0]
     final suspend fun await() // com.vynatix.vault.testing.concurrency/Barrier.await|await(){}[0]
+}
+
+final class com.vynatix.vault.testing/BridgeObserved : com.vynatix.vault.testing/BridgeEvent { // com.vynatix.vault.testing/BridgeObserved|null[0]
+    constructor <init>(com.vynatix.vault/State<*>, kotlin/Any?, kotlin/Long) // com.vynatix.vault.testing/BridgeObserved.<init>|<init>(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Long){}[0]
+
+    final val state // com.vynatix.vault.testing/BridgeObserved.state|{}state[0]
+        final fun <get-state>(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/BridgeObserved.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/BridgeObserved.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/BridgeObserved.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val value // com.vynatix.vault.testing/BridgeObserved.value|{}value[0]
+        final fun <get-value>(): kotlin/Any? // com.vynatix.vault.testing/BridgeObserved.value.<get-value>|<get-value>(){}[0]
+
+    final fun component1(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/BridgeObserved.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.vault.testing/BridgeObserved.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.vault.testing/BridgeObserved.component3|component3(){}[0]
+    final fun copy(com.vynatix.vault/State<*> = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.vault.testing/BridgeObserved // com.vynatix.vault.testing/BridgeObserved.copy|copy(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/BridgeObserved.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/BridgeObserved.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/BridgeObserved.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/BridgePublished : com.vynatix.vault.testing/BridgeEvent { // com.vynatix.vault.testing/BridgePublished|null[0]
+    constructor <init>(com.vynatix.vault/State<*>, kotlin/Any?, kotlin/Long) // com.vynatix.vault.testing/BridgePublished.<init>|<init>(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Long){}[0]
+
+    final val state // com.vynatix.vault.testing/BridgePublished.state|{}state[0]
+        final fun <get-state>(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/BridgePublished.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/BridgePublished.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/BridgePublished.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val value // com.vynatix.vault.testing/BridgePublished.value|{}value[0]
+        final fun <get-value>(): kotlin/Any? // com.vynatix.vault.testing/BridgePublished.value.<get-value>|<get-value>(){}[0]
+
+    final fun component1(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/BridgePublished.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.vault.testing/BridgePublished.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.vault.testing/BridgePublished.component3|component3(){}[0]
+    final fun copy(com.vynatix.vault/State<*> = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.vault.testing/BridgePublished // com.vynatix.vault.testing/BridgePublished.copy|copy(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/BridgePublished.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/BridgePublished.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/BridgePublished.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/EmissionEvent : com.vynatix.vault.testing/VaultEvent { // com.vynatix.vault.testing/EmissionEvent|null[0]
+    constructor <init>(com.vynatix.vault/State<*>, kotlin/Any?, kotlin/Any?, kotlin/Long) // com.vynatix.vault.testing/EmissionEvent.<init>|<init>(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Any?;kotlin.Long){}[0]
+
+    final val newValue // com.vynatix.vault.testing/EmissionEvent.newValue|{}newValue[0]
+        final fun <get-newValue>(): kotlin/Any? // com.vynatix.vault.testing/EmissionEvent.newValue.<get-newValue>|<get-newValue>(){}[0]
+    final val oldValue // com.vynatix.vault.testing/EmissionEvent.oldValue|{}oldValue[0]
+        final fun <get-oldValue>(): kotlin/Any? // com.vynatix.vault.testing/EmissionEvent.oldValue.<get-oldValue>|<get-oldValue>(){}[0]
+    final val state // com.vynatix.vault.testing/EmissionEvent.state|{}state[0]
+        final fun <get-state>(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/EmissionEvent.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/EmissionEvent.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/EmissionEvent.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+
+    final fun component1(): com.vynatix.vault/State<*> // com.vynatix.vault.testing/EmissionEvent.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.vault.testing/EmissionEvent.component2|component2(){}[0]
+    final fun component3(): kotlin/Any? // com.vynatix.vault.testing/EmissionEvent.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.vault.testing/EmissionEvent.component4|component4(){}[0]
+    final fun copy(com.vynatix.vault/State<*> = ..., kotlin/Any? = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.vault.testing/EmissionEvent // com.vynatix.vault.testing/EmissionEvent.copy|copy(com.vynatix.vault.State<*>;kotlin.Any?;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/EmissionEvent.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/EmissionEvent.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/EmissionEvent.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/MiddlewareCompleted : com.vynatix.vault.testing/MiddlewareEvent { // com.vynatix.vault.testing/MiddlewareCompleted|null[0]
+    constructor <init>(com.vynatix.vault/Middleware<*>, com.vynatix.vault/Transaction, kotlin/Long) // com.vynatix.vault.testing/MiddlewareCompleted.<init>|<init>(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Long){}[0]
+
+    final val middleware // com.vynatix.vault.testing/MiddlewareCompleted.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareCompleted.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/MiddlewareCompleted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/MiddlewareCompleted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/MiddlewareCompleted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareCompleted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareCompleted.component1|component1(){}[0]
+    final fun component2(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareCompleted.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.vault.testing/MiddlewareCompleted.component3|component3(){}[0]
+    final fun copy(com.vynatix.vault/Middleware<*> = ..., com.vynatix.vault/Transaction = ..., kotlin/Long = ...): com.vynatix.vault.testing/MiddlewareCompleted // com.vynatix.vault.testing/MiddlewareCompleted.copy|copy(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/MiddlewareCompleted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/MiddlewareCompleted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/MiddlewareCompleted.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/MiddlewareErrored : com.vynatix.vault.testing/MiddlewareEvent { // com.vynatix.vault.testing/MiddlewareErrored|null[0]
+    constructor <init>(com.vynatix.vault/Middleware<*>, com.vynatix.vault/Transaction, kotlin/Throwable, kotlin/Long) // com.vynatix.vault.testing/MiddlewareErrored.<init>|<init>(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+
+    final val cause // com.vynatix.vault.testing/MiddlewareErrored.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable // com.vynatix.vault.testing/MiddlewareErrored.cause.<get-cause>|<get-cause>(){}[0]
+    final val middleware // com.vynatix.vault.testing/MiddlewareErrored.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareErrored.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/MiddlewareErrored.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/MiddlewareErrored.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/MiddlewareErrored.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareErrored.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareErrored.component1|component1(){}[0]
+    final fun component2(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareErrored.component2|component2(){}[0]
+    final fun component3(): kotlin/Throwable // com.vynatix.vault.testing/MiddlewareErrored.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.vault.testing/MiddlewareErrored.component4|component4(){}[0]
+    final fun copy(com.vynatix.vault/Middleware<*> = ..., com.vynatix.vault/Transaction = ..., kotlin/Throwable = ..., kotlin/Long = ...): com.vynatix.vault.testing/MiddlewareErrored // com.vynatix.vault.testing/MiddlewareErrored.copy|copy(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/MiddlewareErrored.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/MiddlewareErrored.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/MiddlewareErrored.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/MiddlewareStarted : com.vynatix.vault.testing/MiddlewareEvent { // com.vynatix.vault.testing/MiddlewareStarted|null[0]
+    constructor <init>(com.vynatix.vault/Middleware<*>, com.vynatix.vault/Transaction, kotlin/Long) // com.vynatix.vault.testing/MiddlewareStarted.<init>|<init>(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Long){}[0]
+
+    final val middleware // com.vynatix.vault.testing/MiddlewareStarted.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareStarted.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/MiddlewareStarted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/MiddlewareStarted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/MiddlewareStarted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareStarted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Middleware<*> // com.vynatix.vault.testing/MiddlewareStarted.component1|component1(){}[0]
+    final fun component2(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/MiddlewareStarted.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.vault.testing/MiddlewareStarted.component3|component3(){}[0]
+    final fun copy(com.vynatix.vault/Middleware<*> = ..., com.vynatix.vault/Transaction = ..., kotlin/Long = ...): com.vynatix.vault.testing/MiddlewareStarted // com.vynatix.vault.testing/MiddlewareStarted.copy|copy(com.vynatix.vault.Middleware<*>;com.vynatix.vault.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/MiddlewareStarted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/MiddlewareStarted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/MiddlewareStarted.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/TransactionCommitted : com.vynatix.vault.testing/TransactionEvent { // com.vynatix.vault.testing/TransactionCommitted|null[0]
+    constructor <init>(com.vynatix.vault/Transaction, kotlin/Long) // com.vynatix.vault.testing/TransactionCommitted.<init>|<init>(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.vault.testing/TransactionCommitted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/TransactionCommitted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/TransactionCommitted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionCommitted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionCommitted.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.vault.testing/TransactionCommitted.component2|component2(){}[0]
+    final fun copy(com.vynatix.vault/Transaction = ..., kotlin/Long = ...): com.vynatix.vault.testing/TransactionCommitted // com.vynatix.vault.testing/TransactionCommitted.copy|copy(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/TransactionCommitted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/TransactionCommitted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/TransactionCommitted.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/TransactionErrored : com.vynatix.vault.testing/TransactionEvent { // com.vynatix.vault.testing/TransactionErrored|null[0]
+    constructor <init>(com.vynatix.vault/Transaction, kotlin/Throwable, kotlin/Long) // com.vynatix.vault.testing/TransactionErrored.<init>|<init>(com.vynatix.vault.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+
+    final val cause // com.vynatix.vault.testing/TransactionErrored.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable // com.vynatix.vault.testing/TransactionErrored.cause.<get-cause>|<get-cause>(){}[0]
+    final val timestamp // com.vynatix.vault.testing/TransactionErrored.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/TransactionErrored.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/TransactionErrored.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionErrored.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionErrored.component1|component1(){}[0]
+    final fun component2(): kotlin/Throwable // com.vynatix.vault.testing/TransactionErrored.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.vault.testing/TransactionErrored.component3|component3(){}[0]
+    final fun copy(com.vynatix.vault/Transaction = ..., kotlin/Throwable = ..., kotlin/Long = ...): com.vynatix.vault.testing/TransactionErrored // com.vynatix.vault.testing/TransactionErrored.copy|copy(com.vynatix.vault.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/TransactionErrored.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/TransactionErrored.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/TransactionErrored.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/TransactionRolledBack : com.vynatix.vault.testing/TransactionEvent { // com.vynatix.vault.testing/TransactionRolledBack|null[0]
+    constructor <init>(com.vynatix.vault/Transaction, kotlin/Long) // com.vynatix.vault.testing/TransactionRolledBack.<init>|<init>(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.vault.testing/TransactionRolledBack.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/TransactionRolledBack.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/TransactionRolledBack.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionRolledBack.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionRolledBack.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.vault.testing/TransactionRolledBack.component2|component2(){}[0]
+    final fun copy(com.vynatix.vault/Transaction = ..., kotlin/Long = ...): com.vynatix.vault.testing/TransactionRolledBack // com.vynatix.vault.testing/TransactionRolledBack.copy|copy(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/TransactionRolledBack.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/TransactionRolledBack.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/TransactionRolledBack.toString|toString(){}[0]
+}
+
+final class com.vynatix.vault.testing/TransactionStarted : com.vynatix.vault.testing/TransactionEvent { // com.vynatix.vault.testing/TransactionStarted|null[0]
+    constructor <init>(com.vynatix.vault/Transaction, kotlin/Long) // com.vynatix.vault.testing/TransactionStarted.<init>|<init>(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.vault.testing/TransactionStarted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.vault.testing/TransactionStarted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.vault.testing/TransactionStarted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionStarted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.vault/Transaction // com.vynatix.vault.testing/TransactionStarted.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.vault.testing/TransactionStarted.component2|component2(){}[0]
+    final fun copy(com.vynatix.vault/Transaction = ..., kotlin/Long = ...): com.vynatix.vault.testing/TransactionStarted // com.vynatix.vault.testing/TransactionStarted.copy|copy(com.vynatix.vault.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/TransactionStarted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/TransactionStarted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.vault.testing/TransactionStarted.toString|toString(){}[0]
 }
 
 final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
@@ -77,6 +302,10 @@ final object com.vynatix.vault.testing.internal/PendingErrorRegistry : kotlinx.a
 final fun (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/barrier(kotlin/Int, kotlin.time/Duration = ...): com.vynatix.vault.testing.concurrency/Barrier // com.vynatix.vault.testing.concurrency/barrier|barrier@com.vynatix.vault.testing.VaultTestScope(kotlin.Int;kotlin.time.Duration){}[0]
 final fun (com.vynatix.vault/TransactionResult<*>).com.vynatix.vault.testing.matcher/shouldRollbackWith(kotlin.reflect/KClass<out kotlin/Throwable>) // com.vynatix.vault.testing.matcher/shouldRollbackWith|shouldRollbackWith@com.vynatix.vault.TransactionResult<*>(kotlin.reflect.KClass<out|kotlin.Throwable>){}[0]
 final fun (kotlin/Function0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.Function0<kotlin.Unit>(kotlin.time.Duration){}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>> (com.vynatix.vault.testing/VaultHandle<#A>).com.vynatix.vault.testing.matcher/shouldMatch(kotlin/Function1<com.vynatix.vault.testing.matcher/StateMatcher<#A>, kotlin/Unit>) // com.vynatix.vault.testing.matcher/shouldMatch|shouldMatch@com.vynatix.vault.testing.VaultHandle<0:0>(kotlin.Function1<com.vynatix.vault.testing.matcher.StateMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.vault.Vault<0:0>>}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>> (com.vynatix.vault.testing/VaultHandle<#A>).com.vynatix.vault.testing.matcher/shouldMatchExactly(kotlin/Function1<com.vynatix.vault.testing.matcher/StateMatcher<#A>, kotlin/Unit>) // com.vynatix.vault.testing.matcher/shouldMatchExactly|shouldMatchExactly@com.vynatix.vault.testing.VaultHandle<0:0>(kotlin.Function1<com.vynatix.vault.testing.matcher.StateMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.vault.Vault<0:0>>}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>> (com.vynatix.vault.testing/VaultHandle<#A>).com.vynatix.vault.testing.matcher/shouldMatchSnapshotOf(#A) // com.vynatix.vault.testing.matcher/shouldMatchSnapshotOf|shouldMatchSnapshotOf@com.vynatix.vault.testing.VaultHandle<0:0>(0:0){0§<com.vynatix.vault.Vault<0:0>>}[0]
+final fun <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Boxed<#A>> (com.vynatix.vault/State<#B>).com.vynatix.vault.testing.matcher/shouldBeBoxedAs(#A) // com.vynatix.vault.testing.matcher/shouldBeBoxedAs|shouldBeBoxedAs@com.vynatix.vault.State<0:1>(0:0){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Boxed<0:0>>}[0]
 final fun com.vynatix.vault.testing/vaultTest(kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction1<com.vynatix.vault.testing/VaultTestScope, kotlin/Unit>) // com.vynatix.vault.testing/vaultTest|vaultTest(kotlin.time.Duration;kotlin.coroutines.SuspendFunction1<com.vynatix.vault.testing.VaultTestScope,kotlin.Unit>){}[0]
 final inline fun <#A: kotlin/Any?> (com.vynatix.vault/TransactionResult<#A>).com.vynatix.vault.testing.matcher/shouldBeSuccess(kotlin/Function1<com.vynatix.vault/TransactionResult.Success<#A>, kotlin/Unit> = ...): com.vynatix.vault/TransactionResult.Success<#A> // com.vynatix.vault.testing.matcher/shouldBeSuccess|shouldBeSuccess@com.vynatix.vault.TransactionResult<0:0>(kotlin.Function1<com.vynatix.vault.TransactionResult.Success<0:0>,kotlin.Unit>){0§<kotlin.Any?>}[0]
 final inline fun <#A: reified kotlin/Throwable> (com.vynatix.vault/TransactionResult<*>).com.vynatix.vault.testing.matcher/shouldBeError(kotlin/Function1<com.vynatix.vault/TransactionResult.Error, kotlin/Unit> = ...): com.vynatix.vault/TransactionResult.Error // com.vynatix.vault.testing.matcher/shouldBeError|shouldBeError@com.vynatix.vault.TransactionResult<*>(kotlin.Function1<com.vynatix.vault.TransactionResult.Error,kotlin.Unit>){0§<kotlin.Throwable>}[0]

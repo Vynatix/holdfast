@@ -38,25 +38,41 @@ class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineS
     /**
      * Register [vault] in this scope and return its [VaultHandle]. Calling
      * `track` again with the same instance returns the previously created
-     * handle — idempotent by reference identity.
+     * handle — idempotent by reference identity, so [capture] on the second
+     * call is ignored.
      *
-     * The [capture] argument is recorded on the handle but only [Capture.All]
-     * has any visible effect in Issue 02; instrumentation lands in Issue 06.
+     * On first registration the handle installs a privileged recorder
+     * middleware on [vault] (unless [capture] is [Capture.None]). The recorder
+     * captures every transaction lifecycle, emission, and middleware
+     * self-event into [VaultHandle.timeline]; see [VaultHandle] for the typed
+     * views built on top. The recorder is detached and its buffer cleared at
+     * scope tearDown — see [tearDown].
+     *
+     * Tests that rely on user middlewares should install them on the vault
+     * BEFORE calling `track`; see [com.vynatix.vault.testing.internal.Recorder]
+     * for the v1 wrap-order limit.
      */
     fun <V : Vault<V>> track(vault: V, capture: Capture = Capture.All): VaultHandle<V> = registry.getOrCreate(vault, capture)
 
     internal fun barrierRegistry(): BarrierRegistry = barriers
 
     /**
-     * Tear down this scope. Always cancels outstanding barriers, removes every
-     * tracked handle's entries from the global [PendingErrorRegistry], and
-     * clears the handle registry. When [bodyAlreadyFailed] is `false`, also
-     * aggregates any unconsumed [TransactionResult.Error] values across all
-     * handles and throws an [AssertionError] listing them —
-     * forcing tests to actively assert on (or explicitly discard) every error
-     * they observe. When the body already threw, the original failure
-     * propagates and the unconsumed-error check is suppressed so the user sees
-     * the root-cause exception rather than a teardown-time message.
+     * Tear down this scope. Always cancels outstanding barriers, disposes each
+     * tracked handle's recorder middleware, removes every tracked handle's
+     * entries from the global [PendingErrorRegistry], and clears the handle
+     * registry. When [bodyAlreadyFailed] is `false`, also aggregates any
+     * unconsumed [TransactionResult.Error] values across all handles and throws
+     * an [AssertionError] listing them — forcing tests to actively assert on
+     * (or explicitly discard) every error they observe. When the body already
+     * threw, the original failure propagates and the unconsumed-error check is
+     * suppressed so the user sees the root-cause exception rather than a
+     * teardown-time message.
+     *
+     * Order is fixed: barriers cancel first so coroutines waiting in
+     * `arrive()`/`await()` resume; then recorders dispose (stopping further
+     * event capture); then the handle registry's pending-error bookkeeping is
+     * cleared. Recorder disposal swallows exceptions to keep teardown robust
+     * even when [bodyAlreadyFailed] is `true`.
      */
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
         barriers.cancelAll()
@@ -66,6 +82,10 @@ class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineS
             handles.flatMap { handle -> handle.pendingErrors.map { handle to it } }
 
         for (handle in handles) {
+            // Detach + drop recorder before clearing the rest so leaked actions
+            // beyond this point don't push more events into the (already
+            // teardown-snapshot) timeline.
+            handle.disposeRecorderInternal()
             PendingErrorRegistry.unregisterAll(handle)
             handle.clearPendingErrorsInternal()
         }
