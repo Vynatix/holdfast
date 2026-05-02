@@ -31,15 +31,22 @@ class AsFlowTest {
         assertEquals(42, first)
     }
 
-    @Test fun asFlowEmitsEachCommittedValue() = runBlocking {
+    @Test fun asFlowDeliversCommittedValuesWithBreathingRoom() = runBlocking {
+        // Under the 2.0 lossless-conflated contract, asFlow guarantees the
+        // latest value is always delivered; intermediate values may be
+        // conflated under fast-emit / slow-collect. With small per-action
+        // breathing room the collector keeps up, so all 4 values land in
+        // order. See AsFlowLosslessConflatedTest for the contract under
+        // contention.
         val v = FlowVault()
         val collector = async {
             v.n.asFlow().take(4).toList()
         }
-        // Allow the collector to subscribe (initial 0 emitted).
-        delay(50)
+        delay(50) // collector subscribes; replay slot delivers 0
         v action { n mutate 1 }
+        delay(30)
         v action { n mutate 2 }
+        delay(30)
         v action { n mutate 3 }
         val result = collector.await()
         assertEquals(listOf(0, 1, 2, 3), result)
