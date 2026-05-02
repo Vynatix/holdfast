@@ -45,6 +45,7 @@ sub.dispose()
 | `com.vynatix:vault` | Core library — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-vault `atomic`, encryption transformer, file-system store |
 | `com.vynatix:vault-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` for async transactional bodies |
 | `com.vynatix:vault-compose` | `@Composable` `collectAsState` / `rememberDisposable` |
+| `com.vynatix:vault-validation` | Boundary-validation primitives ported from [Uncivilized](https://github.com/osama-raddad/Uncivilized): `Civilizable` / `Rule` / `Civilizer` + `CivilizingTransformer` for validate-on-write |
 
 ## Documentation
 
@@ -70,6 +71,7 @@ sub.dispose()
 - **`Vault.computed { } / Vault.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
 - **`atomic(vararg vaults) { }`** — cross-vault transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every vault.
 - **`suspendAction { }`** (`vault-coroutines`) — async-aware transactional body. Mutually exclusive with blocking `action` on the same vault via an internal coroutine `Mutex`.
+- **`CivilizingTransformer(civilizer)`** (`vault-validation`) — validate-on-write transformer that civilizes raw primitives into typed [`Civilizable`](https://github.com/osama-raddad/Uncivilized) domain objects at the boundary. A failed civilization throws `CivilizationException` and rolls the transaction back atomically.
 
 ## Standard library (in-tree)
 
@@ -112,5 +114,6 @@ The core module ships drop-in helpers under `com.vynatix.vault.middleware`,
 
 # Companion modules
 ./gradlew :vault-coroutines:allTests :vault-coroutines:apiCheck
-./gradlew :vault-compose:allTests      :vault-compose:apiCheck
+./gradlew :vault-compose:allTests    :vault-compose:apiCheck
+./gradlew :vault-validation:allTests :vault-validation:apiCheck
 ```

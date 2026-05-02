@@ -1352,6 +1352,75 @@ val r = vault.suspendAction {
 }
 ```
 
+### 14.11 `:vault-validation` — civilize primitives at the boundary
+
+The `com.vynatix:vault-validation` companion artifact ports the
+[Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized) pattern to
+KMP and plugs it into Vault's transformer pipeline. The premise: every primitive
+(`String`, `Long`, …) flowing into your domain should be civilized — validated
+and wrapped in a typed `Civilizable<P>` — exactly once, at the system boundary.
+Inside the domain, you pass civilized objects, never raw primitives. This is
+the canonical fix for the **primitive obsession** code smell.
+
+**Core types** (in `com.vynatix.vault.validation`):
+```kotlin
+interface Civilizable<out P>             { val value: P }
+fun interface Rule<in P>                 { fun validate(primitive: P): Boolean }
+fun interface Condition<P, R : Rule<P>>  { fun check(primitive: P, rule: R): Boolean }
+interface  Variation<P, R, O>            // rule + condition + create(P) -> O
+interface  Civilizer<P, R, O> {
+    val variations: List<Variation<P, R, O>>
+    infix fun of(primitive: P): O        // throws CivilizationException on rejection
+    fun ofOrNull(primitive: P): O?
+    fun validate(primitive: P): Boolean
+}
+class CivilizingTransformer<P, R, O>(civilizer): Transformer<O>
+```
+
+**Define a civilizer**:
+```kotlin
+data class Email(override val value: String) : Civilizable<String>
+
+object EmailCivilizer : SimpleCivilizer<String, Rule<String>, Email>() {
+    override val variations = listOf(
+        Variation.of<String, Rule<String>, Email>(
+            rule = Rule { it.contains('@') && it.length in 3..254 },
+        ) { Email(it) },
+    )
+}
+
+val email = EmailCivilizer of "alice@example.com"     // typed Email
+EmailCivilizer of "not-an-email"                      // throws CivilizationException
+```
+
+**Plug into a vault** with `CivilizingTransformer` for defence-in-depth:
+```kotlin
+class UserVault : Vault<UserVault>() {
+    val email by state(transformer = CivilizingTransformer(EmailCivilizer)) {
+        EmailCivilizer of "init@example.com"
+    }
+}
+
+vault action { email mutate (EmailCivilizer of "new@example.com") }    // OK
+vault action { email mutate Email("not-an-email") }                    // rolls back
+```
+
+The transformer re-validates `value.value` on every write, so a caller who
+constructs `Email("garbage")` directly (e.g. via `data class copy`) still has
+their write rejected — and any other state mutation in the same transaction
+rolls back atomically.
+
+**Multiple variations** for one civilizer (e.g. integer or float):
+```kotlin
+object NumberCivilizer : SimpleCivilizer<String, Rule<String>, Num>() {
+    override val variations = listOf(
+        Variation.of<String, Rule<String>, Num>(rule = Rule { it.toIntOrNull() != null })    { Num.Int(it.toInt()) },
+        Variation.of<String, Rule<String>, Num>(rule = Rule { it.toDoubleOrNull() != null }) { Num.Float(it.toDouble()) },
+    )
+}
+```
+First matching variation wins.
+
 ---
 
 ## Appendix A — One-page cheatsheet

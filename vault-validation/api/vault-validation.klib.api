@@ -1,0 +1,66 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:vault-validation>
+abstract fun interface <#A: in kotlin/Any?> com.vynatix.vault.validation/Rule { // com.vynatix.vault.validation/Rule|null[0]
+    abstract fun validate(#A): kotlin/Boolean // com.vynatix.vault.validation/Rule.validate|validate(1:0){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>> com.vynatix.vault.validation/Condition { // com.vynatix.vault.validation/Condition|null[0]
+    abstract fun check(#A, #B): kotlin/Boolean // com.vynatix.vault.validation/Condition.check|check(1:0;1:1){}[0]
+}
+
+abstract interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Civilizable<#A>> com.vynatix.vault.validation/Civilizer { // com.vynatix.vault.validation/Civilizer|null[0]
+    abstract val variations // com.vynatix.vault.validation/Civilizer.variations|{}variations[0]
+        abstract fun <get-variations>(): kotlin.collections/List<com.vynatix.vault.validation/Variation<#A, #B, #C>> // com.vynatix.vault.validation/Civilizer.variations.<get-variations>|<get-variations>(){}[0]
+
+    open fun of(#A): #C // com.vynatix.vault.validation/Civilizer.of|of(1:0){}[0]
+    open fun ofOrNull(#A): #C? // com.vynatix.vault.validation/Civilizer.ofOrNull|ofOrNull(1:0){}[0]
+    open fun validate(#A): kotlin/Boolean // com.vynatix.vault.validation/Civilizer.validate|validate(1:0){}[0]
+}
+
+abstract interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Civilizable<#A>> com.vynatix.vault.validation/Variation { // com.vynatix.vault.validation/Variation|null[0]
+    abstract val condition // com.vynatix.vault.validation/Variation.condition|{}condition[0]
+        abstract fun <get-condition>(): com.vynatix.vault.validation/Condition<#A, #B> // com.vynatix.vault.validation/Variation.condition.<get-condition>|<get-condition>(){}[0]
+    abstract val rule // com.vynatix.vault.validation/Variation.rule|{}rule[0]
+        abstract fun <get-rule>(): #B // com.vynatix.vault.validation/Variation.rule.<get-rule>|<get-rule>(){}[0]
+
+    abstract fun create(#A): #C // com.vynatix.vault.validation/Variation.create|create(1:0){}[0]
+    open fun matches(#A): kotlin/Boolean // com.vynatix.vault.validation/Variation.matches|matches(1:0){}[0]
+
+    final object Companion { // com.vynatix.vault.validation/Variation.Companion|null[0]
+        final fun <#A2: kotlin/Any?, #B2: com.vynatix.vault.validation/Rule<#A2>, #C2: com.vynatix.vault.validation/Civilizable<#A2>> of(#B2, com.vynatix.vault.validation/Condition<#A2, #B2> = ..., kotlin/Function1<#A2, #C2>): com.vynatix.vault.validation/Variation<#A2, #B2, #C2> // com.vynatix.vault.validation/Variation.Companion.of|of(0:1;com.vynatix.vault.validation.Condition<0:0,0:1>;kotlin.Function1<0:0,0:2>){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Rule<0:0>>;2§<com.vynatix.vault.validation.Civilizable<0:0>>}[0]
+    }
+}
+
+abstract interface <#A: out kotlin/Any?> com.vynatix.vault.validation/Civilizable { // com.vynatix.vault.validation/Civilizable|null[0]
+    abstract val value // com.vynatix.vault.validation/Civilizable.value|{}value[0]
+        abstract fun <get-value>(): #A // com.vynatix.vault.validation/Civilizable.value.<get-value>|<get-value>(){}[0]
+}
+
+abstract class <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Civilizable<#A>> com.vynatix.vault.validation/SimpleCivilizer : com.vynatix.vault.validation/Civilizer<#A, #B, #C> { // com.vynatix.vault.validation/SimpleCivilizer|null[0]
+    constructor <init>() // com.vynatix.vault.validation/SimpleCivilizer.<init>|<init>(){}[0]
+}
+
+final class <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Civilizable<#A>> com.vynatix.vault.validation/CivilizingTransformer : com.vynatix.vault/Transformer<#C> { // com.vynatix.vault.validation/CivilizingTransformer|null[0]
+    constructor <init>(com.vynatix.vault.validation/Civilizer<#A, #B, #C>) // com.vynatix.vault.validation/CivilizingTransformer.<init>|<init>(com.vynatix.vault.validation.Civilizer<1:0,1:1,1:2>){}[0]
+
+    final fun get(#C): #C // com.vynatix.vault.validation/CivilizingTransformer.get|get(1:2){}[0]
+    final fun set(#C): #C // com.vynatix.vault.validation/CivilizingTransformer.set|set(1:2){}[0]
+}
+
+final class com.vynatix.vault.validation/CivilizationException : kotlin/RuntimeException { // com.vynatix.vault.validation/CivilizationException|null[0]
+    constructor <init>(kotlin/String, kotlin/Any? = ..., kotlin/Throwable? = ...) // com.vynatix.vault.validation/CivilizationException.<init>|<init>(kotlin.String;kotlin.Any?;kotlin.Throwable?){}[0]
+
+    final val primitive // com.vynatix.vault.validation/CivilizationException.primitive|{}primitive[0]
+        final fun <get-primitive>(): kotlin/Any? // com.vynatix.vault.validation/CivilizationException.primitive.<get-primitive>|<get-primitive>(){}[0]
+}
+
+final fun <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>> com.vynatix.vault.validation/allConditions(): com.vynatix.vault.validation/Condition<#A, #B> // com.vynatix.vault.validation/allConditions|allConditions(){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Rule<0:0>>}[0]
+final fun <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>> com.vynatix.vault.validation/allOf(kotlin/Array<out kotlin/Function1<#A, kotlin/Boolean>>...): com.vynatix.vault.validation/Condition<#A, #B> // com.vynatix.vault.validation/allOf|allOf(kotlin.Array<out|kotlin.Function1<0:0,kotlin.Boolean>>...){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Rule<0:0>>}[0]
+final fun <#A: kotlin/Any?> com.vynatix.vault.validation/alwaysValid(): com.vynatix.vault.validation/Rule<#A> // com.vynatix.vault.validation/alwaysValid|alwaysValid(){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> com.vynatix.vault.validation/neverValid(): com.vynatix.vault.validation/Rule<#A> // com.vynatix.vault.validation/neverValid|neverValid(){0§<kotlin.Any?>}[0]

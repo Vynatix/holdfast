@@ -4,6 +4,42 @@ All notable changes to the Vault library are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — `:vault-validation` (new module)
+
+- New companion artifact `com.vynatix:vault-validation` that ports the
+  [Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized) pattern
+  into Kotlin Multiplatform (Android + iOS) and integrates it with Vault's
+  transformer pipeline. The original library is JVM-only at Kotlin 1.7.10; this
+  module reimplements the API shape on commonMain.
+- Core interfaces under `com.vynatix.vault.validation`: `Civilizable<P>`,
+  `Rule<P>` (`fun interface`), `Condition<P, R>` (`fun interface`),
+  `Variation<P, R, O>` with a `Variation.of(rule, condition, create)` factory,
+  and `Civilizer<P, R, O>` with `infix of`, `validate`, and `ofOrNull`. Helpers:
+  `allConditions()`, `allOf(vararg predicates)`, `alwaysValid()`,
+  `neverValid()`, plus `SimpleCivilizer<P, R, O>` for the common static-list
+  case.
+- **`CivilizingTransformer<P, R, O>(civilizer)`** — a Vault `Transformer<O>`
+  that re-runs the civilizer's rules on every write. Defence-in-depth against
+  callers who construct a `Civilizable` directly (e.g. via `data class copy`)
+  and bypass `Civilizer of`. A failed validation throws `CivilizationException`
+  inside the transformer's `set`, which propagates to the enclosing
+  `action { }` and rolls every state mutation in the transaction back.
+- `CivilizationException(message, primitive, cause)` carries the rejected
+  primitive in its `primitive` field for diagnostics.
+- 10 tests across `CivilizerTest` + `CivilizingTransformerTest`. Verified on
+  Android JVM + iOS sim. ABI baseline committed at
+  `vault-validation/api/vault-validation.klib.api`. Published to local Maven at
+  `com.vynatix:vault-validation:0.2.0` (4 publication targets:
+  `kotlinMultiplatform`, `android`, `iosArm64`, `iosSimulatorArm64`).
+
+### Documentation
+
+- `vault/README.md` — modules table now includes `:vault-validation`;
+  capabilities section gains a `CivilizingTransformer` entry; build cheatsheet
+  adds `:vault-validation:allTests :vault-validation:apiCheck`.
+
 ## [0.2.0] — 2026-05-02
 
 Additive minor release. Every item that 0.1.0 deferred ships in 0.2.0; no
