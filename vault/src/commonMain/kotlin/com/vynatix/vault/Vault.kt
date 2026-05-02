@@ -4,6 +4,10 @@ package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
 import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -50,6 +54,22 @@ abstract class Vault<Self : Vault<Self>> {
      */
     @VaultInternalApi
     val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
+
+    /**
+     * The [CoroutineScope] this vault's long-running async work runs on. Resolution order
+     * (per-call → per-vault override → process-global default), with this property
+     * supplying levels 2 and 3:
+     *
+     *  1. **Per-call** — APIs that take an explicit `scope: CoroutineScope` parameter use that.
+     *  2. **Per-vault** — a subclass may `override val scope: CoroutineScope` (use a getter,
+     *     not a `val` initializer, to avoid lazy-init order traps in singleton vaults).
+     *  3. **Global** — falls back to [Vault.Companion.defaultScope].
+     *
+     * Per-vault binding via `bindToScope(scope)` (issue 02) replaces this property's
+     * resolved value for one specific vault instance.
+     */
+    open val scope: CoroutineScope
+        get() = defaultScope
 
     private val transactionLock = VaultLock()
     private val propertiesLock = VaultLock()
@@ -504,4 +524,42 @@ abstract class Vault<Self : Vault<Self>> {
      */
     @VaultInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
+
+    companion object {
+        /**
+         * Process-singleton lazy default scope. Initialized on first read of
+         * [defaultScope] when no custom value has been assigned. Backs the lazy
+         * fallback in the resolution chain.
+         */
+        private val processScope: CoroutineScope by lazy {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("VaultProcessScope"))
+        }
+
+        private val customDefaultScope = atomic<CoroutineScope?>(null)
+
+        /**
+         * Process-global default scope used by every [Vault] that has neither a
+         * per-vault override nor a per-call scope argument. Settable at most once
+         * per process via CAS — the first non-null assignment wins; subsequent
+         * assignments throw [IllegalStateException].
+         *
+         * Typical app-init pattern:
+         * ```
+         * val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+         * Vault.defaultScope = appScope
+         * ```
+         *
+         * Reads before any explicit assignment return a lazy
+         * `SupervisorJob() + Dispatchers.Default` process scope. Reading the lazy
+         * default does NOT prevent a subsequent assignment — only an explicit
+         * assignment freezes the value.
+         */
+        var defaultScope: CoroutineScope
+            get() = customDefaultScope.value ?: processScope
+            set(value) {
+                check(customDefaultScope.compareAndSet(null, value)) {
+                    "Vault.defaultScope is settable-once; it has already been assigned."
+                }
+            }
+    }
 }

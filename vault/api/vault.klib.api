@@ -120,6 +120,8 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
         final fun <get-properties>(): kotlin.collections/Map<kotlin/String, com.vynatix.vault/State<*>> // com.vynatix.vault/Vault.properties.<get-properties>|<get-properties>(){}[0]
     final val selfForExternal // com.vynatix.vault/Vault.selfForExternal|{}selfForExternal[0]
         final fun <get-selfForExternal>(): #A // com.vynatix.vault/Vault.selfForExternal.<get-selfForExternal>|<get-selfForExternal>(){}[0]
+    open val scope // com.vynatix.vault/Vault.scope|{}scope[0]
+        open fun <get-scope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault/Vault.scope.<get-scope>|<get-scope>(){}[0]
 
     final var asyncSerializer // com.vynatix.vault/Vault.asyncSerializer|{}asyncSerializer[0]
         final fun <get-asyncSerializer>(): com.vynatix.vault/Vault.AsyncSerializer? // com.vynatix.vault/Vault.asyncSerializer.<get-asyncSerializer>|<get-asyncSerializer>(){}[0]
@@ -152,6 +154,12 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     abstract interface AsyncSerializer { // com.vynatix.vault/Vault.AsyncSerializer|null[0]
         abstract fun blockingAcquire() // com.vynatix.vault/Vault.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]
         abstract fun blockingRelease() // com.vynatix.vault/Vault.AsyncSerializer.blockingRelease|blockingRelease(){}[0]
+    }
+
+    final object Companion { // com.vynatix.vault/Vault.Companion|null[0]
+        final var defaultScope // com.vynatix.vault/Vault.Companion.defaultScope|{}defaultScope[0]
+            final fun <get-defaultScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault/Vault.Companion.defaultScope.<get-defaultScope>|<get-defaultScope>(){}[0]
+            final fun <set-defaultScope>(kotlinx.coroutines/CoroutineScope) // com.vynatix.vault/Vault.Companion.defaultScope.<set-defaultScope>|<set-defaultScope>(kotlinx.coroutines.CoroutineScope){}[0]
     }
 }
 
