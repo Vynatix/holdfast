@@ -6,16 +6,20 @@
  * This file is read top-to-bottom as a tutorial and runs as a test:
  *
  *   1) Domain types          — enum + data classes for the banking model
- *   2) Transformers          — symmetric (Email) and asymmetric-by-shouldTransform (Name)
- *   3) Vaults                — AccountVault (7 states) + BankVault (cross-vault read source)
+ *   2) Transformers          — symmetric (Email), asymmetric-by-shouldTransform (Name),
+ *                              and EncryptingTransformer (taxId, store-encrypted)
+ *   3) Vaults                — AccountVault (8 states) + BankVault (cross-vault read source)
  *   4) Middleware            — Tracing (all 3 hooks + metadata bag), StatusGuard
  *                              (cross-vault read on start), DailyLimit (post-body validation
  *                              via read-your-own-writes)
  *   5) Bridges               — BalancePersistence (save-on-commit + load-on-attach
  *                              two-way Bridge<T>) and AdminStatusChannel (inbound-only
  *                              Observable<T> consumed via observeFrom)
- *   6) Domain operations     — deposit, withdraw, transferTo, applyMonthEnd (savepoints)
- *   7) The end-to-end demo   — sixteen phases that touch every public symbol
+ *   6) Domain operations     — deposit, withdraw, transferTo (cross-vault atomic),
+ *                              applyMonthEnd (savepoints)
+ *   7) The end-to-end demo   — sixteen phases that touch every public symbol +
+ *                              focused 1.1 feature tests (encryption, FileSystemKvStore,
+ *                              snapshot/restore, derived state, cross-vault atomic)
  *
  * Coverage checklist:
  *   Vault<Self>, state, state(transformer), action, mutate, effect, bridge,
@@ -25,7 +29,10 @@
  *   TransactionStatus, Middleware (all hooks + metadata), Bridge/Observable/Publisher,
  *   Transformer.set/get/shouldTransform, Disposable, kotlin.uuid.Uuid (used for
  *   ledger entry IDs), nested savepoint actions, cross-vault rejection,
- *   concurrent commits.
+ *   concurrent commits, EncryptingTransformer + XorCipher, FileSystemKvStore +
+ *   KvBridge, Vault.snapshot()/restore(), Vault.derived(...) push-recomputed,
+ *   atomic(...) cross-vault transactions.
+ *   (suspendAction is exercised in vault-coroutines/.../SuspendActionTest.kt.)
  */
 
 package com.vynatix.vault.demo
@@ -41,6 +48,15 @@ import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.TransactionStatus
 import com.vynatix.vault.Transformer
 import com.vynatix.vault.Vault
+import com.vynatix.vault.atomic
+import com.vynatix.vault.bridge.KvBridge
+import com.vynatix.vault.bridge.LongCodec
+import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.vault.crypto.EncryptingTransformer
+import com.vynatix.vault.crypto.XorCipher
+import com.vynatix.vault.derived
+import com.vynatix.vault.restore
+import com.vynatix.vault.snapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -115,6 +131,8 @@ private class NameNormalizer : Transformer<String> {
  *  - normalized strings      (holderName via NameNormalizer; email via EmailNormalizer)
  *  - append-only collection  (ledger)
  */
+private val DEMO_CIPHER_SEED = "demo-bank-key-not-production".encodeToByteArray()
+
 private class AccountVault(
     val accountId: String,
     initialHolderName: String = "",
@@ -128,6 +146,15 @@ private class AccountVault(
     val ledger by state { emptyList<LedgerEntry>() }
     val dailyWithdrawnCents by state { 0L }
     val lastTransactionAtMs by state { 0L }
+
+    /**
+     * Encrypted-at-rest sensitive identifier. The stored `currentValue` is
+     * ciphertext; reads via `taxId.value` return plaintext through
+     * `EncryptingTransformer.get`. Audit middleware that snapshots
+     * `pendingWrites` sees ciphertext too. (See Phase J + the
+     * `encryptingTransformerProtectsTaxIdAtRest` test below.)
+     */
+    val taxId by state(EncryptingTransformer(XorCipher(DEMO_CIPHER_SEED))) { "" }
 }
 
 /**
@@ -318,20 +345,24 @@ private fun AccountVault.unfreeze(): TransactionResult<Unit> = action { status m
 private fun AccountVault.close(): TransactionResult<Unit> = action { status mutate AccountStatus.Closed }
 
 /**
- * Cross-vault transfer. Each vault owns its own transactionLock, so a transfer
- * is two separate top-level actions — there is no global coordinator. We reverse
- * the debit if the credit fails (a hand-rolled compensating action; for real
- * money you'd want an external orchestrator).
+ * Cross-vault transfer using `atomic(...)`: a single bracketed action across
+ * both vaults that commits-or-rollbacks together. If the credit side throws
+ * (e.g., the peer is Frozen, or a middleware rejects), `atomic` rolls back
+ * the debit too — no hand-rolled compensation needed.
+ *
+ * Phase O of the 1.1 plan; the previous version of this function had to
+ * reverse the debit manually when the credit failed, because each vault held
+ * its own independent lock. `atomic` sorts the vaults by `lockOrderKey`,
+ * acquires both locks deadlock-safely, and treats inner `vault.action {}` as
+ * a savepoint of the cross-vault root.
  */
-private fun AccountVault.transferTo(other: AccountVault, cents: Long, memo: String): TransactionResult<LedgerEntry> {
+private fun AccountVault.transferTo(other: AccountVault, cents: Long, memo: String): TransactionResult<LedgerEntry> = atomic(this, other) {
     val debit = withdraw(cents, "transfer to ${other.accountId}: $memo")
-    if (debit is TransactionResult.Error) return debit
+    if (debit is TransactionResult.Error) throw debit.exception
     val credit = other.deposit(cents, "transfer from $accountId: $memo")
-    if (credit is TransactionResult.Error) {
-        deposit(cents, "compensating credit — peer deposit failed")
-        return credit
-    }
-    return debit // the debit-side ledger entry is canonical for the transfer's caller
+    if (credit is TransactionResult.Error) throw credit.exception
+    // Both succeeded; the debit-side ledger entry is canonical for the caller.
+    (debit as TransactionResult.Success<LedgerEntry>).value
 }
 
 /**
@@ -812,5 +843,178 @@ class BankingDemo {
             )
         }
         assertEquals(500L, reborn.balanceCents.value, "stdlib KvBridge restored persisted balance to fresh vault")
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // 1.1 FEATURE TESTS — focused exercises for each feature added in 1.1.
+    // The big end-to-end scenario above continues to cover the 1.0 surface;
+    // these test methods isolate one 1.1 capability each so failures point
+    // directly at the affected primitive.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Phase J — `EncryptingTransformer` + `XorCipher`.
+     *
+     * The `taxId` field is declared with `state(EncryptingTransformer(XorCipher(seed)))`.
+     * Reads return plaintext; the persisted ciphertext (visible via `KvBridge` to a
+     * `KvStore`) is NOT plaintext.
+     */
+    @Test
+    fun encryptingTransformerProtectsTaxIdAtRest() {
+        val v = AccountVault(accountId = "ACC-CRYPT")
+        val plaintext = "TAX-987-654-321"
+        v action { taxId mutate plaintext }
+        // Read view is plaintext.
+        assertEquals(plaintext, v.taxId.value)
+
+        // Persist via KvBridge: the bytes hitting the KV store are CIPHERTEXT,
+        // because `applyCommitted` publishes the raw post-`set` value.
+        val kv = com.vynatix.vault.bridge.InMemoryKvStore()
+        v { taxId bridge KvBridge(kv, "tax:${v.accountId}", StringCodec) }
+        v action { taxId mutate "TAX-NEW-VALUE-9999" }
+        val persisted = kv.get("tax:${v.accountId}") ?: error("expected persisted ciphertext")
+        assertNotEquals("TAX-NEW-VALUE-9999", persisted, "persisted value is ciphertext, not plaintext")
+        // Sanity: ciphertext is non-empty + base64-ish.
+        assertTrue(persisted.isNotEmpty())
+        // Reads still return plaintext.
+        assertEquals("TAX-NEW-VALUE-9999", v.taxId.value)
+    }
+
+    /**
+     * Phase K — `FileSystemKvStore`.
+     *
+     * Same `KvBridge` shape as the in-memory store, but persistence survives
+     * `KvStore` lifetime — useful when you want filesystem-backed storage
+     * without writing platform IO yourself.
+     */
+    @Test
+    fun fileSystemKvStorePersistsBalanceAcrossSimulatedRestart() {
+        val rootSuffix = "vault-banking-demo-fs-${com.vynatix.vault.bridge.randomDirSuffix()}"
+        val rootPath = com.vynatix.vault.bridge.tempRoot(rootSuffix)
+        val kv = com.vynatix.vault.bridge.FileSystemKvStore(rootPath)
+
+        // Session 1: write.
+        run {
+            val v = AccountVault(accountId = "ACC-FS")
+            v { balanceCents bridge KvBridge(kv, "balance:${v.accountId}", LongCodec) }
+            v action { balanceCents mutate 75_000 }
+            assertEquals(75_000L, v.balanceCents.value)
+        }
+        // Session 2: fresh vault, same KV → load via attach.
+        val reborn = AccountVault(accountId = "ACC-FS")
+        reborn { balanceCents bridge KvBridge(kv, "balance:${reborn.accountId}", LongCodec) }
+        assertEquals(75_000L, reborn.balanceCents.value, "FileSystemKvStore round-trips through attach")
+    }
+
+    /**
+     * Phase L — `Vault.snapshot()` / `Vault.restore(snapshot)`.
+     *
+     * Snapshots capture raw stored values (post-`transformer.set` form).
+     * Restore writes them back without re-running `set`, so asymmetric
+     * transformers like the encryption on `taxId` round-trip cleanly.
+     */
+    @Test
+    fun snapshotAndRestoreRoundTripsAccountStateIncludingEncryptedFields() {
+        val v = AccountVault(accountId = "ACC-SNAP")
+        v action {
+            balanceCents mutate 10_000
+            holderName mutate "Cap Snapshot"
+            email mutate "snap@example.com"
+            taxId mutate "ORIGINAL-TAX-ID"
+            ledger mutate listOf(
+                LedgerEntry(randomLedgerId(), nowMs(), "opening", 10_000, 10_000),
+            )
+        }
+        val snap = v.snapshot()
+        assertTrue("balanceCents" in snap.stateNames)
+        assertTrue("taxId" in snap.stateNames)
+
+        // Mutate aggressively, then restore.
+        v action {
+            balanceCents mutate 999
+            holderName mutate "Should Disappear"
+            email mutate "throwaway@x"
+            taxId mutate "DIFFERENT-TAX-ID"
+            ledger mutate emptyList()
+        }
+        val r = v.restore(snap)
+        assertIs<TransactionResult.Success<Unit>>(r)
+        assertEquals(10_000L, v.balanceCents.value)
+        assertEquals("Cap Snapshot", v.holderName.value)
+        assertEquals("snap@example.com", v.email.value)
+        assertEquals("ORIGINAL-TAX-ID", v.taxId.value, "encrypted state survives snapshot/restore round-trip")
+        assertEquals(1, v.ledger.value.size)
+    }
+
+    /**
+     * Phase M — `Vault.derived(...)` push-recomputed state.
+     *
+     * Subscribes to the `ledger` source state; whenever the ledger commits a
+     * change, the derived `netDebits` recomputes inside a fresh action and
+     * fires its own observers.
+     */
+    @Test
+    fun derivedNetDebitsRecomputesOnLedgerCommits() {
+        val v = AccountVault(accountId = "ACC-DERIVED", initialBalanceCents = 1_000_000)
+        val (netDebits, dispose) = v.derived(v.ledger) {
+            ledger.value.filter { it.deltaCents < 0 }.sumOf { -it.deltaCents }
+        }
+        try {
+            assertEquals(0L, netDebits.value)
+
+            v.deposit(50_000, "salary") // delta +50k → debits unchanged
+            assertEquals(0L, netDebits.value)
+
+            v.withdraw(20_000, "rent") // delta -20k
+            assertEquals(20_000L, netDebits.value)
+
+            v.withdraw(5_000, "groceries") // delta -5k
+            assertEquals(25_000L, netDebits.value)
+
+            // Observer fanout works on the derived state too.
+            val seen = mutableListOf<Long>()
+            val sub = v { netDebits effect { seen.add(this) } }
+            seen.clear()
+            v.withdraw(1_000, "coffee")
+            assertEquals(listOf(26_000L), seen, "derived observer fires after ledger commit")
+            sub.dispose()
+        } finally {
+            dispose.dispose()
+        }
+    }
+
+    /**
+     * Phase O — Cross-vault `atomic(...)` rollback semantics.
+     *
+     * The refactored `transferTo` uses `atomic(this, other)`. On the failing
+     * path (peer is Frozen, deposit refused), the entire transfer rolls back
+     * — both the debit and any partial state writes are dropped, with no
+     * hand-rolled compensation.
+     */
+    @Test
+    fun crossVaultAtomicTransferRollsBackBothVaultsOnFailure() {
+        val a = AccountVault(accountId = "ACC-ATOM-A", initialBalanceCents = 10_000)
+        val b = AccountVault(accountId = "ACC-ATOM-B")
+        // Freeze b so its deposit will throw via the deposit operation's require.
+        b action { status mutate AccountStatus.Frozen }
+
+        val r = a.transferTo(b, 3_000, "should-fail")
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(10_000L, a.balanceCents.value, "atomic rolled back the debit on a")
+        assertEquals(0L, b.balanceCents.value, "atomic prevented any write to b")
+        assertEquals(0L, a.dailyWithdrawnCents.value, "atomic rolled back the daily counter too")
+        assertTrue(a.ledger.value.isEmpty(), "no ledger entry persisted from the rolled-back transfer")
+    }
+
+    @Test
+    fun crossVaultAtomicTransferSucceedsAtomically() {
+        val a = AccountVault(accountId = "ACC-ATOM-OK-A", initialBalanceCents = 10_000)
+        val b = AccountVault(accountId = "ACC-ATOM-OK-B")
+        val r = a.transferTo(b, 4_000, "atomic-ok")
+        assertIs<TransactionResult.Success<LedgerEntry>>(r)
+        assertEquals(6_000L, a.balanceCents.value)
+        assertEquals(4_000L, b.balanceCents.value)
+        assertEquals(1, a.ledger.value.size)
+        assertEquals(1, b.ledger.value.size)
     }
 }
