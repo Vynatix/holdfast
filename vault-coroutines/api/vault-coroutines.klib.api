@@ -6,11 +6,27 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-coroutines>
+abstract interface com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/SuspendingKvStore|null[0]
+    abstract suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/SuspendingKvStore.get|get(kotlin.String){}[0]
+    abstract suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/SuspendingKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    abstract suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/SuspendingKvStore.remove|remove(kotlin.String){}[0]
+    abstract suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/SuspendingKvStore.snapshot|snapshot(){}[0]
+}
+
 final class <#A: kotlin/Any> com.vynatix.vault.coroutines/EagerStateFlow : com.vynatix.vault/Disposable { // com.vynatix.vault.coroutines/EagerStateFlow|null[0]
     final val state // com.vynatix.vault.coroutines/EagerStateFlow.state|{}state[0]
         final fun <get-state>(): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/EagerStateFlow.state.<get-state>|<get-state>(){}[0]
 
     final fun dispose() // com.vynatix.vault.coroutines/EagerStateFlow.dispose|dispose(){}[0]
+}
+
+final class com.vynatix.vault.coroutines/InMemorySuspendingKvStore : com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/InMemorySuspendingKvStore|null[0]
+    constructor <init>(kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.<init>|<init>(kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+
+    final suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.get|get(kotlin.String){}[0]
+    final suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.remove|remove(kotlin.String){}[0]
+    final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.snapshot|snapshot(){}[0]
 }
 
 final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asEagerStateFlow(): com.vynatix.vault.coroutines/EagerStateFlow<#A> // com.vynatix.vault.coroutines/asEagerStateFlow|asEagerStateFlow@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
