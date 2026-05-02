@@ -4,7 +4,7 @@ plugins {
     id("astrid.quality")
     id("astrid.dokka")
     id("astrid.abi")
-    id("astrid.publish")
+    id("astrid.publish.sonatype")
 }
 
 kotlin {

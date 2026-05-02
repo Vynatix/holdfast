@@ -34,6 +34,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `com.vynatix:vault-validation:0.2.0` (4 publication targets:
   `kotlinMultiplatform`, `android`, `iosArm64`, `iosSimulatorArm64`).
 
+### Changed — Packaging
+
+- `astrid.publish.sonatype` is now applied to **all four** published modules
+  (`:vault`, `:vault-coroutines`, `:vault-compose`, `:vault-validation`),
+  replacing the bare `astrid.publish`. `publishToMavenLocal` continues to work
+  unchanged (signing block is no-op when credentials are absent); a real release
+  uses `publishAllPublicationsToSonatypeRepository` on each module.
+
 ### Documentation
 
 - `vault/README.md` — modules table now includes `:vault-validation`;
