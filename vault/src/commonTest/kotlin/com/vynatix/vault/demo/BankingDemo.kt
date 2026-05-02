@@ -49,12 +49,16 @@ import com.vynatix.vault.TransactionStatus
 import com.vynatix.vault.Transformer
 import com.vynatix.vault.Vault
 import com.vynatix.vault.atomic
+import com.vynatix.vault.bridge.InMemoryKvStore
 import com.vynatix.vault.bridge.KvBridge
 import com.vynatix.vault.bridge.LongCodec
 import com.vynatix.vault.bridge.StringCodec
 import com.vynatix.vault.crypto.EncryptingTransformer
 import com.vynatix.vault.crypto.XorCipher
 import com.vynatix.vault.derived
+import com.vynatix.vault.middleware.LoggingMiddleware
+import com.vynatix.vault.middleware.TimingMiddleware
+import com.vynatix.vault.middleware.ValidationMiddleware
 import com.vynatix.vault.restore
 import com.vynatix.vault.snapshot
 import kotlinx.coroutines.Dispatchers
@@ -254,34 +258,12 @@ private class DailyWithdrawalLimit(private val limitCents: Long) : Middleware<Ac
 // 5. BRIDGES — external sync
 // ════════════════════════════════════════════════════════════════════════════════
 
-/** A trivial in-memory key/value store standing in for a real persistence layer. */
-private class InMemoryKvStore {
-    private val map = mutableMapOf<String, String>()
-    fun put(key: String, value: String) {
-        map[key] = value
-    }
-    fun get(key: String): String? = map[key]
-    fun snapshot(): Map<String, String> = map.toMap()
-}
-
 /**
- * Persistence bridge for the balance state. Canonical "save-on-commit, load-on-attach":
- *   - `publish(value)` (called by the vault on each successful commit) writes to KV.
- *   - `observe(observer)` (called by the vault when the bridge is attached) immediately
- *     replays any persisted value, hydrating the state.
- */
-private class BalancePersistenceBridge(private val kv: InMemoryKvStore, private val accountId: String) : Bridge<Long> {
-    override fun observe(observer: (Long) -> Unit): Disposable {
-        kv.get("balance:$accountId")?.toLongOrNull()?.let(observer)
-        return Disposable { /* one-shot replay; no listener to detach */ }
-    }
-    override fun publish(value: Long): Boolean {
-        kv.put("balance:$accountId", value.toString())
-        return true
-    }
-}
-
-/**
+ * Persistence in this demo is the stdlib `KvBridge` over `InMemoryKvStore`
+ * (and `FileSystemKvStore` in the dedicated 1.1 test below). The earlier
+ * versions of this demo shipped a hand-rolled `BalancePersistenceBridge`;
+ * since 1.1 the same wiring is one line: `state bridge KvBridge(kv, key, codec)`.
+ *
  * Inbound-only push channel: an "admin console" can flip an account's status
  * without going through `vault action { ... }`. Unlike a [Bridge] (two-way),
  * this only implements [Observable] — the vault binds to it via `state observeFrom obs`
@@ -340,8 +322,14 @@ private fun AccountVault.withdraw(cents: Long, description: String): Transaction
     entry
 }
 
+@Suppress("unused") // demo-domain operations exposed for completeness; exercised in
+// `accountStatusTransitionsViaFreezeUnfreezeAndClose` below.
 private fun AccountVault.freeze(): TransactionResult<Unit> = action { status mutate AccountStatus.Frozen }
+
+@Suppress("unused")
 private fun AccountVault.unfreeze(): TransactionResult<Unit> = action { status mutate AccountStatus.Active }
+
+@Suppress("unused")
 private fun AccountVault.close(): TransactionResult<Unit> = action { status mutate AccountStatus.Closed }
 
 /**
@@ -495,7 +483,7 @@ class BankingDemo {
         val overLimit = alice.withdraw(60_000, "luxury")
         assertIs<TransactionResult.Error>(overLimit)
         assertEquals(TransactionStatus.RolledBack, overLimit.transaction.status)
-        assertTrue(overLimit.exception.message?.contains("daily withdrawal limit") == true)
+        assertEquals(true, overLimit.exception.message?.contains("daily withdrawal limit"))
 
         // Every staged write was discarded.
         assertEquals(balanceBefore, alice.balanceCents.value)
@@ -547,7 +535,7 @@ class BankingDemo {
         bank action { emergencyLockdown mutate true }
         val refusedDuringLockdown = alice.deposit(1, "during lockdown")
         assertIs<TransactionResult.Error>(refusedDuringLockdown)
-        assertTrue(refusedDuringLockdown.exception.message?.contains("lockdown") == true)
+        assertEquals(refusedDuringLockdown.exception.message?.contains("lockdown"), true)
         bank action { emergencyLockdown mutate false }
 
         // Lockdown didn't touch alice's state.
@@ -583,7 +571,8 @@ class BankingDemo {
         // Phase 11 — Persistence bridge: save-on-commit + load-on-attach
         // ────────────────────────────────────────────────────────────────────
         val kv = InMemoryKvStore()
-        val balanceBridge = BalancePersistenceBridge(kv, alice.accountId)
+        val balanceKey = "balance:${alice.accountId}"
+        val balanceBridge = KvBridge(kv, balanceKey, LongCodec)
         alice { balanceCents bridge balanceBridge }
         // Trigger one commit to populate the KV.
         alice.deposit(5_000, "post-attach deposit")
@@ -627,7 +616,7 @@ class BankingDemo {
         // Phase 13 — Bridge swap and detach (no further publishes to the old bridge)
         // ────────────────────────────────────────────────────────────────────
         val secondKv = InMemoryKvStore()
-        val secondBridge = BalancePersistenceBridge(secondKv, alice.accountId)
+        val secondBridge = KvBridge(secondKv, balanceKey, LongCodec)
         alice { balanceCents bridge secondBridge }
         val firstSavedBefore = kv.get("balance:${alice.accountId}")
         alice.deposit(1, "after swap")
@@ -753,10 +742,6 @@ class BankingDemo {
                 it is TraceEvent.Errored
         }
         assertTrue(rolledBackCount > 0, "trace recorded at least one rolled-back / errored transaction")
-
-        // Mark the demo's run-time tag so downstream tests don't assume residual state.
-        @Suppress("UNUSED_VARIABLE")
-        val finishedAtMs = nowMs()
     }
 
     /**
@@ -802,21 +787,16 @@ class BankingDemo {
         val timings = mutableListOf<Long>()
         // Outermost (LAST) is Logging so its onError sees inner failures.
         v.middlewares(
-            com.vynatix.vault.middleware.ValidationMiddleware<AccountVault> {
+            ValidationMiddleware {
                 require(balanceCents.value >= 0) { "balance must stay non-negative" }
             },
-            com.vynatix.vault.middleware.TimingMiddleware { _, _, ms -> timings.add(ms) },
-            com.vynatix.vault.middleware.LoggingMiddleware("ACC-STD", log::add),
+            TimingMiddleware { _, _, ms -> timings.add(ms) },
+            LoggingMiddleware("ACC-STD", log::add),
         )
 
-        val kv = com.vynatix.vault.bridge.InMemoryKvStore()
-        v {
-            balanceCents bridge com.vynatix.vault.bridge.KvBridge(
-                kv,
-                "balance:${v.accountId}",
-                com.vynatix.vault.bridge.LongCodec,
-            )
-        }
+        val kv = InMemoryKvStore()
+        val key = "balance:${v.accountId}"
+        v { balanceCents bridge KvBridge(kv, key, LongCodec) }
 
         // Successful deposit: persisted, logged, timed.
         val r1 = v.deposit(500, "opening")
@@ -835,13 +815,7 @@ class BankingDemo {
 
         // Re-hydration: a fresh vault attached to the same KV loads the persisted balance.
         val reborn = AccountVault(accountId = v.accountId)
-        reborn {
-            balanceCents bridge com.vynatix.vault.bridge.KvBridge(
-                kv,
-                "balance:${v.accountId}",
-                com.vynatix.vault.bridge.LongCodec,
-            )
-        }
+        reborn { balanceCents bridge KvBridge(kv, key, LongCodec) }
         assertEquals(500L, reborn.balanceCents.value, "stdlib KvBridge restored persisted balance to fresh vault")
     }
 
@@ -869,7 +843,7 @@ class BankingDemo {
 
         // Persist via KvBridge: the bytes hitting the KV store are CIPHERTEXT,
         // because `applyCommitted` publishes the raw post-`set` value.
-        val kv = com.vynatix.vault.bridge.InMemoryKvStore()
+        val kv = InMemoryKvStore()
         v { taxId bridge KvBridge(kv, "tax:${v.accountId}", StringCodec) }
         v action { taxId mutate "TAX-NEW-VALUE-9999" }
         val persisted = kv.get("tax:${v.accountId}") ?: error("expected persisted ciphertext")
