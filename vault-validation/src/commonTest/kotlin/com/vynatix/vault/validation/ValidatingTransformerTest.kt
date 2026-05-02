@@ -7,11 +7,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private data class UserEmail(override val value: String) : Civilizable<String>
+private data class UserEmail(override val value: String) : Validated<String>
 
-private object UserEmailCivilizer : Civilizer<String, Rule<String>, UserEmail> {
-    override val variations = listOf(
-        createVariation(
+private object UserEmailValidator : Validator<String, Rule<String>, UserEmail> {
+    override val specs = listOf(
+        createSpec(
             { UserEmail(it) },
             allConditions(),
             Rule { it.contains('@') },
@@ -21,18 +21,18 @@ private object UserEmailCivilizer : Civilizer<String, Rule<String>, UserEmail> {
 }
 
 private class UserVault : Vault<UserVault>() {
-    val email by state(transformer = CivilizingTransformer(UserEmailCivilizer)) {
-        UserEmailCivilizer of "init@example.com"
+    val email by state(transformer = ValidatingTransformer(UserEmailValidator)) {
+        UserEmailValidator of "init@example.com"
     }
     val displayName by state { "init" }
 }
 
-class CivilizingTransformerTest {
+class ValidatingTransformerTest {
     @Test
-    fun acceptsValidPrimitiveAndStoresCivilizedValue() {
+    fun acceptsValidPrimitiveAndStoresWrappedValue() {
         val vault = UserVault()
         val result = vault action {
-            email mutate (UserEmailCivilizer of "alice@example.com")
+            email mutate (UserEmailValidator of "alice@example.com")
         }
         assertIs<TransactionResult.Success<*>>(result)
         assertEquals("alice@example.com", vault.email.value.value)

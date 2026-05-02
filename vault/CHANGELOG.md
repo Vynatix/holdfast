@@ -8,34 +8,32 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added — `:vault-validation` (new module)
 
-- New companion artifact `com.vynatix:vault-validation` that ports the
-  [Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized) pattern
-  into Kotlin Multiplatform (Android + iOS) and integrates it with Vault's
-  transformer pipeline. The original library is JVM-only at Kotlin 1.7.10; this
-  module reimplements the API shape on commonMain.
-- Core interfaces under `com.vynatix.vault.validation`, ABI-faithful to the
-  JVM original: `Civilizable<PRIMITIVE>`, `Rule<PRIMITIVE>` (`fun interface`),
+- New companion artifact `com.vynatix:vault-validation` providing
+  boundary-validation primitives in commonMain (Android + iOS) that integrate
+  with Vault's transformer pipeline.
+- Core interfaces under `com.vynatix.vault.validation`:
+  `Validated<PRIMITIVE>` (the typed wrapper carrying `val value: P`),
+  `Rule<PRIMITIVE>` (`fun interface`),
   `Condition<P, R>` (`fun interface`, `run(primitive, rule: Array<out R>)`),
-  `Variation<P, R, O>` (`rule: Array<out R>` + `condition` + `declaration`),
-  and `Civilizer<P, R, O>` with `infix of`, `validate`, `ofOrNull`, plus the
+  `Spec<P, R, O>` (`rule: Array<out R>` + `condition` + `factory`),
+  and `Validator<P, R, O>` with `infix of`, `validate`, `ofOrNull`, plus the
   combinator/builder members `allConditions()`, `anyConditions()`, and
-  `createVariation(declaration, condition, vararg rule)`. `Declaration<P, O>`
-  is a `(P) -> O` typealias.
-- **`CivilizingTransformer<P, R, O>(civilizer)`** — a Vault `Transformer<O>`
-  that re-runs `civilizer of value.value` on every write. Defence-in-depth
-  against callers who construct a `Civilizable` directly (e.g. via `data class
-  copy`) and bypass `Civilizer.of`. A failed civilization throws
-  `IllegalArgumentException` (matching the original library), which propagates
-  to the enclosing `action { }` and rolls every state mutation in the
-  transaction back.
-- 10 tests across `CivilizerTest` + `CivilizingTransformerTest` covering happy
-  path, `ofOrNull`, `validate`, multi-variation matching, multi-rule per
-  variation with both `allConditions()` and `anyConditions()`, transformer
-  rollback on constructor bypass, and cross-state atomicity. Verified on
-  Android JVM + iOS sim. ABI baseline at
-  `vault-validation/api/vault-validation.klib.api`. Published to local Maven at
-  `com.vynatix:vault-validation:0.2.0` (4 publication targets:
-  `kotlinMultiplatform`, `android`, `iosArm64`, `iosSimulatorArm64`).
+  `createSpec(factory, condition, vararg rule)`. `Factory<P, O>` is a
+  `(P) -> O` typealias.
+- **`ValidatingTransformer<P, R, O>(validator)`** — a Vault `Transformer<O>`
+  that re-runs `validator of value.value` on every write. Defence-in-depth
+  against callers who construct a `Validated` directly (e.g. via `data class
+  copy`) and bypass `Validator.of`. A failed validation throws
+  `IllegalArgumentException`, which propagates to the enclosing `action { }`
+  and rolls every state mutation in the transaction back.
+- 10 tests across `ValidatorTest` + `ValidatingTransformerTest` covering happy
+  path, `ofOrNull`, `validate`, multi-spec matching, multi-rule per spec with
+  both `allConditions()` and `anyConditions()`, transformer rollback on
+  constructor bypass, and cross-state atomicity. Verified on Android JVM + iOS
+  sim. ABI baseline at `vault-validation/api/vault-validation.klib.api`.
+  Published to local Maven at `com.vynatix:vault-validation:0.2.0` (4
+  publication targets: `kotlinMultiplatform`, `android`, `iosArm64`,
+  `iosSimulatorArm64`).
 
 ### Changed — Packaging
 

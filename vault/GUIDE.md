@@ -1352,79 +1352,76 @@ val r = vault.suspendAction {
 }
 ```
 
-### 14.11 `:vault-validation` — civilize primitives at the boundary
+### 14.11 `:vault-validation` — validate primitives at the boundary
 
-The `com.vynatix:vault-validation` companion artifact ports the
-[Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized) pattern to
-KMP and plugs it into Vault's transformer pipeline. The premise: every primitive
-(`String`, `Long`, …) flowing into your domain should be civilized — validated
-and wrapped in a typed `Civilizable<P>` — exactly once, at the system boundary.
-Inside the domain, you pass civilized objects, never raw primitives. This is
-the canonical fix for the **primitive obsession** code smell.
+The `com.vynatix:vault-validation` companion artifact ships boundary-validation
+primitives that plug into Vault's transformer pipeline. The premise: every
+primitive (`String`, `Long`, …) flowing into your domain should be validated
+and wrapped in a typed `Validated<P>` — exactly once, at the system boundary.
+Inside the domain, you pass wrapper objects, never raw primitives. This is the
+canonical fix for the **primitive obsession** code smell.
 
-**Core types** (in `com.vynatix.vault.validation`, faithful KMP port of the
-JVM-only [Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized)):
+**Core types** (in `com.vynatix.vault.validation`):
 ```kotlin
-interface     Civilizable<P>             { val value: P }
+interface     Validated<P>               { val value: P }
 fun interface Rule<P>                    { fun validate(primitive: P): Boolean }
 fun interface Condition<P, R : Rule<P>>  { fun run(primitive: P, rule: Array<out R>): Boolean }
-typealias     Declaration<P, O>          = (P) -> O
-interface     Variation<P, R, O>         { val rule: Array<out R>; val condition: Condition<P, R>; val declaration: Declaration<P, O> }
-interface     Civilizer<P, R, O> {
-    val variations: Collection<Variation<P, R, O>>
+typealias     Factory<P, O>              = (P) -> O
+interface     Spec<P, R, O>              { val rule: Array<out R>; val condition: Condition<P, R>; val factory: Factory<P, O> }
+interface     Validator<P, R, O> {
+    val specs: Collection<Spec<P, R, O>>
     infix fun of(value: P): O           // throws IllegalArgumentException on rejection
     fun ofOrNull(value: P): O?
     fun validate(value: P): Boolean
     fun <P2, R2 : Rule<P2>> allConditions(): Condition<P2, R2>   // every rule must pass
     fun <P2, R2 : Rule<P2>> anyConditions(): Condition<P2, R2>   // at least one rule
-    fun createVariation(declaration: Declaration<P, O>, condition: Condition<P, R>, vararg rule: R): Variation<P, R, O>
+    fun createSpec(factory: Factory<P, O>, condition: Condition<P, R>, vararg rule: R): Spec<P, R, O>
 }
-class CivilizingTransformer<P, R, O>(civilizer): Transformer<O>
+class ValidatingTransformer<P, R, O>(validator): Transformer<O>
 ```
 
-**Define a civilizer**:
+**Define a validator**:
 ```kotlin
-data class Email(override val value: String) : Civilizable<String>
+data class Email(override val value: String) : Validated<String>
 
-object EmailCivilizer : Civilizer<String, Rule<String>, Email> {
+object EmailValidator : Validator<String, Rule<String>, Email> {
     private val nonEmpty    = Rule<String> { it.isNotBlank() }
     private val containsAt  = Rule<String> { it.contains('@') }
     private val sensibleLen = Rule<String> { it.length in 3..254 }
 
-    override val variations = listOf(
-        createVariation({ Email(it) }, allConditions(), nonEmpty, containsAt, sensibleLen),
+    override val specs = listOf(
+        createSpec({ Email(it) }, allConditions(), nonEmpty, containsAt, sensibleLen),
     )
 }
 
-val email = EmailCivilizer of "alice@example.com"     // typed Email
-EmailCivilizer of "not-an-email"                      // throws IllegalArgumentException
+val email = EmailValidator of "alice@example.com"     // typed Email
+EmailValidator of "not-an-email"                      // throws IllegalArgumentException
 ```
 
-**Plug into a vault** with `CivilizingTransformer` for defence-in-depth:
+**Plug into a vault** with `ValidatingTransformer` for defence-in-depth:
 ```kotlin
 class UserVault : Vault<UserVault>() {
-    val email by state(transformer = CivilizingTransformer(EmailCivilizer)) {
-        EmailCivilizer of "init@example.com"
+    val email by state(transformer = ValidatingTransformer(EmailValidator)) {
+        EmailValidator of "init@example.com"
     }
 }
 
-vault action { email mutate (EmailCivilizer of "new@example.com") }    // OK
+vault action { email mutate (EmailValidator of "new@example.com") }    // OK
 vault action { email mutate Email("not-an-email") }                    // rolls back
 ```
 
-The transformer re-runs the civilizer on every write, so a caller who
+The transformer re-runs the validator on every write, so a caller who
 constructs `Email("garbage")` directly (e.g. via `data class copy`) still has
 their write rejected — and any other state mutation in the same transaction
 rolls back atomically.
 
-**Multiple variations** + **multiple rules per variation** — `anyConditions()`
-fans out across rules within one variation; the first matching variation in the
-list wins:
+**Multiple specs** + **multiple rules per spec** — `anyConditions()` fans out
+across rules within one spec; the first matching spec in the list wins:
 ```kotlin
-object TokenCivilizer : Civilizer<String, Rule<String>, Token> {
-    override val variations = listOf(
+object TokenValidator : Validator<String, Rule<String>, Token> {
+    override val specs = listOf(
         // either Bearer or Basic prefix is acceptable
-        createVariation(
+        createSpec(
             { Token(it) },
             anyConditions(),
             Rule { it.startsWith("Bearer ") },
