@@ -6,7 +6,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private data class Email(override val value: String) : Validated<String>
+private data class Email(override val value: String) : Boxed<String>
 
 private object EmailValidator : Validator<String, Rule<String>, Email> {
     private val nonEmpty = Rule<String> { it.isNotBlank() }
@@ -18,7 +18,7 @@ private object EmailValidator : Validator<String, Rule<String>, Email> {
     )
 }
 
-private data class IntNum(override val value: Int) : Validated<Int>
+private data class IntNum(override val value: Int) : Boxed<Int>
 
 private object PositiveIntValidator : Validator<Int, Rule<Int>, IntNum> {
     override val specs = listOf(
@@ -26,7 +26,7 @@ private object PositiveIntValidator : Validator<Int, Rule<Int>, IntNum> {
     )
 }
 
-private data class Num(override val value: String) : Validated<String>
+private data class Num(override val value: String) : Boxed<String>
 
 private object MultiSpecValidator : Validator<String, Rule<String>, Num> {
     override val specs = listOf(
@@ -35,7 +35,7 @@ private object MultiSpecValidator : Validator<String, Rule<String>, Num> {
     )
 }
 
-private data class Token(override val value: String) : Validated<String>
+private data class Token(override val value: String) : Boxed<String>
 
 private object EitherTokenValidator : Validator<String, Rule<String>, Token> {
     override val specs = listOf(

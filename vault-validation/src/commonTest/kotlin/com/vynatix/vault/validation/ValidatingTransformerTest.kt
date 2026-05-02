@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private data class UserEmail(override val value: String) : Validated<String>
+private data class UserEmail(override val value: String) : Boxed<String>
 
 private object UserEmailValidator : Validator<String, Rule<String>, UserEmail> {
     override val specs = listOf(

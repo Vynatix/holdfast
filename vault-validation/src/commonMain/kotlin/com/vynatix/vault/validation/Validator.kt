@@ -12,7 +12,7 @@ package com.vynatix.vault.validation
  *
  * **Quick start**:
  * ```kotlin
- * data class Email(override val value: String) : Validated<String>
+ * data class Email(override val value: String) : Boxed<String>
  *
  * object EmailValidator : Validator<String, Rule<String>, Email> {
  *     private val nonEmpty = Rule<String> { it.isNotBlank() }
@@ -28,7 +28,7 @@ package com.vynatix.vault.validation
  * Pair with [ValidatingTransformer] to enforce the same invariant on every
  * Vault state write.
  */
-interface Validator<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Validated<PRIMITIVE>> {
+interface Validator<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Boxed<PRIMITIVE>> {
     val specs: Collection<Spec<PRIMITIVE, RULE, OBJECT>>
 
     /**

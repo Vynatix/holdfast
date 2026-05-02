@@ -3,12 +3,12 @@ package com.vynatix.vault.validation
 import com.vynatix.vault.Transformer
 
 /**
- * A [Transformer] that re-validates a [Validated]'s primitive against its
+ * A [Transformer] that re-validates a [Boxed]'s primitive against its
  * [Validator] on every write, throwing [IllegalArgumentException] (and rolling
  * back the enclosing transaction) when no spec matches.
  *
  * Why use this when [Validator.of] already throws? Two reasons:
- *  1. Defence in depth — a caller that constructs a [Validated] directly
+ *  1. Defence in depth — a caller that constructs a [Boxed] directly
  *     (bypassing the validator, e.g. via a `data class copy`) still has its
  *     invariant enforced when the value lands in the vault.
  *  2. Atomicity — a failed write inside an `action { … }` rolls back every
@@ -28,7 +28,7 @@ import com.vynatix.vault.Transformer
  *
  * The [get] side is identity — the stored object already carries its primitive.
  */
-class ValidatingTransformer<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Validated<PRIMITIVE>>(
+class ValidatingTransformer<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Boxed<PRIMITIVE>>(
     private val validator: Validator<PRIMITIVE, RULE, OBJECT>,
 ) : Transformer<OBJECT> {
     override fun set(value: OBJECT): OBJECT {

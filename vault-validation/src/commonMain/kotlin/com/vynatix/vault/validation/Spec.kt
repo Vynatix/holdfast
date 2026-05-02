@@ -5,7 +5,7 @@ typealias Factory<PRIMITIVE, OBJECT> = (PRIMITIVE) -> OBJECT
 
 /**
  * A single way of validating a primitive [PRIMITIVE] and constructing a
- * [Validated] [OBJECT] from it.
+ * [Boxed] [OBJECT] from it.
  *
  * A spec pairs an array of [Rule]s, a [Condition] that combines them, and a
  * [Factory] that builds the wrapper once the rules pass.
@@ -14,7 +14,7 @@ typealias Factory<PRIMITIVE, OBJECT> = (PRIMITIVE) -> OBJECT
  * `NumberValidator` with an integer spec and a float spec). Use
  * [Validator.createSpec] to build instances ergonomically.
  */
-interface Spec<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Validated<PRIMITIVE>> {
+interface Spec<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Boxed<PRIMITIVE>> {
     val rule: Array<out RULE>
     val condition: Condition<PRIMITIVE, RULE>
     val factory: Factory<PRIMITIVE, OBJECT>

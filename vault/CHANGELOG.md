@@ -12,7 +12,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   boundary-validation primitives in commonMain (Android + iOS) that integrate
   with Vault's transformer pipeline.
 - Core interfaces under `com.vynatix.vault.validation`:
-  `Validated<PRIMITIVE>` (the typed wrapper carrying `val value: P`),
+  `Boxed<PRIMITIVE>` (the typed wrapper carrying `val value: P`),
   `Rule<PRIMITIVE>` (`fun interface`),
   `Condition<P, R>` (`fun interface`, `run(primitive, rule: Array<out R>)`),
   `Spec<P, R, O>` (`rule: Array<out R>` + `condition` + `factory`),
@@ -22,7 +22,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `(P) -> O` typealias.
 - **`ValidatingTransformer<P, R, O>(validator)`** — a Vault `Transformer<O>`
   that re-runs `validator of value.value` on every write. Defence-in-depth
-  against callers who construct a `Validated` directly (e.g. via `data class
+  against callers who construct a `Boxed` directly (e.g. via `data class
   copy`) and bypass `Validator.of`. A failed validation throws
   `IllegalArgumentException`, which propagates to the enclosing `action { }`
   and rolls every state mutation in the transaction back.

@@ -6,10 +6,10 @@ package com.vynatix.vault.validation
  *
  * The pattern: instead of passing raw `String` / `Long` / etc. through your
  * domain — risking primitive obsession and uncaught invariant violations —
- * validate the primitive once into a [Validated] wrapper, and pass the wrapper
+ * validate the primitive once into a [Boxed] wrapper, and pass the wrapper
  * thereafter. Pair with [Validator] to perform the validation, and with
  * [ValidatingTransformer] to enforce the invariant on every Vault write.
  */
-interface Validated<PRIMITIVE> {
+interface Boxed<PRIMITIVE> {
     val value: PRIMITIVE
 }

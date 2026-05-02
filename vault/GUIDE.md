@@ -1357,13 +1357,13 @@ val r = vault.suspendAction {
 The `com.vynatix:vault-validation` companion artifact ships boundary-validation
 primitives that plug into Vault's transformer pipeline. The premise: every
 primitive (`String`, `Long`, …) flowing into your domain should be validated
-and wrapped in a typed `Validated<P>` — exactly once, at the system boundary.
+and wrapped in a typed `Boxed<P>` — exactly once, at the system boundary.
 Inside the domain, you pass wrapper objects, never raw primitives. This is the
 canonical fix for the **primitive obsession** code smell.
 
 **Core types** (in `com.vynatix.vault.validation`):
 ```kotlin
-interface     Validated<P>               { val value: P }
+interface     Boxed<P>               { val value: P }
 fun interface Rule<P>                    { fun validate(primitive: P): Boolean }
 fun interface Condition<P, R : Rule<P>>  { fun run(primitive: P, rule: Array<out R>): Boolean }
 typealias     Factory<P, O>              = (P) -> O
@@ -1382,7 +1382,7 @@ class ValidatingTransformer<P, R, O>(validator): Transformer<O>
 
 **Define a validator**:
 ```kotlin
-data class Email(override val value: String) : Validated<String>
+data class Email(override val value: String) : Boxed<String>
 
 object EmailValidator : Validator<String, Rule<String>, Email> {
     private val nonEmpty    = Rule<String> { it.isNotBlank() }
