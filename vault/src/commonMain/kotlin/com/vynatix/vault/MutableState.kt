@@ -74,6 +74,15 @@ class MutableState<T : Any>(
     internal fun beforeSet(newValue: T): T = transformer?.takeIf { it.shouldTransform(newValue) }?.set(newValue) ?: newValue
 
     /**
+     * Raw access to the committed `currentValue`, bypassing `transformer.get`.
+     * Used by [Vault.snapshot] to capture the on-disk-equivalent representation
+     * (ciphertext, post-`transformer.set` form, etc.) so [Vault.restore] can
+     * round-trip without re-running `transformer.set`.
+     */
+    internal val rawCurrentValue: T
+        get() = stateLock.withLock { currentValue }
+
+    /**
      * Commit-time apply: writes `currentValue`, notifies observers, publishes to bridge.
      * The single observable side effect of a successful commit. Lock-order: snapshot
      * under `stateLock`, release, then notify outside `stateLock` to avoid AB-BA with

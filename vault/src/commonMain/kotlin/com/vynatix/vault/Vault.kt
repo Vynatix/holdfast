@@ -1,8 +1,18 @@
+@file:OptIn(VaultInternalApi::class)
+
 package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
+import kotlinx.atomicfu.atomic
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+
+/**
+ * Process-monotonic counter used to assign each [Vault] a stable [Vault.lockOrderKey]
+ * at construction. Used by `atomic(...)` to acquire multi-vault locks in a
+ * deadlock-safe global order.
+ */
+private val vaultLockOrderKeyGen = atomic(0L)
 
 /**
  * Base class for transactional state containers.
@@ -33,6 +43,14 @@ import kotlin.uuid.Uuid
 @VaultActionDsl
 @Suppress("TooManyFunctions") // The Vault DSL is intentionally broad; each member is a single primitive.
 abstract class Vault<Self : Vault<Self>> {
+    /**
+     * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
+     * sorts its vault arguments by this key before acquiring locks, giving
+     * deadlock-safe global ordering across any combination of vaults.
+     */
+    @VaultInternalApi
+    val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
+
     private val transactionLock = VaultLock()
     private val propertiesLock = VaultLock()
     private val middlewareLock = VaultLock()
@@ -76,6 +94,75 @@ abstract class Vault<Self : Vault<Self>> {
      */
     @kotlin.concurrent.Volatile
     var uncaughtObserverHandler: ((Throwable) -> Unit)? = null
+
+    /**
+     * Hook for an external mutual-exclusion mechanism that needs to coordinate
+     * with this vault's blocking [action]. Set at most once, by the
+     * `:vault-coroutines` `suspendAction` extension when it first wraps a
+     * suspending body — the serializer's blocking acquire/release brackets every
+     * blocking [action] call so that concurrent suspending callers see a serial
+     * stream of actions.
+     *
+     * Marked `@VaultInternalApi` because it's an extension point for companion
+     * modules, not a user-facing knob. If null (the default), `action` runs
+     * unwrapped — the legacy fast path.
+     */
+    interface AsyncSerializer {
+        fun blockingAcquire()
+        fun blockingRelease()
+    }
+
+    @VaultInternalApi
+    @kotlin.concurrent.Volatile
+    var asyncSerializer: AsyncSerializer? = null
+
+    /**
+     * Set while a `suspendAction` body is in flight. While non-null, `mutate`
+     * additionally accepts callers on threads that aren't the txn's owner thread,
+     * because the suspending body may resume on different threads via coroutine
+     * dispatch. The [AsyncSerializer] guarantees no other action runs concurrently,
+     * so the relaxed ownership check is sound.
+     */
+    @VaultInternalApi
+    @kotlin.concurrent.Volatile
+    var suspendingOwner: Any? = null
+
+    /**
+     * Tasks queued during an in-progress action that should run AFTER the current
+     * top-level action's commit fanout completes. Used by [derived] to defer
+     * recompute actions out of the parent's commit loop — this avoids re-entering
+     * `pendingWrites` while the parent is iterating it.
+     *
+     * Owner-thread-confined; safe to read/write only on the owning thread.
+     */
+    private val postCommitTasks = mutableListOf<() -> Unit>()
+
+    /**
+     * Schedule [task] to run after the current top-level action's commit fanout
+     * finishes. If called outside any action, the task runs immediately.
+     *
+     * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
+     * instead of re-entering the parent's commit. Internal because the deferral
+     * contract is implementation detail.
+     */
+    internal fun postCommit(task: () -> Unit) {
+        if (_activeTransaction != null) {
+            postCommitTasks.add(task)
+        } else {
+            task()
+        }
+    }
+
+    private fun drainPostCommitTasks() {
+        // Drain to a local copy so any task that queues another doesn't perturb
+        // our iteration. Tasks scheduled by tasks land in postCommitTasks and
+        // are picked up by the next iteration of this loop.
+        while (postCommitTasks.isNotEmpty()) {
+            val drained = postCommitTasks.toList()
+            postCommitTasks.clear()
+            drained.forEach { runCatching { it() } }
+        }
+    }
 
     @Suppress("UNCHECKED_CAST")
     private val self: Self get() = this as Self
@@ -126,7 +213,21 @@ abstract class Vault<Self : Vault<Self>> {
      * including merged inner writes.
      */
     @OptIn(ExperimentalUuidApi::class)
-    infix fun <R> action(body: Self.() -> R): TransactionResult<R> = transactionLock.withLock {
+    infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
+        // If a suspending caller (vault-coroutines.suspendAction) has installed a
+        // serializer, block here until they release. This makes blocking action and
+        // suspending action mutually exclusive on the same vault.
+        val serializer = asyncSerializer
+        serializer?.blockingAcquire()
+        try {
+            return runBlockingActionUnderLock(body)
+        } finally {
+            serializer?.blockingRelease()
+        }
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> = transactionLock.withLock {
         val parent = _activeTransaction
         val txn = Transaction(
             id = body::class.simpleName ?: Uuid.random().toString(),
@@ -153,6 +254,9 @@ abstract class Vault<Self : Vault<Self>> {
         } finally {
             _activeTransaction = parent
         }
+        // Drain post-commit tasks only at top-level exit — nested actions inherit
+        // the parent's deferred queue and let it drain at the outermost boundary.
+        if (parent == null) drainPostCommitTasks()
         outcome
     }
 
@@ -204,6 +308,29 @@ abstract class Vault<Self : Vault<Self>> {
      * value (post-`transformer.get`). The returned [Disposable] removes the observer.
      */
     infix fun <T : Any> State<T>.effect(effect: T.() -> Unit): Disposable = this.getMutableState().observe(effect::invoke)
+
+    /**
+     * Internal: create-or-fetch a state under an arbitrary name. Used by
+     * [derived] to register synthetic backing states whose names ("__derived_N")
+     * never collide with user-declared property names (since Kotlin identifiers
+     * can't start with `__`).
+     */
+    internal fun <T : Any> registerInternalState(
+        name: String,
+        initial: T,
+        transformer: Transformer<T>? = null,
+        distinct: Boolean = false,
+    ): MutableState<T> = propertiesLock.withLock {
+        val existing = _properties[name]
+        if (existing != null) {
+            @Suppress("UNCHECKED_CAST")
+            existing as MutableState<T>
+        } else {
+            MutableState(initial, transformer, this, distinct).also {
+                _properties[name] = it
+            }
+        }
+    }
 
     /**
      * Attach (or detach, when null) a [Bridge] for two-way external sync.
@@ -258,8 +385,12 @@ abstract class Vault<Self : Vault<Self>> {
         val state = this.getMutableState()
         val txn = _activeTransaction
         val onOwnerThread = txn != null && txn.ownerThreadId == currentThreadId()
+        // Suspending body may resume on a different thread; AsyncSerializer ensures
+        // no other action runs concurrently while suspendingOwner != null, so the
+        // relaxed check is sound.
+        val onOwnerCoroutine = txn != null && suspendingOwner != null
 
-        if (txn != null && onOwnerThread) {
+        if (txn != null && (onOwnerThread || onOwnerCoroutine)) {
             // Defensive: a transaction that's been manually committed or rolled back
             // shouldn't accept further mutations. Throw rather than silently lose the write.
             check(txn.status == TransactionStatus.Active) {
@@ -340,4 +471,37 @@ abstract class Vault<Self : Vault<Self>> {
             error("Cannot remove state '$name' with pending writes in an active transaction; commit or rollback first")
         }
     }
+
+    /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Sets the active
+     * transaction directly without going through the blocking lock — the caller
+     * is responsible for serialization (via [asyncSerializer]).
+     */
+    @VaultInternalApi
+    fun internalSetActiveTransaction(txn: Transaction?) {
+        _activeTransaction = txn
+    }
+
+    /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Drains any post-commit
+     * tasks queued during the suspending action — same semantics as the
+     * blocking action's tail drain.
+     */
+    @VaultInternalApi
+    fun internalDrainPostCommitTasks() {
+        drainPostCommitTasks()
+    }
+
+    @VaultInternalApi
+    @Suppress("UNCHECKED_CAST")
+    val selfForExternal: Self get() = self
+
+    /**
+     * Internal hook for `atomic(...)`. Runs [block] under this vault's
+     * `transactionLock`. The reentrant lock makes this safe to call when the
+     * same thread already holds the lock (e.g., nested `atomic` calls overlap
+     * on a vault).
+     */
+    @VaultInternalApi
+    fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
 }

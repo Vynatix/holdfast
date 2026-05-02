@@ -17,6 +17,18 @@ import kotlin.time.Clock
  * (no-op).
  */
 class Transaction internal constructor(val id: String, internal val parent: Transaction?, internal val ownerThreadId: Long) {
+
+    companion object {
+        /**
+         * Public-but-opt-in factory for `:vault-coroutines.suspendAction`. The
+         * primary constructor stays `internal` so user code can't manufacture
+         * spurious transactions; companion modules that need to construct
+         * one (because they implement their own action variant) opt in here.
+         */
+        @VaultInternalApi
+        fun createForExternal(id: String, ownerThreadId: Long): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
+    }
+
     private val statusLock = VaultLock()
     private val endTimeLock = VaultLock()
     private val pendingLock = VaultLock()
@@ -46,6 +58,20 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * [MutableState.applyCommitted].
      */
     internal val pendingWrites: MutableMap<MutableState<*>, Any> = mutableMapOf()
+
+    /**
+     * Stage a [rawValue] directly as a pending write, bypassing [MutableState.beforeSet].
+     * Used by [Vault.restore] to round-trip raw stored values (ciphertext,
+     * post-`transformer.set` form) without re-running the transformer.
+     *
+     * For symmetric transformers this is equivalent to a normal mutate; for
+     * asymmetric ones (e.g. [com.vynatix.vault.crypto.EncryptingTransformer]),
+     * the difference is critical — restoring already-encrypted ciphertext via
+     * `mutate` would re-encrypt it.
+     */
+    internal fun stagePendingRaw(state: MutableState<*>, rawValue: Any) {
+        pendingWrites[state] = rawValue
+    }
 
     /**
      * Read-only view of the states modified by this transaction (or its
@@ -100,7 +126,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
                     parentTxn.pendingWrites.putAll(pendingWrites)
                 } else {
                     // Top-level commit: apply each pending write. Observers and bridges
-                    // see the value here, post-commit, never mid-action.
+                    // see the value here, post-commit, never mid-action. Pending writes
+                    // remain readable via findPendingValue during the iteration so
+                    // observer callbacks reading sibling states still see the
+                    // about-to-be-committed values (read-your-own-writes during fanout).
                     pendingWrites.forEach { (state, value) ->
                         @Suppress("UNCHECKED_CAST")
                         (state as MutableState<Any>).applyCommitted(value)
