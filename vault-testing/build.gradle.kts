@@ -18,6 +18,7 @@ kotlin {
             api(libs.kotest.assertions.core)
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.coroutines.test)
+            implementation(libs.atomicfu)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

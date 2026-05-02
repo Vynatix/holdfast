@@ -36,6 +36,19 @@ final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing/VaultHan
     final suspend fun <#A1: kotlin/Any?> suspendAction(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault.testing/VaultHandle.suspendAction|suspendAction(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
 }
 
+final class com.vynatix.vault.testing.bridge/FakeKvStore : com.vynatix.vault.bridge/KvStore { // com.vynatix.vault.testing.bridge/FakeKvStore|null[0]
+    constructor <init>() // com.vynatix.vault.testing.bridge/FakeKvStore.<init>|<init>(){}[0]
+
+    final val contents // com.vynatix.vault.testing.bridge/FakeKvStore.contents|{}contents[0]
+        final fun <get-contents>(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.testing.bridge/FakeKvStore.contents.<get-contents>|<get-contents>(){}[0]
+
+    final fun clear() // com.vynatix.vault.testing.bridge/FakeKvStore.clear|clear(){}[0]
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.vault.testing.bridge/FakeKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.vault.testing.bridge/FakeKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.vault.testing.bridge/FakeKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.testing.bridge/FakeKvStore.snapshot|snapshot(){}[0]
+}
+
 final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
     final val backgroundScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope|{}backgroundScope[0]
         final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
@@ -49,6 +62,4 @@ final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/Corout
     final fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture = ...): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultTestScope.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
 }
 
-final fun (kotlin/Function0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.Function0<kotlin.Unit>(kotlin.time.Duration){}[0]
 final fun com.vynatix.vault.testing/vaultTest(kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction1<com.vynatix.vault.testing/VaultTestScope, kotlin/Unit>) // com.vynatix.vault.testing/vaultTest|vaultTest(kotlin.time.Duration;kotlin.coroutines.SuspendFunction1<com.vynatix.vault.testing.VaultTestScope,kotlin.Unit>){}[0]
-final suspend fun (kotlin.coroutines/SuspendFunction0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.coroutines.SuspendFunction0<kotlin.Unit>(kotlin.time.Duration){}[0]
