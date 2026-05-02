@@ -31,7 +31,9 @@ final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing/VaultHan
     final val vault // com.vynatix.vault.testing/VaultHandle.vault|{}vault[0]
         final fun <get-vault>(): #A // com.vynatix.vault.testing/VaultHandle.vault.<get-vault>|<get-vault>(){}[0]
 
+    final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault.testing/VaultHandle.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> read(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault.testing/VaultHandle.read|read(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final suspend fun <#A1: kotlin/Any?> suspendAction(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault.testing/VaultHandle.suspendAction|suspendAction(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
 }
 
 final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
