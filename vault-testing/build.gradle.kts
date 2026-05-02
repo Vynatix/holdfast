@@ -15,6 +15,7 @@ kotlin {
         commonMain.dependencies {
             api(project(":vault"))
             api(project(":vault-coroutines"))
+            api(project(":vault-validation"))
             api(libs.kotest.assertions.core)
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.coroutines.test)
