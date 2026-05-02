@@ -1,6 +1,27 @@
 package com.vynatix.vault
 
+/**
+ * Cross-cutting interceptor that wraps every transaction on a [Vault]. Subclass and
+ * override the hooks of interest:
+ *  - [onTransactionStarted] runs before the action body. Throwing here aborts the
+ *    transaction.
+ *  - [onTransactionCompleted] runs after the body returns successfully but BEFORE
+ *    the commit applies pending writes. Throwing here triggers rollback. This is
+ *    where post-body validation lives — pending writes are visible to the owner
+ *    thread via read-your-own-writes.
+ *  - [onTransactionError] runs when the body throws. Receives the exception. Cannot
+ *    swallow the error — re-throwing is automatic.
+ *
+ * Multiple middlewares form a chain. Started runs left-to-right; completed/error
+ * unwind right-to-left. The shared [MiddlewareContext.metadata] map carries
+ * per-transaction values across the same middleware's hooks (e.g. a start time
+ * stashed in `started`, read in `completed`).
+ */
 open class Middleware<T : Vault<T>> {
+    /**
+     * Mutable context passed to each hook. The [metadata] map is per-transaction —
+     * a fresh empty map is created for each invocation of [invoke].
+     */
     data class MiddlewareContext<T : Vault<T>>(
         val vault: T,
         val transaction: Transaction,
@@ -21,7 +42,8 @@ open class Middleware<T : Vault<T>> {
     operator fun invoke(vault: T, next: () -> Unit) {
         val context = MiddlewareContext(
             vault = vault,
-            transaction = vault.activeTransaction ?: error("No active transaction"),
+            transaction = vault.activeTransaction
+                ?: throw TransactionException("No active transaction for middleware to wrap"),
         )
         execute(context, next)
     }

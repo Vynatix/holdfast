@@ -118,7 +118,7 @@ class MiddlewareLifecycleTest {
 
         val result = v action { n mutate 1 }
 
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertSame(v, capture.capturedVault)
         assertNotNull(capture.capturedTransaction)
         assertSame(result.transaction, capture.capturedTransaction)

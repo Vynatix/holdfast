@@ -4,6 +4,7 @@ import kotlinx.atomicfu.atomic
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 private class LifecycleVault : Vault<LifecycleVault>() {
@@ -18,6 +19,25 @@ private class LifecycleBridge : Bridge<Int> {
         publishCount.incrementAndGet()
         return true
     }
+}
+
+/**
+ * Two-way bridge with a manual `deliver` so the test can simulate an external
+ * inbound update. Used to verify that swapping or detaching a bridge actually
+ * disposes its inbound observer registration.
+ */
+private class TwoWayBridge : Bridge<Int> {
+    private val callbacks = mutableListOf<(Int) -> Unit>()
+    val publishCount = atomic(0)
+    override fun observe(observer: (Int) -> Unit): Disposable {
+        callbacks.add(observer)
+        return Disposable { callbacks.remove(observer) }
+    }
+    override fun publish(value: Int): Boolean {
+        publishCount.incrementAndGet()
+        return true
+    }
+    fun deliver(value: Int) = callbacks.toList().forEach { it(value) }
 }
 
 class MemoryLifecycleTest {
@@ -145,5 +165,109 @@ class MemoryLifecycleTest {
         assertEquals(99, v.a.value)
         assertEquals(1, bridge.publishCount.value, "old bridge cleared; no new publishes")
         assertEquals(listOf(1), seen, "old observer disposed; no new notifications")
+    }
+
+    @Test
+    fun replacingBridgeDisposesPreviousInboundObserverRegistration() {
+        // Regression: prior to A1, the bridge setter discarded the Disposable returned
+        // by `value?.observe { … }`. After swap, an external `deliver` on the OLD
+        // bridge would still drive applyFromBridge on the vault's state. Verify
+        // the inbound observer is detached on swap.
+        val v = LifecycleVault()
+        val first = TwoWayBridge()
+        val second = TwoWayBridge()
+        v { a bridge first }
+        v.a // ensure registered
+
+        // Swap: the previous bridge's inbound observer must be disposed.
+        v { a bridge second }
+
+        // External "admin push" on the OLD bridge — should not affect the state.
+        first.deliver(999)
+        assertEquals(0, v.a.value, "old bridge's inbound observer was leaked; state was driven by detached bridge")
+
+        // Push on the NEW bridge does drive the state.
+        second.deliver(42)
+        assertEquals(42, v.a.value)
+    }
+
+    @Test
+    fun settingBridgeToNullDisposesPreviousInboundObserverRegistration() {
+        val v = LifecycleVault()
+        val bridge = TwoWayBridge()
+        v { a bridge bridge }
+
+        // Detach via null.
+        v { a bridge null }
+
+        // External "admin push" should not affect the now-detached state.
+        bridge.deliver(123)
+        assertEquals(0, v.a.value, "bridge=null didn't dispose inbound observer; detached bridge still drives state")
+    }
+
+    @Test
+    fun removeStateInsideActiveTransactionWithPendingWriteRefuses() {
+        val v = LifecycleVault()
+        var caught: Throwable? = null
+        v action {
+            a mutate 7
+            // a now has a pending write in this transaction; removeState must refuse.
+            try {
+                removeState("a")
+            } catch (e: IllegalStateException) {
+                caught = e
+            }
+        }
+        assertIs<IllegalStateException>(caught, "removeState with pending writes must throw IllegalStateException")
+        // After the action commits (a's write applied), removeState succeeds normally.
+        v.removeState("a")
+        assertFalse("a" in v.properties.keys)
+    }
+
+    @Test
+    fun uncaughtObserverHandlerReceivesObserverExceptionsOnCommitFire() {
+        // A10 contract: observer exceptions on commit-fire are silently swallowed by
+        // default; a non-null uncaughtObserverHandler captures them. Initial-subscribe
+        // fires propagate to the caller (observe is synchronous from their POV).
+        val v = LifecycleVault()
+        val captured = mutableListOf<Throwable>()
+        v.uncaughtObserverHandler = { captured.add(it) }
+        // Throw only on commit-fire, not on the initial-subscribe call.
+        val first = atomic(true)
+        v {
+            a effect {
+                if (first.value) {
+                    first.value = false
+                } else {
+                    error("boom on commit with value=$this")
+                }
+            }
+        }
+        v action { a mutate 1 }
+        assertEquals(1, captured.size, "handler captured the commit-fire throw")
+        assertTrue(captured.first().message?.contains("boom on commit") == true)
+    }
+
+    @Test
+    fun uncaughtObserverHandlerNullPreservesSilentSwallow() {
+        // Default behavior: null handler swallows silently; other observers continue
+        // to fire even when one throws on commit. (The existing contract — see
+        // EffectTest.effectThatThrowsExceptionDoesNotPreventOtherSubscribersFromBeingNotified.)
+        val v = LifecycleVault()
+        val seen = mutableListOf<Int>()
+        val first = atomic(true)
+        v {
+            a effect {
+                if (first.value) {
+                    first.value = false
+                } else {
+                    error("commit-fire throws")
+                }
+            }
+        }
+        v { a effect { seen.add(this) } }
+        seen.clear()
+        v action { a mutate 1 }
+        assertEquals(listOf(1), seen, "second observer fires on commit even when first throws and handler is null")
     }
 }

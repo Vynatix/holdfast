@@ -1,5 +1,6 @@
 plugins {
     id("astrid.kmp.library")
+    id("astrid.compose.multiplatform")
     id("astrid.quality")
     id("astrid.dokka")
     id("astrid.abi")
@@ -8,17 +9,16 @@ plugins {
 
 kotlin {
     android {
-        namespace = "com.vynatix.vault"
+        namespace = "com.vynatix.vault.compose"
     }
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.atomicfu)
+            api(project(":vault"))
+            implementation(compose.runtime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
