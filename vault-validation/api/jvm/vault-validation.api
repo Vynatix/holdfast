@@ -1,0 +1,47 @@
+public abstract interface class com/vynatix/vault/validation/Boxed {
+	public abstract fun getValue ()Ljava/lang/Object;
+}
+
+public abstract interface class com/vynatix/vault/validation/Condition {
+	public abstract fun run (Ljava/lang/Object;[Lcom/vynatix/vault/validation/Rule;)Z
+}
+
+public abstract interface class com/vynatix/vault/validation/Rule {
+	public abstract fun validate (Ljava/lang/Object;)Z
+}
+
+public abstract interface class com/vynatix/vault/validation/Spec {
+	public abstract fun getCondition ()Lcom/vynatix/vault/validation/Condition;
+	public abstract fun getFactory ()Lkotlin/jvm/functions/Function1;
+	public abstract fun getRule ()[Lcom/vynatix/vault/validation/Rule;
+}
+
+public final class com/vynatix/vault/validation/ValidatingTransformer : com/vynatix/vault/Transformer {
+	public fun <init> (Lcom/vynatix/vault/validation/Validator;)V
+	public fun get (Lcom/vynatix/vault/validation/Boxed;)Lcom/vynatix/vault/validation/Boxed;
+	public synthetic fun get (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun set (Lcom/vynatix/vault/validation/Boxed;)Lcom/vynatix/vault/validation/Boxed;
+	public synthetic fun set (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun shouldTransform (Lcom/vynatix/vault/validation/Boxed;)Z
+	public synthetic fun shouldTransform (Ljava/lang/Object;)Z
+}
+
+public abstract interface class com/vynatix/vault/validation/Validator {
+	public fun allConditions ()Lcom/vynatix/vault/validation/Condition;
+	public fun anyConditions ()Lcom/vynatix/vault/validation/Condition;
+	public fun createSpec (Lkotlin/jvm/functions/Function1;Lcom/vynatix/vault/validation/Condition;[Lcom/vynatix/vault/validation/Rule;)Lcom/vynatix/vault/validation/Spec;
+	public abstract fun getSpecs ()Ljava/util/Collection;
+	public fun of (Ljava/lang/Object;)Lcom/vynatix/vault/validation/Boxed;
+	public fun ofOrNull (Ljava/lang/Object;)Lcom/vynatix/vault/validation/Boxed;
+	public fun validate (Ljava/lang/Object;)Z
+}
+
+public final class com/vynatix/vault/validation/Validator$DefaultImpls {
+	public static fun allConditions (Lcom/vynatix/vault/validation/Validator;)Lcom/vynatix/vault/validation/Condition;
+	public static fun anyConditions (Lcom/vynatix/vault/validation/Validator;)Lcom/vynatix/vault/validation/Condition;
+	public static fun createSpec (Lcom/vynatix/vault/validation/Validator;Lkotlin/jvm/functions/Function1;Lcom/vynatix/vault/validation/Condition;[Lcom/vynatix/vault/validation/Rule;)Lcom/vynatix/vault/validation/Spec;
+	public static fun of (Lcom/vynatix/vault/validation/Validator;Ljava/lang/Object;)Lcom/vynatix/vault/validation/Boxed;
+	public static fun ofOrNull (Lcom/vynatix/vault/validation/Validator;Ljava/lang/Object;)Lcom/vynatix/vault/validation/Boxed;
+	public static fun validate (Lcom/vynatix/vault/validation/Validator;Ljava/lang/Object;)Z
+}
+
