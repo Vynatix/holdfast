@@ -18,14 +18,26 @@ import kotlin.time.Duration.Companion.seconds
  * }
  * ```
  *
+ * On scope exit, [VaultTestScope.tearDown] aggregates every [com.vynatix.vault.TransactionResult.Error]
+ * that was returned from a tracked handle's `action`/`suspendAction` and not
+ * consumed by a `shouldBe*` matcher (or
+ * [VaultHandle.consumeAllPendingErrors]). If any are still pending and the
+ * body itself returned cleanly, the resulting [AssertionError] fails the
+ * test. The check is suppressed when the body already threw so the
+ * root-cause exception is what the runner reports.
+ *
  * The default [timeout] of 60 seconds matches `runTest`'s own default; pass a
  * larger value when exercising long virtual-time delays.
  */
 fun vaultTest(timeout: Duration = 60.seconds, body: suspend VaultTestScope.() -> Unit): TestResult = runTest(timeout = timeout) {
     val scope = VaultTestScope(this)
+    var bodyFailed = false
     try {
         scope.body()
+    } catch (t: Throwable) {
+        bodyFailed = true
+        throw t
     } finally {
-        scope.tearDown()
+        scope.tearDown(bodyFailed)
     }
 }

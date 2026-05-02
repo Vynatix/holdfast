@@ -26,6 +26,13 @@ internal class HandleRegistry {
         return handle
     }
 
+    /**
+     * Snapshot of every handle this registry currently owns. Stable to iterate
+     * after return; used by [com.vynatix.vault.testing.VaultTestScope.tearDown]
+     * to aggregate the per-handle pending-error lists into a single report.
+     */
+    fun allHandles(): List<VaultHandle<*>> = entries.map { it.handle }
+
     fun clear() {
         entries.clear()
     }

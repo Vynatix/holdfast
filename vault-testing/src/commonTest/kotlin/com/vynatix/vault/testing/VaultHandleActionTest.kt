@@ -29,6 +29,8 @@ class VaultHandleActionTest {
         val result = ctr.action<Unit> { throw ise }
         assertIs<TransactionResult.Error>(result)
         assertSame(ise, result.exception)
+        // Strict scope-exit guard requires the error to be acknowledged.
+        ctr.consumeAllPendingErrors()
     }
 
     @Test
@@ -50,5 +52,7 @@ class VaultHandleActionTest {
         val result = ctr.suspendAction<Unit> { throw iae }
         assertIs<TransactionResult.Error>(result)
         assertSame(iae, result.exception)
+        // Strict scope-exit guard requires the error to be acknowledged.
+        ctr.consumeAllPendingErrors()
     }
 }
