@@ -13,23 +13,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into Kotlin Multiplatform (Android + iOS) and integrates it with Vault's
   transformer pipeline. The original library is JVM-only at Kotlin 1.7.10; this
   module reimplements the API shape on commonMain.
-- Core interfaces under `com.vynatix.vault.validation`: `Civilizable<P>`,
-  `Rule<P>` (`fun interface`), `Condition<P, R>` (`fun interface`),
-  `Variation<P, R, O>` with a `Variation.of(rule, condition, create)` factory,
-  and `Civilizer<P, R, O>` with `infix of`, `validate`, and `ofOrNull`. Helpers:
-  `allConditions()`, `allOf(vararg predicates)`, `alwaysValid()`,
-  `neverValid()`, plus `SimpleCivilizer<P, R, O>` for the common static-list
-  case.
+- Core interfaces under `com.vynatix.vault.validation`, ABI-faithful to the
+  JVM original: `Civilizable<PRIMITIVE>`, `Rule<PRIMITIVE>` (`fun interface`),
+  `Condition<P, R>` (`fun interface`, `run(primitive, rule: Array<out R>)`),
+  `Variation<P, R, O>` (`rule: Array<out R>` + `condition` + `declaration`),
+  and `Civilizer<P, R, O>` with `infix of`, `validate`, `ofOrNull`, plus the
+  combinator/builder members `allConditions()`, `anyConditions()`, and
+  `createVariation(declaration, condition, vararg rule)`. `Declaration<P, O>`
+  is a `(P) -> O` typealias.
 - **`CivilizingTransformer<P, R, O>(civilizer)`** — a Vault `Transformer<O>`
-  that re-runs the civilizer's rules on every write. Defence-in-depth against
-  callers who construct a `Civilizable` directly (e.g. via `data class copy`)
-  and bypass `Civilizer of`. A failed validation throws `CivilizationException`
-  inside the transformer's `set`, which propagates to the enclosing
-  `action { }` and rolls every state mutation in the transaction back.
-- `CivilizationException(message, primitive, cause)` carries the rejected
-  primitive in its `primitive` field for diagnostics.
-- 10 tests across `CivilizerTest` + `CivilizingTransformerTest`. Verified on
-  Android JVM + iOS sim. ABI baseline committed at
+  that re-runs `civilizer of value.value` on every write. Defence-in-depth
+  against callers who construct a `Civilizable` directly (e.g. via `data class
+  copy`) and bypass `Civilizer.of`. A failed civilization throws
+  `IllegalArgumentException` (matching the original library), which propagates
+  to the enclosing `action { }` and rolls every state mutation in the
+  transaction back.
+- 10 tests across `CivilizerTest` + `CivilizingTransformerTest` covering happy
+  path, `ofOrNull`, `validate`, multi-variation matching, multi-rule per
+  variation with both `allConditions()` and `anyConditions()`, transformer
+  rollback on constructor bypass, and cross-state atomicity. Verified on
+  Android JVM + iOS sim. ABI baseline at
   `vault-validation/api/vault-validation.klib.api`. Published to local Maven at
   `com.vynatix:vault-validation:0.2.0` (4 publication targets:
   `kotlinMultiplatform`, `android`, `iosArm64`, `iosSimulatorArm64`).

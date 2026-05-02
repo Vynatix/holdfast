@@ -3,9 +3,9 @@ package com.vynatix.vault.validation
 import com.vynatix.vault.Transformer
 
 /**
- * A [Transformer] that re-validates a [Civilizable]'s primitive against its
- * [Civilizer] on every write, throwing [CivilizationException] (and rolling
- * back the enclosing transaction) when validation fails.
+ * A [Transformer] that re-civilizes a [Civilizable]'s primitive against its
+ * [Civilizer] on every write, throwing [IllegalArgumentException] (and rolling
+ * back the enclosing transaction) when no variation matches.
  *
  * Why use this when [Civilizer.of] already throws? Two reasons:
  *  1. Defence in depth — a caller that constructs a [Civilizable] directly
@@ -28,16 +28,15 @@ import com.vynatix.vault.Transformer
  *
  * The [get] side is identity — the stored object already carries its primitive.
  */
-class CivilizingTransformer<P, R : Rule<P>, O : Civilizable<P>>(private val civilizer: Civilizer<P, R, O>) : Transformer<O> {
-    override fun set(value: O): O {
-        if (!civilizer.validate(value.value)) {
-            throw CivilizationException(
-                message = "CivilizingTransformer rejected ${value.value}",
-                primitive = value.value,
-            )
-        }
+class CivilizingTransformer<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Civilizable<PRIMITIVE>>(
+    private val civilizer: Civilizer<PRIMITIVE, RULE, OBJECT>,
+) : Transformer<OBJECT> {
+    override fun set(value: OBJECT): OBJECT {
+        // Re-run the civilizer on value.value; this throws IllegalArgumentException
+        // if no variation matches, which propagates to the action and rolls back.
+        civilizer of value.value
         return value
     }
 
-    override fun get(value: O): O = value
+    override fun get(value: OBJECT): OBJECT = value
 }

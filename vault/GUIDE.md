@@ -1362,17 +1362,22 @@ and wrapped in a typed `Civilizable<P>` — exactly once, at the system boundary
 Inside the domain, you pass civilized objects, never raw primitives. This is
 the canonical fix for the **primitive obsession** code smell.
 
-**Core types** (in `com.vynatix.vault.validation`):
+**Core types** (in `com.vynatix.vault.validation`, faithful KMP port of the
+JVM-only [Uncivilized Primitives](https://github.com/osama-raddad/Uncivilized)):
 ```kotlin
-interface Civilizable<out P>             { val value: P }
-fun interface Rule<in P>                 { fun validate(primitive: P): Boolean }
-fun interface Condition<P, R : Rule<P>>  { fun check(primitive: P, rule: R): Boolean }
-interface  Variation<P, R, O>            // rule + condition + create(P) -> O
-interface  Civilizer<P, R, O> {
-    val variations: List<Variation<P, R, O>>
-    infix fun of(primitive: P): O        // throws CivilizationException on rejection
-    fun ofOrNull(primitive: P): O?
-    fun validate(primitive: P): Boolean
+interface     Civilizable<P>             { val value: P }
+fun interface Rule<P>                    { fun validate(primitive: P): Boolean }
+fun interface Condition<P, R : Rule<P>>  { fun run(primitive: P, rule: Array<out R>): Boolean }
+typealias     Declaration<P, O>          = (P) -> O
+interface     Variation<P, R, O>         { val rule: Array<out R>; val condition: Condition<P, R>; val declaration: Declaration<P, O> }
+interface     Civilizer<P, R, O> {
+    val variations: Collection<Variation<P, R, O>>
+    infix fun of(value: P): O           // throws IllegalArgumentException on rejection
+    fun ofOrNull(value: P): O?
+    fun validate(value: P): Boolean
+    fun <P2, R2 : Rule<P2>> allConditions(): Condition<P2, R2>   // every rule must pass
+    fun <P2, R2 : Rule<P2>> anyConditions(): Condition<P2, R2>   // at least one rule
+    fun createVariation(declaration: Declaration<P, O>, condition: Condition<P, R>, vararg rule: R): Variation<P, R, O>
 }
 class CivilizingTransformer<P, R, O>(civilizer): Transformer<O>
 ```
@@ -1381,16 +1386,18 @@ class CivilizingTransformer<P, R, O>(civilizer): Transformer<O>
 ```kotlin
 data class Email(override val value: String) : Civilizable<String>
 
-object EmailCivilizer : SimpleCivilizer<String, Rule<String>, Email>() {
+object EmailCivilizer : Civilizer<String, Rule<String>, Email> {
+    private val nonEmpty    = Rule<String> { it.isNotBlank() }
+    private val containsAt  = Rule<String> { it.contains('@') }
+    private val sensibleLen = Rule<String> { it.length in 3..254 }
+
     override val variations = listOf(
-        Variation.of<String, Rule<String>, Email>(
-            rule = Rule { it.contains('@') && it.length in 3..254 },
-        ) { Email(it) },
+        createVariation({ Email(it) }, allConditions(), nonEmpty, containsAt, sensibleLen),
     )
 }
 
 val email = EmailCivilizer of "alice@example.com"     // typed Email
-EmailCivilizer of "not-an-email"                      // throws CivilizationException
+EmailCivilizer of "not-an-email"                      // throws IllegalArgumentException
 ```
 
 **Plug into a vault** with `CivilizingTransformer` for defence-in-depth:
@@ -1405,21 +1412,27 @@ vault action { email mutate (EmailCivilizer of "new@example.com") }    // OK
 vault action { email mutate Email("not-an-email") }                    // rolls back
 ```
 
-The transformer re-validates `value.value` on every write, so a caller who
+The transformer re-runs the civilizer on every write, so a caller who
 constructs `Email("garbage")` directly (e.g. via `data class copy`) still has
 their write rejected — and any other state mutation in the same transaction
 rolls back atomically.
 
-**Multiple variations** for one civilizer (e.g. integer or float):
+**Multiple variations** + **multiple rules per variation** — `anyConditions()`
+fans out across rules within one variation; the first matching variation in the
+list wins:
 ```kotlin
-object NumberCivilizer : SimpleCivilizer<String, Rule<String>, Num>() {
+object TokenCivilizer : Civilizer<String, Rule<String>, Token> {
     override val variations = listOf(
-        Variation.of<String, Rule<String>, Num>(rule = Rule { it.toIntOrNull() != null })    { Num.Int(it.toInt()) },
-        Variation.of<String, Rule<String>, Num>(rule = Rule { it.toDoubleOrNull() != null }) { Num.Float(it.toDouble()) },
+        // either Bearer or Basic prefix is acceptable
+        createVariation(
+            { Token(it) },
+            anyConditions(),
+            Rule { it.startsWith("Bearer ") },
+            Rule { it.startsWith("Basic ") },
+        ),
     )
 }
 ```
-First matching variation wins.
 
 ---
 

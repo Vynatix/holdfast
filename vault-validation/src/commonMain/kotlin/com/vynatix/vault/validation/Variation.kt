@@ -1,42 +1,21 @@
 package com.vynatix.vault.validation
 
+/** Constructor lambda that turns a primitive into a civilized object. */
+typealias Declaration<PRIMITIVE, OBJECT> = (PRIMITIVE) -> OBJECT
+
 /**
- * A single way of civilizing a primitive [P] into a [Civilizable] [O].
+ * A single way of civilizing a primitive [PRIMITIVE] into a [Civilizable]
+ * [OBJECT].
  *
- * Variations let one [Civilizer] handle multiple shapes of input. For instance,
- * a `NumberCivilizer` might have an `IntegerVariation` and a `FloatVariation`,
- * each with a different rule and a different `create` lambda.
+ * A variation pairs an array of [Rule]s, a [Condition] that combines them, and
+ * a [Declaration] that builds the civilized object once the rules pass.
+ *
+ * Variations let one [Civilizer] handle multiple shapes of input (e.g. a
+ * `NumberCivilizer` with `IntegerVariation` and `FloatVariation`). Use
+ * [Civilizer.createVariation] to build instances ergonomically.
  */
-interface Variation<P, R : Rule<P>, O : Civilizable<P>> {
-    val rule: R
-    val condition: Condition<P, R>
-
-    /** Construct the civilized object. Called only after [matches] returns true. */
-    fun create(primitive: P): O
-
-    /** Whether this variation accepts [primitive]. */
-    fun matches(primitive: P): Boolean = condition.check(primitive, rule)
-
-    companion object {
-        /**
-         * Build a [Variation] from a rule, a condition, and a constructor lambda.
-         *
-         * ```kotlin
-         * val variation = Variation.of(EmailRule, allConditions()) { Email(it) }
-         * ```
-         */
-        fun <P, R : Rule<P>, O : Civilizable<P>> of(
-            rule: R,
-            condition: Condition<P, R> = allConditions(),
-            create: (P) -> O,
-        ): Variation<P, R, O> = SimpleVariation(rule, condition, create)
-    }
-}
-
-private class SimpleVariation<P, R : Rule<P>, O : Civilizable<P>>(
-    override val rule: R,
-    override val condition: Condition<P, R>,
-    private val construct: (P) -> O,
-) : Variation<P, R, O> {
-    override fun create(primitive: P): O = construct(primitive)
+interface Variation<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Civilizable<PRIMITIVE>> {
+    val rule: Array<out RULE>
+    val condition: Condition<PRIMITIVE, RULE>
+    val declaration: Declaration<PRIMITIVE, OBJECT>
 }

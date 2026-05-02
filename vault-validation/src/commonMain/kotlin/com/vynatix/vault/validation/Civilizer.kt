@@ -1,23 +1,24 @@
 package com.vynatix.vault.validation
 
 /**
- * Civilizes raw primitives [P] into typed domain objects [O] at the boundary of
- * your system.
+ * Civilizes raw primitives [PRIMITIVE] into typed domain objects [OBJECT] at
+ * the boundary of your system.
  *
- * A civilizer holds an ordered list of [Variation]s; [of] picks the first
- * matching variation and calls its `create`. If no variation matches, [of]
- * throws [CivilizationException] — which, when invoked inside a Vault
- * transaction, rolls the transaction back atomically.
+ * A civilizer holds a [variations] collection. [of] picks the first variation
+ * whose [Condition] returns true for the supplied primitive, then runs that
+ * variation's [Declaration] to construct the civilized object. If no variation
+ * matches, [of] throws [IllegalArgumentException] — which, when invoked inside a
+ * Vault transaction, rolls the transaction back atomically.
  *
- * **Quick start (extending [SimpleCivilizer]):**
+ * **Quick start**:
  * ```kotlin
  * data class Email(override val value: String) : Civilizable<String>
  *
- * object EmailCivilizer : SimpleCivilizer<String, Rule<String>, Email>() {
+ * object EmailCivilizer : Civilizer<String, Rule<String>, Email> {
+ *     private val nonEmpty = Rule<String> { it.isNotBlank() }
+ *     private val containsAt = Rule<String> { it.contains('@') }
  *     override val variations = listOf(
- *         Variation.of<String, Rule<String>, Email>(
- *             rule = { it.contains('@') && it.length <= 254 },
- *         ) { Email(it) },
+ *         createVariation({ Email(it) }, allConditions(), nonEmpty, containsAt),
  *     )
  * }
  *
@@ -27,39 +28,51 @@ package com.vynatix.vault.validation
  * Pair with [CivilizingTransformer] to enforce the same invariant on every
  * Vault state write.
  */
-interface Civilizer<P, R : Rule<P>, O : Civilizable<P>> {
-    val variations: List<Variation<P, R, O>>
+interface Civilizer<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Civilizable<PRIMITIVE>> {
+    val variations: Collection<Variation<PRIMITIVE, RULE, OBJECT>>
 
     /**
-     * Civilize [primitive] into [O]. Throws [CivilizationException] if no
+     * Civilize [value] into [OBJECT]. Throws [IllegalArgumentException] if no
      * variation matches.
      */
-    infix fun of(primitive: P): O {
-        val match = variations.firstOrNull { it.matches(primitive) }
-            ?: throw CivilizationException(
-                message = "No variation matches primitive: $primitive",
-                primitive = primitive,
-            )
-        return match.create(primitive)
+    infix fun of(value: PRIMITIVE): OBJECT {
+        val safeValue = requireNotNull(value) { "Cannot civilize a null primitive" }
+        val match = findVariationByValue(safeValue) ?: noVariationFound(safeValue, variations)
+        return match.declaration(safeValue)
     }
 
-    /** Whether at least one variation accepts [primitive]. */
-    fun validate(primitive: P): Boolean = variations.any { it.matches(primitive) }
+    /** Civilize, returning null on rejection. */
+    fun ofOrNull(value: PRIMITIVE): OBJECT? = findVariationByValue(value)?.declaration?.invoke(value)
 
-    /** Civilize, returning null on rejection. Use when failure is expected. */
-    fun ofOrNull(primitive: P): O? = variations.firstOrNull { it.matches(primitive) }?.create(primitive)
+    /** Whether at least one variation accepts [value]. */
+    fun validate(value: PRIMITIVE): Boolean = findVariationByValue(value) != null
+
+    /** Combinator: every rule in the variation must pass. */
+    fun <P, R : Rule<P>> allConditions(): Condition<P, R> = Condition { p, rules -> rules.all { it.validate(p) } }
+
+    /** Combinator: at least one rule in the variation must pass. */
+    fun <P, R : Rule<P>> anyConditions(): Condition<P, R> = Condition { p, rules -> rules.any { it.validate(p) } }
+
+    /**
+     * Build a [Variation] anonymously. The rules are passed as a vararg; the
+     * supplied [condition] decides how to combine them (typically
+     * [allConditions] or [anyConditions]).
+     */
+    fun createVariation(
+        declaration: Declaration<PRIMITIVE, OBJECT>,
+        condition: Condition<PRIMITIVE, RULE>,
+        vararg rule: RULE,
+    ): Variation<PRIMITIVE, RULE, OBJECT> = object : Variation<PRIMITIVE, RULE, OBJECT> {
+        override val rule: Array<out RULE> = rule
+        override val declaration: Declaration<PRIMITIVE, OBJECT> = declaration
+        override val condition: Condition<PRIMITIVE, RULE> = condition
+    }
+
+    private fun findVariationByValue(value: PRIMITIVE): Variation<PRIMITIVE, RULE, OBJECT>? =
+        variations.find { it.condition.run(value, it.rule) }
+
+    private fun noVariationFound(value: PRIMITIVE, variations: Collection<Variation<PRIMITIVE, RULE, OBJECT>>): Nothing {
+        val ruleNames = variations.flatMap { v -> v.rule.map { it::class.simpleName ?: "Rule" } }
+        throw IllegalArgumentException("No variation found for value $value in ${ruleNames.joinToString()}")
+    }
 }
-
-/**
- * Convenience base for civilizers whose variations are static. Subclasses just
- * override [variations].
- */
-abstract class SimpleCivilizer<P, R : Rule<P>, O : Civilizable<P>> : Civilizer<P, R, O>
-
-/**
- * Thrown by [Civilizer.of] (and [CivilizingTransformer.set]) when a primitive
- * cannot be civilized. Carries the rejected primitive in [primitive] for
- * diagnostics; inside a Vault transaction, the throw rolls the transaction
- * back atomically.
- */
-class CivilizationException(message: String, val primitive: Any? = null, cause: Throwable? = null) : RuntimeException(message, cause)

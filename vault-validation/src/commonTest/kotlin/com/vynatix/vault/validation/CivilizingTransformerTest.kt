@@ -9,11 +9,14 @@ import kotlin.test.assertTrue
 
 private data class UserEmail(override val value: String) : Civilizable<String>
 
-private object UserEmailCivilizer : SimpleCivilizer<String, Rule<String>, UserEmail>() {
+private object UserEmailCivilizer : Civilizer<String, Rule<String>, UserEmail> {
     override val variations = listOf(
-        Variation.of<String, Rule<String>, UserEmail>(
-            rule = Rule { it.contains('@') && it.length in 3..254 },
-        ) { UserEmail(it) },
+        createVariation(
+            { UserEmail(it) },
+            allConditions(),
+            Rule { it.contains('@') },
+            Rule { it.length in 3..254 },
+        ),
     )
 }
 
@@ -46,7 +49,7 @@ class CivilizingTransformerTest {
         }
 
         assertIs<TransactionResult.Error>(result)
-        assertTrue(result.exception is CivilizationException)
+        assertTrue(result.exception is IllegalArgumentException)
         assertEquals("init@example.com", vault.email.value.value)
         assertEquals("before", vault.displayName.value)
     }
