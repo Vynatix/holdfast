@@ -6,3 +6,45 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-testing>
+sealed interface com.vynatix.vault.testing/Capture { // com.vynatix.vault.testing/Capture|null[0]
+    final class RingBuffer : com.vynatix.vault.testing/Capture { // com.vynatix.vault.testing/Capture.RingBuffer|null[0]
+        constructor <init>(kotlin/Int) // com.vynatix.vault.testing/Capture.RingBuffer.<init>|<init>(kotlin.Int){}[0]
+
+        final val size // com.vynatix.vault.testing/Capture.RingBuffer.size|{}size[0]
+            final fun <get-size>(): kotlin/Int // com.vynatix.vault.testing/Capture.RingBuffer.size.<get-size>|<get-size>(){}[0]
+
+        final fun component1(): kotlin/Int // com.vynatix.vault.testing/Capture.RingBuffer.component1|component1(){}[0]
+        final fun copy(kotlin/Int = ...): com.vynatix.vault.testing/Capture.RingBuffer // com.vynatix.vault.testing/Capture.RingBuffer.copy|copy(kotlin.Int){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault.testing/Capture.RingBuffer.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.vault.testing/Capture.RingBuffer.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.vault.testing/Capture.RingBuffer.toString|toString(){}[0]
+    }
+
+    final object All : com.vynatix.vault.testing/Capture // com.vynatix.vault.testing/Capture.All|null[0]
+
+    final object None : com.vynatix.vault.testing/Capture // com.vynatix.vault.testing/Capture.None|null[0]
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.testing/VaultHandle { // com.vynatix.vault.testing/VaultHandle|null[0]
+    final val captureMode // com.vynatix.vault.testing/VaultHandle.captureMode|{}captureMode[0]
+        final fun <get-captureMode>(): com.vynatix.vault.testing/Capture // com.vynatix.vault.testing/VaultHandle.captureMode.<get-captureMode>|<get-captureMode>(){}[0]
+    final val vault // com.vynatix.vault.testing/VaultHandle.vault|{}vault[0]
+        final fun <get-vault>(): #A // com.vynatix.vault.testing/VaultHandle.vault.<get-vault>|<get-vault>(){}[0]
+
+    final fun <#A1: kotlin/Any?> read(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault.testing/VaultHandle.read|read(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+}
+
+final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
+    final val backgroundScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope|{}backgroundScope[0]
+        final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
+    final val coroutineContext // com.vynatix.vault.testing/VaultTestScope.coroutineContext|{}coroutineContext[0]
+        final fun <get-coroutineContext>(): kotlin.coroutines/CoroutineContext // com.vynatix.vault.testing/VaultTestScope.coroutineContext.<get-coroutineContext>|<get-coroutineContext>(){}[0]
+    final val testScheduler // com.vynatix.vault.testing/VaultTestScope.testScheduler|{}testScheduler[0]
+        final fun <get-testScheduler>(): kotlinx.coroutines.test/TestCoroutineScheduler // com.vynatix.vault.testing/VaultTestScope.testScheduler.<get-testScheduler>|<get-testScheduler>(){}[0]
+    final val testScope // com.vynatix.vault.testing/VaultTestScope.testScope|{}testScope[0]
+        final fun <get-testScope>(): kotlinx.coroutines.test/TestScope // com.vynatix.vault.testing/VaultTestScope.testScope.<get-testScope>|<get-testScope>(){}[0]
+
+    final fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture = ...): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultTestScope.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
+}
+
+final fun com.vynatix.vault.testing/vaultTest(kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction1<com.vynatix.vault.testing/VaultTestScope, kotlin/Unit>) // com.vynatix.vault.testing/vaultTest|vaultTest(kotlin.time.Duration;kotlin.coroutines.SuspendFunction1<com.vynatix.vault.testing.VaultTestScope,kotlin.Unit>){}[0]
