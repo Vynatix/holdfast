@@ -26,6 +26,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 11. [Testing Patterns](#11-testing-patterns)
 12. [Common Pitfalls](#12-common-pitfalls)
 13. [API Reference](#13-api-reference)
+14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 
 ---
 
@@ -1011,22 +1012,26 @@ never T1's pending writes.
 
 | Member | Signature | Description |
 |---|---|---|
-| `state` | `fun <T> state(transformer: Transformer<T>? = null, init: Initializer<T>): StateDelegate<T>` | Declares a state property |
-| `action` | `infix fun action(action: Self.() -> Unit): TransactionResult` | Runs body in a transaction |
+| `state` | `fun <T> state(transformer: Transformer<T>? = null, distinct: Boolean = false, init: Initializer<T>): StateDelegate<T>` | Declares a state property; `distinct=true` opts into same-value commit dedup |
+| `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
-| `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware |
+| `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Optional handler for commit-fire observer exceptions (default null = silent swallow) |
+| `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
-| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map |
+| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
 
 ### Extensions on `State<T>` (member-extensions of `Vault<Self>`)
 
 | Member | Signature | Description |
 |---|---|---|
 | `mutate` | `infix fun State<T>.mutate(that: T)` | Buffers post-`set` value into active txn or wraps in implicit action |
+| `update` | `infix fun State<T>.update(block: (T) -> T)` | Read-modify-write; equivalent to `mutate(block(value))` |
 | `effect` | `infix fun State<T>.effect(effect: T.() -> Unit): Disposable` | Subscribes to commits |
-| `bridge` | `infix fun State<T>.bridge(bridge: Bridge<T>)` | Connects a two-way external sync |
+| `bridge` | `infix fun State<T>.bridge(bridge: Bridge<T>?)` | Connects a two-way external sync; `null` detaches |
+| `observeFrom` | `infix fun State<T>.observeFrom(o: Observable<T>): Disposable` | Inbound-only push from an external `Observable`, no outbound publish |
 
 ### `Transaction`
 
@@ -1034,7 +1039,9 @@ never T1's pending writes.
 |---|---|---|
 | `id` | `val id: String` | The action class simple name, or a UUID |
 | `status` | `val status: TransactionStatus` | `Active` / `Committed` / `RolledBack` / `Failed` |
-| `endTime` | `val endTime: String?` | Set when status moves out of `Active` |
+| `endTime` | `val endTime: Long?` | Epoch milliseconds at which status left `Active` |
+| `parent` | `val parent: Transaction?` *(opt-in)* | Outer transaction for savepoint chains |
+| `modifiedStates` | `val modifiedStates: Set<State<*>>` | Read-only view of pending-write keys (owner-thread only) |
 | `commit` | `fun commit()` | Idempotent. No-op if not Active |
 | `rollback` | `fun rollback()` | Idempotent. No-op if not Active |
 
@@ -1092,12 +1099,257 @@ open class Middleware<V : Vault<V>> {
 ### Sealed result and status types
 
 ```kotlin
-sealed class TransactionResult {
-    data class Success(val transaction: Transaction) : TransactionResult()
-    data class Error(val exception: Throwable, val transaction: Transaction) : TransactionResult()
+sealed interface TransactionResult<out R> {
+    data class Success<R>(val transaction: Transaction, val value: R) : TransactionResult<R>
+    data class Error(val exception: Throwable, val transaction: Transaction) : TransactionResult<Nothing>
 }
 
 enum class TransactionStatus { Active, Committed, RolledBack, Failed }
+```
+
+---
+
+## 14. The 1.1 surface
+
+Everything below ships in 1.1 on top of the 1.0 baseline above. Each
+capability is independently usable; pick the ones you need.
+
+### 14.1 `Vault.snapshot()` / `Vault.restore(snapshot)`
+
+```kotlin
+class VaultSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+    val stateNames: Set<String>
+    val size: Int
+}
+
+fun <V : Vault<V>> V.snapshot(): VaultSnapshot
+fun <V : Vault<V>> V.restore(snapshot: VaultSnapshot): TransactionResult<Unit>
+```
+
+`snapshot` captures the raw stored value of every state that has been
+delegate-initialized at least once. `restore` writes them back inside a
+single top-level `action`, bypassing `transformer.set` so asymmetric
+transformers (encryption, JSON codecs) round-trip losslessly.
+
+```kotlin
+val snap = vault.snapshot()
+vault action { count mutate 9999; label mutate "wrong" }
+vault.restore(snap)               // count + label back to snapshot values
+```
+
+Restore-time bridge publish: yes. Detach bridges first if the snapshot
+shouldn't echo back to your persistence layer. Restore of an unknown state
+name throws (caught by the wrapping action → `TransactionResult.Error`).
+
+### 14.2 `Vault.computed { }` / `Vault.derived(sources) { }`
+
+```kotlin
+fun <V : Vault<V>, T : Any> V.computed(compute: V.() -> T): State<T>
+fun <V : Vault<V>, T : Any> V.derived(
+    vararg sources: State<*>,
+    compute: V.() -> T,
+): Pair<State<T>, Disposable>
+```
+
+- **`computed`**: read-time, no observation. Cheap. The returned `State<T>`
+  has no observer mechanism — every read of `value` re-runs `compute`.
+- **`derived`**: push-recomputed. Subscribes to each source via `effect`;
+  on each source commit, runs `compute()` inside a fresh top-level action
+  on the same vault and stages the result in a backing `MutableState`.
+  The returned `State<T>` is a real observable state — use `effect` to
+  subscribe.
+
+The recompute is deferred via `Vault.postCommit` (an internal queue) so
+it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
+Disposing the `Disposable` stops recomputation.
+
+### 14.3 `atomic(vararg vaults) { body }`
+
+```kotlin
+fun <R> atomic(vararg vaults: Vault<*>, body: () -> R): TransactionResult<R>
+```
+
+Brackets multiple vaults' transactions so they commit-or-rollback together.
+Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
+frame as savepoints of each vault's root. On body throw, every vault is
+rolled back; on body return, every vault commits in lock order with
+sequential observer fanout per-vault.
+
+```kotlin
+val r = atomic(accountA, accountB) {
+    accountA.action { balance update { it - amount } }
+    accountB.action { balance update { it + amount } }
+}
+```
+
+Vaults are sorted by `Vault.lockOrderKey` (process-monotonic, set at
+construction) before lock acquisition — deadlock-safe across any
+combination. Nested `atomic` is supported via reentrant locks.
+
+### 14.4 `EncryptingTransformer` + `Cipher` (`com.vynatix.vault.crypto`)
+
+```kotlin
+interface Cipher {
+    fun encrypt(plaintext: String): String
+    fun decrypt(ciphertext: String): String
+}
+
+class EncryptingTransformer(cipher: Cipher) : Transformer<String>
+class XorCipher(seed: ByteArray) : Cipher       // educational only
+```
+
+Use `state(EncryptingTransformer(cipher)) { initial }` to make a state
+encrypt-on-write, decrypt-on-read. Stored `currentValue` is ciphertext;
+`KvBridge`-persisted bytes are ciphertext; reads through `state.value`
+are plaintext. Asymmetric-rollback safe (the library records raw
+ciphertext and writes raw on restore — never re-runs `transformer.set`).
+
+`XorCipher` is **NOT production-grade** — it's a KMP-pure stand-in.
+Production users implement `Cipher` over `javax.crypto` (JVM) or
+CryptoKit (iOS) — typically AES-GCM with a per-state IV embedded in
+the encoded output.
+
+### 14.5 `FileSystemKvStore` (`com.vynatix.vault.bridge`)
+
+```kotlin
+expect class FileSystemKvStore(rootPath: String) : KvStore
+```
+
+Backend for `KvBridge` that persists each key as a single file under
+`rootPath`. Atomic writes via tempfile + rename on JVM (`Files.move(ATOMIC_MOVE)`)
+and iOS (`NSData.writeToURL(atomically=true)`).
+
+```kotlin
+val kv = FileSystemKvStore(rootPath = "$home/.myapp")
+vault { balance bridge KvBridge(kv, "balance:1", LongCodec) }
+// balance auto-persists on every commit; new vaults attaching the same
+// KvBridge hydrate from disk via load-on-attach.
+```
+
+Key encoding: URL-percent-encoded so any String is a safe filename.
+
+### 14.6 Standard middleware (`com.vynatix.vault.middleware`)
+
+```kotlin
+class LoggingMiddleware<V>(tag: String, log: (String) -> Unit = ::println)
+class TimingMiddleware<V>(onResult: (id: String, status: TransactionStatus, elapsedMs: Long) -> Unit)
+class ValidationMiddleware<V>(check: V.() -> Unit)
+```
+
+Drop-in. Order in `vault.middlewares(...)` matters — the LAST argument
+is the outermost middleware (its `onTransactionStarted` runs first; its
+`onTransactionError` runs last). Place logging/audit middleware LAST so
+it sees errors thrown by validation middleware placed earlier.
+
+### 14.7 `KvBridge` + `Codec` + `KvStore` (`com.vynatix.vault.bridge`)
+
+```kotlin
+interface KvStore {
+    fun get(key: String): String?
+    fun put(key: String, value: String)
+    fun remove(key: String)
+    fun snapshot(): Map<String, String>
+}
+
+interface Codec<T : Any> {
+    fun encode(value: T): String
+    fun decode(string: String): T
+}
+object StringCodec : Codec<String>
+object LongCodec   : Codec<Long>
+object IntCodec    : Codec<Int>
+object BooleanCodec: Codec<Boolean>
+
+class InMemoryKvStore : KvStore                     // tests + dev
+class KvBridge<T : Any>(kv: KvStore, key: String, codec: Codec<T>) : Bridge<T>
+```
+
+Generic save-on-commit + load-on-attach. Combine with any `KvStore`
+implementation (in-memory, file system, MultiplatformSettings, …).
+
+### 14.8 `:vault-coroutines`
+
+```kotlin
+fun <T : Any> State<T>.asFlow(): Flow<T>
+fun <T : Any> State<T>.asStateFlow(scope: CoroutineScope, started: SharingStarted = SharingStarted.WhileSubscribed()): StateFlow<T>
+fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T>
+
+suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
+suspend fun <T : Any> State<T>.awaitValue(target: T): T
+
+suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+```
+
+`suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
+Mutually exclusive with blocking `Vault.action` on the same vault via an
+internal coroutine `Mutex` installed lazily. Cancellation of the body
+rolls back the transaction; commit phase wraps in `NonCancellable` so
+observer/bridge fanout completes cleanly even if the surrounding scope
+cancels mid-commit.
+
+Limitations (1.1): no middleware support (`runMiddlewareChain` is non-
+suspending); body should be single-threaded — spawned threads' `mutate`
+calls fall outside the recognized owner.
+
+### 14.9 `:vault-compose`
+
+```kotlin
+@Composable
+fun <V : Vault<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
+
+@Composable
+fun rememberDisposable(make: () -> Disposable): Disposable
+```
+
+Bridges vault state into Compose's snapshot system as a
+`androidx.compose.runtime.State<T>`, triggering recomposition on every
+successful commit. Backed by `produceState`; subscription's lifecycle is
+tied to the surrounding Composable.
+
+### 14.10 The cookbook: 1.1 idioms
+
+**Encrypted-at-rest credential**:
+```kotlin
+class CredsVault : Vault<CredsVault>() {
+    val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
+}
+val kv = FileSystemKvStore("$home/.app/creds")
+vault { token bridge KvBridge(kv, "session", StringCodec) }
+// token is plaintext on read; persisted file contains ciphertext.
+```
+
+**Cross-vault transfer with one-line atomicity**:
+```kotlin
+fun AccountVault.transferTo(other: AccountVault, cents: Long) =
+    atomic(this, other) {
+        action { balance update { it - cents } }
+        other.action { balance update { it + cents } }
+    }
+```
+
+**Auto-recomputed running total**:
+```kotlin
+val (total, dispose) = vault.derived(vault.items) { items.value.sumOf { it.amount } }
+val sub = vault { total effect { uiTotal.value = this } }
+// later: sub.dispose() ; dispose.dispose()
+```
+
+**Snapshot-and-restore for undo**:
+```kotlin
+val undoStack = ArrayDeque<VaultSnapshot>()
+fun saveCheckpoint() { undoStack.addLast(vault.snapshot()) }
+fun undo() = undoStack.removeLastOrNull()?.let { vault.restore(it) }
+```
+
+**Async transactional fetch**:
+```kotlin
+val r = vault.suspendAction {
+    status mutate Status.Loading
+    val data = api.fetch()                  // suspending I/O
+    items mutate (items.value + data)
+    status mutate Status.Loaded
+    data
+}
 ```
 
 ---
@@ -1108,14 +1360,16 @@ enum class TransactionStatus { Active, Committed, RolledBack, Failed }
 class V : Vault<V>() {
     val x by state { 0 }
     val s by state(MyTransformer()) { "" }
+    val token by state(EncryptingTransformer(cipher)) { "" }   // 1.1
+    val items by state(distinct = true) { emptyList<Item>() }  // 1.1 dedup
 }
 val v = V()
 
 // Subscribe.
 val sub = v { x effect { println("x=$this") } }       // initial: x=0
 
-// Atomic mutation.
-v action { x mutate 1; s mutate "hello" }              // → x=1
+// Atomic single-vault mutation; body return flows into Success.
+val r = v action { x update { it + 1 }; "$x.value done" }  // 1.1: update + <R>
 
 // Failed atomic mutation.
 v action { x mutate 99; error("nope") }                // (no fire)
@@ -1123,12 +1377,32 @@ v action { x mutate 99; error("nope") }                // (no fire)
 // Bare mutation — same outcome as a one-mutate action.
 v { x mutate 2 }                                       // → x=2
 
-// Cross-cutting concern.
-v.middlewares(Logger())
+// Cross-cutting concern. LAST argument is outermost middleware.
+v.middlewares(ValidationMiddleware { … }, LoggingMiddleware("v"))
 
-// External sync.
-v { s bridge JsonBridge(path) }
+// External sync (two-way bridge); detach with bridge null.
+v { s bridge KvBridge(kv, "s", StringCodec) }
+v { s bridge null }
+
+// Inbound-only push (1.1).
+val sub2 = v { s observeFrom externalObservable }
+
+// Cross-vault atomic (1.1).
+atomic(accountA, accountB) {
+    accountA.action { balance update { it - cents } }
+    accountB.action { balance update { it + cents } }
+}
+
+// Snapshot / restore (1.1).
+val snap = v.snapshot()
+v.restore(snap)
+
+// Push-recomputed derived state (1.1).
+val (total, d) = v.derived(v.items) { items.value.sumOf { it.amount } }
+
+// Suspending body (1.1, vault-coroutines).
+val r2 = v.suspendAction { status mutate Loading; val data = api.fetch(); status mutate Loaded; data }
 
 // Cleanup.
-sub.dispose()
+sub.dispose(); sub2.dispose(); d.dispose()
 ```
