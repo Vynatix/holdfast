@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("astrid.kmp.library")
     id("astrid.compose.multiplatform")
@@ -11,6 +13,14 @@ kotlin {
     android {
         namespace = "com.vynatix.vault.compose"
     }
+
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_21)
+        }
+    }
+
+    applyDefaultHierarchyTemplate()
 
     sourceSets {
         commonMain.dependencies {
