@@ -22,6 +22,26 @@ kotlin {
     applyDefaultHierarchyTemplate()
 
     sourceSets {
+        val jvmAndAndroidMain by creating {
+            dependsOn(commonMain.get())
+        }
+        androidMain {
+            dependsOn(jvmAndAndroidMain)
+        }
+        jvmMain {
+            dependsOn(jvmAndAndroidMain)
+        }
+
+        val jvmAndAndroidHostTest by creating {
+            dependsOn(commonTest.get())
+        }
+        androidHostTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+        jvmTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+
         commonMain.dependencies {
             api(project(":vault"))
             implementation(libs.kotlinx.coroutines.core)

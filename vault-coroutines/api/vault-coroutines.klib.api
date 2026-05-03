@@ -33,6 +33,15 @@ final class com.vynatix.vault.coroutines/InMemorySuspendingKvStore : com.vynatix
     final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.snapshot|snapshot(){}[0]
 }
 
+final class com.vynatix.vault.coroutines/SuspendingFileSystemKvStore : com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.<init>|<init>(kotlin.String){}[0]
+
+    final suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.get|get(kotlin.String){}[0]
+    final suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.remove|remove(kotlin.String){}[0]
+    final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.snapshot|snapshot(){}[0]
+}
+
 open class <#A: kotlin/Any> com.vynatix.vault.coroutines/SuspendingKvBridge : com.vynatix.vault/Bridge<#A> { // com.vynatix.vault.coroutines/SuspendingKvBridge|null[0]
     final val bridgeScope // com.vynatix.vault.coroutines/SuspendingKvBridge.bridgeScope|{}bridgeScope[0]
         final fun <get-bridgeScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.coroutines/SuspendingKvBridge.bridgeScope.<get-bridgeScope>|<get-bridgeScope>(){}[0]

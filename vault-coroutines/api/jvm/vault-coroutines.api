@@ -40,6 +40,17 @@ public final class com/vynatix/vault/coroutines/SuspendingBridgeKt {
 	public static synthetic fun suspendingBridge$default (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting;
 }
 
+public final class com/vynatix/vault/coroutines/SuspendingFileSystemKvStore : com/vynatix/vault/coroutines/SuspendingKvStore {
+	public static final field HEX_DIGITS I
+	public static final field HEX_RADIX I
+	public static final field TMP_PREFIX Ljava/lang/String;
+	public fun <init> (Ljava/lang/String;)V
+	public fun get (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun put (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun remove (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun snapshot (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public class com/vynatix/vault/coroutines/SuspendingKvBridge : com/vynatix/vault/Bridge {
 	protected final fun getBridgeScope ()Lkotlinx/coroutines/CoroutineScope;
 	public final fun getErrors ()Lkotlinx/coroutines/flow/SharedFlow;
