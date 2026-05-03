@@ -9,6 +9,13 @@ plugins {
 }
 
 kotlin {
+    compilerOptions {
+        // Enable K2 context parameters (stable in Kotlin 2.2+, behind opt-in flag in 2.3.21).
+        // Powers the context(scope: CoroutineScope) overloads on `asStateFlow`, `bridge`,
+        // `suspendingBridge` — see issues 23/24/25 and 2.0-DESIGN.md §3.8.
+        freeCompilerArgs.add("-Xcontext-parameters")
+    }
+
     android {
         namespace = "com.vynatix.vault.coroutines"
     }

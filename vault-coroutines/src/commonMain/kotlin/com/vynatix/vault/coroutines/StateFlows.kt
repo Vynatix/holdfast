@@ -93,6 +93,31 @@ fun <T : Any> State<T>.asStateFlow(
 ): StateFlow<T> = asFlow().stateIn(scope, started, this.value)
 
 /**
+ * K2 context-parameter overload of [asStateFlow]. Resolves the sharing [CoroutineScope]
+ * from the surrounding `context(scope: CoroutineScope) { … }` block instead of from the
+ * owning vault. Lets a consumer write
+ *
+ * ```
+ * context(viewModelScope: CoroutineScope)
+ * class MyViewModel(vault: MyVault) {
+ *     val flow = vault.count.asStateFlow()
+ * }
+ * ```
+ *
+ * without forwarding `viewModelScope` explicitly through every adapter call. Coexists
+ * with the default-param overload — outside any `context(...)` block, the call site
+ * resolves to the default-param form and picks up `vault.scope`.
+ *
+ * Behavior is identical to the default-param overload otherwise: the returned
+ * [StateFlow] subscribes upstream while [started] permits, replays the current value
+ * to late subscribers, and stops upstream when [scope] cancels.
+ */
+context(scope: CoroutineScope)
+fun <T : Any> State<T>.asStateFlow(
+    started: SharingStarted = SharingStarted.WhileSubscribed(),
+): StateFlow<T> = asFlow().stateIn(scope, started, this.value)
+
+/**
  * Suspend until [predicate] holds for the state's value. Returns the value that
  * satisfied the predicate. Useful for awaiting state-machine progress in tests
  * or in await-style application code.

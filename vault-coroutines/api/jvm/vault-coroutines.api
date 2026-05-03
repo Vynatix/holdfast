@@ -11,7 +11,9 @@ public final class com/vynatix/vault/coroutines/InMemorySuspendingKvStore : com/
 public final class com/vynatix/vault/coroutines/StateFlowsKt {
 	public static final fun asFlow (Lcom/vynatix/vault/State;)Lkotlinx/coroutines/flow/Flow;
 	public static final fun asStateFlow (Lcom/vynatix/vault/State;Lkotlinx/coroutines/CoroutineScope;Lkotlinx/coroutines/flow/SharingStarted;)Lkotlinx/coroutines/flow/StateFlow;
+	public static final fun asStateFlow (Lkotlinx/coroutines/CoroutineScope;Lcom/vynatix/vault/State;Lkotlinx/coroutines/flow/SharingStarted;)Lkotlinx/coroutines/flow/StateFlow;
 	public static synthetic fun asStateFlow$default (Lcom/vynatix/vault/State;Lkotlinx/coroutines/CoroutineScope;Lkotlinx/coroutines/flow/SharingStarted;ILjava/lang/Object;)Lkotlinx/coroutines/flow/StateFlow;
+	public static synthetic fun asStateFlow$default (Lkotlinx/coroutines/CoroutineScope;Lcom/vynatix/vault/State;Lkotlinx/coroutines/flow/SharingStarted;ILjava/lang/Object;)Lkotlinx/coroutines/flow/StateFlow;
 	public static final fun awaitValue (Lcom/vynatix/vault/State;Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static final fun first (Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
