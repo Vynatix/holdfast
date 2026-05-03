@@ -150,6 +150,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun internalSetActiveTransaction(com.vynatix.vault/Transaction?) // com.vynatix.vault/Vault.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.vault.Transaction?){}[0]
     final fun middlewares(kotlin/Array<out com.vynatix.vault/Middleware<#A>>...) // com.vynatix.vault/Vault.middlewares|middlewares(kotlin.Array<out|com.vynatix.vault.Middleware<1:0>>...){}[0]
     final fun removeState(kotlin/String) // com.vynatix.vault/Vault.removeState|removeState(kotlin.String){}[0]
+    final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.vault/Middleware<#A>> // com.vynatix.vault/Vault.snapshotMiddleware|snapshotMiddleware(){}[0]
 
     abstract interface AsyncSerializer { // com.vynatix.vault/Vault.AsyncSerializer|null[0]
         abstract fun blockingAcquire() // com.vynatix.vault/Vault.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]
@@ -268,6 +269,9 @@ open class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Middleware { // c
     constructor <init>() // com.vynatix.vault/Middleware.<init>|<init>(){}[0]
 
     final fun invoke(#A, kotlin/Function0<kotlin/Unit>) // com.vynatix.vault/Middleware.invoke|invoke(1:0;kotlin.Function0<kotlin.Unit>){}[0]
+    final fun invokeOnTransactionCompleted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.invokeOnTransactionCompleted|invokeOnTransactionCompleted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+    final fun invokeOnTransactionError(com.vynatix.vault/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.vault/Middleware.invokeOnTransactionError|invokeOnTransactionError(com.vynatix.vault.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    final fun invokeOnTransactionStarted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.invokeOnTransactionStarted|invokeOnTransactionStarted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
     open fun onTransactionCompleted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.onTransactionCompleted|onTransactionCompleted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
     open fun onTransactionError(com.vynatix.vault/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.vault/Middleware.onTransactionError|onTransactionError(com.vynatix.vault.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
     open fun onTransactionStarted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.onTransactionStarted|onTransactionStarted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]

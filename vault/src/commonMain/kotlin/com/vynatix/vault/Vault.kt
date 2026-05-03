@@ -517,6 +517,20 @@ abstract class Vault<Self : Vault<Self>> {
     val selfForExternal: Self get() = self
 
     /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Returns a stable
+     * snapshot of the currently-registered middleware list, taken under the
+     * middleware lock — same snapshot semantics as [runMiddlewareChain] uses
+     * for the blocking [action] path. The suspending chain runner uses this
+     * to invoke each hook directly with its own `runCatching` wrapper, in
+     * concentric-ring order (forward = chain order on `started`; reverse on
+     * `completed`/`error`).
+     */
+    @VaultInternalApi
+    fun snapshotMiddleware(): List<Middleware<Self>> = middlewareLock.withLock {
+        middlewareList.toList()
+    }
+
+    /**
      * Internal hook for `atomic(...)`. Runs [block] under this vault's
      * `transactionLock`. The reentrant lock makes this safe to call when the
      * same thread already holds the lock (e.g., nested `atomic` calls overlap

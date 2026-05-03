@@ -52,4 +52,28 @@ open class Middleware<T : Vault<T>> {
     protected open fun onTransactionCompleted(context: MiddlewareContext<T>) {}
     protected open fun onTransactionError(context: MiddlewareContext<T>, error: Throwable) {
     }
+
+    /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * [onTransactionStarted] hook directly so the suspending chain runner can
+     * compose hooks in concentric-ring order with per-hook `runCatching`
+     * isolation. Not part of the stable public API; sync `action` continues
+     * to use [invoke].
+     */
+    @VaultInternalApi
+    fun invokeOnTransactionStarted(context: MiddlewareContext<T>) = onTransactionStarted(context)
+
+    /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * [onTransactionCompleted] hook directly. See [invokeOnTransactionStarted].
+     */
+    @VaultInternalApi
+    fun invokeOnTransactionCompleted(context: MiddlewareContext<T>) = onTransactionCompleted(context)
+
+    /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * [onTransactionError] hook directly. See [invokeOnTransactionStarted].
+     */
+    @VaultInternalApi
+    fun invokeOnTransactionError(context: MiddlewareContext<T>, error: Throwable) = onTransactionError(context, error)
 }

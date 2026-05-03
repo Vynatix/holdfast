@@ -1287,8 +1287,16 @@ rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
 cancels mid-commit.
 
-Limitations (1.1): no middleware support (`runMiddlewareChain` is non-
-suspending); body should be single-threaded — spawned threads' `mutate`
+`Middleware<V>` sync hooks fire on `suspendAction` as well as `action`
+(2.0; was a documented no-op limitation in 1.1). Concentric-ring ordering:
+`onTransactionStarted` runs in chain order before the body, `onTransactionCompleted`
+or `onTransactionError` runs in reverse chain order around the body. Each hook
+invocation is wrapped in `runCatching` — a throw from one middleware's hook does
+not abort other middlewares' hooks. Behavior change: middleware authors who
+relied on "suspendAction won't trigger me" must verify their hooks are idempotent
+under the suspending path.
+
+Limitations: body should be single-threaded — spawned threads' `mutate`
 calls fall outside the recognized owner.
 
 ### 14.9 `:vault-compose`

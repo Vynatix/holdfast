@@ -2,6 +2,7 @@
 
 package com.vynatix.vault.coroutines
 
+import com.vynatix.vault.Middleware
 import com.vynatix.vault.Transaction
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
@@ -35,8 +36,12 @@ import kotlin.uuid.Uuid
  *    the transaction. Cancellation BETWEEN body return and commit is suppressed
  *    via [NonCancellable] on the commit phase — once the body completes, the
  *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
- *  - **Middleware**: NOT invoked for 1.1. Use blocking `action` if you need
- *    middleware plus async work.
+ *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
+ *    in concentric-ring order — `onTransactionStarted` in chain order before
+ *    the body; `onTransactionCompleted` (success) or `onTransactionError`
+ *    (throw / cancellation) in reverse chain order. Each hook invocation is
+ *    wrapped in `runCatching`: one middleware's failure does not abort other
+ *    middlewares' hooks.
  *  - **Concurrent threads inside the body**: undefined. Stick to single-flight
  *    bodies.
  *
@@ -66,20 +71,53 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         internalSetActiveTransaction(txn)
         suspendingOwner = owner
 
+        // Snapshot the middleware chain once at the start of the action — same
+        // semantics as the blocking path. Concurrent middleware registration
+        // during this action does not retroactively apply.
+        val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
+        // One MiddlewareContext per middleware, reused across that middleware's
+        // started/completed/error hooks so metadata stashed in one hook is
+        // visible to the next, matching the sync `Middleware.invoke` contract.
+        val contexts: List<Middleware.MiddlewareContext<V>> = middlewareChain.map { _ ->
+            Middleware.MiddlewareContext(
+                vault = selfForExternal,
+                transaction = txn,
+            )
+        }
+
+        // Concentric forward: chain order. Each invocation is run-caught so one
+        // middleware's failure does not abort others.
+        for (i in middlewareChain.indices) {
+            runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
+        }
+
         val outcome: TransactionResult<R> = try {
             val value: R = try {
-                @Suppress("UNCHECKED_CAST")
-                (selfForExternal as V).body()
+                selfForExternal.body()
             } catch (ce: CancellationException) {
+                // Concentric reverse on the error path. Cancellation is propagated
+                // after rollback; error hooks run for symmetry with the throwing
+                // path so middleware sees one consistent "errored transaction" view.
+                for (i in middlewareChain.indices.reversed()) {
+                    runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], ce) }
+                }
                 runCatching { txn.rollback() }
                 throw ce
             } catch (e: Throwable) {
+                for (i in middlewareChain.indices.reversed()) {
+                    runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
+                }
                 runCatching { txn.rollback() }
                 return@withLock TransactionResult.Error(e, txn)
             }
             // Body returned. Commit under NonCancellable so observer/bridge
             // fanout completes even if the surrounding scope cancels here.
+            // Sync `Middleware.invoke` runs `onTransactionCompleted` BEFORE
+            // commit; we preserve that ordering here.
             withContext(NonCancellable) {
+                for (i in middlewareChain.indices.reversed()) {
+                    runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
+                }
                 try {
                     txn.commit()
                     TransactionResult.Success(txn, value)

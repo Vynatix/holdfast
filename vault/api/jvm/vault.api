@@ -20,6 +20,9 @@ public abstract interface class com/vynatix/vault/Initializer : kotlin/jvm/funct
 public class com/vynatix/vault/Middleware {
 	public fun <init> ()V
 	public final fun invoke (Lcom/vynatix/vault/Vault;Lkotlin/jvm/functions/Function0;)V
+	public final fun invokeOnTransactionCompleted (Lcom/vynatix/vault/Middleware$MiddlewareContext;)V
+	public final fun invokeOnTransactionError (Lcom/vynatix/vault/Middleware$MiddlewareContext;Ljava/lang/Throwable;)V
+	public final fun invokeOnTransactionStarted (Lcom/vynatix/vault/Middleware$MiddlewareContext;)V
 	protected fun onTransactionCompleted (Lcom/vynatix/vault/Middleware$MiddlewareContext;)V
 	protected fun onTransactionError (Lcom/vynatix/vault/Middleware$MiddlewareContext;Ljava/lang/Throwable;)V
 	protected fun onTransactionStarted (Lcom/vynatix/vault/Middleware$MiddlewareContext;)V
@@ -168,6 +171,7 @@ public abstract class com/vynatix/vault/Vault {
 	public final fun setAsyncSerializer (Lcom/vynatix/vault/Vault$AsyncSerializer;)V
 	public final fun setSuspendingOwner (Ljava/lang/Object;)V
 	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
+	public final fun snapshotMiddleware ()Ljava/util/List;
 	public final fun state (Lcom/vynatix/vault/Transformer;ZLcom/vynatix/vault/Initializer;)Lcom/vynatix/vault/StateDelegate;
 	public static synthetic fun state$default (Lcom/vynatix/vault/Vault;Lcom/vynatix/vault/Transformer;ZLcom/vynatix/vault/Initializer;ILjava/lang/Object;)Lcom/vynatix/vault/StateDelegate;
 	public final fun update (Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function1;)V
