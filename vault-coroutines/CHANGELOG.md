@@ -88,10 +88,11 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   path; this surfaces only as a behavior change for consumers who registered
   middleware AND use `Job.cancel()` to terminate `suspendAction`s.
 - **Middleware ordering is uniform across `action` and `suspendAction`.**
-  Both paths execute the chain forward (first-registered = outermost) for
-  `started`, and reverse (last-registered = outermost) for `completed` /
-  `error`. Earlier 2.0 work-in-progress had an asymmetry between the two
-  paths; that has been resolved.
+  Both paths use **last-registered = outermost** semantics: for
+  `vault.middlewares(A, B)`, the trace is `B.started → A.started → body →
+  A.completed → B.completed`. Earlier 2.0 work-in-progress had the
+  suspending path inverted (first-registered outermost); that asymmetry has
+  been resolved.
 - **`onTransactionCompleted` throw semantics differ between sync and
   suspend.** Sync `action`'s throwing completion hook triggers rollback.
   Suspend `suspendAction`'s completion hook is wrapped in `runCatching`,
