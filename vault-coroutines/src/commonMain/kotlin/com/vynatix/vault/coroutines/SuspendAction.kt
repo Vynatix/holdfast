@@ -93,8 +93,18 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         // middleware fires `started` first — matching `Vault.middlewares`'s contract
         // and the sync `action` path's fold-derived nesting (issue 31). Each
         // invocation is run-caught so one middleware's failure does not abort others.
+        // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
+        // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
+        // sync sibling — interleaved per-middleware so the master ordering is
+        //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
         for (i in middlewareChain.indices.reversed()) {
             runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
+            val mw = middlewareChain[i]
+            if (mw is SuspendingMiddlewareHooks<*>) {
+                @Suppress("UNCHECKED_CAST")
+                val async = mw as SuspendingMiddlewareHooks<V>
+                runCatching { async.onTransactionStartedAsync(contexts[i]) }
+            }
         }
 
         val outcome: TransactionResult<R> = try {
@@ -106,14 +116,27 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
                 // mirrors the sync `Middleware.invoke` unwind order. Cancellation is
                 // propagated after rollback; error hooks run for symmetry with the
                 // throwing path so middleware sees one consistent "errored
-                // transaction" view.
+                // transaction" view. Per-middleware async-then-sync interleave:
+                //   A.async.errorAsync, A.sync.error, B.async.errorAsync, B.sync.error
                 for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionErrorAsync(contexts[i], ce) }
+                    }
                     runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], ce) }
                 }
                 runCatching { txn.rollback() }
                 throw ce
             } catch (e: Throwable) {
                 for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionErrorAsync(contexts[i], e) }
+                    }
                     runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
                 }
                 runCatching { txn.rollback() }
@@ -124,8 +147,16 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             // Sync `Middleware.invoke` runs `onTransactionCompleted` BEFORE
             // commit; we preserve that ordering here, with innermost-first
             // unwind so the outermost middleware sees `completed` last.
+            // Per-middleware async-then-sync interleave:
+            //   A.async.completedAsync, A.sync.completed, B.async.completedAsync, B.sync.completed
             withContext(NonCancellable) {
                 for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionCompletedAsync(contexts[i]) }
+                    }
                     runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
                 }
                 try {

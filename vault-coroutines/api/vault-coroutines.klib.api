@@ -6,6 +6,12 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-coroutines>
+abstract interface <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.coroutines/SuspendingMiddlewareHooks { // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks|null[0]
+    open suspend fun onTransactionCompletedAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionCompletedAsync|onTransactionCompletedAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+    open suspend fun onTransactionErrorAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionErrorAsync|onTransactionErrorAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    open suspend fun onTransactionStartedAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionStartedAsync|onTransactionStartedAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+}
+
 abstract interface <#A: kotlin/Any> com.vynatix.vault.coroutines/SuspendingBridge : com.vynatix.vault/Bridge<#A> { // com.vynatix.vault.coroutines/SuspendingBridge|null[0]
     abstract fun publish(#A): kotlin/Boolean // com.vynatix.vault.coroutines/SuspendingBridge.publish|publish(1:0){}[0]
     abstract suspend fun publishAwaited(#A) // com.vynatix.vault.coroutines/SuspendingBridge.publishAwaited|publishAwaited(1:0){}[0]

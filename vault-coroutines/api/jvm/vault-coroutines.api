@@ -52,3 +52,15 @@ public abstract interface class com/vynatix/vault/coroutines/SuspendingKvStore {
 	public abstract fun snapshot (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public abstract interface class com/vynatix/vault/coroutines/SuspendingMiddlewareHooks {
+	public fun onTransactionCompletedAsync (Lcom/vynatix/vault/Middleware$MiddlewareContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun onTransactionErrorAsync (Lcom/vynatix/vault/Middleware$MiddlewareContext;Ljava/lang/Throwable;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun onTransactionStartedAsync (Lcom/vynatix/vault/Middleware$MiddlewareContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/vault/coroutines/SuspendingMiddlewareHooks$DefaultImpls {
+	public static fun onTransactionCompletedAsync (Lcom/vynatix/vault/coroutines/SuspendingMiddlewareHooks;Lcom/vynatix/vault/Middleware$MiddlewareContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static fun onTransactionErrorAsync (Lcom/vynatix/vault/coroutines/SuspendingMiddlewareHooks;Lcom/vynatix/vault/Middleware$MiddlewareContext;Ljava/lang/Throwable;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static fun onTransactionStartedAsync (Lcom/vynatix/vault/coroutines/SuspendingMiddlewareHooks;Lcom/vynatix/vault/Middleware$MiddlewareContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
