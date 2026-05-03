@@ -93,6 +93,19 @@ abstract class EventfulVault<Self : EventfulVault<Self, E>, E : Any>(
         txn.stagePendingEvent(_events, event)
     }
 
+    /**
+     * On dispose, clear any replay slot the events SharedFlow may hold. We use
+     * `replay = 0` by default so this is normally a no-op, but a subclass that
+     * configures `replay > 0` would otherwise leave stale events visible to
+     * late subscribers after the vault is gone. After this returns, no further
+     * emits land — every entrypoint that could call [emit] (action / mutate /
+     * suspendAction) is already gated by the disposed check on [Vault].
+     */
+    override fun onDispose() {
+        super.onDispose()
+        _events.resetReplayCache()
+    }
+
     private companion object {
         /** Default `extraBufferCapacity` for the events SharedFlow. Per design §3.6. */
         private const val DEFAULT_EVENT_BUFFER_CAPACITY = 16

@@ -123,6 +123,7 @@ abstract class <#A: com.vynatix.vault/EventfulVault<#A, #B>, #B: kotlin/Any> com
         final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#B> // com.vynatix.vault/EventfulVault.events.<get-events>|<get-events>(){}[0]
 
     final fun emit(#B) // com.vynatix.vault/EventfulVault.emit|emit(1:1){}[0]
+    open fun onDispose() // com.vynatix.vault/EventfulVault.onDispose|onDispose(){}[0]
 }
 
 abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // com.vynatix.vault/Vault|null[0]
@@ -130,6 +131,8 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
 
     final val activeTransaction // com.vynatix.vault/Vault.activeTransaction|{}activeTransaction[0]
         final fun <get-activeTransaction>(): com.vynatix.vault/Transaction? // com.vynatix.vault/Vault.activeTransaction.<get-activeTransaction>|<get-activeTransaction>(){}[0]
+    final val isDisposed // com.vynatix.vault/Vault.isDisposed|{}isDisposed[0]
+        final fun <get-isDisposed>(): kotlin/Boolean // com.vynatix.vault/Vault.isDisposed.<get-isDisposed>|<get-isDisposed>(){}[0]
     final val lockOrderKey // com.vynatix.vault/Vault.lockOrderKey|{}lockOrderKey[0]
         final fun <get-lockOrderKey>(): kotlin/Long // com.vynatix.vault/Vault.lockOrderKey.<get-lockOrderKey>|<get-lockOrderKey>(){}[0]
     final val properties // com.vynatix.vault/Vault.properties|{}properties[0]
@@ -161,6 +164,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.vault/Vault.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
     final fun clearMiddleware() // com.vynatix.vault/Vault.clearMiddleware|clearMiddleware(){}[0]
     final fun clearStates() // com.vynatix.vault/Vault.clearStates|clearStates(){}[0]
+    final fun dispose() // com.vynatix.vault/Vault.dispose|dispose(){}[0]
     final fun getState(kotlin/String): com.vynatix.vault/State<*>? // com.vynatix.vault/Vault.getState|getState(kotlin.String){}[0]
     final fun hasState(kotlin/String): kotlin/Boolean // com.vynatix.vault/Vault.hasState|hasState(kotlin.String){}[0]
     final fun internalDrainPostCommitTasks() // com.vynatix.vault/Vault.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
@@ -168,6 +172,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun middlewares(kotlin/Array<out com.vynatix.vault/Middleware<#A>>...) // com.vynatix.vault/Vault.middlewares|middlewares(kotlin.Array<out|com.vynatix.vault.Middleware<1:0>>...){}[0]
     final fun removeState(kotlin/String) // com.vynatix.vault/Vault.removeState|removeState(kotlin.String){}[0]
     final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.vault/Middleware<#A>> // com.vynatix.vault/Vault.snapshotMiddleware|snapshotMiddleware(){}[0]
+    open fun onDispose() // com.vynatix.vault/Vault.onDispose|onDispose(){}[0]
 
     abstract interface AsyncSerializer { // com.vynatix.vault/Vault.AsyncSerializer|null[0]
         abstract fun blockingAcquire() // com.vynatix.vault/Vault.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]

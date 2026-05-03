@@ -25,6 +25,7 @@ public abstract class com/vynatix/vault/EventfulVault : com/vynatix/vault/Vault,
 	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun emit (Ljava/lang/Object;)V
 	public final fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+	protected fun onDispose ()V
 }
 
 public abstract interface class com/vynatix/vault/Initializer : kotlin/jvm/functions/Function0 {
@@ -172,6 +173,7 @@ public abstract class com/vynatix/vault/Vault {
 	public final fun bridge (Lcom/vynatix/vault/State;Lcom/vynatix/vault/Bridge;)V
 	public final fun clearMiddleware ()V
 	public final fun clearStates ()V
+	public final fun dispose ()V
 	public final fun effect (Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public final fun getActiveTransaction ()Lcom/vynatix/vault/Transaction;
 	public final fun getAsyncSerializer ()Lcom/vynatix/vault/Vault$AsyncSerializer;
@@ -186,9 +188,11 @@ public abstract class com/vynatix/vault/Vault {
 	public final fun internalDrainPostCommitTasks ()V
 	public final fun internalSetActiveTransaction (Lcom/vynatix/vault/Transaction;)V
 	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun isDisposed ()Z
 	public final fun middlewares ([Lcom/vynatix/vault/Middleware;)V
 	public final fun mutate (Lcom/vynatix/vault/State;Ljava/lang/Object;)V
 	public final fun observeFrom (Lcom/vynatix/vault/State;Lcom/vynatix/vault/Observable;)Lcom/vynatix/vault/Disposable;
+	protected fun onDispose ()V
 	public final fun removeState (Ljava/lang/String;)V
 	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun setAsyncSerializer (Lcom/vynatix/vault/Vault$AsyncSerializer;)V
