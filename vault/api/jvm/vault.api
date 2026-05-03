@@ -168,6 +168,7 @@ public abstract class com/vynatix/vault/Vault {
 	public static final field Companion Lcom/vynatix/vault/Vault$Companion;
 	public fun <init> ()V
 	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/TransactionResult;
+	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
 	public final fun bridge (Lcom/vynatix/vault/State;Lcom/vynatix/vault/Bridge;)V
 	public final fun clearMiddleware ()V
 	public final fun clearStates ()V

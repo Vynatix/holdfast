@@ -158,6 +158,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault/Vault.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault/Vault.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.vault/Vault.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+    final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.vault/Vault.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
     final fun clearMiddleware() // com.vynatix.vault/Vault.clearMiddleware|clearMiddleware(){}[0]
     final fun clearStates() // com.vynatix.vault/Vault.clearStates|clearStates(){}[0]
     final fun getState(kotlin/String): com.vynatix.vault/State<*>? // com.vynatix.vault/Vault.getState|getState(kotlin.String){}[0]

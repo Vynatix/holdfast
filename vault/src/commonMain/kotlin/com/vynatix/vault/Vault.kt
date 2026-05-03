@@ -56,20 +56,50 @@ abstract class Vault<Self : Vault<Self>> {
     val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
 
     /**
+     * Volatile backing field for the scope bound via [bindToScope]. `null` until the
+     * first `bindToScope` call; subsequent calls atomically replace it. Read by the
+     * default getter of [scope] as resolution level 3 (between subclass override and
+     * process default).
+     *
+     * Marked `@Volatile` so a write on one thread is immediately visible to readers
+     * on other threads — the binding is racy by contract (last writer wins).
+     */
+    @kotlin.concurrent.Volatile
+    private var boundScope: CoroutineScope? = null
+
+    /**
      * The [CoroutineScope] this vault's long-running async work runs on. Resolution order
-     * (per-call → per-vault override → process-global default), with this property
-     * supplying levels 2 and 3:
+     * (per-call → per-vault override → bound → process-global default):
      *
      *  1. **Per-call** — APIs that take an explicit `scope: CoroutineScope` parameter use that.
      *  2. **Per-vault** — a subclass may `override val scope: CoroutineScope` (use a getter,
      *     not a `val` initializer, to avoid lazy-init order traps in singleton vaults).
-     *  3. **Global** — falls back to [Vault.Companion.defaultScope].
-     *
-     * Per-vault binding via `bindToScope(scope)` (issue 02) replaces this property's
-     * resolved value for one specific vault instance.
+     *     A subclass override sits ABOVE this property in the resolution chain, so it
+     *     beats any [bindToScope] call.
+     *  3. **Bound** — the scope passed to the most recent [bindToScope] call on this
+     *     vault instance, if any. Rebindable.
+     *  4. **Global** — falls back to [Vault.Companion.defaultScope].
      */
     open val scope: CoroutineScope
-        get() = defaultScope
+        get() = boundScope ?: defaultScope
+
+    /**
+     * Bind this vault to [scope] for resolution level 3 (see [scope]). After this call,
+     * `vault.scope` returns [scope] (unless a subclass has its own `override val scope`,
+     * which beats the bound scope). Calling [bindToScope] again replaces the binding.
+     *
+     * Thread safety: the binding field is `@Volatile`; the latest write becomes
+     * visible to all readers. Concurrent callers race in the obvious way (last write
+     * wins) — bind once at app init, or guard externally if multiple components own
+     * the binding.
+     *
+     * Lifecycle note: [bindToScope] does NOT cancel the previously-bound scope and
+     * does NOT cancel the new scope when the vault is later disposed. Scope lifetimes
+     * are owned by the caller. See [dispose] for terminal teardown of the vault.
+     */
+    fun bindToScope(scope: CoroutineScope) {
+        boundScope = scope
+    }
 
     private val transactionLock = VaultLock()
     private val propertiesLock = VaultLock()
