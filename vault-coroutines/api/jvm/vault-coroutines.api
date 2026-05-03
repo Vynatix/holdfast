@@ -37,6 +37,7 @@ public abstract interface class com/vynatix/vault/coroutines/SuspendingBridge : 
 
 public final class com/vynatix/vault/coroutines/SuspendingBridgeKt {
 	public static final fun bridge (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge;
+	public static final fun bridge (Lkotlinx/coroutines/CoroutineScope;Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge;
 	public static synthetic fun bridge$default (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge;
 	public static final fun suspendingBridge (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting;
 	public static synthetic fun suspendingBridge$default (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting;

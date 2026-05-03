@@ -134,6 +134,30 @@ fun <T : Any> SuspendingKvStore.bridge(
 ): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
 
 /**
+ * K2 context-parameter overload of [SuspendingKvStore.bridge]. Resolves the bridge's
+ * driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
+ * block instead of from [Vault.defaultScope]. Lets a consumer write
+ *
+ * ```
+ * context(viewModelScope: CoroutineScope)
+ * class MyViewModel(store: SuspendingKvStore) {
+ *     val bridge = store.bridge(key = "k", codec = StringCodec)
+ * }
+ * ```
+ *
+ * without forwarding `viewModelScope` explicitly. Coexists with the default-param
+ * overload — outside any `context(...)` block the call site resolves to the
+ * default-param form and falls back to [Vault.defaultScope].
+ *
+ * Behavior is identical otherwise: see [SuspendingKvStore.bridge] for the full contract.
+ */
+context(scope: CoroutineScope)
+fun <T : Any> SuspendingKvStore.bridge(
+    key: String,
+    codec: Codec<T>,
+): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
+
+/**
  * Concrete fire-and-forget [Bridge] returned by [SuspendingKvStore.bridge].
  * Held as a class (rather than a hidden anonymous object) so callers can
  * reach the [errors] flow without an extra cast. See [bridge] for the full
