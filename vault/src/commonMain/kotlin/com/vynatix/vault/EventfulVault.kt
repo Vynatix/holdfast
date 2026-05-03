@@ -58,7 +58,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 abstract class EventfulVault<Self : EventfulVault<Self, E>, E : Any>(
     extraBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
     onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
-) : Vault<Self>(), Eventful<E> {
+) : Vault<Self>(),
+    Eventful<E> {
 
     private val _events: MutableSharedFlow<E> = MutableSharedFlow(
         replay = 0,

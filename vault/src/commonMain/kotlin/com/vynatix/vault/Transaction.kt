@@ -193,10 +193,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * snapshot list is owned by the caller and reflects insertion order.
      */
     @VaultInternalApi
-    fun commitDispatching(
-        applyTopLevel: (MutableState<*>, Any) -> Unit,
-        drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?,
-    ) {
+    fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit, drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
 

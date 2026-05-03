@@ -35,9 +35,9 @@ private sealed class SupportEvent {
  * `init`-block binding. Default-argument syntax keeps the call site clean:
  * `SupportVault()`.
  */
-private class SupportVault private constructor(
-    private val support: EventfulSupport<SupportEvent>,
-) : Vault<SupportVault>(), Eventful<SupportEvent> by support {
+private class SupportVault private constructor(private val support: EventfulSupport<SupportEvent>) :
+    Vault<SupportVault>(),
+    Eventful<SupportEvent> by support {
     constructor() : this(EventfulSupport())
 
     val n by state { 0 }

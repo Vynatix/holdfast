@@ -171,10 +171,11 @@ class EventfulVaultCommitOrderingTest {
 
     private data class SmallEvent(val n: Int)
 
-    private class SmallBufferVault : EventfulVault<SmallBufferVault, SmallEvent>(
-        extraBufferCapacity = 2,
-        onBufferOverflow = BufferOverflow.SUSPEND,
-    ) {
+    private class SmallBufferVault :
+        EventfulVault<SmallBufferVault, SmallEvent>(
+            extraBufferCapacity = 2,
+            onBufferOverflow = BufferOverflow.SUSPEND,
+        ) {
         val tick by state { 0 }
     }
 }

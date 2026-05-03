@@ -21,10 +21,7 @@ private class CountingStartedMiddleware : Middleware<MwVault>() {
     }
 }
 
-private class RecordingMiddleware(
-    private val tag: String,
-    private val log: MutableList<String>,
-) : Middleware<MwVault>() {
+private class RecordingMiddleware(private val tag: String, private val log: MutableList<String>) : Middleware<MwVault>() {
     override fun onTransactionStarted(context: MiddlewareContext<MwVault>) {
         log.add("$tag.started")
     }

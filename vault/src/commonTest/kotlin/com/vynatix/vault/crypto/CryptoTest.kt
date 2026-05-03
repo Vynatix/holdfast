@@ -2,10 +2,10 @@ package com.vynatix.vault.crypto
 
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
-import com.vynatix.vault.effect
 import com.vynatix.vault.bridge.InMemoryKvStore
 import com.vynatix.vault.bridge.KvBridge
 import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.vault.effect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails

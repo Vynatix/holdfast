@@ -4,7 +4,6 @@ import com.vynatix.vault.EventfulVault
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.TransactionStatus
 import com.vynatix.vault.Vault
-import com.vynatix.vault.atomic
 import com.vynatix.vault.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -181,7 +180,9 @@ class SuspendAtomicDeadlockPreventionTest {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @AfterTest fun cleanup() { scope.cancel() }
+    @AfterTest fun cleanup() {
+        scope.cancel()
+    }
 
     @Test fun deadlockPreventionViaLockOrderKey() = runBlocking {
         // Two coroutines call suspendAtomic with vaults in REVERSE order.
@@ -274,7 +275,9 @@ class SuspendAtomicEventsTest {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @AfterTest fun cleanup() { scope.coroutineContext[Job]?.cancel() }
+    @AfterTest fun cleanup() {
+        scope.coroutineContext[Job]?.cancel()
+    }
 
     @Test fun eventsFireAfterCommitInLockOrder() = runBlocking {
         val a = EventingAccountVault(initial = 100)
@@ -332,8 +335,10 @@ class SuspendAtomicEventsTest {
         assertTrue(bEventIdx >= 0, "b event did not fire; saw $timeline")
         // State observers run synchronously on the commit thread — their order
         // reflects per-vault and cross-vault commit ordering directly.
-        assertTrue(bStateIdx < aEventIdx || aStateIdx < bStateIdx,
-            "state ordering must reflect lock order; saw $timeline")
+        assertTrue(
+            bStateIdx < aEventIdx || aStateIdx < bStateIdx,
+            "state ordering must reflect lock order; saw $timeline",
+        )
         // Cross-vault state ordering: a (lower lockOrderKey) commits before b.
         assertTrue(aStateIdx < bStateIdx, "a's state observer must fire before b's; saw $timeline")
         // Events are dispatched to collectors asynchronously, but their
@@ -455,7 +460,9 @@ class SuspendAtomicConcurrencyTest {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @AfterTest fun cleanup() { scope.cancel() }
+    @AfterTest fun cleanup() {
+        scope.cancel()
+    }
 
     @Test fun manyConcurrentSuspendAtomicAllCommitWithoutDataLoss() = runBlocking {
         val a = AccountVault(initial = 0)

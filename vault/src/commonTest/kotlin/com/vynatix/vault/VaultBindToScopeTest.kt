@@ -22,8 +22,7 @@ class VaultBindToScopeTest {
         override val scope: CoroutineScope get() = s
     }
 
-    private fun newScope(name: String): CoroutineScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName(name))
+    private fun newScope(name: String): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName(name))
 
     @Test
     fun unbound_vault_returns_defaultScope() {

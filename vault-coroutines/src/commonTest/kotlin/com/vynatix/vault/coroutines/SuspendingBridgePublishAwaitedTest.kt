@@ -2,9 +2,9 @@ package com.vynatix.vault.coroutines
 
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
-import com.vynatix.vault.effect
 import com.vynatix.vault.bridge.IntCodec
 import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.vault.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -170,7 +170,9 @@ class SuspendingBridgePublishAwaitedTest {
                 sequence += "store.put"
                 map[key] = value
             }
-            override suspend fun remove(key: String) { map.remove(key) }
+            override suspend fun remove(key: String) {
+                map.remove(key)
+            }
             override suspend fun snapshot(): Map<String, String> = map.toMap()
         }
         val awaiting = store.suspendingBridge("k", IntCodec, scope = testScope)
@@ -255,7 +257,10 @@ private class DedupCountingSuspendingKvStore : SuspendingKvStore {
         map[key] = value
     }
 
-    override suspend fun remove(key: String) = mutex.withLock { map.remove(key); Unit }
+    override suspend fun remove(key: String) = mutex.withLock {
+        map.remove(key)
+        Unit
+    }
     override suspend fun snapshot(): Map<String, String> = mutex.withLock { map.toMap() }
 }
 
@@ -304,6 +309,8 @@ private class SlowSuspendingKvStore(private val delayMs: Long) : SuspendingKvSto
         mutex.withLock { map[key] = value }
     }
 
-    override suspend fun remove(key: String) { mutex.withLock { map.remove(key) } }
+    override suspend fun remove(key: String) {
+        mutex.withLock { map.remove(key) }
+    }
     override suspend fun snapshot(): Map<String, String> = mutex.withLock { map.toMap() }
 }

@@ -158,5 +158,4 @@ class EventfulVaultTest {
         )
         assertEquals(expected, received)
     }
-
 }

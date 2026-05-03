@@ -20,10 +20,9 @@ private class HooksVault : Vault<HooksVault>() {
  * assert the concentric-ring interleaving:
  * sync.started -> async.startedAsync -> body -> async.completedAsync -> sync.completed.
  */
-private class DualHookMiddleware(
-    private val tag: String,
-    private val log: MutableList<String>,
-) : Middleware<HooksVault>(), SuspendingMiddlewareHooks<HooksVault> {
+private class DualHookMiddleware(private val tag: String, private val log: MutableList<String>) :
+    Middleware<HooksVault>(),
+    SuspendingMiddlewareHooks<HooksVault> {
 
     override fun onTransactionStarted(context: MiddlewareContext<HooksVault>) {
         log.add("$tag.sync.started")
@@ -64,10 +63,9 @@ private class DualHookMiddleware(
  * suspending hooks", the sync hook overrides simply do nothing — the contract
  * point being that `vault.action { }` neither fires async hooks nor crashes.
  */
-private class AsyncOnlyMiddleware(
-    private val tag: String,
-    private val log: MutableList<String>,
-) : Middleware<HooksVault>(), SuspendingMiddlewareHooks<HooksVault> {
+private class AsyncOnlyMiddleware(private val tag: String, private val log: MutableList<String>) :
+    Middleware<HooksVault>(),
+    SuspendingMiddlewareHooks<HooksVault> {
     // No sync overrides — defaults are no-op.
 
     override suspend fun onTransactionStartedAsync(context: Middleware.MiddlewareContext<HooksVault>) {
@@ -89,7 +87,8 @@ private class FailingAsyncHookMiddleware(
     private val failOnStartedAsync: Boolean = false,
     private val failOnCompletedAsync: Boolean = false,
     private val failOnErrorAsync: Boolean = false,
-) : Middleware<HooksVault>(), SuspendingMiddlewareHooks<HooksVault> {
+) : Middleware<HooksVault>(),
+    SuspendingMiddlewareHooks<HooksVault> {
 
     override suspend fun onTransactionStartedAsync(context: Middleware.MiddlewareContext<HooksVault>) {
         log.add("$tag.async.startedAsync")
@@ -251,11 +250,13 @@ class SuspendingMiddlewareHooksTest {
         // so A.async.completedAsync still fires on the success unwind.
         assertEquals(
             listOf(
-                "B.sync.started", "B.async.startedAsync",
+                "B.sync.started",
+                "B.async.startedAsync",
                 "A.async.startedAsync",
                 "BODY",
                 "A.async.completedAsync",
-                "B.async.completedAsync", "B.sync.completed",
+                "B.async.completedAsync",
+                "B.sync.completed",
             ),
             log,
         )
@@ -278,9 +279,11 @@ class SuspendingMiddlewareHooksTest {
         assertEquals(
             listOf(
                 "B.async.startedAsync",
-                "A.sync.started", "A.async.startedAsync",
+                "A.sync.started",
+                "A.async.startedAsync",
                 "BODY",
-                "A.async.completedAsync", "A.sync.completed",
+                "A.async.completedAsync",
+                "A.sync.completed",
                 "B.async.completedAsync",
             ),
             log,
@@ -305,9 +308,11 @@ class SuspendingMiddlewareHooksTest {
         assertEquals(
             listOf(
                 "B.async.startedAsync",
-                "A.sync.started", "A.async.startedAsync",
+                "A.sync.started",
+                "A.async.startedAsync",
                 "BODY",
-                "A.async.errorAsync", "A.sync.error",
+                "A.async.errorAsync",
+                "A.sync.error",
                 "B.async.errorAsync",
             ),
             log,
@@ -331,7 +336,8 @@ class SuspendingMiddlewareHooksTest {
             listOf(
                 "M.sync.started",
                 "M.async.startedAsync",
-                "BEFORE", "AFTER",
+                "BEFORE",
+                "AFTER",
                 "M.async.completedAsync",
                 "M.sync.completed",
             ),

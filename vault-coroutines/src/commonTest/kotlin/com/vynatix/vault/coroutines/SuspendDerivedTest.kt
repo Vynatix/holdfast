@@ -4,12 +4,9 @@ import com.vynatix.vault.Disposable
 import com.vynatix.vault.Vault
 import com.vynatix.vault.effect
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.AfterTest
@@ -36,7 +33,9 @@ import kotlin.test.assertTrue
 private class SuspendDerivedVault(scope: CoroutineScope) : Vault<SuspendDerivedVault>() {
     val n by state { 0 }
     val factor by state { 1 }
-    init { bindToScope(scope) }
+    init {
+        bindToScope(scope)
+    }
 }
 
 class SuspendDerivedTest {
@@ -49,8 +48,7 @@ class SuspendDerivedTest {
         scopes.forEach { runCatching { it.cancel() } }
     }
 
-    private fun newScope(): CoroutineScope =
-        CoroutineScope(SupervisorJob()).also { scopes.add(it) }
+    private fun newScope(): CoroutineScope = CoroutineScope(SupervisorJob()).also { scopes.add(it) }
 
     @Test
     fun source_change_triggers_recompute_via_suspending_compute() = runBlocking {
