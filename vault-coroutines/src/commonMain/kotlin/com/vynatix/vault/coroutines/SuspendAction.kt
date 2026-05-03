@@ -39,11 +39,13 @@ import kotlin.uuid.Uuid
  *    via [NonCancellable] on the commit phase — once the body completes, the
  *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
  *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
- *    in concentric-ring order — `onTransactionStarted` in chain order before
- *    the body; `onTransactionCompleted` (success) or `onTransactionError`
- *    (throw / cancellation) in reverse chain order. Each hook invocation is
- *    wrapped in `runCatching`: one middleware's failure does not abort other
- *    middlewares' hooks.
+ *    in concentric-ring order — last-registered middleware is outermost (its
+ *    `onTransactionStarted` fires first), matching `Vault.middlewares`'s
+ *    contract and the sync `action` path. `onTransactionCompleted` (success)
+ *    or `onTransactionError` (throw / cancellation) unwind in chain order
+ *    (innermost-first), so the outermost middleware sees `completed`/`error`
+ *    last. Each hook invocation is wrapped in `runCatching`: one middleware's
+ *    failure does not abort other middlewares' hooks.
  *  - **Concurrent threads inside the body**: undefined. Stick to single-flight
  *    bodies.
  *
@@ -87,9 +89,11 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             )
         }
 
-        // Concentric forward: chain order. Each invocation is run-caught so one
-        // middleware's failure does not abort others.
-        for (i in middlewareChain.indices) {
+        // Concentric outermost-first: iterate REVERSED so the LAST-registered
+        // middleware fires `started` first — matching `Vault.middlewares`'s contract
+        // and the sync `action` path's fold-derived nesting (issue 31). Each
+        // invocation is run-caught so one middleware's failure does not abort others.
+        for (i in middlewareChain.indices.reversed()) {
             runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
         }
 
@@ -97,16 +101,19 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             val value: R = try {
                 selfForExternal.body()
             } catch (ce: CancellationException) {
-                // Concentric reverse on the error path. Cancellation is propagated
-                // after rollback; error hooks run for symmetry with the throwing
-                // path so middleware sees one consistent "errored transaction" view.
-                for (i in middlewareChain.indices.reversed()) {
+                // Concentric forward (innermost-first) on the error path so the
+                // outermost middleware that ran `started` first sees `error` last —
+                // mirrors the sync `Middleware.invoke` unwind order. Cancellation is
+                // propagated after rollback; error hooks run for symmetry with the
+                // throwing path so middleware sees one consistent "errored
+                // transaction" view.
+                for (i in middlewareChain.indices) {
                     runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], ce) }
                 }
                 runCatching { txn.rollback() }
                 throw ce
             } catch (e: Throwable) {
-                for (i in middlewareChain.indices.reversed()) {
+                for (i in middlewareChain.indices) {
                     runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
                 }
                 runCatching { txn.rollback() }
@@ -115,9 +122,10 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             // Body returned. Commit under NonCancellable so observer/bridge
             // fanout completes even if the surrounding scope cancels here.
             // Sync `Middleware.invoke` runs `onTransactionCompleted` BEFORE
-            // commit; we preserve that ordering here.
+            // commit; we preserve that ordering here, with innermost-first
+            // unwind so the outermost middleware sees `completed` last.
             withContext(NonCancellable) {
-                for (i in middlewareChain.indices.reversed()) {
+                for (i in middlewareChain.indices) {
                     runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
                 }
                 try {

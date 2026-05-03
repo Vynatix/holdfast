@@ -12,10 +12,12 @@ package com.vynatix.vault
  *  - [onTransactionError] runs when the body throws. Receives the exception. Cannot
  *    swallow the error — re-throwing is automatic.
  *
- * Multiple middlewares form a chain. Started runs left-to-right; completed/error
- * unwind right-to-left. The shared [MiddlewareContext.metadata] map carries
- * per-transaction values across the same middleware's hooks (e.g. a start time
- * stashed in `started`, read in `completed`).
+ * Multiple middlewares form a chain. The LAST-registered middleware is outermost:
+ * its `started` fires first, its `completed`/`error` fires last. Earlier-registered
+ * middlewares are inner. Same ordering on both [Vault.action] and
+ * `:vault-coroutines.suspendAction`. The shared [MiddlewareContext.metadata] map
+ * carries per-transaction values across the same middleware's hooks (e.g. a start
+ * time stashed in `started`, read in `completed`).
  */
 open class Middleware<T : Vault<T>> {
     /**

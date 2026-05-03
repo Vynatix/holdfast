@@ -109,8 +109,8 @@ class SuspendActionMiddlewareTest {
     fun concentricRingOrderingAcrossTwoMiddlewaresOnError() = runBlocking {
         val v = MwVault()
         val log = mutableListOf<String>()
-        // Registration order is [A, B]; concentric forward: A.started -> B.started -> body
-        // backward on error: B.error -> A.error
+        // Registration order is [A, B]; LAST argument is outermost (matches sync `action`):
+        //   B.started -> A.started -> body -> A.error -> B.error
         v.middlewares(
             RecordingMiddleware("A", log),
             RecordingMiddleware("B", log),
@@ -122,7 +122,7 @@ class SuspendActionMiddlewareTest {
         }
 
         assertEquals(
-            listOf("A.started", "B.started", "BODY", "B.error", "A.error"),
+            listOf("B.started", "A.started", "BODY", "A.error", "B.error"),
             log,
         )
     }
@@ -139,7 +139,7 @@ class SuspendActionMiddlewareTest {
         v.suspendAction { log.add("BODY") }
 
         assertEquals(
-            listOf("A.started", "B.started", "BODY", "B.completed", "A.completed"),
+            listOf("B.started", "A.started", "BODY", "A.completed", "B.completed"),
             log,
         )
     }
@@ -160,9 +160,10 @@ class SuspendActionMiddlewareTest {
         }
 
         assertIs<TransactionResult.Success<*>>(r)
-        // A.started fires (throws but is run-caught), then B.started, then body, then completed in reverse.
+        // B.started fires (B is outermost), then A.started (A throws but is run-caught),
+        // then body, then completed forward (innermost-first): A.completed, B.completed.
         assertEquals(
-            listOf("A.started", "B.started", "BODY", "B.completed", "A.completed"),
+            listOf("B.started", "A.started", "BODY", "A.completed", "B.completed"),
             log,
         )
     }
@@ -180,7 +181,7 @@ class SuspendActionMiddlewareTest {
 
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(
-            listOf("A.started", "B.started", "BODY", "B.completed", "A.completed"),
+            listOf("B.started", "A.started", "BODY", "A.completed", "B.completed"),
             log,
         )
     }
@@ -200,10 +201,46 @@ class SuspendActionMiddlewareTest {
         }
 
         assertIs<TransactionResult.Error>(r)
-        // B.error throws but is run-caught; A.error must still fire.
+        // B.error throws but is run-caught; A.error must still fire (innermost-first on error).
         assertEquals(
-            listOf("A.started", "B.started", "BODY", "B.error", "A.error"),
+            listOf("B.started", "A.started", "BODY", "A.error", "B.error"),
             log,
+        )
+    }
+
+    @Test
+    fun middleware_ordering_is_identical_across_action_and_suspendAction() = runBlocking {
+        // Defensive regression test for issue 31: same middleware registration on the
+        // same vault must produce the same hook trace whether the user invokes the
+        // blocking `action { }` or the suspending `suspendAction { }` path. Earlier
+        // 1.x had `action` using last-registered = outermost (B.started first) and
+        // `suspendAction` using first-registered = outermost (A.started first), an
+        // asymmetric defect. This test fails if the asymmetry ever returns.
+        val v = MwVault()
+        val syncLog = mutableListOf<String>()
+        v.middlewares(
+            RecordingMiddleware("A", syncLog),
+            RecordingMiddleware("B", syncLog),
+        )
+
+        v action { syncLog.add("BODY") }
+
+        val suspendLog = mutableListOf<String>()
+        // Build a second vault with the same registration so the syncLog→suspendLog
+        // comparison is symmetric (same vault would replay middleware state across
+        // calls; clean instance keeps the comparison apples-to-apples).
+        val v2 = MwVault()
+        v2.middlewares(
+            RecordingMiddleware("A", suspendLog),
+            RecordingMiddleware("B", suspendLog),
+        )
+
+        v2.suspendAction { suspendLog.add("BODY") }
+
+        assertEquals(
+            syncLog,
+            suspendLog,
+            "blocking action and suspendAction must produce identical middleware ordering; sync=$syncLog suspend=$suspendLog",
         )
     }
 

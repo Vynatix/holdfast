@@ -192,6 +192,9 @@ abstract class Vault<Self : Vault<Self>> {
      * outermost middleware (its `onTransactionStarted` runs first; its `completed`
      * or `onTransactionError` runs last). Earlier-listed middlewares are inner.
      *
+     * Same ordering applies to both blocking [action] and suspending
+     * `:vault-coroutines.suspendAction` (issue 31).
+     *
      * Practical implication: for an `onTransactionError` handler to see exceptions
      * thrown by another middleware, it must be listed AFTER that middleware. Place
      * a logging/audit middleware LAST so it sees errors from validation middleware
@@ -522,8 +525,9 @@ abstract class Vault<Self : Vault<Self>> {
      * middleware lock — same snapshot semantics as [runMiddlewareChain] uses
      * for the blocking [action] path. The suspending chain runner uses this
      * to invoke each hook directly with its own `runCatching` wrapper, in
-     * concentric-ring order (forward = chain order on `started`; reverse on
-     * `completed`/`error`).
+     * concentric-ring order matching the sync path: reverse chain order on
+     * `started` (LAST-registered = outermost fires first), forward chain
+     * order on `completed`/`error` (innermost first; outermost last).
      */
     @VaultInternalApi
     fun snapshotMiddleware(): List<Middleware<Self>> = middlewareLock.withLock {
