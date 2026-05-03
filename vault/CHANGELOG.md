@@ -50,6 +50,14 @@ module (`:vault-validation-coroutines`).
   `email.state mutate email.civilize("alice@example.com")` without naming
   the validator object externally. The original `boxed()` factory is
   unchanged.
+- **`assign` infix** on `BoxedHandle<P, O>` — civilize a raw primitive and
+  atomically mutate the state inside an `action { }` block:
+  ```kotlin
+  vault action { email assign "alice@example.com" }
+  ```
+  Implemented via Kotlin context parameters (`-Xcontext-parameters`,
+  enabled globally in the `astrid.kmp.library` convention plugin). Throws
+  `ValidationException` and rolls back on validation failure.
 
 ### Added — `:vault-validation-coroutines` (new module)
 

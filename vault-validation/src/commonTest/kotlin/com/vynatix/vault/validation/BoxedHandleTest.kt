@@ -59,4 +59,25 @@ class BoxedHandleTest {
         // Initial value preserved
         assertEquals("init@example.com", v.email.state.value.value)
     }
+
+    @Test
+    fun assignInfixCivilizesAndMutatesInsideAction() {
+        val v = HandleVault()
+        val r = v action {
+            email assign "alice@example.com"
+        }
+        assertIs<TransactionResult.Success<*>>(r)
+        assertEquals("alice@example.com", v.email.state.value.value)
+    }
+
+    @Test
+    fun assignInfixRollsBackOnInvalidPrimitive() {
+        val v = HandleVault()
+        val r = v action {
+            email assign "ab" // too short — civilize throws ValidationException
+        }
+        assertIs<TransactionResult.Error>(r)
+        assertTrue(r.exception is ValidationException)
+        assertEquals("init@example.com", v.email.state.value.value)
+    }
 }

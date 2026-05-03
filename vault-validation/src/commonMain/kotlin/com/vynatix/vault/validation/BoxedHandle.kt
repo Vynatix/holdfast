@@ -52,7 +52,8 @@ class BoxedHandleDelegate<P : Any, O : Boxed<P>> internal constructor(
 /**
  * Like [boxed], but the resulting property is a [BoxedHandle] (carrying both
  * the underlying state and the validator) instead of a bare [State]. Useful
- * when the validator instance is awkward to reference at the mutate site.
+ * when the validator instance is awkward to reference at the mutate site,
+ * or when you want the [assign] infix sugar.
  *
  * If you don't need the bundled validator at the call site, prefer [boxed].
  */
@@ -61,3 +62,27 @@ fun <V : Vault<V>, P : Any, O : Boxed<P>> Vault<V>.boxedHandle(validator: Valida
         backing = state(transformer = ValidatingTransformer(validator)) { validator of initial() },
         validator = validator,
     )
+
+/**
+ * Civilize [primitive] through the handle's validator and atomically mutate
+ * the underlying state inside an existing `vault action { … }` block:
+ *
+ * ```kotlin
+ * vault action {
+ *     email assign "alice@example.com"
+ *     displayName mutate "Alice"
+ * }
+ * ```
+ *
+ * Reads as the natural one-liner one would expect for boundary-validated
+ * state. Throws `ValidationException` (and rolls back the transaction) if
+ * the primitive fails validation. Requires the enclosing scope to provide
+ * a [Vault] context — i.e. you must be inside an `action { }` block, not
+ * at top level.
+ *
+ * Implemented via Kotlin context parameters (`-Xcontext-parameters`).
+ */
+context(vault: Vault<*>)
+infix fun <P : Any, O : Boxed<P>> BoxedHandle<P, O>.assign(primitive: P) {
+    with(vault) { state mutate civilize(primitive) }
+}

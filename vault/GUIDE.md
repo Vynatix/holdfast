@@ -1530,14 +1530,18 @@ adopter-side.
 
 #### Vault integration (`vault-validation`)
 
+Two state factories:
+
 ```kotlin
 class UserVault : Vault<UserVault>() {
-    val email by boxed(EmailValidator) { "init@example.com" }
+    val email       by boxed(EmailValidator) { "init@example.com" }       // State<Email>
+    val displayName by boxedHandle(NameValidator) { "init" }              // BoxedHandle<String, Name>
 }
 
 vault action {
-    email mutate (EmailValidator of "alice@example.com")     // OK
-    email mutate Email("not-an-email")                       // rolls back via transformer
+    email mutate (EmailValidator of "alice@example.com")     // explicit validator at the call site
+    displayName assign "Alice"                                // assign infix via BoxedHandle
+    email mutate Email("not-an-email")                        // rolls back via transformer
 }
 
 // KvBridge persistence
@@ -1550,11 +1554,16 @@ vault {
 }
 ```
 
-`Vault.boxed(validator) { initial }` is sugar for
-`state(transformer = ValidatingTransformer(v)) { v of initial() }`.
-`ValidatingTransformer` re-validates on every write (defence-in-depth against
-constructor bypass via `data class copy`). `BoxedCodec` round-trips
-`Boxed<P>` through any `Codec<P>`.
+- **`boxed(validator) { initial }`** — sugar for
+  `state(transformer = ValidatingTransformer(v)) { v of initial() }`.
+  Property type is `State<O>`; mutate with the explicit validator.
+- **`boxedHandle(validator) { initial }`** — same wiring, but the property
+  is a `BoxedHandle<P, O>` bundling state + validator. Enables the
+  `assign` infix (powered by Kotlin context parameters) for one-line
+  civilize-and-mutate at the call site.
+- **`ValidatingTransformer`** — re-validates on every write, so
+  constructor bypass (`data class copy`) is rejected.
+- **`BoxedCodec`** — round-trips `Boxed<P>` through any `Codec<P>`.
 
 #### Suspend validation (`validation-coroutines`)
 
