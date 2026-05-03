@@ -21,9 +21,11 @@ import com.vynatix.vault.Transaction
  *    automatically wrapped (no public `:vault` API exists for that yet). The
  *    typed views ([VaultHandle.middlewareEventsOf]) will return an empty list
  *    for any user class until that gap is filled.
- *  - [BridgeEvent] — bridge publish/observe lifecycle. **In v1 always empty**
- *    (Issue 12 owns the bridge instrumentation surface); included now so
- *    Issue 07's matchers can be designed against the final hierarchy.
+ *  - [BridgeEvent] — bridge publish/observe lifecycle. Bridges attached to
+ *    a state **before** [VaultTestScope.track] are wrapped at install time and
+ *    fire events through the recorder; bridges attached afterwards are not
+ *    wrapped (no public `:vault` hook for late attachments yet). See
+ *    [VaultHandle.bridgeEvents] for the typed view.
  *
  * Events are immutable data classes; the timeline returned by
  * [VaultHandle.timeline] is a defensive copy, so callers can iterate and filter
@@ -73,8 +75,11 @@ data class TransactionErrored(override val transaction: Transaction, val cause: 
 
 /**
  * Emitted at commit time for each state present in [Transaction.modifiedStates].
- * The [oldValue] is the post-`transformer.get` view captured by the recorder in
- * `onTransactionStarted` (so it reflects the value the body started with);
+ * The [oldValue] is the committed value before the body's pending writes were
+ * applied — the recorder captures it inside `onTransactionCompleted` by briefly
+ * toggling the active-transaction overlay off via
+ * `internalSetActiveTransaction(null)` (see
+ * [com.vynatix.vault.testing.internal.PrivilegedHooks.snapshotCommittedStateValues]).
  * [newValue] is the post-`transformer.get` view of the about-to-be-committed
  * pending write (read via [State.value] on the owner thread inside the active
  * transaction, so read-your-own-writes returns the pending value).
@@ -108,9 +113,13 @@ data class MiddlewareErrored(
 ) : MiddlewareEvent
 
 /**
- * Bridge lifecycle event carrying the [State] involved. **In v1 always
- * unobserved** — Issue 12 owns the bridge instrumentation. The hierarchy is
- * defined now so Issue 07's matchers can target it without future churn.
+ * Bridge lifecycle event carrying the [State] involved. Bridges attached to a
+ * state **before** [VaultTestScope.track] are wrapped at install time
+ * ([com.vynatix.vault.testing.internal.RecordingBridgeWrapper]) and produce
+ * [BridgePublished] / [BridgeObserved] events through the recorder; bridges
+ * attached after `track(v)` are not wrapped, so their interactions are invisible
+ * to the timeline. The constraint is forced by `:vault` not exposing a hook for
+ * late bridge attachments.
  */
 sealed interface BridgeEvent : VaultEvent {
     val state: State<*>

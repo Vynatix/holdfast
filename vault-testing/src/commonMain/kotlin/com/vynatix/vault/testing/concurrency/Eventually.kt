@@ -1,6 +1,7 @@
 package com.vynatix.vault.testing.concurrency
 
 import com.vynatix.vault.testing.VaultTestScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration
@@ -35,6 +36,8 @@ suspend fun VaultTestScope.eventually(within: Duration = 1.seconds, every: Durat
             try {
                 block()
                 return@withTimeoutOrNull Unit
+            } catch (c: CancellationException) {
+                throw c
             } catch (t: Throwable) {
                 lastError = t
                 delay(every)
