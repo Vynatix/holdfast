@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("astrid.kmp.library")
     id("astrid.quality")
@@ -7,11 +9,46 @@ plugins {
 }
 
 kotlin {
+    compilerOptions {
+        // Enable K2 context parameters (stable in Kotlin 2.2+, behind opt-in flag in 2.3.21).
+        // Powers the context(scope: CoroutineScope) overloads on `asStateFlow`, `bridge`,
+        // `suspendingBridge` — see issues 23/24/25 and 2.0-DESIGN.md §3.8.
+        freeCompilerArgs.add("-Xcontext-parameters")
+    }
+
     android {
         namespace = "com.vynatix.vault.coroutines"
     }
 
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_21)
+        }
+    }
+
+    applyDefaultHierarchyTemplate()
+
     sourceSets {
+        val jvmAndAndroidMain by creating {
+            dependsOn(commonMain.get())
+        }
+        androidMain {
+            dependsOn(jvmAndAndroidMain)
+        }
+        jvmMain {
+            dependsOn(jvmAndAndroidMain)
+        }
+
+        val jvmAndAndroidHostTest by creating {
+            dependsOn(commonTest.get())
+        }
+        androidHostTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+        jvmTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+
         commonMain.dependencies {
             api(project(":vault"))
             implementation(libs.kotlinx.coroutines.core)

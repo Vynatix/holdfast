@@ -4,6 +4,10 @@ package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
 import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -51,6 +55,126 @@ abstract class Vault<Self : Vault<Self>> {
     @VaultInternalApi
     val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
 
+    /**
+     * Volatile backing field for the scope bound via [bindToScope]. `null` until the
+     * first `bindToScope` call; subsequent calls atomically replace it. Read by the
+     * default getter of [scope] as resolution level 3 (between subclass override and
+     * process default).
+     *
+     * Marked `@Volatile` so a write on one thread is immediately visible to readers
+     * on other threads — the binding is racy by contract (last writer wins).
+     */
+    @kotlin.concurrent.Volatile
+    private var boundScope: CoroutineScope? = null
+
+    /**
+     * The [CoroutineScope] this vault's long-running async work runs on. Resolution order
+     * (per-call → per-vault override → bound → process-global default):
+     *
+     *  1. **Per-call** — APIs that take an explicit `scope: CoroutineScope` parameter use that.
+     *  2. **Per-vault** — a subclass may `override val scope: CoroutineScope` (use a getter,
+     *     not a `val` initializer, to avoid lazy-init order traps in singleton vaults).
+     *     A subclass override sits ABOVE this property in the resolution chain, so it
+     *     beats any [bindToScope] call.
+     *  3. **Bound** — the scope passed to the most recent [bindToScope] call on this
+     *     vault instance, if any. Rebindable.
+     *  4. **Global** — falls back to [Vault.Companion.defaultScope].
+     */
+    open val scope: CoroutineScope
+        get() = boundScope ?: defaultScope
+
+    /**
+     * Bind this vault to [scope] for resolution level 3 (see [scope]). After this call,
+     * `vault.scope` returns [scope] (unless a subclass has its own `override val scope`,
+     * which beats the bound scope). Calling [bindToScope] again replaces the binding.
+     *
+     * Thread safety: the binding field is `@Volatile`; the latest write becomes
+     * visible to all readers. Concurrent callers race in the obvious way (last write
+     * wins) — bind once at app init, or guard externally if multiple components own
+     * the binding.
+     *
+     * Lifecycle note: [bindToScope] does NOT cancel the previously-bound scope and
+     * does NOT cancel the new scope when the vault is later disposed. Scope lifetimes
+     * are owned by the caller. See [dispose] for terminal teardown of the vault.
+     */
+    fun bindToScope(scope: CoroutineScope) {
+        boundScope = scope
+    }
+
+    /**
+     * Atomic disposed flag. CAS'd to `true` exactly once on the first [dispose] call;
+     * subsequent calls observe `true` and return without throwing (idempotent contract).
+     * Every public entry point reads this — when `true`, they throw
+     * `IllegalStateException("vault disposed")`.
+     */
+    private val disposedFlag = atomic(false)
+
+    /**
+     * Whether [dispose] has been called on this vault. Once `true`, every public
+     * mutation entrypoint (`action`, `mutate`, `update`, `effect`, `bridge`,
+     * `observeFrom`, `removeState`, `clearStates`, etc.) and every state-registry
+     * read throws [IllegalStateException]. Cold APIs in companion modules
+     * (e.g. `:vault-coroutines.asFlow`/`first`/`awaitValue`) MUST also check this
+     * before establishing observer subscriptions.
+     */
+    val isDisposed: Boolean get() = disposedFlag.value
+
+    /**
+     * Terminally tear down this vault. Idempotent.
+     *
+     * After `dispose()`:
+     *  - Every state-mutation API throws `IllegalStateException("vault disposed")`.
+     *  - Every state-registry read API throws.
+     *  - All registered observers are dropped; all bridges are detached.
+     *  - The [Vault.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
+     *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
+     *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
+     *
+     * Subclasses with additional resources (e.g. `EventfulVault`'s events SharedFlow)
+     * should override [onDispose] to release them. Always call `super.onDispose()`.
+     */
+    fun dispose() {
+        if (!disposedFlag.compareAndSet(expect = false, update = true)) {
+            // Already disposed — idempotent, no work, no throw.
+            return
+        }
+        // Drop in-flight transactional state so any pending writes can never be applied.
+        // Acquire the transaction lock briefly so a racing action that's mid-flight
+        // (under the lock) finishes before we reach into shared structures.
+        transactionLock.withLock {
+            _activeTransaction = null
+            postCommitTasks.clear()
+        }
+        // Snapshot the property map under its lock, then call shutdownSilently outside
+        // any vault-side lock — `shutdownSilently` takes the per-state observer + bridge
+        // locks, and we don't want to invert ordering.
+        val toShutdown = propertiesLock.withLock {
+            val snap = _properties.values.toList()
+            _properties.clear()
+            snap
+        }
+        toShutdown.forEach { runCatching { it.shutdownSilently() } }
+        // Drop middleware so a stray reference to a disposed vault can't keep
+        // captured state alive.
+        middlewareLock.withLock { middlewareList.clear() }
+        // Subclass hook: EventfulVault uses this to reset its events SharedFlow.
+        runCatching { onDispose() }
+    }
+
+    /**
+     * Subclass hook invoked once, AFTER the base `dispose()` has cleared all states,
+     * observers, bridges, and middleware. Override to release subclass-owned resources
+     * (e.g. `EventfulVault` resets its events SharedFlow). Default no-op.
+     *
+     * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
+     * leave the vault half-disposed.
+     */
+    protected open fun onDispose() {}
+
+    private fun checkNotDisposed() {
+        if (disposedFlag.value) error("vault disposed")
+    }
+
     private val transactionLock = VaultLock()
     private val propertiesLock = VaultLock()
     private val middlewareLock = VaultLock()
@@ -77,7 +201,10 @@ abstract class Vault<Self : Vault<Self>> {
      * the transactional API; doing so leads to undefined behavior.
      */
     val properties: Map<String, State<*>>
-        get() = propertiesLock.withLock { _properties.toMap() }
+        get() {
+            checkNotDisposed()
+            return propertiesLock.withLock { _properties.toMap() }
+        }
 
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
@@ -142,10 +269,14 @@ abstract class Vault<Self : Vault<Self>> {
      * finishes. If called outside any action, the task runs immediately.
      *
      * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
-     * instead of re-entering the parent's commit. Internal because the deferral
-     * contract is implementation detail.
+     * instead of re-entering the parent's commit. Also reachable by companion
+     * modules (`:vault-coroutines.suspendDerived`) that need the same deferral
+     * contract; marked `@VaultInternalApi` because the deferral is an
+     * implementation detail of the derived-recompute machinery, not a
+     * user-facing knob.
      */
-    internal fun postCommit(task: () -> Unit) {
+    @VaultInternalApi
+    fun postCommit(task: () -> Unit) {
         if (_activeTransaction != null) {
             postCommitTasks.add(task)
         } else {
@@ -172,12 +303,16 @@ abstract class Vault<Self : Vault<Self>> {
      * outermost middleware (its `onTransactionStarted` runs first; its `completed`
      * or `onTransactionError` runs last). Earlier-listed middlewares are inner.
      *
+     * Same ordering applies to both blocking [action] and suspending
+     * `:vault-coroutines.suspendAction` (issue 31).
+     *
      * Practical implication: for an `onTransactionError` handler to see exceptions
      * thrown by another middleware, it must be listed AFTER that middleware. Place
      * a logging/audit middleware LAST so it sees errors from validation middleware
      * placed earlier.
      */
     fun middlewares(vararg middleware: Middleware<Self>) {
+        checkNotDisposed()
         middlewareLock.withLock {
             middlewareList.addAll(middleware)
         }
@@ -185,6 +320,7 @@ abstract class Vault<Self : Vault<Self>> {
 
     /** Drop every registered middleware. */
     fun clearMiddleware() {
+        checkNotDisposed()
         middlewareLock.withLock {
             middlewareList.clear()
         }
@@ -214,6 +350,7 @@ abstract class Vault<Self : Vault<Self>> {
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
+        checkNotDisposed()
         // If a suspending caller (vault-coroutines.suspendAction) has installed a
         // serializer, block here until they release. This makes blocking action and
         // suspending action mutually exclusive on the same vault.
@@ -289,6 +426,7 @@ abstract class Vault<Self : Vault<Self>> {
     fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T> {
         val owningVault: Vault<*> = this
         return StateDelegate { _, property ->
+            checkNotDisposed()
             propertiesLock.withLock {
                 val existing = _properties[property.name]
                 if (existing != null) {
@@ -304,18 +442,16 @@ abstract class Vault<Self : Vault<Self>> {
     }
 
     /**
-     * Subscribe to commits on this state. The receiver `T` of [effect] is the new
-     * value (post-`transformer.get`). The returned [Disposable] removes the observer.
+     * Create-or-fetch a state under an arbitrary name. Used by [derived] to
+     * register synthetic backing states whose names ("__derived_N") never
+     * collide with user-declared property names (since Kotlin identifiers
+     * can't start with `__`). Also reachable by companion modules
+     * (`:vault-coroutines.suspendDerived`) for the suspending-derived backing
+     * state; marked `@VaultInternalApi` because the synthesized name scheme
+     * is an implementation detail.
      */
-    infix fun <T : Any> State<T>.effect(effect: T.() -> Unit): Disposable = this.getMutableState().observe(effect::invoke)
-
-    /**
-     * Internal: create-or-fetch a state under an arbitrary name. Used by
-     * [derived] to register synthetic backing states whose names ("__derived_N")
-     * never collide with user-declared property names (since Kotlin identifiers
-     * can't start with `__`).
-     */
-    internal fun <T : Any> registerInternalState(
+    @VaultInternalApi
+    fun <T : Any> registerInternalState(
         name: String,
         initial: T,
         transformer: Transformer<T>? = null,
@@ -339,6 +475,7 @@ abstract class Vault<Self : Vault<Self>> {
      * On detach, the previous bridge's inbound observer is disposed.
      */
     infix fun <T : Any> State<T>.bridge(bridge: Bridge<T>?) {
+        checkNotDisposed()
         this.getMutableState().bridge = bridge
     }
 
@@ -350,6 +487,7 @@ abstract class Vault<Self : Vault<Self>> {
      * Returns a [Disposable] that detaches the inbound subscription.
      */
     infix fun <T : Any> State<T>.observeFrom(observable: Observable<T>): Disposable {
+        checkNotDisposed()
         val ms = this.getMutableState()
         return observable.observe { value -> ms.applyFromBridge(value) }
     }
@@ -369,6 +507,7 @@ abstract class Vault<Self : Vault<Self>> {
      * ```
      */
     infix fun <T : Any> State<T>.update(block: (T) -> T) {
+        checkNotDisposed()
         this mutate block(this.value)
     }
 
@@ -382,6 +521,7 @@ abstract class Vault<Self : Vault<Self>> {
      * committed value.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
+        checkNotDisposed()
         val state = this.getMutableState()
         val txn = _activeTransaction
         val onOwnerThread = txn != null && txn.ownerThreadId == currentThreadId()
@@ -423,13 +563,15 @@ abstract class Vault<Self : Vault<Self>> {
      * (states are registered lazily on first delegate read). Caller MUST NOT cast
      * the returned [State] back to [MutableState].
      */
-    fun getState(name: String): State<*>? = propertiesLock.withLock {
-        _properties[name]
+    fun getState(name: String): State<*>? {
+        checkNotDisposed()
+        return propertiesLock.withLock { _properties[name] }
     }
 
     /** Whether a state with [name] has been registered. */
-    fun hasState(name: String): Boolean = propertiesLock.withLock {
-        _properties.containsKey(name)
+    fun hasState(name: String): Boolean {
+        checkNotDisposed()
+        return propertiesLock.withLock { _properties.containsKey(name) }
     }
 
     /**
@@ -440,6 +582,7 @@ abstract class Vault<Self : Vault<Self>> {
      * transaction (caller must commit or roll back first).
      */
     fun removeState(name: String) {
+        checkNotDisposed()
         propertiesLock.withLock {
             val state = _properties[name] ?: return@withLock
             checkNoPendingWrites(state, name)
@@ -456,6 +599,7 @@ abstract class Vault<Self : Vault<Self>> {
      * transaction.
      */
     fun clearStates() {
+        checkNotDisposed()
         propertiesLock.withLock {
             _properties.values.forEach { state ->
                 checkNoPendingWrites(state, state.toString())
@@ -497,6 +641,21 @@ abstract class Vault<Self : Vault<Self>> {
     val selfForExternal: Self get() = self
 
     /**
+     * Internal hook for `:vault-coroutines.suspendAction`. Returns a stable
+     * snapshot of the currently-registered middleware list, taken under the
+     * middleware lock — same snapshot semantics as [runMiddlewareChain] uses
+     * for the blocking [action] path. The suspending chain runner uses this
+     * to invoke each hook directly with its own `runCatching` wrapper, in
+     * concentric-ring order matching the sync path: reverse chain order on
+     * `started` (LAST-registered = outermost fires first), forward chain
+     * order on `completed`/`error` (innermost first; outermost last).
+     */
+    @VaultInternalApi
+    fun snapshotMiddleware(): List<Middleware<Self>> = middlewareLock.withLock {
+        middlewareList.toList()
+    }
+
+    /**
      * Internal hook for `atomic(...)`. Runs [block] under this vault's
      * `transactionLock`. The reentrant lock makes this safe to call when the
      * same thread already holds the lock (e.g., nested `atomic` calls overlap
@@ -504,4 +663,42 @@ abstract class Vault<Self : Vault<Self>> {
      */
     @VaultInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
+
+    companion object {
+        /**
+         * Process-singleton lazy default scope. Initialized on first read of
+         * [defaultScope] when no custom value has been assigned. Backs the lazy
+         * fallback in the resolution chain.
+         */
+        private val processScope: CoroutineScope by lazy {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("VaultProcessScope"))
+        }
+
+        private val customDefaultScope = atomic<CoroutineScope?>(null)
+
+        /**
+         * Process-global default scope used by every [Vault] that has neither a
+         * per-vault override nor a per-call scope argument. Settable at most once
+         * per process via CAS — the first non-null assignment wins; subsequent
+         * assignments throw [IllegalStateException].
+         *
+         * Typical app-init pattern:
+         * ```
+         * val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+         * Vault.defaultScope = appScope
+         * ```
+         *
+         * Reads before any explicit assignment return a lazy
+         * `SupervisorJob() + Dispatchers.Default` process scope. Reading the lazy
+         * default does NOT prevent a subsequent assignment — only an explicit
+         * assignment freezes the value.
+         */
+        var defaultScope: CoroutineScope
+            get() = customDefaultScope.value ?: processScope
+            set(value) {
+                check(customDefaultScope.compareAndSet(null, value)) {
+                    "Vault.defaultScope is settable-once; it has already been assigned."
+                }
+            }
+    }
 }

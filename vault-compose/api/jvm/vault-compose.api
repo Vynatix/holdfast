@@ -1,0 +1,5 @@
+public final class com/vynatix/vault/compose/ComposeBindingsKt {
+	public static final fun collectAsState (Lcom/vynatix/vault/Vault;Lcom/vynatix/vault/State;Landroidx/compose/runtime/Composer;I)Landroidx/compose/runtime/State;
+	public static final fun rememberDisposable (Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)Lcom/vynatix/vault/Disposable;
+}
+

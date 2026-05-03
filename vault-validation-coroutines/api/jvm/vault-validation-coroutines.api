@@ -1,0 +1,4 @@
+public final class com/vynatix/vault/validation/coroutines/SuspendBoxedExtensionsKt {
+	public static final fun suspendValidateAndMutate (Lcom/vynatix/vault/Vault;Lcom/vynatix/vault/State;Lcom/vynatix/validation/coroutines/SuspendValidator;Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+

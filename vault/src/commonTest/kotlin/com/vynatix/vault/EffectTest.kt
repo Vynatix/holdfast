@@ -249,6 +249,42 @@ class EffectNotificationTest {
     }
 }
 
+class EffectTopLevelExtensionTest {
+
+    @Test
+    fun topLevelEffectFiresOnCommitOutsideVaultBlock() {
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        // Direct top-level call: no `vault { … }` wrapping.
+        val d = v.count effect { seen.add(this) }
+        v action { count mutate 7 }
+        assertEquals(listOf(0, 7), seen)
+        d.dispose()
+    }
+
+    @Test
+    fun topLevelEffectDisposableStopsFurtherFires() {
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        val d = v.count effect { seen.add(this) }
+        v action { count mutate 1 }
+        d.dispose()
+        v action { count mutate 2 }
+        assertEquals(listOf(0, 1), seen)
+    }
+
+    @Test
+    fun memberCallSiteInsideVaultBlockStillCompiles() {
+        // Acceptance: existing `vault { state effect { … } }` keeps working.
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        val d = v { count effect { seen.add(this) } }
+        v action { count mutate 3 }
+        assertEquals(listOf(0, 3), seen)
+        d.dispose()
+    }
+}
+
 class EffectTransactionIsolationTest {
 
     @Test

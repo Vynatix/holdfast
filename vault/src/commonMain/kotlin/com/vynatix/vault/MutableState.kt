@@ -1,3 +1,5 @@
+@file:OptIn(VaultInternalApi::class)
+
 package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
@@ -21,7 +23,8 @@ import com.vynatix.vault.platform.currentThreadId
 class MutableState<T : Any>(
     initialValue: T,
     private val transformer: Transformer<T>? = null,
-    internal val owningVault: Vault<*>,
+    @property:VaultInternalApi
+    val owningVault: Vault<*>,
     internal val distinct: Boolean = false,
 ) : State<T> {
     private val stateLock = VaultLock()
@@ -29,6 +32,22 @@ class MutableState<T : Any>(
     private val bridgeLock = VaultLock()
 
     private val observers = mutableSetOf<(T) -> Unit>()
+
+    /**
+     * Test-only window onto the live observer set size. Unlike a "total observers
+     * ever attached" counter, this reflects the *current* number of live
+     * subscriptions — adds and disposes both move it. Reads under [observersLock]
+     * so the count is consistent with concurrent [observe]/dispose.
+     *
+     * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+     * uses it to verify that `Flow`/`StateFlow`/`effect` adapters correctly dispose
+     * their underlying observer registration on consumer cancellation. Application
+     * code must never read this — depending on observer count couples consumers to
+     * the internal subscription model.
+     */
+    @VaultInternalApi
+    val observerCount: Int
+        get() = observersLock.withLock { observers.size }
 
     @kotlin.concurrent.Volatile
     private var currentValue: T = initialValue
@@ -83,6 +102,36 @@ class MutableState<T : Any>(
         get() = stateLock.withLock { currentValue }
 
     /**
+     * Commit-time apply (raw): writes `currentValue` and notifies observers, but
+     * **does NOT publish to the bridge**. Strict subset of [applyCommitted]
+     * exposed as a `@VaultInternalApi` extension hook so companion modules
+     * (notably `:vault-coroutines.suspendAction`) can interpose between the
+     * observer fanout (step 1+2) and the bridge publish (step 3) — necessary
+     * for [com.vynatix.vault.coroutines.SuspendingBridge.publishAwaited] to be
+     * awaited under `withContext(NonCancellable)` instead of fire-and-forget.
+     *
+     * If [distinct] is true and the new processed value is `==` to
+     * `currentValue`, skips observer fanout (opt-in dedup). Bridge publish is
+     * the caller's responsibility — they must not call `bridge.publish` either
+     * if this returns silently due to dedup.
+     *
+     * Returns `true` if the value was applied (observer fanout fired), `false`
+     * if it was deduped. The boolean lets the caller skip their own bridge
+     * publish in the dedup case.
+     */
+    @VaultInternalApi
+    fun applyCommittedRaw(processedValue: T): Boolean {
+        val unchanged = stateLock.withLock {
+            val same = distinct && currentValue == processedValue
+            if (!same) currentValue = processedValue
+            same
+        }
+        if (unchanged) return false
+        notifyObservers(afterGet(processedValue))
+        return true
+    }
+
+    /**
      * Commit-time apply: writes `currentValue`, notifies observers, publishes to bridge.
      * The single observable side effect of a successful commit. Lock-order: snapshot
      * under `stateLock`, release, then notify outside `stateLock` to avoid AB-BA with
@@ -92,13 +141,8 @@ class MutableState<T : Any>(
      * skips both observer fanout and bridge publish (opt-in dedup).
      */
     internal fun applyCommitted(processedValue: T) {
-        val unchanged = stateLock.withLock {
-            val same = distinct && currentValue == processedValue
-            if (!same) currentValue = processedValue
-            same
-        }
-        if (unchanged) return
-        notifyObservers(afterGet(processedValue))
+        @OptIn(VaultInternalApi::class)
+        if (!applyCommittedRaw(processedValue)) return
         bridgeLock.withLock { currentBridge?.publish(processedValue) }
     }
 
@@ -136,7 +180,14 @@ class MutableState<T : Any>(
      *
      * Returns a [Disposable] that removes the observer when called. Double-dispose
      * is safe (idempotent).
+     *
+     * Internal: the public surface is the top-level [com.vynatix.vault.effect]
+     * extension. Companion modules in the same library group (`:vault-coroutines`,
+     * `:vault-validation`) reach this directly through the package-internal
+     * visibility for adapter implementations (Flow/StateFlow). Application code
+     * must use [effect].
      */
+    @VaultInternalApi
     fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
         observers.add(observer)
         // Initial callback uses the same view as the value getter — post-transformer.get —
@@ -189,3 +240,22 @@ class MutableState<T : Any>(
         }
     }
 }
+
+/**
+ * Test-only window onto the live observer count for a [State]. Convenience
+ * extension so test code can read it from a [State] reference (the public
+ * surface) without an explicit cast to [MutableState]. Throws if the [State]
+ * was not produced by `vault.state { … }` — only [MutableState] instances
+ * carry an observer set.
+ *
+ * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+ * uses it to verify that `Flow`/`StateFlow`/`effect` adapters dispose their
+ * underlying observer registration on consumer cancellation. Application code
+ * must never opt in.
+ */
+@VaultInternalApi
+val <T : Any> State<T>.observerCount: Int
+    get() {
+        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (vault.state { ... })")
+        return ms.observerCount
+    }

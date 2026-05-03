@@ -5,9 +5,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import com.vynatix.vault.Disposable
-import com.vynatix.vault.MutableState
 import com.vynatix.vault.State
 import com.vynatix.vault.Vault
+import com.vynatix.vault.effect
 
 /**
  * Bridges a vault [State] into Compose's snapshot system as a `androidx.compose.runtime.State`,
@@ -31,13 +31,11 @@ import com.vynatix.vault.Vault
  * ```
  */
 @Composable
-fun <V : Vault<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> {
-    val mutable = state as MutableState<T>
-    return produceState(initialValue = mutable.value, mutable) {
-        val disposable = mutable.observe { value = it }
+fun <V : Vault<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> =
+    produceState(initialValue = state.value, state) {
+        val disposable = state effect { value = this }
         awaitDispose { disposable.dispose() }
     }
-}
 
 /**
  * Owns a [Disposable] for the lifetime of the surrounding Composable. The

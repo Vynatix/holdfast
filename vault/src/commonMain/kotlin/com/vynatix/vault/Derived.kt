@@ -1,3 +1,5 @@
+@file:OptIn(VaultInternalApi::class)
+
 package com.vynatix.vault
 
 import kotlinx.atomicfu.atomic

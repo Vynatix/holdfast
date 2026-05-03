@@ -6,16 +6,67 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-coroutines>
-final class <#A: kotlin/Any> com.vynatix.vault.coroutines/EagerStateFlow : com.vynatix.vault/Disposable { // com.vynatix.vault.coroutines/EagerStateFlow|null[0]
-    final val state // com.vynatix.vault.coroutines/EagerStateFlow.state|{}state[0]
-        final fun <get-state>(): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/EagerStateFlow.state.<get-state>|<get-state>(){}[0]
-
-    final fun dispose() // com.vynatix.vault.coroutines/EagerStateFlow.dispose|dispose(){}[0]
+abstract interface <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.coroutines/SuspendingMiddlewareHooks { // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks|null[0]
+    open suspend fun onTransactionCompletedAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionCompletedAsync|onTransactionCompletedAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+    open suspend fun onTransactionErrorAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionErrorAsync|onTransactionErrorAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    open suspend fun onTransactionStartedAsync(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault.coroutines/SuspendingMiddlewareHooks.onTransactionStartedAsync|onTransactionStartedAsync(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
 }
 
-final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asEagerStateFlow(): com.vynatix.vault.coroutines/EagerStateFlow<#A> // com.vynatix.vault.coroutines/asEagerStateFlow|asEagerStateFlow@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
+abstract interface <#A: kotlin/Any> com.vynatix.vault.coroutines/SuspendingBridge : com.vynatix.vault/Bridge<#A> { // com.vynatix.vault.coroutines/SuspendingBridge|null[0]
+    abstract fun publish(#A): kotlin/Boolean // com.vynatix.vault.coroutines/SuspendingBridge.publish|publish(1:0){}[0]
+    abstract suspend fun publishAwaited(#A) // com.vynatix.vault.coroutines/SuspendingBridge.publishAwaited|publishAwaited(1:0){}[0]
+}
+
+abstract interface com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/SuspendingKvStore|null[0]
+    abstract suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/SuspendingKvStore.get|get(kotlin.String){}[0]
+    abstract suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/SuspendingKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    abstract suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/SuspendingKvStore.remove|remove(kotlin.String){}[0]
+    abstract suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/SuspendingKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.vault.coroutines/InMemorySuspendingKvStore : com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/InMemorySuspendingKvStore|null[0]
+    constructor <init>(kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.<init>|<init>(kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+
+    final suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.get|get(kotlin.String){}[0]
+    final suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.remove|remove(kotlin.String){}[0]
+    final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.vault.coroutines/SuspendingFileSystemKvStore : com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.<init>|<init>(kotlin.String){}[0]
+
+    final suspend fun get(kotlin/String): kotlin/String? // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.get|get(kotlin.String){}[0]
+    final suspend fun put(kotlin/String, kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final suspend fun remove(kotlin/String) // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.remove|remove(kotlin.String){}[0]
+    final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/SuspendingFileSystemKvStore.snapshot|snapshot(){}[0]
+}
+
+open class <#A: kotlin/Any> com.vynatix.vault.coroutines/SuspendingKvBridge : com.vynatix.vault/Bridge<#A> { // com.vynatix.vault.coroutines/SuspendingKvBridge|null[0]
+    final val bridgeScope // com.vynatix.vault.coroutines/SuspendingKvBridge.bridgeScope|{}bridgeScope[0]
+        final fun <get-bridgeScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.coroutines/SuspendingKvBridge.bridgeScope.<get-bridgeScope>|<get-bridgeScope>(){}[0]
+    final val errors // com.vynatix.vault.coroutines/SuspendingKvBridge.errors|{}errors[0]
+        final fun <get-errors>(): kotlinx.coroutines.flow/SharedFlow<kotlin/Throwable> // com.vynatix.vault.coroutines/SuspendingKvBridge.errors.<get-errors>|<get-errors>(){}[0]
+
+    final suspend fun putOrEmit(#A) // com.vynatix.vault.coroutines/SuspendingKvBridge.putOrEmit|putOrEmit(1:0){}[0]
+    open fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault.coroutines/SuspendingKvBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    open fun publish(#A): kotlin/Boolean // com.vynatix.vault.coroutines/SuspendingKvBridge.publish|publish(1:0){}[0]
+
+    final class <#A1: kotlin/Any> Awaiting : com.vynatix.vault.coroutines/SuspendingBridge<#A1>, com.vynatix.vault.coroutines/SuspendingKvBridge<#A1> { // com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting|null[0]
+        final fun publish(#A1): kotlin/Boolean // com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting.publish|publish(1:0){}[0]
+        final suspend fun publishAwaited(#A1) // com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting.publishAwaited|publishAwaited(1:0){}[0]
+    }
+}
+
+final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault.coroutines/suspendDerived(kotlin/Array<out com.vynatix.vault/State<*>>..., kotlin.coroutines/SuspendFunction1<#A, #B>): kotlin/Pair<com.vynatix.vault/State<#B>, com.vynatix.vault/Disposable> // com.vynatix.vault.coroutines/suspendDerived|suspendDerived@0:0(kotlin.Array<out|com.vynatix.vault.State<*>>...;kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/bridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.vault.coroutines/SuspendingKvBridge<#A> // com.vynatix.vault.coroutines/bridge|bridge@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/suspendingBridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting<#A> // com.vynatix.vault.coroutines/suspendingBridge|suspendingBridge@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asFlow(): kotlinx.coroutines.flow/Flow<#A> // com.vynatix.vault.coroutines/asFlow|asFlow@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
-final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asStateFlow(kotlinx.coroutines/CoroutineScope, kotlinx.coroutines.flow/SharingStarted = ...): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/asStateFlow|asStateFlow@com.vynatix.vault.State<0:0>(kotlinx.coroutines.CoroutineScope;kotlinx.coroutines.flow.SharingStarted){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asStateFlow(kotlinx.coroutines/CoroutineScope = ..., kotlinx.coroutines.flow/SharingStarted = ...): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/asStateFlow|asStateFlow@com.vynatix.vault.State<0:0>(kotlinx.coroutines.CoroutineScope;kotlinx.coroutines.flow.SharingStarted){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (context(kotlinx.coroutines/CoroutineScope), com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/bridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>): com.vynatix.vault.coroutines/SuspendingKvBridge<#A> // com.vynatix.vault.coroutines/bridge|bridge(kotlinx.coroutines.CoroutineScope)@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (context(kotlinx.coroutines/CoroutineScope), com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/suspendingBridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>): com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting<#A> // com.vynatix.vault.coroutines/suspendingBridge|suspendingBridge(kotlinx.coroutines.CoroutineScope)@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (context(kotlinx.coroutines/CoroutineScope), com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asStateFlow(kotlinx.coroutines.flow/SharingStarted = ...): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/asStateFlow|asStateFlow(kotlinx.coroutines.CoroutineScope)@com.vynatix.vault.State<0:0>(kotlinx.coroutines.flow.SharingStarted){0§<kotlin.Any>}[0]
 final suspend fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any?> (#A).com.vynatix.vault.coroutines/suspendAction(kotlin.coroutines/SuspendFunction1<#A, #B>): com.vynatix.vault/TransactionResult<#B> // com.vynatix.vault.coroutines/suspendAction|suspendAction@0:0(kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any?>}[0]
 final suspend fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/awaitValue(#A): #A // com.vynatix.vault.coroutines/awaitValue|awaitValue@com.vynatix.vault.State<0:0>(0:0){0§<kotlin.Any>}[0]
 final suspend fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/first(kotlin/Function1<#A, kotlin/Boolean>): #A // com.vynatix.vault.coroutines/first|first@com.vynatix.vault.State<0:0>(kotlin.Function1<0:0,kotlin.Boolean>){0§<kotlin.Any>}[0]
+final suspend fun <#A: kotlin/Any?> com.vynatix.vault.coroutines/suspendAtomic(kotlin/Array<out com.vynatix.vault/Vault<*>>..., kotlin.coroutines/SuspendFunction0<#A>): com.vynatix.vault/TransactionResult<#A> // com.vynatix.vault.coroutines/suspendAtomic|suspendAtomic(kotlin.Array<out|com.vynatix.vault.Vault<*>>...;kotlin.coroutines.SuspendFunction0<0:0>){0§<kotlin.Any?>}[0]

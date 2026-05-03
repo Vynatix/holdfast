@@ -2,12 +2,11 @@
 
 package com.vynatix.vault.coroutines
 
+import com.vynatix.vault.Middleware
 import com.vynatix.vault.Transaction
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
 import com.vynatix.vault.platform.currentThreadId
-import kotlinx.atomicfu.locks.SynchronizedObject
-import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -35,8 +34,14 @@ import kotlin.uuid.Uuid
  *    the transaction. Cancellation BETWEEN body return and commit is suppressed
  *    via [NonCancellable] on the commit phase — once the body completes, the
  *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
- *  - **Middleware**: NOT invoked for 1.1. Use blocking `action` if you need
- *    middleware plus async work.
+ *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
+ *    in concentric-ring order — last-registered middleware is outermost (its
+ *    `onTransactionStarted` fires first), matching `Vault.middlewares`'s
+ *    contract and the sync `action` path. `onTransactionCompleted` (success)
+ *    or `onTransactionError` (throw / cancellation) unwind in chain order
+ *    (innermost-first), so the outermost middleware sees `completed`/`error`
+ *    last. Each hook invocation is wrapped in `runCatching`: one middleware's
+ *    failure does not abort other middlewares' hooks.
  *  - **Concurrent threads inside the body**: undefined. Stick to single-flight
  *    bodies.
  *
@@ -66,22 +71,92 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         internalSetActiveTransaction(txn)
         suspendingOwner = owner
 
+        // Snapshot the middleware chain once at the start of the action — same
+        // semantics as the blocking path. Concurrent middleware registration
+        // during this action does not retroactively apply.
+        val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
+        // One MiddlewareContext per middleware, reused across that middleware's
+        // started/completed/error hooks so metadata stashed in one hook is
+        // visible to the next, matching the sync `Middleware.invoke` contract.
+        val contexts: List<Middleware.MiddlewareContext<V>> = middlewareChain.map { _ ->
+            Middleware.MiddlewareContext(
+                vault = selfForExternal,
+                transaction = txn,
+            )
+        }
+
+        // Concentric outermost-first: iterate REVERSED so the LAST-registered
+        // middleware fires `started` first — matching `Vault.middlewares`'s contract
+        // and the sync `action` path's fold-derived nesting (issue 31). Each
+        // invocation is run-caught so one middleware's failure does not abort others.
+        // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
+        // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
+        // sync sibling — interleaved per-middleware so the master ordering is
+        //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
+        for (i in middlewareChain.indices.reversed()) {
+            runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
+            val mw = middlewareChain[i]
+            if (mw is SuspendingMiddlewareHooks<*>) {
+                @Suppress("UNCHECKED_CAST")
+                val async = mw as SuspendingMiddlewareHooks<V>
+                runCatching { async.onTransactionStartedAsync(contexts[i]) }
+            }
+        }
+
         val outcome: TransactionResult<R> = try {
             val value: R = try {
-                @Suppress("UNCHECKED_CAST")
-                (selfForExternal as V).body()
+                selfForExternal.body()
             } catch (ce: CancellationException) {
+                // Concentric forward (innermost-first) on the error path so the
+                // outermost middleware that ran `started` first sees `error` last —
+                // mirrors the sync `Middleware.invoke` unwind order. Cancellation is
+                // propagated after rollback; error hooks run for symmetry with the
+                // throwing path so middleware sees one consistent "errored
+                // transaction" view. Per-middleware async-then-sync interleave:
+                //   A.async.errorAsync, A.sync.error, B.async.errorAsync, B.sync.error
+                for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionErrorAsync(contexts[i], ce) }
+                    }
+                    runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], ce) }
+                }
                 runCatching { txn.rollback() }
                 throw ce
             } catch (e: Throwable) {
+                for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionErrorAsync(contexts[i], e) }
+                    }
+                    runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
+                }
                 runCatching { txn.rollback() }
                 return@withLock TransactionResult.Error(e, txn)
             }
             // Body returned. Commit under NonCancellable so observer/bridge
             // fanout completes even if the surrounding scope cancels here.
+            // Sync `Middleware.invoke` runs `onTransactionCompleted` BEFORE
+            // commit; we preserve that ordering here, with innermost-first
+            // unwind so the outermost middleware sees `completed` last.
+            // Per-middleware async-then-sync interleave:
+            //   A.async.completedAsync, A.sync.completed, B.async.completedAsync, B.sync.completed
             withContext(NonCancellable) {
+                for (i in middlewareChain.indices) {
+                    val mw = middlewareChain[i]
+                    if (mw is SuspendingMiddlewareHooks<*>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val async = mw as SuspendingMiddlewareHooks<V>
+                        runCatching { async.onTransactionCompletedAsync(contexts[i]) }
+                    }
+                    runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
+                }
                 try {
-                    txn.commit()
+                    suspendingCommit(txn)
                     TransactionResult.Success(txn, value)
                 } catch (e: Throwable) {
                     TransactionResult.Error(e, txn)
@@ -98,46 +173,3 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
 
 /** Owner sentinel for suspendAction calls that have no enclosing Job. */
 private object SuspendActionFallbackOwner
-
-/**
- * Lazy installation of the [Vault.AsyncSerializer] hook on each vault. The
- * hook is installed on first use and persists for the vault's lifetime — the
- * coroutine [Mutex] inside it serializes both blocking action and suspending
- * action.
- */
-private val installLock = object : SynchronizedObject() {}
-
-private fun ensureSerializer(vault: Vault<*>): MutexSerializer {
-    val installed = vault.asyncSerializer as? MutexSerializer
-    if (installed != null) return installed
-    return synchronized(installLock) {
-        val again = vault.asyncSerializer as? MutexSerializer
-        if (again != null) return@synchronized again
-        val fresh = MutexSerializer()
-        vault.asyncSerializer = fresh
-        fresh
-    }
-}
-
-/**
- * AsyncSerializer impl backed by a coroutine [Mutex]. Blocking `action` callers
- * spin via `tryLock` + platform yield; suspending `suspendAction` callers use
- * the natural `Mutex.withLock` suspending wait.
- */
-private class MutexSerializer : Vault.AsyncSerializer {
-    val mutex = Mutex()
-
-    override fun blockingAcquire() {
-        while (!mutex.tryLock(SPIN_OWNER)) {
-            com.vynatix.vault.platform.threadYield()
-        }
-    }
-
-    override fun blockingRelease() {
-        runCatching { mutex.unlock(SPIN_OWNER) }
-    }
-
-    private companion object {
-        private val SPIN_OWNER = Any()
-    }
-}

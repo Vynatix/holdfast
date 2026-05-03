@@ -3,6 +3,7 @@ package com.vynatix.vault.coroutines
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.TransactionStatus
 import com.vynatix.vault.Vault
+import com.vynatix.vault.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
