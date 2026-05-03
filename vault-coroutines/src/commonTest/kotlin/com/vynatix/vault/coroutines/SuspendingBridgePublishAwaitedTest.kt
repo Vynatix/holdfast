@@ -2,6 +2,7 @@ package com.vynatix.vault.coroutines
 
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
+import com.vynatix.vault.effect
 import com.vynatix.vault.bridge.IntCodec
 import com.vynatix.vault.bridge.StringCodec
 import kotlinx.coroutines.CompletableDeferred

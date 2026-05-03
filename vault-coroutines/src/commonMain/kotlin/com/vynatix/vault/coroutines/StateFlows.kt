@@ -1,8 +1,8 @@
 package com.vynatix.vault.coroutines
 
 import com.vynatix.vault.Disposable
-import com.vynatix.vault.MutableState
 import com.vynatix.vault.State
+import com.vynatix.vault.effect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -41,12 +41,12 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
         extraBufferCapacity = 0,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    @Suppress("UNCHECKED_CAST")
-    val mutable = this@asFlow as MutableState<T>
     // Seed the replay slot with the value at subscribe time so a brand-new collector's
-    // first emission is the current value (not whatever observe fires next).
-    shared.tryEmit(mutable.value)
-    val disposable: Disposable = mutable.observe { value -> shared.tryEmit(value) }
+    // first emission is the current value (not whatever effect fires next).
+    shared.tryEmit(this@asFlow.value)
+    // Top-level `effect` extension: cast-internal, public surface stays State<T>.
+    // The handler ignores its receiver and re-emits to the shared flow.
+    val disposable: Disposable = this@asFlow.effect { shared.tryEmit(this) }
     try {
         emitAll(shared)
     } finally {

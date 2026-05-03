@@ -14,6 +14,10 @@ public abstract interface class com/vynatix/vault/Disposable {
 	public abstract fun dispose ()V
 }
 
+public final class com/vynatix/vault/EffectKt {
+	public static final fun effect (Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
+}
+
 public abstract interface class com/vynatix/vault/Eventful {
 	public abstract fun emit (Ljava/lang/Object;)V
 	public abstract fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
@@ -65,7 +69,6 @@ public final class com/vynatix/vault/MutableState : com/vynatix/vault/State {
 	public final fun getBridge ()Lcom/vynatix/vault/Bridge;
 	public final fun getObserverCount ()I
 	public fun getValue ()Ljava/lang/Object;
-	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public final fun setBridge (Lcom/vynatix/vault/Bridge;)V
 }
 
@@ -174,7 +177,6 @@ public abstract class com/vynatix/vault/Vault {
 	public final fun clearMiddleware ()V
 	public final fun clearStates ()V
 	public final fun dispose ()V
-	public final fun effect (Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public final fun getActiveTransaction ()Lcom/vynatix/vault/Transaction;
 	public final fun getAsyncSerializer ()Lcom/vynatix/vault/Vault$AsyncSerializer;
 	public final fun getLockOrderKey ()J

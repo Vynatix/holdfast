@@ -56,6 +56,7 @@ import com.vynatix.vault.bridge.StringCodec
 import com.vynatix.vault.crypto.EncryptingTransformer
 import com.vynatix.vault.crypto.XorCipher
 import com.vynatix.vault.derived
+import com.vynatix.vault.effect
 import com.vynatix.vault.middleware.LoggingMiddleware
 import com.vynatix.vault.middleware.TimingMiddleware
 import com.vynatix.vault.middleware.ValidationMiddleware

@@ -438,15 +438,6 @@ abstract class Vault<Self : Vault<Self>> {
     }
 
     /**
-     * Subscribe to commits on this state. The receiver `T` of [effect] is the new
-     * value (post-`transformer.get`). The returned [Disposable] removes the observer.
-     */
-    infix fun <T : Any> State<T>.effect(effect: T.() -> Unit): Disposable {
-        checkNotDisposed()
-        return this.getMutableState().observe(effect::invoke)
-    }
-
-    /**
      * Internal: create-or-fetch a state under an arbitrary name. Used by
      * [derived] to register synthetic backing states whose names ("__derived_N")
      * never collide with user-declared property names (since Kotlin identifiers

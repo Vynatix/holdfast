@@ -177,8 +177,14 @@ class MutableState<T : Any>(
      *
      * Returns a [Disposable] that removes the observer when called. Double-dispose
      * is safe (idempotent).
+     *
+     * Internal: the public surface is the top-level [com.vynatix.vault.effect]
+     * extension. Companion modules in the same library group (`:vault-coroutines`,
+     * `:vault-validation`) reach this directly through the package-internal
+     * visibility for adapter implementations (Flow/StateFlow). Application code
+     * must use [effect].
      */
-    fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
+    internal fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
         observers.add(observer)
         // Initial callback uses the same view as the value getter — post-transformer.get —
         // so an observer never sees a value the getter wouldn't return for the same state.
