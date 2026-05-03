@@ -95,6 +95,31 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
 ): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
 
 /**
+ * K2 context-parameter overload of [SuspendingKvStore.suspendingBridge]. Resolves the
+ * bridge's driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
+ * block instead of from [Vault.defaultScope]. Lets a consumer write
+ *
+ * ```
+ * context(viewModelScope: CoroutineScope)
+ * class MyViewModel(store: SuspendingKvStore) {
+ *     val bridge = store.suspendingBridge(key = "k", codec = StringCodec)
+ * }
+ * ```
+ *
+ * without forwarding `viewModelScope` explicitly. Coexists with the default-param
+ * overload — outside any `context(...)` block the call site resolves to the
+ * default-param form and falls back to [Vault.defaultScope].
+ *
+ * Behavior is identical otherwise: see [SuspendingKvStore.suspendingBridge] for the
+ * full contract.
+ */
+context(scope: CoroutineScope)
+fun <T : Any> SuspendingKvStore.suspendingBridge(
+    key: String,
+    codec: Codec<T>,
+): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
+
+/**
  * Adapts a [SuspendingKvStore] to the sync [Bridge] contract used by `vault.action { }`.
  *
  * **Save semantics — fire-and-forget.** [Bridge.publish] enqueues the encoded
