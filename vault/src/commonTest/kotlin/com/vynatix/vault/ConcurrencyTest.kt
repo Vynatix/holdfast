@@ -1,6 +1,10 @@
 package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
+import com.vynatix.vault.testing.concurrency.parallel
+import com.vynatix.vault.testing.concurrency.transaction
+import com.vynatix.vault.testing.matcher.shouldBeSuccess
+import com.vynatix.vault.testing.vaultTest
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -200,45 +204,15 @@ class ParallelActionTest {
         assertNull(v.activeTransaction)
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
     @Test
-    fun offThreadStateValueReadDuringActiveActionReturnsCommittedNotPending() {
-        val ownerCtx = newSingleThreadContext("owner-thread")
-        val readerCtx = newSingleThreadContext("reader-thread")
-        try {
-            val captured = runBlocking {
-                val v = ParallelVault()
-                v action { count mutate 5 }
-
-                val midAction = atomic(false)
-                val readerDone = atomic(false)
-                val seen = atomic(-1)
-
-                val owner = async(ownerCtx) {
-                    v action {
-                        count mutate 999
-                        midAction.value = true
-                        while (!readerDone.value) { /* spin */ }
-                    }
-                }
-                val reader = async(readerCtx) {
-                    while (!midAction.value) { /* spin */ }
-                    seen.value = v.count.value
-                    readerDone.value = true
-                }
-                owner.await()
-                reader.await()
-                seen.value
-            }
-            assertEquals(
-                5,
-                captured,
-                "off-owner-thread reads see committed _value (5), not pending (999)",
-            )
-        } finally {
-            ownerCtx.close()
-            readerCtx.close()
+    fun offThreadStateValueReadDuringActiveActionReturnsCommittedNotPending() = vaultTest {
+        val v = track(ParallelVault())
+        v.action { count mutate 5 }.shouldBeSuccess()
+        val txn = transaction(on = v) { count mutate 999 }
+        parallel(1) {
+            assertEquals(5, v.read { count.value }, "off-owner-thread reads see committed (5), not pending (999)")
         }
+        txn.commit().shouldBeSuccess()
     }
 
     @OptIn(DelicateCoroutinesApi::class)

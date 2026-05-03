@@ -28,7 +28,7 @@ class ActionLifecycleTest {
     fun successfulActionReturnsSuccessWithCommittedTransaction() {
         val v = TxTestVault()
         val result = v action { count mutate 1 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals(TransactionStatus.Committed, result.transaction.status)
     }
 
@@ -64,7 +64,7 @@ class ActionLifecycleTest {
     fun emptyActionReturnsSuccessWithCommittedTransaction() {
         val v = TxTestVault()
         val result = v action { /* no mutations, no throws */ }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals(TransactionStatus.Committed, result.transaction.status)
     }
 
@@ -79,7 +79,7 @@ class ActionLifecycleTest {
                 count mutate 10
             }
         }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals(
             10,
             v.count.value,
@@ -91,7 +91,7 @@ class ActionLifecycleTest {
     fun actionTransactionIdIsNonEmpty() {
         val v = TxTestVault()
         val result = v action { count mutate 1 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertTrue(
             result.transaction.id.isNotEmpty(),
             "transaction id must be a non-empty string for diagnostic purposes",
@@ -118,10 +118,10 @@ class ActionLifecycleTest {
     fun transactionEndTimeIsSetAfterCommit() {
         val v = TxTestVault()
         val result = v action { count mutate 1 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         val endTime = result.transaction.endTime
         assertNotNull(endTime, "endTime must be populated after commit")
-        assertTrue(endTime.toLong() > 0L, "endTime must be a positive epoch-millis; got $endTime")
+        assertTrue(endTime > 0L, "endTime must be a positive epoch-millis; got $endTime")
     }
 
     @Test
@@ -265,7 +265,7 @@ class TransactionStatusGuardsTest {
     fun rollbackCalledOnAlreadyCommittedTransactionIsNoOp() {
         val v = TxTestVault()
         val result = v action { count mutate 5 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals(5, v.count.value)
 
         runCatching { result.transaction.rollback() }
@@ -331,7 +331,7 @@ class TransactionStatusGuardsTest {
     fun commitCalledTwiceOnAnAlreadyCommittedTransactionIsNoOpOnSecondCall() {
         val v = TxTestVault()
         val result = v action { count mutate 5 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
 
         // Vault.action already called commit(); second call hits the status guard.
         runCatching { result.transaction.commit() }

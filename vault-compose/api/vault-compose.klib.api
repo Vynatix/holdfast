@@ -1,0 +1,10 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:vault-compose>
+final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault.compose/collectAsState(com.vynatix.vault/State<#B>, androidx.compose.runtime/Composer?, kotlin/Int): androidx.compose.runtime/State<#B> // com.vynatix.vault.compose/collectAsState|collectAsState@0:0(com.vynatix.vault.State<0:1>;androidx.compose.runtime.Composer?;kotlin.Int){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]
+final fun com.vynatix.vault.compose/rememberDisposable(kotlin/Function0<com.vynatix.vault/Disposable>, androidx.compose.runtime/Composer?, kotlin/Int): com.vynatix.vault/Disposable // com.vynatix.vault.compose/rememberDisposable|rememberDisposable(kotlin.Function0<com.vynatix.vault.Disposable>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]

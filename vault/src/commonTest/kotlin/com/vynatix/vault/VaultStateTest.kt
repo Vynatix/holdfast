@@ -49,7 +49,7 @@ class StateBasicsTest {
     fun actionMutatesSingleStateAndReturnsCommittedSuccess() {
         val v = StateTestVault()
         val result = v action { count mutate 42 }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals(42, v.count.value)
         assertEquals(TransactionStatus.Committed, result.transaction.status)
     }

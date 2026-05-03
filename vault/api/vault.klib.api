@@ -1,0 +1,314 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:vault>
+open annotation class com.vynatix.vault/VaultActionDsl : kotlin/Annotation { // com.vynatix.vault/VaultActionDsl|null[0]
+    constructor <init>() // com.vynatix.vault/VaultActionDsl.<init>|<init>(){}[0]
+}
+
+open annotation class com.vynatix.vault/VaultInternalApi : kotlin/Annotation { // com.vynatix.vault/VaultInternalApi|null[0]
+    constructor <init>() // com.vynatix.vault/VaultInternalApi.<init>|<init>(){}[0]
+}
+
+final enum class com.vynatix.vault/TransactionStatus : kotlin/Enum<com.vynatix.vault/TransactionStatus> { // com.vynatix.vault/TransactionStatus|null[0]
+    enum entry Active // com.vynatix.vault/TransactionStatus.Active|null[0]
+    enum entry Committed // com.vynatix.vault/TransactionStatus.Committed|null[0]
+    enum entry Failed // com.vynatix.vault/TransactionStatus.Failed|null[0]
+    enum entry RolledBack // com.vynatix.vault/TransactionStatus.RolledBack|null[0]
+
+    final val entries // com.vynatix.vault/TransactionStatus.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.vault/TransactionStatus> // com.vynatix.vault/TransactionStatus.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): com.vynatix.vault/TransactionStatus // com.vynatix.vault/TransactionStatus.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<com.vynatix.vault/TransactionStatus> // com.vynatix.vault/TransactionStatus.values|values#static(){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.vault/Initializer : kotlin/Function0<#A> // com.vynatix.vault/Initializer|null[0]
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.vault/Observable { // com.vynatix.vault/Observable|null[0]
+    abstract fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault/Observable.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.vault/Publisher { // com.vynatix.vault/Publisher|null[0]
+    abstract fun publish(#A): kotlin/Boolean // com.vynatix.vault/Publisher.publish|publish(1:0){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.vault/StateDelegate { // com.vynatix.vault/StateDelegate|null[0]
+    abstract fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.vault/State<#A> // com.vynatix.vault/StateDelegate.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+}
+
+abstract fun interface com.vynatix.vault/Disposable { // com.vynatix.vault/Disposable|null[0]
+    abstract fun dispose() // com.vynatix.vault/Disposable.dispose|dispose(){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.vault.bridge/Codec { // com.vynatix.vault.bridge/Codec|null[0]
+    abstract fun decode(kotlin/String): #A // com.vynatix.vault.bridge/Codec.decode|decode(kotlin.String){}[0]
+    abstract fun encode(#A): kotlin/String // com.vynatix.vault.bridge/Codec.encode|encode(1:0){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.vault/Bridge : com.vynatix.vault/Observable<#A>, com.vynatix.vault/Publisher<#A> // com.vynatix.vault/Bridge|null[0]
+
+abstract interface <#A: kotlin/Any> com.vynatix.vault/State { // com.vynatix.vault/State|null[0]
+    abstract val value // com.vynatix.vault/State.value|{}value[0]
+        abstract fun <get-value>(): #A // com.vynatix.vault/State.value.<get-value>|<get-value>(){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.vault/Transformer { // com.vynatix.vault/Transformer|null[0]
+    abstract fun get(#A): #A // com.vynatix.vault/Transformer.get|get(1:0){}[0]
+    abstract fun set(#A): #A // com.vynatix.vault/Transformer.set|set(1:0){}[0]
+    open fun shouldTransform(#A): kotlin/Boolean // com.vynatix.vault/Transformer.shouldTransform|shouldTransform(1:0){}[0]
+}
+
+abstract interface com.vynatix.vault.bridge/KvStore { // com.vynatix.vault.bridge/KvStore|null[0]
+    abstract fun get(kotlin/String): kotlin/String? // com.vynatix.vault.bridge/KvStore.get|get(kotlin.String){}[0]
+    abstract fun put(kotlin/String, kotlin/String) // com.vynatix.vault.bridge/KvStore.put|put(kotlin.String;kotlin.String){}[0]
+    abstract fun remove(kotlin/String) // com.vynatix.vault.bridge/KvStore.remove|remove(kotlin.String){}[0]
+    abstract fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.bridge/KvStore.snapshot|snapshot(){}[0]
+}
+
+abstract interface com.vynatix.vault.crypto/Cipher { // com.vynatix.vault.crypto/Cipher|null[0]
+    abstract fun decrypt(kotlin/String): kotlin/String // com.vynatix.vault.crypto/Cipher.decrypt|decrypt(kotlin.String){}[0]
+    abstract fun encrypt(kotlin/String): kotlin/String // com.vynatix.vault.crypto/Cipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+sealed interface <#A: out kotlin/Any?> com.vynatix.vault/TransactionResult { // com.vynatix.vault/TransactionResult|null[0]
+    final class <#A1: kotlin/Any?> Success : com.vynatix.vault/TransactionResult<#A1> { // com.vynatix.vault/TransactionResult.Success|null[0]
+        constructor <init>(com.vynatix.vault/Transaction, #A1) // com.vynatix.vault/TransactionResult.Success.<init>|<init>(com.vynatix.vault.Transaction;1:0){}[0]
+
+        final val transaction // com.vynatix.vault/TransactionResult.Success.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault/TransactionResult.Success.transaction.<get-transaction>|<get-transaction>(){}[0]
+        final val value // com.vynatix.vault/TransactionResult.Success.value|{}value[0]
+            final fun <get-value>(): #A1 // com.vynatix.vault/TransactionResult.Success.value.<get-value>|<get-value>(){}[0]
+
+        final fun component1(): com.vynatix.vault/Transaction // com.vynatix.vault/TransactionResult.Success.component1|component1(){}[0]
+        final fun component2(): #A1 // com.vynatix.vault/TransactionResult.Success.component2|component2(){}[0]
+        final fun copy(com.vynatix.vault/Transaction = ..., #A1 = ...): com.vynatix.vault/TransactionResult.Success<#A1> // com.vynatix.vault/TransactionResult.Success.copy|copy(com.vynatix.vault.Transaction;1:0){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault/TransactionResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.vault/TransactionResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.vault/TransactionResult.Success.toString|toString(){}[0]
+    }
+
+    final class Error : com.vynatix.vault/TransactionResult<kotlin/Nothing> { // com.vynatix.vault/TransactionResult.Error|null[0]
+        constructor <init>(kotlin/Throwable, com.vynatix.vault/Transaction) // com.vynatix.vault/TransactionResult.Error.<init>|<init>(kotlin.Throwable;com.vynatix.vault.Transaction){}[0]
+
+        final val exception // com.vynatix.vault/TransactionResult.Error.exception|{}exception[0]
+            final fun <get-exception>(): kotlin/Throwable // com.vynatix.vault/TransactionResult.Error.exception.<get-exception>|<get-exception>(){}[0]
+        final val transaction // com.vynatix.vault/TransactionResult.Error.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault/TransactionResult.Error.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+        final fun component1(): kotlin/Throwable // com.vynatix.vault/TransactionResult.Error.component1|component1(){}[0]
+        final fun component2(): com.vynatix.vault/Transaction // com.vynatix.vault/TransactionResult.Error.component2|component2(){}[0]
+        final fun copy(kotlin/Throwable = ..., com.vynatix.vault/Transaction = ...): com.vynatix.vault/TransactionResult.Error // com.vynatix.vault/TransactionResult.Error.copy|copy(kotlin.Throwable;com.vynatix.vault.Transaction){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault/TransactionResult.Error.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.vault/TransactionResult.Error.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.vault/TransactionResult.Error.toString|toString(){}[0]
+    }
+}
+
+abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // com.vynatix.vault/Vault|null[0]
+    constructor <init>() // com.vynatix.vault/Vault.<init>|<init>(){}[0]
+
+    final val activeTransaction // com.vynatix.vault/Vault.activeTransaction|{}activeTransaction[0]
+        final fun <get-activeTransaction>(): com.vynatix.vault/Transaction? // com.vynatix.vault/Vault.activeTransaction.<get-activeTransaction>|<get-activeTransaction>(){}[0]
+    final val lockOrderKey // com.vynatix.vault/Vault.lockOrderKey|{}lockOrderKey[0]
+        final fun <get-lockOrderKey>(): kotlin/Long // com.vynatix.vault/Vault.lockOrderKey.<get-lockOrderKey>|<get-lockOrderKey>(){}[0]
+    final val properties // com.vynatix.vault/Vault.properties|{}properties[0]
+        final fun <get-properties>(): kotlin.collections/Map<kotlin/String, com.vynatix.vault/State<*>> // com.vynatix.vault/Vault.properties.<get-properties>|<get-properties>(){}[0]
+    final val selfForExternal // com.vynatix.vault/Vault.selfForExternal|{}selfForExternal[0]
+        final fun <get-selfForExternal>(): #A // com.vynatix.vault/Vault.selfForExternal.<get-selfForExternal>|<get-selfForExternal>(){}[0]
+
+    final var asyncSerializer // com.vynatix.vault/Vault.asyncSerializer|{}asyncSerializer[0]
+        final fun <get-asyncSerializer>(): com.vynatix.vault/Vault.AsyncSerializer? // com.vynatix.vault/Vault.asyncSerializer.<get-asyncSerializer>|<get-asyncSerializer>(){}[0]
+        final fun <set-asyncSerializer>(com.vynatix.vault/Vault.AsyncSerializer?) // com.vynatix.vault/Vault.asyncSerializer.<set-asyncSerializer>|<set-asyncSerializer>(com.vynatix.vault.Vault.AsyncSerializer?){}[0]
+    final var suspendingOwner // com.vynatix.vault/Vault.suspendingOwner|{}suspendingOwner[0]
+        final fun <get-suspendingOwner>(): kotlin/Any? // com.vynatix.vault/Vault.suspendingOwner.<get-suspendingOwner>|<get-suspendingOwner>(){}[0]
+        final fun <set-suspendingOwner>(kotlin/Any?) // com.vynatix.vault/Vault.suspendingOwner.<set-suspendingOwner>|<set-suspendingOwner>(kotlin.Any?){}[0]
+    final var uncaughtObserverHandler // com.vynatix.vault/Vault.uncaughtObserverHandler|{}uncaughtObserverHandler[0]
+        final fun <get-uncaughtObserverHandler>(): kotlin/Function1<kotlin/Throwable, kotlin/Unit>? // com.vynatix.vault/Vault.uncaughtObserverHandler.<get-uncaughtObserverHandler>|<get-uncaughtObserverHandler>(){}[0]
+        final fun <set-uncaughtObserverHandler>(kotlin/Function1<kotlin/Throwable, kotlin/Unit>?) // com.vynatix.vault/Vault.uncaughtObserverHandler.<set-uncaughtObserverHandler>|<set-uncaughtObserverHandler>(kotlin.Function1<kotlin.Throwable,kotlin.Unit>?){}[0]
+
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).bridge(com.vynatix.vault/Bridge<#A1>?) // com.vynatix.vault/Vault.bridge|bridge@com.vynatix.vault.State<0:0>(com.vynatix.vault.Bridge<0:0>?){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).effect(kotlin/Function1<#A1, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault/Vault.effect|effect@com.vynatix.vault.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).mutate(#A1) // com.vynatix.vault/Vault.mutate|mutate@com.vynatix.vault.State<0:0>(0:0){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).observeFrom(com.vynatix.vault/Observable<#A1>): com.vynatix.vault/Disposable // com.vynatix.vault/Vault.observeFrom|observeFrom@com.vynatix.vault.State<0:0>(com.vynatix.vault.Observable<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).update(kotlin/Function1<#A1, #A1>) // com.vynatix.vault/Vault.update|update@com.vynatix.vault.State<0:0>(kotlin.Function1<0:0,0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> state(com.vynatix.vault/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.vault/Initializer<#A1>): com.vynatix.vault/StateDelegate<#A1> // com.vynatix.vault/Vault.state|state(com.vynatix.vault.Transformer<0:0>?;kotlin.Boolean;com.vynatix.vault.Initializer<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault/Vault.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault/Vault.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.vault/Vault.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+    final fun clearMiddleware() // com.vynatix.vault/Vault.clearMiddleware|clearMiddleware(){}[0]
+    final fun clearStates() // com.vynatix.vault/Vault.clearStates|clearStates(){}[0]
+    final fun getState(kotlin/String): com.vynatix.vault/State<*>? // com.vynatix.vault/Vault.getState|getState(kotlin.String){}[0]
+    final fun hasState(kotlin/String): kotlin/Boolean // com.vynatix.vault/Vault.hasState|hasState(kotlin.String){}[0]
+    final fun internalDrainPostCommitTasks() // com.vynatix.vault/Vault.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
+    final fun internalSetActiveTransaction(com.vynatix.vault/Transaction?) // com.vynatix.vault/Vault.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.vault.Transaction?){}[0]
+    final fun middlewares(kotlin/Array<out com.vynatix.vault/Middleware<#A>>...) // com.vynatix.vault/Vault.middlewares|middlewares(kotlin.Array<out|com.vynatix.vault.Middleware<1:0>>...){}[0]
+    final fun removeState(kotlin/String) // com.vynatix.vault/Vault.removeState|removeState(kotlin.String){}[0]
+
+    abstract interface AsyncSerializer { // com.vynatix.vault/Vault.AsyncSerializer|null[0]
+        abstract fun blockingAcquire() // com.vynatix.vault/Vault.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]
+        abstract fun blockingRelease() // com.vynatix.vault/Vault.AsyncSerializer.blockingRelease|blockingRelease(){}[0]
+    }
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.middleware/LoggingMiddleware : com.vynatix.vault/Middleware<#A> { // com.vynatix.vault.middleware/LoggingMiddleware|null[0]
+    constructor <init>(kotlin/String, kotlin/Function1<kotlin/String, kotlin/Unit> = ...) // com.vynatix.vault.middleware/LoggingMiddleware.<init>|<init>(kotlin.String;kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.middleware/TimingMiddleware : com.vynatix.vault/Middleware<#A> { // com.vynatix.vault.middleware/TimingMiddleware|null[0]
+    constructor <init>(kotlin/Function3<kotlin/String, com.vynatix.vault/TransactionStatus, kotlin/Long, kotlin/Unit>) // com.vynatix.vault.middleware/TimingMiddleware.<init>|<init>(kotlin.Function3<kotlin.String,com.vynatix.vault.TransactionStatus,kotlin.Long,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault.middleware/ValidationMiddleware : com.vynatix.vault/Middleware<#A> { // com.vynatix.vault.middleware/ValidationMiddleware|null[0]
+    constructor <init>(kotlin/Function1<#A, kotlin/Unit>) // com.vynatix.vault.middleware/ValidationMiddleware.<init>|<init>(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.vault.bridge/KvBridge : com.vynatix.vault/Bridge<#A> { // com.vynatix.vault.bridge/KvBridge|null[0]
+    constructor <init>(com.vynatix.vault.bridge/KvStore, kotlin/String, com.vynatix.vault.bridge/Codec<#A>) // com.vynatix.vault.bridge/KvBridge.<init>|<init>(com.vynatix.vault.bridge.KvStore;kotlin.String;com.vynatix.vault.bridge.Codec<1:0>){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault.bridge/KvBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publish(#A): kotlin/Boolean // com.vynatix.vault.bridge/KvBridge.publish|publish(1:0){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.vault/MutableState : com.vynatix.vault/State<#A> { // com.vynatix.vault/MutableState|null[0]
+    constructor <init>(#A, com.vynatix.vault/Transformer<#A>? = ..., com.vynatix.vault/Vault<*>, kotlin/Boolean = ...) // com.vynatix.vault/MutableState.<init>|<init>(1:0;com.vynatix.vault.Transformer<1:0>?;com.vynatix.vault.Vault<*>;kotlin.Boolean){}[0]
+
+    final val value // com.vynatix.vault/MutableState.value|{}value[0]
+        final fun <get-value>(): #A // com.vynatix.vault/MutableState.value.<get-value>|<get-value>(){}[0]
+
+    final var bridge // com.vynatix.vault/MutableState.bridge|{}bridge[0]
+        final fun <get-bridge>(): com.vynatix.vault/Bridge<#A>? // com.vynatix.vault/MutableState.bridge.<get-bridge>|<get-bridge>(){}[0]
+        final fun <set-bridge>(com.vynatix.vault/Bridge<#A>?) // com.vynatix.vault/MutableState.bridge.<set-bridge>|<set-bridge>(com.vynatix.vault.Bridge<1:0>?){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault/MutableState.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+final class com.vynatix.vault.bridge/FileSystemKvStore : com.vynatix.vault.bridge/KvStore { // com.vynatix.vault.bridge/FileSystemKvStore|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.vault.bridge/FileSystemKvStore.<init>|<init>(kotlin.String){}[0]
+
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.vault.bridge/FileSystemKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.vault.bridge/FileSystemKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.vault.bridge/FileSystemKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.bridge/FileSystemKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.vault.bridge/InMemoryKvStore : com.vynatix.vault.bridge/KvStore { // com.vynatix.vault.bridge/InMemoryKvStore|null[0]
+    constructor <init>() // com.vynatix.vault.bridge/InMemoryKvStore.<init>|<init>(){}[0]
+
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.vault.bridge/InMemoryKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.vault.bridge/InMemoryKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.vault.bridge/InMemoryKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.bridge/InMemoryKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.vault.crypto/EncryptingTransformer : com.vynatix.vault/Transformer<kotlin/String> { // com.vynatix.vault.crypto/EncryptingTransformer|null[0]
+    constructor <init>(com.vynatix.vault.crypto/Cipher) // com.vynatix.vault.crypto/EncryptingTransformer.<init>|<init>(com.vynatix.vault.crypto.Cipher){}[0]
+
+    final fun get(kotlin/String): kotlin/String // com.vynatix.vault.crypto/EncryptingTransformer.get|get(kotlin.String){}[0]
+    final fun set(kotlin/String): kotlin/String // com.vynatix.vault.crypto/EncryptingTransformer.set|set(kotlin.String){}[0]
+}
+
+final class com.vynatix.vault.crypto/XorCipher : com.vynatix.vault.crypto/Cipher { // com.vynatix.vault.crypto/XorCipher|null[0]
+    constructor <init>(kotlin/ByteArray) // com.vynatix.vault.crypto/XorCipher.<init>|<init>(kotlin.ByteArray){}[0]
+
+    final fun decrypt(kotlin/String): kotlin/String // com.vynatix.vault.crypto/XorCipher.decrypt|decrypt(kotlin.String){}[0]
+    final fun encrypt(kotlin/String): kotlin/String // com.vynatix.vault.crypto/XorCipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+final class com.vynatix.vault/Transaction { // com.vynatix.vault/Transaction|null[0]
+    final val endTime // com.vynatix.vault/Transaction.endTime|{}endTime[0]
+        final fun <get-endTime>(): kotlin/Long? // com.vynatix.vault/Transaction.endTime.<get-endTime>|<get-endTime>(){}[0]
+    final val id // com.vynatix.vault/Transaction.id|{}id[0]
+        final fun <get-id>(): kotlin/String // com.vynatix.vault/Transaction.id.<get-id>|<get-id>(){}[0]
+    final val modifiedStates // com.vynatix.vault/Transaction.modifiedStates|{}modifiedStates[0]
+        final fun <get-modifiedStates>(): kotlin.collections/Set<com.vynatix.vault/State<*>> // com.vynatix.vault/Transaction.modifiedStates.<get-modifiedStates>|<get-modifiedStates>(){}[0]
+    final val status // com.vynatix.vault/Transaction.status|{}status[0]
+        final fun <get-status>(): com.vynatix.vault/TransactionStatus // com.vynatix.vault/Transaction.status.<get-status>|<get-status>(){}[0]
+
+    final fun commit() // com.vynatix.vault/Transaction.commit|commit(){}[0]
+    final fun rollback() // com.vynatix.vault/Transaction.rollback|rollback(){}[0]
+
+    final object Companion { // com.vynatix.vault/Transaction.Companion|null[0]
+        final fun createForExternal(kotlin/String, kotlin/Long): com.vynatix.vault/Transaction // com.vynatix.vault/Transaction.Companion.createForExternal|createForExternal(kotlin.String;kotlin.Long){}[0]
+    }
+}
+
+final class com.vynatix.vault/TransactionException : kotlin/Exception { // com.vynatix.vault/TransactionException|null[0]
+    constructor <init>(kotlin/String, kotlin/Throwable? = ...) // com.vynatix.vault/TransactionException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final class com.vynatix.vault/VaultLock : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.vault/VaultLock|null[0]
+    constructor <init>() // com.vynatix.vault/VaultLock.<init>|<init>(){}[0]
+
+    final fun acquire() // com.vynatix.vault/VaultLock.acquire|acquire(){}[0]
+    final fun release() // com.vynatix.vault/VaultLock.release|release(){}[0]
+    final inline fun <#A1: kotlin/Any?> withLock(kotlin/Function0<#A1>): #A1 // com.vynatix.vault/VaultLock.withLock|withLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+}
+
+final class com.vynatix.vault/VaultSnapshot { // com.vynatix.vault/VaultSnapshot|null[0]
+    final val size // com.vynatix.vault/VaultSnapshot.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // com.vynatix.vault/VaultSnapshot.size.<get-size>|<get-size>(){}[0]
+    final val stateNames // com.vynatix.vault/VaultSnapshot.stateNames|{}stateNames[0]
+        final fun <get-stateNames>(): kotlin.collections/Set<kotlin/String> // com.vynatix.vault/VaultSnapshot.stateNames.<get-stateNames>|<get-stateNames>(){}[0]
+}
+
+open class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Middleware { // com.vynatix.vault/Middleware|null[0]
+    constructor <init>() // com.vynatix.vault/Middleware.<init>|<init>(){}[0]
+
+    final fun invoke(#A, kotlin/Function0<kotlin/Unit>) // com.vynatix.vault/Middleware.invoke|invoke(1:0;kotlin.Function0<kotlin.Unit>){}[0]
+    open fun onTransactionCompleted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.onTransactionCompleted|onTransactionCompleted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+    open fun onTransactionError(com.vynatix.vault/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.vault/Middleware.onTransactionError|onTransactionError(com.vynatix.vault.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    open fun onTransactionStarted(com.vynatix.vault/Middleware.MiddlewareContext<#A>) // com.vynatix.vault/Middleware.onTransactionStarted|onTransactionStarted(com.vynatix.vault.Middleware.MiddlewareContext<1:0>){}[0]
+
+    final class <#A1: com.vynatix.vault/Vault<#A1>> MiddlewareContext { // com.vynatix.vault/Middleware.MiddlewareContext|null[0]
+        constructor <init>(#A1, com.vynatix.vault/Transaction, kotlin.collections/MutableMap<kotlin/String, kotlin/Any> = ...) // com.vynatix.vault/Middleware.MiddlewareContext.<init>|<init>(1:0;com.vynatix.vault.Transaction;kotlin.collections.MutableMap<kotlin.String,kotlin.Any>){}[0]
+
+        final val metadata // com.vynatix.vault/Middleware.MiddlewareContext.metadata|{}metadata[0]
+            final fun <get-metadata>(): kotlin.collections/MutableMap<kotlin/String, kotlin/Any> // com.vynatix.vault/Middleware.MiddlewareContext.metadata.<get-metadata>|<get-metadata>(){}[0]
+        final val transaction // com.vynatix.vault/Middleware.MiddlewareContext.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault/Middleware.MiddlewareContext.transaction.<get-transaction>|<get-transaction>(){}[0]
+        final val vault // com.vynatix.vault/Middleware.MiddlewareContext.vault|{}vault[0]
+            final fun <get-vault>(): #A1 // com.vynatix.vault/Middleware.MiddlewareContext.vault.<get-vault>|<get-vault>(){}[0]
+
+        final fun component1(): #A1 // com.vynatix.vault/Middleware.MiddlewareContext.component1|component1(){}[0]
+        final fun component2(): com.vynatix.vault/Transaction // com.vynatix.vault/Middleware.MiddlewareContext.component2|component2(){}[0]
+        final fun component3(): kotlin.collections/MutableMap<kotlin/String, kotlin/Any> // com.vynatix.vault/Middleware.MiddlewareContext.component3|component3(){}[0]
+        final fun copy(#A1 = ..., com.vynatix.vault/Transaction = ..., kotlin.collections/MutableMap<kotlin/String, kotlin/Any> = ...): com.vynatix.vault/Middleware.MiddlewareContext<#A1> // com.vynatix.vault/Middleware.MiddlewareContext.copy|copy(1:0;com.vynatix.vault.Transaction;kotlin.collections.MutableMap<kotlin.String,kotlin.Any>){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.vault/Middleware.MiddlewareContext.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.vault/Middleware.MiddlewareContext.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.vault/Middleware.MiddlewareContext.toString|toString(){}[0]
+    }
+}
+
+final object com.vynatix.vault.bridge/BooleanCodec : com.vynatix.vault.bridge/Codec<kotlin/Boolean> { // com.vynatix.vault.bridge/BooleanCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Boolean // com.vynatix.vault.bridge/BooleanCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Boolean): kotlin/String // com.vynatix.vault.bridge/BooleanCodec.encode|encode(kotlin.Boolean){}[0]
+}
+
+final object com.vynatix.vault.bridge/IntCodec : com.vynatix.vault.bridge/Codec<kotlin/Int> { // com.vynatix.vault.bridge/IntCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Int // com.vynatix.vault.bridge/IntCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Int): kotlin/String // com.vynatix.vault.bridge/IntCodec.encode|encode(kotlin.Int){}[0]
+}
+
+final object com.vynatix.vault.bridge/LongCodec : com.vynatix.vault.bridge/Codec<kotlin/Long> { // com.vynatix.vault.bridge/LongCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Long // com.vynatix.vault.bridge/LongCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Long): kotlin/String // com.vynatix.vault.bridge/LongCodec.encode|encode(kotlin.Long){}[0]
+}
+
+final object com.vynatix.vault.bridge/StringCodec : com.vynatix.vault.bridge/Codec<kotlin/String> { // com.vynatix.vault.bridge/StringCodec|null[0]
+    final fun decode(kotlin/String): kotlin/String // com.vynatix.vault.bridge/StringCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/String): kotlin/String // com.vynatix.vault.bridge/StringCodec.encode|encode(kotlin.String){}[0]
+}
+
+final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault/computed(kotlin/Function1<#A, #B>): com.vynatix.vault/State<#B> // com.vynatix.vault/computed|computed@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault/derived(kotlin/Array<out com.vynatix.vault/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.vault/State<#B>, com.vynatix.vault/Disposable> // com.vynatix.vault/derived|derived@0:0(kotlin.Array<out|com.vynatix.vault.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>> (#A).com.vynatix.vault/restore(com.vynatix.vault/VaultSnapshot): com.vynatix.vault/TransactionResult<kotlin/Unit> // com.vynatix.vault/restore|restore@0:0(com.vynatix.vault.VaultSnapshot){0§<com.vynatix.vault.Vault<0:0>>}[0]
+final fun <#A: com.vynatix.vault/Vault<#A>> (#A).com.vynatix.vault/snapshot(): com.vynatix.vault/VaultSnapshot // com.vynatix.vault/snapshot|snapshot@0:0(){0§<com.vynatix.vault.Vault<0:0>>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.vault/Transformer<#A>).com.vynatix.vault/then(com.vynatix.vault/Transformer<#A>): com.vynatix.vault/Transformer<#A> // com.vynatix.vault/then|then@com.vynatix.vault.Transformer<0:0>(com.vynatix.vault.Transformer<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any?> com.vynatix.vault/atomic(kotlin/Array<out com.vynatix.vault/Vault<*>>..., kotlin/Function0<#A>): com.vynatix.vault/TransactionResult<#A> // com.vynatix.vault/atomic|atomic(kotlin.Array<out|com.vynatix.vault.Vault<*>>...;kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+final fun com.vynatix.vault.platform/currentThreadId(): kotlin/Long // com.vynatix.vault.platform/currentThreadId|currentThreadId(){}[0]
+final fun com.vynatix.vault.platform/threadYield() // com.vynatix.vault.platform/threadYield|threadYield(){}[0]

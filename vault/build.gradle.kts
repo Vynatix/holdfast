@@ -1,6 +1,9 @@
 plugins {
     id("astrid.kmp.library")
     id("astrid.quality")
+    id("astrid.dokka")
+    id("astrid.abi")
+    id("astrid.publish.sonatype")
 }
 
 kotlin {
@@ -16,6 +19,7 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
+            implementation(project(":vault-testing"))
         }
     }
 }

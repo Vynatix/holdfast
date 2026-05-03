@@ -99,7 +99,7 @@ class NestedActionSavepointTest {
             // `try { … } catch (e: Throwable)`. To propagate, outer must re-throw explicitly.
         }
 
-        assertIs<TransactionResult.Success>(
+        assertIs<TransactionResult.Success<*>>(
             outer,
             "outer succeeds because nested's exception was caught and turned into an Error result",
         )
@@ -141,7 +141,7 @@ class NestedActionSavepointTest {
             } // discards nested-2 pending
             assertIs<TransactionResult.Error>(nested2)
         }
-        assertIs<TransactionResult.Success>(result)
+        assertIs<TransactionResult.Success<*>>(result)
         assertEquals("outer1", v.state1.value)
         assertEquals(
             "good",
@@ -286,7 +286,7 @@ class SavepointReadYourOwnWritesTest {
             }
             // Action body returned; Vault.action's commit is no-op (status RolledBack).
             // Vault.action returns Success(txn) with status RolledBack.
-            assertIs<TransactionResult.Success>(nestedResult)
+            assertIs<TransactionResult.Success<*>>(nestedResult)
             assertEquals(
                 "initial2",
                 state2.value,

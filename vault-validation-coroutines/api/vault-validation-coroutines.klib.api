@@ -1,0 +1,9 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:vault-validation-coroutines>
+final suspend fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any, #C: com.vynatix.validation/Boxed<#B>> (#A).com.vynatix.vault.validation.coroutines/suspendValidateAndMutate(com.vynatix.vault/State<#C>, com.vynatix.validation.coroutines/SuspendValidator<#B, #C>, #B): com.vynatix.vault/TransactionResult<kotlin/Unit> // com.vynatix.vault.validation.coroutines/suspendValidateAndMutate|suspendValidateAndMutate@0:0(com.vynatix.vault.State<0:2>;com.vynatix.validation.coroutines.SuspendValidator<0:1,0:2>;0:1){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>;2§<com.vynatix.validation.Boxed<0:1>>}[0]
