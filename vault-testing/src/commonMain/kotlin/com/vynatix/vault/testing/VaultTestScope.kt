@@ -3,6 +3,7 @@ package com.vynatix.vault.testing
 import com.vynatix.vault.Middleware
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
+import com.vynatix.vault.testing.internal.AwaitingRegistry
 import com.vynatix.vault.testing.internal.BarrierRegistry
 import com.vynatix.vault.testing.internal.HandleRegistry
 import com.vynatix.vault.testing.internal.OpenTransactionRegistry
@@ -49,6 +50,7 @@ class VaultTestScope internal constructor(val testScope: TestScope) :
     private val registry = HandleRegistry()
     private val barriers = BarrierRegistry()
     private val openTransactions = OpenTransactionRegistry()
+    private val awaitings = AwaitingRegistry()
 
     /**
      * Register [vault] in this scope and return its [VaultHandle]. Calling
@@ -121,10 +123,22 @@ class VaultTestScope internal constructor(val testScope: TestScope) :
 
     internal fun openTransactionRegistry(): OpenTransactionRegistry = openTransactions
 
+    internal fun awaitingRegistry(): AwaitingRegistry = awaitings
+
     /**
-     * Tear down this scope. Always cancels outstanding barriers, rolls back
-     * any leaked open transactions, disposes each tracked handle's recorder
-     * middleware, removes every tracked handle's entries from the global
+     * Snapshot of every tracked [VaultHandle] in this scope. Used by
+     * [com.vynatix.vault.testing.concurrency.awaiting] to subscribe to every
+     * recorder's timeline (and to read the post-timeout last-N-events tail
+     * for the augmented error message). Returns the same list as the
+     * registry's internal `allHandles()` — defensive copy, safe to iterate.
+     */
+    internal fun allTrackedHandles(): List<VaultHandle<*>> = registry.allHandles()
+
+    /**
+     * Tear down this scope. Always cancels outstanding barriers, closes any
+     * live `awaiting { ... }` subscriber channels, rolls back any leaked
+     * open transactions, disposes each tracked handle's recorder middleware,
+     * removes every tracked handle's entries from the global
      * [PendingErrorRegistry], and clears the handle registry. When
      * [bodyAlreadyFailed] is `false`, also aggregates any unconsumed
      * [TransactionResult.Error] values across all handles and throws an
@@ -135,17 +149,21 @@ class VaultTestScope internal constructor(val testScope: TestScope) :
      * teardown-time message.
      *
      * Order is fixed: barriers cancel first so coroutines waiting in
-     * `arrive()`/`await()` resume; then [OpenTransactionRegistry.rollbackAll]
+     * `arrive()`/`await()` resume; then [AwaitingRegistry.cancelAll] closes
+     * any still-live `awaiting` subscriber channels (so a forgotten
+     * `awaiting` resumes with [kotlinx.coroutines.channels.ClosedReceiveChannelException]
+     * rather than leaking past the test); then [OpenTransactionRegistry.rollbackAll]
      * discards pending writes from any leaked
      * [com.vynatix.vault.testing.concurrency.OpenTransaction] (so a forgotten
      * `transaction(...)` never leaks pending writes into the next test); then
-     * recorders dispose (stopping further event capture); then the handle
-     * registry's pending-error bookkeeping is cleared. Recorder disposal
-     * swallows exceptions to keep teardown robust even when [bodyAlreadyFailed]
-     * is `true`.
+     * recorders dispose (stopping further event capture and dropping their
+     * subscriber refs); then the handle registry's pending-error bookkeeping
+     * is cleared. Recorder disposal swallows exceptions to keep teardown
+     * robust even when [bodyAlreadyFailed] is `true`.
      */
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
         barriers.cancelAll()
+        awaitings.cancelAll()
         openTransactions.rollbackAll()
 
         val handles = registry.allHandles()

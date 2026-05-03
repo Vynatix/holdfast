@@ -19,6 +19,7 @@ import com.vynatix.vault.testing.TransactionStarted
 import com.vynatix.vault.testing.VaultEvent
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import kotlinx.coroutines.channels.SendChannel
 import kotlin.time.Clock
 
 /**
@@ -80,6 +81,16 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
     private val lock = SynchronizedObject()
     private val events: MutableList<VaultEvent> = mutableListOf()
 
+    /**
+     * Live subscribers receiving every freshly-pushed [VaultEvent] via
+     * [SendChannel.trySend]. Populated by [snapshotAndSubscribe] (used by the
+     * `awaiting { ... }` primitive) and cleared via [unsubscribe]. Guarded by
+     * the same [lock] as [events] so the replay-then-subscribe sequence in
+     * [snapshotAndSubscribe] is atomic with respect to concurrent [push] calls
+     * — no event can land between the snapshot copy and the subscribe.
+     */
+    private val subscribers: MutableList<SendChannel<VaultEvent>> = mutableListOf()
+
     /** Most recent transaction this recorder observed, regardless of outcome. */
     @kotlin.concurrent.Volatile
     private var _lastTransaction: com.vynatix.vault.Transaction? = null
@@ -102,6 +113,16 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
      * Append [event] to the buffer, applying [Capture]'s policy. [Capture.None]
      * is short-circuited; [Capture.RingBuffer] truncates from the front so the
      * stored window is the most-recent N. [Capture.All] grows unbounded.
+     *
+     * After buffering, fans out to every live subscriber via
+     * [SendChannel.trySend]. The fan-out runs under [lock] so a concurrent
+     * [snapshotAndSubscribe] cannot insert a new subscriber after a buffer
+     * append but before its trySend — the subscriber sees either both the
+     * replay (containing this event) or the channel send, never neither.
+     * trySend is non-blocking: subscribers use [kotlinx.coroutines.channels.Channel.UNLIMITED]
+     * capacity so the call should always succeed; if a subscriber's channel is
+     * already closed (e.g. an `awaiting` call is mid-cleanup) the failure is
+     * silently swallowed by trySend.
      */
     fun push(event: VaultEvent) {
         if (capture is Capture.None) return
@@ -112,6 +133,35 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
                     events.removeAt(0)
                 }
             }
+            for (subscriber in subscribers) {
+                subscriber.trySend(event)
+            }
+        }
+    }
+
+    /**
+     * Atomically copy the current [events] buffer into [out] and register
+     * [channel] as a live subscriber. Both steps run under the same [lock] so
+     * a concurrent [push] cannot land between the snapshot copy and the
+     * subscribe — the caller (the `awaiting` primitive) sees the boundary as
+     * a clean cut, with each event delivered exactly once via either the
+     * replay list or the channel.
+     */
+    fun snapshotAndSubscribe(channel: SendChannel<VaultEvent>, out: MutableList<VaultEvent>) {
+        synchronized(lock) {
+            out.addAll(events)
+            subscribers.add(channel)
+        }
+    }
+
+    /**
+     * Remove [channel] from the subscriber list. Safe to call on a channel
+     * that was never subscribed (a no-op then) and on one that is already
+     * closed — the recorder does not own the channel's lifecycle.
+     */
+    fun unsubscribe(channel: SendChannel<VaultEvent>) {
+        synchronized(lock) {
+            subscribers.removeAll { it === channel }
         }
     }
 
@@ -129,6 +179,11 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
     fun dispose() {
         synchronized(lock) {
             events.clear()
+            // Drop subscriber refs but do NOT close the channels — `awaiting`
+            // owns its channel lifecycle (close happens in its own
+            // try/finally). The scope-level `AwaitingRegistry.cancelAll` runs
+            // before recorder dispose and is responsible for closing them.
+            subscribers.clear()
         }
         _lastTransaction = null
         _lastResult = null
