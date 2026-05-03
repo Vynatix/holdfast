@@ -1,5 +1,6 @@
 package com.vynatix.vault.testing
 
+import com.vynatix.vault.Middleware
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
 import com.vynatix.vault.testing.internal.BarrierRegistry
@@ -21,10 +22,22 @@ import kotlinx.coroutines.test.TestScope
  * [testScope] so extension helpers like `runCurrent()`, `advanceUntilIdle()`,
  * `advanceTimeBy()`, and `currentTime` can be invoked against it directly.
  *
+ * Implements [VaultAutoRegistration] — the member-extension surface that lets
+ * tests call `myVault.action { … }`, `myVault.read { … }`, `myVault.timeline`,
+ * etc. directly inside a [vaultTest] block without an explicit [track] call.
+ * See [VaultAutoRegistration] for the resolution model. The
+ * `inline reified middlewareEventsOf<M>()` overload is declared as a member
+ * here (not in the interface) because reified type parameters require `inline`
+ * and an `inline reified` interface member would inline through the abstract
+ * [track] dispatch awkwardly; declaring it on the implementing class lets the
+ * inline call directly resolve to the concrete [HandleRegistry.getOrCreate].
+ *
  * Constructed exclusively by [vaultTest]; never instantiated directly by user
  * code.
  */
-class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineScope by testScope {
+class VaultTestScope internal constructor(val testScope: TestScope) :
+    CoroutineScope by testScope,
+    VaultAutoRegistration {
 
     /** The virtual-time scheduler driving this test. */
     val testScheduler: TestCoroutineScheduler get() = testScope.testScheduler
@@ -52,7 +65,55 @@ class VaultTestScope internal constructor(val testScope: TestScope) : CoroutineS
      * BEFORE calling `track`; see [com.vynatix.vault.testing.internal.Recorder]
      * for the v1 wrap-order limit.
      */
-    fun <V : Vault<V>> track(vault: V, capture: Capture = Capture.All): VaultHandle<V> = registry.getOrCreate(vault, capture)
+    override fun <V : Vault<V>> track(vault: V, capture: Capture): VaultHandle<V> = registry.getOrCreate(vault, capture)
+
+    /**
+     * Auto-registering reified-type overload of [VaultHandle.middlewareEventsOf].
+     * Auto-registers `this` (via [autoTrackTimeline]) and filters the timeline
+     * by [M].
+     *
+     * The receiver is `Vault<*>` rather than `V : Vault<V>` so the call site
+     * can specify only the reified type parameter — `v.middlewareEventsOf<M>()`
+     * — without writing both type arguments. The non-reified work is delegated
+     * to [autoTrackTimeline] so this `inline reified` member only carries the
+     * `filterIsInstance<MiddlewareEvent>` and the `M` type-check, both of
+     * which depend on the reified type parameter.
+     *
+     * **v1 caveat** carries through from [VaultHandle.middlewareEventsOf]: only
+     * events for the recorder itself are captured. User-class [M]s return an
+     * empty list; the API is in place so v2 can populate it without ABI churn.
+     */
+    inline fun <reified M : Middleware<*>> Vault<*>.middlewareEventsOf(): List<MiddlewareEvent> = autoTrackTimeline(this)
+        .filterIsInstance<MiddlewareEvent>()
+        .filter { it.middleware is M }
+
+    /**
+     * Internal helper used by the inline reified [middlewareEventsOf] overload.
+     * Splits "auto-register the vault and read its timeline" out of the inline
+     * call site so the inline body can stay narrow (just the reified
+     * filterIsInstance).
+     *
+     * The internal helper has its own recursively-bounded `V` parameter so it
+     * can satisfy [HandleRegistry.getOrCreate]'s `V : Vault<V>` bound. The
+     * `@Suppress("UNCHECKED_CAST")` cast on entry is sound because the
+     * registry indexes by reference identity, not by type — the runtime
+     * vault instance is unchanged and the timeline read-out is type-erased
+     * to `List<VaultEvent>`.
+     */
+    @PublishedApi
+    internal fun autoTrackTimeline(vault: Vault<*>): List<VaultEvent> = autoTrackTimelineTyped(vault)
+
+    /**
+     * See [autoTrackTimeline]; the unchecked cast bridges the `Vault<*>`
+     * receiver to a fresh recursively-bounded `V` so [HandleRegistry.getOrCreate]
+     * accepts it. Sound because the registry keys by reference identity, not
+     * by `V`.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun <V : Vault<V>> autoTrackTimelineTyped(vault: Vault<*>): List<VaultEvent> {
+        val asSelf = vault as V
+        return registry.getOrCreate(asSelf, Capture.All).timeline
+    }
 
     internal fun barrierRegistry(): BarrierRegistry = barriers
 

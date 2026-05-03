@@ -10,6 +10,25 @@ open annotation class com.vynatix.vault.testing.matcher/TimelineMatcherDsl : kot
     constructor <init>() // com.vynatix.vault.testing.matcher/TimelineMatcherDsl.<init>|<init>(){}[0]
 }
 
+abstract interface com.vynatix.vault.testing/VaultAutoRegistration { // com.vynatix.vault.testing/VaultAutoRegistration|null[0]
+    open val lastResult // com.vynatix.vault.testing/VaultAutoRegistration.lastResult|@0:0{0§<com.vynatix.vault.Vault<0:0>>}lastResult[0]
+        open fun <#A2: com.vynatix.vault/Vault<#A2>> (#A2).<get-lastResult>(): com.vynatix.vault/TransactionResult<*>? // com.vynatix.vault.testing/VaultAutoRegistration.lastResult.<get-lastResult>|<get-lastResult>@0:0(){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open val lastTransaction // com.vynatix.vault.testing/VaultAutoRegistration.lastTransaction|@0:0{0§<com.vynatix.vault.Vault<0:0>>}lastTransaction[0]
+        open fun <#A2: com.vynatix.vault/Vault<#A2>> (#A2).<get-lastTransaction>(): com.vynatix.vault/Transaction? // com.vynatix.vault.testing/VaultAutoRegistration.lastTransaction.<get-lastTransaction>|<get-lastTransaction>@0:0(){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open val timeline // com.vynatix.vault.testing/VaultAutoRegistration.timeline|@0:0{0§<com.vynatix.vault.Vault<0:0>>}timeline[0]
+        open fun <#A2: com.vynatix.vault/Vault<#A2>> (#A2).<get-timeline>(): kotlin.collections/List<com.vynatix.vault.testing/VaultEvent> // com.vynatix.vault.testing/VaultAutoRegistration.timeline.<get-timeline>|<get-timeline>@0:0(){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open val transactions // com.vynatix.vault.testing/VaultAutoRegistration.transactions|@0:0{0§<com.vynatix.vault.Vault<0:0>>}transactions[0]
+        open fun <#A2: com.vynatix.vault/Vault<#A2>> (#A2).<get-transactions>(): kotlin.collections/List<com.vynatix.vault.testing/TransactionEvent> // com.vynatix.vault.testing/VaultAutoRegistration.transactions.<get-transactions>|<get-transactions>@0:0(){0§<com.vynatix.vault.Vault<0:0>>}[0]
+
+    abstract fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture = ...): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultAutoRegistration.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open fun <#A1: com.vynatix.vault/Vault<#A1>, #B1: com.vynatix.vault/Middleware<#A1>> (#A1).middlewareEventsOf(#B1): kotlin.collections/List<com.vynatix.vault.testing/MiddlewareEvent> // com.vynatix.vault.testing/VaultAutoRegistration.middlewareEventsOf|middlewareEventsOf@0:0(0:1){0§<com.vynatix.vault.Vault<0:0>>;1§<com.vynatix.vault.Middleware<0:0>>}[0]
+    open fun <#A1: com.vynatix.vault/Vault<#A1>, #B1: kotlin/Any?> (#A1).action(kotlin/Function1<#A1, #B1>): com.vynatix.vault/TransactionResult<#B1> // com.vynatix.vault.testing/VaultAutoRegistration.action|action@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any?>}[0]
+    open fun <#A1: com.vynatix.vault/Vault<#A1>, #B1: kotlin/Any?> (#A1).read(kotlin/Function1<#A1, #B1>): #B1 // com.vynatix.vault.testing/VaultAutoRegistration.read|read@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any?>}[0]
+    open fun <#A1: com.vynatix.vault/Vault<#A1>> (#A1).bridgeEvents(kotlin.reflect/KProperty1<#A1, com.vynatix.vault/State<*>>): kotlin.collections/List<com.vynatix.vault.testing/BridgeEvent> // com.vynatix.vault.testing/VaultAutoRegistration.bridgeEvents|bridgeEvents@0:0(kotlin.reflect.KProperty1<0:0,com.vynatix.vault.State<*>>){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open fun <#A1: com.vynatix.vault/Vault<#A1>> (#A1).emissions(kotlin.reflect/KProperty1<#A1, com.vynatix.vault/State<*>>): kotlin.collections/List<com.vynatix.vault.testing/EmissionEvent> // com.vynatix.vault.testing/VaultAutoRegistration.emissions|emissions@0:0(kotlin.reflect.KProperty1<0:0,com.vynatix.vault.State<*>>){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    open suspend fun <#A1: com.vynatix.vault/Vault<#A1>, #B1: kotlin/Any?> (#A1).suspendAction(kotlin.coroutines/SuspendFunction1<#A1, #B1>): com.vynatix.vault/TransactionResult<#B1> // com.vynatix.vault.testing/VaultAutoRegistration.suspendAction|suspendAction@0:0(kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any?>}[0]
+}
+
 sealed interface com.vynatix.vault.testing.matcher/EventPredicate { // com.vynatix.vault.testing.matcher/EventPredicate|null[0]
     abstract val description // com.vynatix.vault.testing.matcher/EventPredicate.description|{}description[0]
         abstract fun <get-description>(): kotlin/String // com.vynatix.vault.testing.matcher/EventPredicate.description.<get-description>|<get-description>(){}[0]
@@ -394,7 +413,7 @@ final class com.vynatix.vault.testing/TransactionStarted : com.vynatix.vault.tes
     final fun toString(): kotlin/String // com.vynatix.vault.testing/TransactionStarted.toString|toString(){}[0]
 }
 
-final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
+final class com.vynatix.vault.testing/VaultTestScope : com.vynatix.vault.testing/VaultAutoRegistration, kotlinx.coroutines/CoroutineScope { // com.vynatix.vault.testing/VaultTestScope|null[0]
     final val backgroundScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope|{}backgroundScope[0]
         final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.vault.testing/VaultTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
     final val coroutineContext // com.vynatix.vault.testing/VaultTestScope.coroutineContext|{}coroutineContext[0]
@@ -404,7 +423,9 @@ final class com.vynatix.vault.testing/VaultTestScope : kotlinx.coroutines/Corout
     final val testScope // com.vynatix.vault.testing/VaultTestScope.testScope|{}testScope[0]
         final fun <get-testScope>(): kotlinx.coroutines.test/TestScope // com.vynatix.vault.testing/VaultTestScope.testScope.<get-testScope>|<get-testScope>(){}[0]
 
-    final fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture = ...): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultTestScope.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    final fun <#A1: com.vynatix.vault/Vault<#A1>> track(#A1, com.vynatix.vault.testing/Capture): com.vynatix.vault.testing/VaultHandle<#A1> // com.vynatix.vault.testing/VaultTestScope.track|track(0:0;com.vynatix.vault.testing.Capture){0§<com.vynatix.vault.Vault<0:0>>}[0]
+    final fun autoTrackTimeline(com.vynatix.vault/Vault<*>): kotlin.collections/List<com.vynatix.vault.testing/VaultEvent> // com.vynatix.vault.testing/VaultTestScope.autoTrackTimeline|autoTrackTimeline(com.vynatix.vault.Vault<*>){}[0]
+    final inline fun <#A1: reified com.vynatix.vault/Middleware<*>> (com.vynatix.vault/Vault<*>).middlewareEventsOf(): kotlin.collections/List<com.vynatix.vault.testing/MiddlewareEvent> // com.vynatix.vault.testing/VaultTestScope.middlewareEventsOf|middlewareEventsOf@com.vynatix.vault.Vault<*>(){0§<com.vynatix.vault.Middleware<*>>}[0]
 }
 
 final object com.vynatix.vault.testing.internal/PendingErrorRegistry : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.vault.testing.internal/PendingErrorRegistry|null[0]
