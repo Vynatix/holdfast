@@ -83,6 +83,36 @@ class MutableState<T : Any>(
         get() = stateLock.withLock { currentValue }
 
     /**
+     * Commit-time apply (raw): writes `currentValue` and notifies observers, but
+     * **does NOT publish to the bridge**. Strict subset of [applyCommitted]
+     * exposed as a `@VaultInternalApi` extension hook so companion modules
+     * (notably `:vault-coroutines.suspendAction`) can interpose between the
+     * observer fanout (step 1+2) and the bridge publish (step 3) — necessary
+     * for [com.vynatix.vault.coroutines.SuspendingBridge.publishAwaited] to be
+     * awaited under `withContext(NonCancellable)` instead of fire-and-forget.
+     *
+     * If [distinct] is true and the new processed value is `==` to
+     * `currentValue`, skips observer fanout (opt-in dedup). Bridge publish is
+     * the caller's responsibility — they must not call `bridge.publish` either
+     * if this returns silently due to dedup.
+     *
+     * Returns `true` if the value was applied (observer fanout fired), `false`
+     * if it was deduped. The boolean lets the caller skip their own bridge
+     * publish in the dedup case.
+     */
+    @VaultInternalApi
+    fun applyCommittedRaw(processedValue: T): Boolean {
+        val unchanged = stateLock.withLock {
+            val same = distinct && currentValue == processedValue
+            if (!same) currentValue = processedValue
+            same
+        }
+        if (unchanged) return false
+        notifyObservers(afterGet(processedValue))
+        return true
+    }
+
+    /**
      * Commit-time apply: writes `currentValue`, notifies observers, publishes to bridge.
      * The single observable side effect of a successful commit. Lock-order: snapshot
      * under `stateLock`, release, then notify outside `stateLock` to avoid AB-BA with
@@ -92,13 +122,8 @@ class MutableState<T : Any>(
      * skips both observer fanout and bridge publish (opt-in dedup).
      */
     internal fun applyCommitted(processedValue: T) {
-        val unchanged = stateLock.withLock {
-            val same = distinct && currentValue == processedValue
-            if (!same) currentValue = processedValue
-            same
-        }
-        if (unchanged) return
-        notifyObservers(afterGet(processedValue))
+        @OptIn(VaultInternalApi::class)
+        if (!applyCommittedRaw(processedValue)) return
         bridgeLock.withLock { currentBridge?.publish(processedValue) }
     }
 

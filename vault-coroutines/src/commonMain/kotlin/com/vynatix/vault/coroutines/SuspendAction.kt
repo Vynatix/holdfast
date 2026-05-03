@@ -3,6 +3,7 @@
 package com.vynatix.vault.coroutines
 
 import com.vynatix.vault.Middleware
+import com.vynatix.vault.MutableState
 import com.vynatix.vault.Transaction
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
@@ -119,7 +120,7 @@ suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
                     runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
                 }
                 try {
-                    txn.commit()
+                    suspendingCommit(txn)
                     TransactionResult.Success(txn, value)
                 } catch (e: Throwable) {
                     TransactionResult.Error(e, txn)
@@ -154,6 +155,51 @@ private fun ensureSerializer(vault: Vault<*>): MutexSerializer {
         val fresh = MutexSerializer()
         vault.asyncSerializer = fresh
         fresh
+    }
+}
+
+/**
+ * Commit the transaction with the `suspendAction`-specific bridge interpose.
+ *
+ * Identical to [Transaction.commit] for nested (savepoint) transactions —
+ * pending writes merge into the parent's buffer. For a top-level transaction,
+ * each pending write is applied via [MutableState.applyCommittedRaw] (replace
+ * value + observer fanout, NO bridge publish), and the bridge publish is
+ * dispatched separately:
+ *
+ *  - If the bound bridge is a [SuspendingBridge], call its [SuspendingBridge.publishAwaited]
+ *    directly here — the surrounding `withContext(NonCancellable)` ensures the
+ *    write completes even if the calling scope cancels.
+ *  - Otherwise (sync [com.vynatix.vault.Bridge] or no bridge), call [com.vynatix.vault.Bridge.publish]
+ *    fire-and-forget, matching the sync action contract.
+ *
+ * Pending writes are pre-snapshotted before observer fanout so the suspend
+ * call out of [Transaction.commitDispatching] does not run inside its
+ * `pendingLock.withLock` block — `publishAwaited` is genuinely suspending and
+ * could deadlock or cause re-entrant lock issues otherwise. The downside is
+ * one extra map allocation; the upside is correctness.
+ */
+@Suppress("UNCHECKED_CAST")
+private suspend fun suspendingCommit(txn: Transaction) {
+    // Snapshot pending writes outside the commit's pendingLock, so we can
+    // suspend in publishAwaited without holding any internal vault lock.
+    // The commit itself runs the observer fanout and clears pendingWrites.
+    val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
+    txn.commitDispatching { state, value ->
+        val ms = state as MutableState<Any>
+        // Step 1+2: replace + observers (no bridge publish yet).
+        ms.applyCommittedRaw(value)
+        publishQueue += ms to value
+    }
+    // Step 3: bridge publish phase. SuspendingBridge gets awaited;
+    // every other Bridge falls back to fire-and-forget Bridge.publish.
+    for ((ms, value) in publishQueue) {
+        val br = ms.bridge ?: continue
+        if (br is SuspendingBridge<*>) {
+            (br as SuspendingBridge<Any>).publishAwaited(value)
+        } else {
+            br.publish(value)
+        }
     }
 }
 

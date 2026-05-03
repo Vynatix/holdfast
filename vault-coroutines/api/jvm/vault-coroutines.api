@@ -27,17 +27,28 @@ public final class com/vynatix/vault/coroutines/SuspendActionKt {
 }
 
 public abstract interface class com/vynatix/vault/coroutines/SuspendingBridge : com/vynatix/vault/Bridge {
+	public abstract fun publish (Ljava/lang/Object;)Z
+	public abstract fun publishAwaited (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/vault/coroutines/SuspendingBridgeKt {
 	public static final fun bridge (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge;
 	public static synthetic fun bridge$default (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge;
+	public static final fun suspendingBridge (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting;
+	public static synthetic fun suspendingBridge$default (Lcom/vynatix/vault/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/vault/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting;
 }
 
-public final class com/vynatix/vault/coroutines/SuspendingKvBridge : com/vynatix/vault/Bridge {
+public class com/vynatix/vault/coroutines/SuspendingKvBridge : com/vynatix/vault/Bridge {
+	protected final fun getBridgeScope ()Lkotlinx/coroutines/CoroutineScope;
 	public final fun getErrors ()Lkotlinx/coroutines/flow/SharedFlow;
 	public fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public fun publish (Ljava/lang/Object;)Z
+	protected final fun putOrEmit (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/vault/coroutines/SuspendingKvBridge$Awaiting : com/vynatix/vault/coroutines/SuspendingKvBridge, com/vynatix/vault/coroutines/SuspendingBridge {
+	public fun publish (Ljava/lang/Object;)Z
+	public fun publishAwaited (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public abstract interface class com/vynatix/vault/coroutines/SuspendingKvStore {

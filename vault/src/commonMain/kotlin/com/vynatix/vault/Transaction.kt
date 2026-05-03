@@ -114,6 +114,30 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * bridges fire.
      */
     fun commit() {
+        @OptIn(VaultInternalApi::class)
+        commitDispatching { state, value ->
+            @Suppress("UNCHECKED_CAST")
+            (state as MutableState<Any>).applyCommitted(value)
+        }
+    }
+
+    /**
+     * Internal commit variant for `:vault-coroutines.suspendAction`. Same
+     * idempotent semantics as [commit], but the per-pending-write apply step
+     * is delegated to [applyTopLevel]. Used to interpose
+     * [com.vynatix.vault.coroutines.SuspendingBridge.publishAwaited] between
+     * the observer fanout (via [MutableState.applyCommittedRaw]) and the
+     * bridge publish.
+     *
+     * For a nested (savepoint) transaction, [applyTopLevel] is NOT called —
+     * pending writes merge into the parent's buffer just like [commit].
+     *
+     * The lambda is invoked synchronously from inside the commit lock for each
+     * pending write, in iteration order. Throwing from it propagates as
+     * [TransactionException] just like the sync path.
+     */
+    @VaultInternalApi
+    fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
 
@@ -125,14 +149,14 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
                     // savepoint mutations override any earlier parent pending for the same state.
                     parentTxn.pendingWrites.putAll(pendingWrites)
                 } else {
-                    // Top-level commit: apply each pending write. Observers and bridges
-                    // see the value here, post-commit, never mid-action. Pending writes
-                    // remain readable via findPendingValue during the iteration so
-                    // observer callbacks reading sibling states still see the
-                    // about-to-be-committed values (read-your-own-writes during fanout).
+                    // Top-level commit: apply each pending write via the caller-supplied
+                    // dispatcher. Observers and bridges see the value here, post-commit,
+                    // never mid-action. Pending writes remain readable via findPendingValue
+                    // during the iteration so observer callbacks reading sibling states
+                    // still see the about-to-be-committed values (read-your-own-writes
+                    // during fanout).
                     pendingWrites.forEach { (state, value) ->
-                        @Suppress("UNCHECKED_CAST")
-                        (state as MutableState<Any>).applyCommitted(value)
+                        applyTopLevel(state, value)
                     }
                 }
                 pendingWrites.clear()
