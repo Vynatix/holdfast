@@ -68,6 +68,7 @@ public final class com/vynatix/vault/MutableState : com/vynatix/vault/State {
 	public final fun applyCommittedRaw (Ljava/lang/Object;)Z
 	public final fun getBridge ()Lcom/vynatix/vault/Bridge;
 	public final fun getObserverCount ()I
+	public final fun getOwningVault ()Lcom/vynatix/vault/Vault;
 	public fun getValue ()Ljava/lang/Object;
 	public final fun setBridge (Lcom/vynatix/vault/Bridge;)V
 }

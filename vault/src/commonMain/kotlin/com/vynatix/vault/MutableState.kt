@@ -1,3 +1,5 @@
+@file:OptIn(VaultInternalApi::class)
+
 package com.vynatix.vault
 
 import com.vynatix.vault.platform.currentThreadId
@@ -21,7 +23,8 @@ import com.vynatix.vault.platform.currentThreadId
 class MutableState<T : Any>(
     initialValue: T,
     private val transformer: Transformer<T>? = null,
-    internal val owningVault: Vault<*>,
+    @property:VaultInternalApi
+    val owningVault: Vault<*>,
     internal val distinct: Boolean = false,
 ) : State<T> {
     private val stateLock = VaultLock()

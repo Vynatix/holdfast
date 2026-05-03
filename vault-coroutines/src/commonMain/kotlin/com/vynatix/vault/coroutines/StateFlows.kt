@@ -1,6 +1,9 @@
+@file:OptIn(com.vynatix.vault.VaultInternalApi::class)
+
 package com.vynatix.vault.coroutines
 
 import com.vynatix.vault.Disposable
+import com.vynatix.vault.MutableState
 import com.vynatix.vault.State
 import com.vynatix.vault.effect
 import kotlinx.coroutines.CoroutineScope
@@ -55,16 +58,39 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
 }
 
 /**
- * Hot [StateFlow] adapter over a [State], scoped to [scope]. Subscribers see the
- * current value immediately, then any subsequent commits while [scope] is active.
- * When [scope] cancels, the underlying observer is disposed.
+ * Package-internal accessor: resolves the [CoroutineScope] of the [Vault] that
+ * owns this [State]. The cast to [MutableState] stays here — never in any public
+ * signature. Throws if the [State] was not produced by `vault.state { … }`.
  *
- * Use [SharingStarted.WhileSubscribed] (the default here) so the upstream
- * subscription only exists while at least one consumer collects — matching the
- * `stateIn` convention.
+ * Used as the default for [asStateFlow]'s `scope` parameter so callers can write
+ * `state.asStateFlow()` and pick up the vault's scope automatically.
  */
-fun <T : Any> State<T>.asStateFlow(scope: CoroutineScope, started: SharingStarted = SharingStarted.WhileSubscribed()): StateFlow<T> =
-    asFlow().stateIn(scope, started, this.value)
+internal val <T : Any> State<T>.owningScope: CoroutineScope
+    get() {
+        @Suppress("UNCHECKED_CAST")
+        val mutable = (this as? MutableState<T>) ?: error("owningScope is only defined for State produced by vault.state { ... }")
+        return mutable.owningVault.scope
+    }
+
+/**
+ * Hot [StateFlow] adapter over a [State]. Subscribers see the current value
+ * immediately, then any subsequent commits while [scope] is active. When [scope]
+ * cancels, the underlying observer is disposed.
+ *
+ * `scope` defaults to the owning vault's [com.vynatix.vault.Vault.scope] (resolved
+ * via the chain documented on `Vault.scope` — per-vault override / bound scope /
+ * `Vault.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
+ * call site `state.asStateFlow(myScope, started)` continues to compile.
+ *
+ * `started` defaults to [SharingStarted.WhileSubscribed] so the upstream
+ * subscription only exists while at least one consumer collects — matching the
+ * `stateIn` convention. Pass [SharingStarted.Eagerly] for the eager-publish path
+ * (replacement for the removed `asEagerStateFlow()`).
+ */
+fun <T : Any> State<T>.asStateFlow(
+    scope: CoroutineScope = owningScope,
+    started: SharingStarted = SharingStarted.WhileSubscribed(),
+): StateFlow<T> = asFlow().stateIn(scope, started, this.value)
 
 /**
  * Suspend until [predicate] holds for the state's value. Returns the value that

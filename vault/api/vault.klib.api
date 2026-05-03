@@ -209,6 +209,8 @@ final class <#A: kotlin/Any> com.vynatix.vault/MutableState : com.vynatix.vault/
 
     final val observerCount // com.vynatix.vault/MutableState.observerCount|{}observerCount[0]
         final fun <get-observerCount>(): kotlin/Int // com.vynatix.vault/MutableState.observerCount.<get-observerCount>|<get-observerCount>(){}[0]
+    final val owningVault // com.vynatix.vault/MutableState.owningVault|{}owningVault[0]
+        final fun <get-owningVault>(): com.vynatix.vault/Vault<*> // com.vynatix.vault/MutableState.owningVault.<get-owningVault>|<get-owningVault>(){}[0]
     final val value // com.vynatix.vault/MutableState.value|{}value[0]
         final fun <get-value>(): #A // com.vynatix.vault/MutableState.value.<get-value>|<get-value>(){}[0]
 
