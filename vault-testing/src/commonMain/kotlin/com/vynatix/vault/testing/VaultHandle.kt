@@ -1,13 +1,19 @@
 package com.vynatix.vault.testing
 
+import com.vynatix.vault.Bridge
 import com.vynatix.vault.Middleware
+import com.vynatix.vault.MutableState
 import com.vynatix.vault.State
 import com.vynatix.vault.Transaction
 import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
 import com.vynatix.vault.coroutines.suspendAction
+import com.vynatix.vault.testing.bridge.BridgeView
+import com.vynatix.vault.testing.bridge.LatchedBridge
+import com.vynatix.vault.testing.bridge.RecordingBridge
 import com.vynatix.vault.testing.internal.PendingErrorRegistry
 import com.vynatix.vault.testing.internal.Recorder
+import com.vynatix.vault.testing.internal.RecordingBridgeWrapper
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.reflect.KProperty1
@@ -47,6 +53,23 @@ class VaultHandle<V : Vault<V>> internal constructor(val vault: V, val captureMo
      */
     internal val recorder: Recorder<V>? = if (captureMode is Capture.None) null else Recorder(captureMode)
 
+    /**
+     * Per-state map from the live [State] reference (key by identity) to the
+     * [RecordingBridgeWrapper] that wraps any user-attached bridge on that
+     * state. Populated at handle install time (this `init` block) for every
+     * state currently in [Vault.properties] that has a bridge attached.
+     *
+     * **v1 limitation**: bridges attached AFTER `track(v)` are NOT
+     * auto-wrapped — :vault has no public hook for late attachment. The
+     * documented contract is "attach bridges before track(v)" so the wrapper
+     * sees every commit-time publish and inbound observation. This map is
+     * populated only at the install boundary; attaching a fresh bridge after
+     * track(v) replaces the wrapped reference with the unwrapped one and
+     * subsequent BridgePublished/Observed events will not fire for that
+     * state.
+     */
+    private val bridgeWrappers: MutableMap<State<*>, RecordingBridgeWrapper<*>> = mutableMapOf()
+
     init {
         // Install the recorder as the FIRST middleware (innermost in the chain).
         // The fold-right wrapping in `Vault.runMiddlewareChain` makes earlier-listed
@@ -55,6 +78,36 @@ class VaultHandle<V : Vault<V>> internal constructor(val vault: V, val captureMo
         // commit time. This puts emission events at the natural boundary between
         // body return and commit apply.
         recorder?.let { vault.middlewares(it) }
+
+        // Wrap every currently-attached bridge so the recorder sees publish /
+        // observe events on the timeline. We iterate vault.properties, cast
+        // each State to MutableState (the only concrete State implementation
+        // produced by Vault.state — the cast is sound for any state created
+        // by the vault DSL). Setting state.bridge re-runs the attach path,
+        // which disposes the old inbound subscription and calls our wrapper's
+        // observe — the wrap is therefore visible to production code as a
+        // single re-attach. See RecordingBridgeWrapper KDoc for the
+        // implications.
+        recorder?.let { rec -> wrapAttachedBridges(rec) }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun wrapAttachedBridges(recorder: Recorder<V>) {
+        // Re-wrap of an already-wrapped bridge is a no-op (idempotent track
+        // calls land here via HandleRegistry.getOrCreate returning the same
+        // handle, so this init runs only once per vault — but defensive in
+        // case future entry points cycle here).
+        val wrappable = vault.properties.values
+            .mapNotNull { state -> (state as? MutableState<Any>)?.let { state to it } }
+            .mapNotNull { (state, mutable) -> mutable.bridge?.let { Triple(state, mutable, it) } }
+            .filter { (_, _, attached) -> attached !is RecordingBridgeWrapper<*> }
+        for ((state, mutable, attached) in wrappable) {
+            val wrapper = RecordingBridgeWrapper(state = state, delegate = attached, recorder = recorder)
+            bridgeWrappers[state] = wrapper
+            // Replace the attached bridge — vault setter disposes the old
+            // inbound subscription and calls wrapper.observe.
+            mutable.bridge = wrapper as Bridge<Any>
+        }
     }
 
     /**
@@ -111,13 +164,66 @@ class VaultHandle<V : Vault<V>> internal constructor(val vault: V, val captureMo
 
     /**
      * Filter of [timeline] for [BridgeEvent]s targeting [prop]'s state on this
-     * vault. **In v1 always empty** — Issue 12 owns the bridge instrumentation;
-     * the typed view is shipped now so Issue 07's matchers can target it
-     * without future churn.
+     * vault. Populated by the [Recorder] when bridges attached to tracked
+     * states publish / observe — see [RecordingBridgeWrapper] for the wrap
+     * strategy and the v1 limit (bridges attached AFTER `track(v)` are not
+     * wrapped).
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
         val target = prop.get(vault)
         return timeline.filterIsInstance<BridgeEvent>().filter { it.state === target }
+    }
+
+    /**
+     * Look up the bridge attached to the [State] referenced by [prop] on this
+     * handle's vault and return a [BridgeView] facade for inspecting publish
+     * history and synthesising inbound updates.
+     *
+     * The lookup walks two sources, in order:
+     *  1. The handle's [bridgeWrappers] map — populated at install time for
+     *     every state with a bridge attached BEFORE `track(v)`.
+     *  2. The state's current `MutableState.bridge` — used as a fallback for
+     *     states whose bridge was attached after track(v); the resulting
+     *     [BridgeView] still works for direct inspection but does NOT receive
+     *     [BridgePublished] / [BridgeObserved] events on the timeline.
+     *
+     * If the underlying bridge is one of the test bridges
+     * ([com.vynatix.vault.testing.bridge.RecordingBridge] /
+     * [com.vynatix.vault.testing.bridge.LatchedBridge]) the [BridgeView] reads
+     * its publish history; for arbitrary bridges (e.g. a real
+     * [com.vynatix.vault.bridge.KvBridge]) only the wrapper-tracked publishes
+     * are visible — but only if the bridge was wrapped at install time.
+     *
+     * @throws IllegalStateException if the state has no bridge attached.
+     */
+    fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
+        val state = prop.get(vault)
+        val wrapper = bridgeWrappers[state]
+        if (wrapper != null) {
+            return BridgeView(BridgeView.WrappedSource(wrapper))
+        }
+        // Fallback: no install-time wrapper, but the state may have a bridge
+        // attached after track(v). Probe the MutableState.bridge directly and
+        // try to construct a view from a known test-bridge type.
+        @Suppress("UNCHECKED_CAST")
+        val mutable = (state as? MutableState<Any>)
+            ?: error("bridge(${prop.name}): state was not created by this vault — cannot inspect its bridge")
+        val attached = mutable.bridge ?: error(
+            "bridge(${prop.name}): no bridge attached. Attach via `state bridge bridge` before calling.",
+        )
+        return adaptBridge(attached)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun adaptBridge(attached: Bridge<*>): BridgeView<*> = when (attached) {
+        is RecordingBridge<*> -> BridgeView(BridgeView.RecordingSource(attached as RecordingBridge<Any>))
+        is LatchedBridge<*> -> BridgeView(BridgeView.LatchedSource(attached as LatchedBridge<Any>))
+        is RecordingBridgeWrapper<*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper<Any>))
+        else -> error(
+            "bridge(...): underlying bridge is a ${attached::class.simpleName} which does not " +
+                "support introspection. Attach it BEFORE track(v) so the recorder can wrap it, " +
+                "or use a RecordingBridge / LatchedBridge in tests.",
+        )
     }
 
     /**
@@ -242,6 +348,13 @@ class VaultHandle<V : Vault<V>> internal constructor(val vault: V, val captureMo
         // this vault can fire the recorder), then drop the recorder's buffer.
         // Catch any throw so teardown stays robust under leaked handles.
         runCatching { vault.clearMiddleware() }
+        // Drop the wrapper map; the wrappers remain attached to states (the
+        // vault still references them) but they hold a reference to a
+        // recorder we are about to clear, so future publishes from a leaked
+        // post-teardown action would push events into an empty buffer (no
+        // observable effect). Clearing the map releases our reference so a
+        // leaked handle does not retain wrappers indefinitely.
+        bridgeWrappers.clear()
         r.dispose()
     }
 }
