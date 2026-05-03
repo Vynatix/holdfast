@@ -2,6 +2,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("astrid.kmp.library")
+    id("astrid.kmp.jvm")
+    id("astrid.kmp.wasmJs")
     id("astrid.compose.multiplatform")
     id("astrid.quality")
     id("astrid.dokka")
