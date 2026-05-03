@@ -30,6 +30,22 @@ class MutableState<T : Any>(
 
     private val observers = mutableSetOf<(T) -> Unit>()
 
+    /**
+     * Test-only window onto the live observer set size. Unlike a "total observers
+     * ever attached" counter, this reflects the *current* number of live
+     * subscriptions — adds and disposes both move it. Reads under [observersLock]
+     * so the count is consistent with concurrent [observe]/dispose.
+     *
+     * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+     * uses it to verify that `Flow`/`StateFlow`/`effect` adapters correctly dispose
+     * their underlying observer registration on consumer cancellation. Application
+     * code must never read this — depending on observer count couples consumers to
+     * the internal subscription model.
+     */
+    @VaultInternalApi
+    val observerCount: Int
+        get() = observersLock.withLock { observers.size }
+
     @kotlin.concurrent.Volatile
     private var currentValue: T = initialValue
 
@@ -214,3 +230,22 @@ class MutableState<T : Any>(
         }
     }
 }
+
+/**
+ * Test-only window onto the live observer count for a [State]. Convenience
+ * extension so test code can read it from a [State] reference (the public
+ * surface) without an explicit cast to [MutableState]. Throws if the [State]
+ * was not produced by `vault.state { … }` — only [MutableState] instances
+ * carry an observer set.
+ *
+ * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+ * uses it to verify that `Flow`/`StateFlow`/`effect` adapters dispose their
+ * underlying observer registration on consumer cancellation. Application code
+ * must never opt in.
+ */
+@VaultInternalApi
+val <T : Any> State<T>.observerCount: Int
+    get() {
+        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (vault.state { ... })")
+        return ms.observerCount
+    }

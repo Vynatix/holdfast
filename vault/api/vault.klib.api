@@ -202,6 +202,8 @@ final class <#A: kotlin/Any> com.vynatix.vault.bridge/KvBridge : com.vynatix.vau
 final class <#A: kotlin/Any> com.vynatix.vault/MutableState : com.vynatix.vault/State<#A> { // com.vynatix.vault/MutableState|null[0]
     constructor <init>(#A, com.vynatix.vault/Transformer<#A>? = ..., com.vynatix.vault/Vault<*>, kotlin/Boolean = ...) // com.vynatix.vault/MutableState.<init>|<init>(1:0;com.vynatix.vault.Transformer<1:0>?;com.vynatix.vault.Vault<*>;kotlin.Boolean){}[0]
 
+    final val observerCount // com.vynatix.vault/MutableState.observerCount|{}observerCount[0]
+        final fun <get-observerCount>(): kotlin/Int // com.vynatix.vault/MutableState.observerCount.<get-observerCount>|<get-observerCount>(){}[0]
     final val value // com.vynatix.vault/MutableState.value|{}value[0]
         final fun <get-value>(): #A // com.vynatix.vault/MutableState.value.<get-value>|<get-value>(){}[0]
 
@@ -335,6 +337,9 @@ final object com.vynatix.vault.bridge/StringCodec : com.vynatix.vault.bridge/Cod
     final fun decode(kotlin/String): kotlin/String // com.vynatix.vault.bridge/StringCodec.decode|decode(kotlin.String){}[0]
     final fun encode(kotlin/String): kotlin/String // com.vynatix.vault.bridge/StringCodec.encode|encode(kotlin.String){}[0]
 }
+
+final val com.vynatix.vault/observerCount // com.vynatix.vault/observerCount|@com.vynatix.vault.State<0:0>{0§<kotlin.Any>}observerCount[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.vault/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
 
 final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault/computed(kotlin/Function1<#A, #B>): com.vynatix.vault/State<#B> // com.vynatix.vault/computed|computed@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any> (#A).com.vynatix.vault/derived(kotlin/Array<out com.vynatix.vault/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.vault/State<#B>, com.vynatix.vault/Disposable> // com.vynatix.vault/derived|derived@0:0(kotlin.Array<out|com.vynatix.vault.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>}[0]

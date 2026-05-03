@@ -62,9 +62,14 @@ public final class com/vynatix/vault/MutableState : com/vynatix/vault/State {
 	public synthetic fun <init> (Ljava/lang/Object;Lcom/vynatix/vault/Transformer;Lcom/vynatix/vault/Vault;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun applyCommittedRaw (Ljava/lang/Object;)Z
 	public final fun getBridge ()Lcom/vynatix/vault/Bridge;
+	public final fun getObserverCount ()I
 	public fun getValue ()Ljava/lang/Object;
 	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public final fun setBridge (Lcom/vynatix/vault/Bridge;)V
+}
+
+public final class com/vynatix/vault/MutableStateKt {
+	public static final fun getObserverCount (Lcom/vynatix/vault/State;)I
 }
 
 public abstract interface class com/vynatix/vault/Observable {
