@@ -1470,6 +1470,64 @@ arrives as `["address", "zip"]`.
 Composites accumulate violations across **all** fields (not just the first
 failure), so HTTP/form layers can surface every problem at once.
 
+#### Collection fields — `each` and `forKey`
+
+```kotlin
+val UserValidator = validator<User> {
+    field("email", { it.email }, EmailValidator)
+    each("addresses", { it.addresses }, AddressValidator)             // List<Address>
+    forKey("tags", { it.tags }, "primary", TagValidator)              // Map<String, String>
+}
+```
+
+Path notation distinguishes index segments (`"[0]"`, `"[2]"`) from named
+field segments. A failure inside `user.addresses[2].zip` arrives as
+`path = ["addresses", "[2]", "zip"]`.
+
+#### Format regex rules
+
+`com.vynatix.validation.rules` ships nine practical-but-not-RFC-strict
+format checks: `EmailRule`, `UrlRule`, `UuidRule`, `Ipv4Rule`, `Ipv6Rule`,
+`E164PhoneRule`, `Iso8601DateRule`, `Iso8601DateTimeRule`, `IbanRule`. None
+of these claim full RFC compliance — they target the 95% case used by HTML5
+forms. Adopters needing stricter forms compose their own
+`MatchesRule(regex)` or subclass `Rule<String>`.
+
+#### Internationalization — `MessageResolver`
+
+```kotlin
+class AndroidMessageResolver(val resources: Resources) : MessageResolver {
+    override fun resolve(violation: Violation, locale: String?): String {
+        val resId = when (violation.code) {
+            "string.minLength" -> R.string.err_min_length
+            "string.nonBlank"  -> R.string.err_non_blank
+            else               -> return violation.message
+        }
+        return resources.getString(resId, *violation.args.values.toTypedArray())
+    }
+}
+
+val resolved: List<String> = result.resolveAll(AndroidMessageResolver(resources))
+```
+
+The library ships `EnglishMessageResolver` (the default — returns
+`Violation.message` verbatim) and the `MessageResolver` interface for
+custom strategies. `code` + `args` are the contract surface.
+
+#### Schema export / introspection
+
+```kotlin
+when (val d = UserValidator.describe()) {
+    is ValidatorDescription.LeafDescription -> /* leaf — list specs/rules */
+    is ValidatorDescription.CompositeDescription -> d.fields.forEach { … }
+    is ValidatorDescription.OpaqueDescription -> /* fallback for hand-rolled */
+}
+```
+
+Useful for OpenAPI / JSON-Schema generation, form-builder UIs, or doc
+generation. Ships introspection only — actual schema-format export is
+adopter-side.
+
 #### Vault integration (`vault-validation`)
 
 ```kotlin
@@ -1527,6 +1585,39 @@ val r: ValidationResult<NewUser> = v.validate(NewUser("alice", "Alice"))
 
 The composite DSL accepts either sync or suspend sub-validators via
 overloaded `field` factories.
+
+#### Vault adapter for suspend validation (`vault-validation-coroutines`)
+
+```kotlin
+suspend fun adoptUsername(name: String): TransactionResult<Unit> =
+    vault.suspendValidateAndMutate(vault.username, UsernameValidator, name)
+```
+
+Runs the suspend validator (which may do I/O), then mutates the Vault state
+inside a `suspendAction { }`. Atomic: validation failure rolls back the
+entire transaction.
+
+#### Transformer composition — `Transformer.then`
+
+```kotlin
+import com.vynatix.vault.then
+
+val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
+
+class UserVault : Vault<UserVault>() {
+    val email by state(transformer = pipeline) { /* … */ }
+}
+```
+
+`then` chains transformers: `set` runs `this.set` then `other.set`; `get`
+runs `other.get` then `this.get` (reverse order, so round-trip preserved).
+Ships in `:vault` core.
+
+#### Migrating from Konform
+
+See [`validation/KONFORM-MIGRATION.md`](../validation/KONFORM-MIGRATION.md)
+for a 1:1 mapping from Konform's `Validation<T>` API to this library's
+surface. No runtime Konform dep.
 
 ---
 

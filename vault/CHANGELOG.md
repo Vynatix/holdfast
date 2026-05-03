@@ -4,6 +4,78 @@ All notable changes to the Vault library are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-03
+
+Closes the deferred-features list from 0.3.0. Additive across the validation
+modules; one additive change to `:vault` core (`Transformer.then`); one new
+module (`:vault-validation-coroutines`).
+
+### Added — `:validation`
+
+- **9 format-regex rules** in `com.vynatix.validation.rules`:
+  `EmailRule`, `UrlRule`, `UuidRule`, `Ipv4Rule`, `Ipv6Rule`, `E164PhoneRule`,
+  `Iso8601DateRule`, `Iso8601DateTimeRule`, `IbanRule`. Each captures a
+  practical pattern (NOT a strict RFC grammar) — the patterns target HTML5 /
+  OWASP common usage, not edge-case correctness. Adopters needing stricter
+  forms compose `MatchesRule(theirRegex)` or subclass `Rule<String>`.
+- **Collection field validators** in `com.vynatix.validation`:
+  `each(name, getter, elementValidator)` validates every element of an
+  `Iterable<E>` field with indexed path notation (`["addresses", "[2]", "zip"]`);
+  `forKey(name, getter, key, valueValidator)` validates a specific map key
+  with quoted-key path notation (`["tags", "[\"primary\"]"]`). Both
+  accumulate violations across elements.
+- **`MessageResolver` + `EnglishMessageResolver` default**. `interface
+  MessageResolver { fun resolve(violation: Violation, locale: String? = null): String }`.
+  Adopters wire their own (Android resources, kotlinx-i18n, in-house bundle)
+  to consume `Violation.code` + `Violation.args`. `ValidationResult.resolveAll(resolver)`
+  helper for batch resolution.
+- **Schema export / introspection.** `Validator<IN, OUT>.describe(): ValidatorDescription`
+  surfaces leaf specs/rules and composite field structure. Three sealed
+  variants: `LeafDescription`, `CompositeDescription`, `OpaqueDescription`.
+  Useful for OpenAPI / JSON-Schema generation and form-builder UIs.
+
+### Added — `:vault` core
+
+- **`Transformer<T>.then(other: Transformer<T>): Transformer<T>`** — composition
+  primitive that lets adopters chain transformers (e.g.
+  `ValidatingTransformer + EncryptingTransformer`). Set order: this then
+  other; get order: other then this (round-trip-preserving). `shouldTransform`
+  is logical OR.
+
+### Added — `:vault-validation`
+
+- **`BoxedHandle<P, O>` + `boxedHandle()` factory** — alternative to `boxed()`
+  that returns a property of type `BoxedHandle` instead of bare `State<O>`.
+  Bundles the underlying `state` and `validator` so call sites can
+  `email.state mutate email.civilize("alice@example.com")` without naming
+  the validator object externally. The original `boxed()` factory is
+  unchanged.
+
+### Added — `:vault-validation-coroutines` (new module)
+
+- New companion artifact `com.vynatix:vault-validation-coroutines`.
+- **`Vault<V>.suspendValidateAndMutate(state, suspendValidator, primitive)`** —
+  primary entry. Runs the suspend validator (which may do I/O), then mutates
+  the Vault state inside a `suspendAction { }`. Atomic: validation failure
+  rolls back the entire transaction.
+- Tests cover acceptance, rejection-with-rollback, and
+  `ValidationException` propagation.
+
+### Documentation
+
+- `validation/KONFORM-MIGRATION.md` (new) — 1:1 conceptual mapping from
+  Konform's `Validation<T>` API to `:validation`'s surface. Drop-in for
+  adopters migrating; no runtime Konform dep.
+- `vault/README.md`, `vault/CHANGELOG.md`, `vault/GUIDE.md` updated.
+
+### Verification
+
+- 53+ tests across the validation modules; 8 modules total green on
+  Android JVM + iOS sim.
+- `apiCheck` clean across 8 modules; new ABI baselines committed.
+- `detekt` + `ktlint` clean across all 8 modules.
+- 32 GAVs at 0.4.0 published to `~/.m2/repository/com/vynatix/`.
+
 ## [0.3.0] — 2026-05-03
 
 Validation library reshape. The 0.2.0 `:vault-validation` surface is fully

@@ -1,8 +1,8 @@
 package com.vynatix.vault.testing.matcher
 
+import com.vynatix.validation.Boxed
 import com.vynatix.vault.Vault
 import com.vynatix.vault.testing.vaultTest
-import com.vynatix.vault.validation.Boxed
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith

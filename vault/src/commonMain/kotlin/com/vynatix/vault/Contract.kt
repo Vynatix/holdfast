@@ -73,6 +73,35 @@ interface Transformer<T : Any> {
 }
 
 /**
+ * Compose two [Transformer]s. The result's `set` runs `this.set` then
+ * `other.set`; its `get` runs `other.get` then `this.get` (reverse order, so
+ * round-trips: `outer.then(inner).get(outer.then(inner).set(x)) == x` when
+ * each transformer is itself a round-trip).
+ *
+ * Useful for chaining domain transformers — e.g. validate-then-encrypt:
+ * ```kotlin
+ * val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
+ * vault { state(transformer = pipeline) { … } }
+ * ```
+ *
+ * If either transformer's [shouldTransform] returns false on the inbound
+ * value, the composed transformer skips that side accordingly.
+ */
+fun <T : Any> Transformer<T>.then(other: Transformer<T>): Transformer<T> = object : Transformer<T> {
+    override fun set(value: T): T {
+        val first = if (this@then.shouldTransform(value)) this@then.set(value) else value
+        return if (other.shouldTransform(first)) other.set(first) else first
+    }
+
+    override fun get(value: T): T {
+        val first = if (other.shouldTransform(value)) other.get(value) else value
+        return if (this@then.shouldTransform(first)) this@then.get(first) else first
+    }
+
+    override fun shouldTransform(value: T): Boolean = this@then.shouldTransform(value) || other.shouldTransform(value)
+}
+
+/**
  * A handle to release something — an effect subscription, an inbound bridge
  * registration, etc. [dispose] is idempotent: calling it twice is safe.
  */

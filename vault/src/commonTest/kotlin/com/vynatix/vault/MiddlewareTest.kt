@@ -62,7 +62,10 @@ class MiddlewareLifecycleTest {
     fun onTransactionStartedRunsBeforeActionBlock() = vaultTest {
         val events = mutableListOf<String>()
         val v = MiddlewareTestVault().apply { middlewares(GlobalRecordingMiddleware("M", events)) }
-        track(v).action { events.add("BLOCK"); n mutate 1 }.shouldBeSuccess()
+        track(v).action {
+            events.add("BLOCK")
+            n mutate 1
+        }.shouldBeSuccess()
         assertEquals("M:started", events.first())
         assertTrue(events.indexOf("M:started") < events.indexOf("BLOCK"), "onTransactionStarted must precede the action block")
     }

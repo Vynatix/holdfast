@@ -1,7 +1,7 @@
 package com.vynatix.vault.testing.matcher
 
+import com.vynatix.validation.Boxed
 import com.vynatix.vault.State
-import com.vynatix.vault.validation.Boxed
 
 /**
  * Assert that this state holds a [Boxed] wrapper whose primitive is `==` to
@@ -17,7 +17,7 @@ import com.vynatix.vault.validation.Boxed
  *
  * Throws [AssertionError] if the unboxed primitive does not equal [primitive].
  */
-infix fun <P, T : Boxed<P>> State<T>.shouldBeBoxedAs(primitive: P) {
+infix fun <P : Any, T : Boxed<P>> State<T>.shouldBeBoxedAs(primitive: P) {
     val box = this.value
     val unboxed = box.value
     if (unboxed != primitive) {
