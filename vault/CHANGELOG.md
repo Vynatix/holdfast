@@ -4,6 +4,65 @@ All notable changes to the Vault library are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.0.0 — 2026-05-03
+
+Coordinated 2.0 cut across `:vault`, `:vault-coroutines`, `:vault-compose`,
+and `:vault-validation`. See [MIGRATING.md](../MIGRATING.md) for the
+per-call-site rewrite cheatsheet.
+
+### Added
+
+- **`Vault.scope: CoroutineScope`** with three-tier resolution: per-call
+  parameter → per-vault `override val scope` → process-default
+  `Vault.defaultScope`. The settable-once `Vault.defaultScope` lazily backs
+  off to a process `SupervisorJob + Dispatchers.Default` if never assigned.
+  App-init pattern: `Vault.defaultScope = appScope` once at startup.
+- **`Vault.bindToScope(scope)`** — replaces the bound scope reference for
+  one vault. Optional. Calling on an already-bound vault rebinds.
+- **`Vault.dispose()`** — terminal lifecycle. Idempotent. Clears states,
+  detaches bridges, clears observers, terminates events `SharedFlow`. Does
+  NOT cancel the bound scope (caller owns its lifecycle). Subsequent calls
+  to scope-using or transactional APIs throw `IllegalStateException`.
+- **`Eventful<E>` interface** (`val events: SharedFlow<E>` + `fun emit(event)`)
+  and **`EventfulVault<Self, E>`** base class. Events stage into the active
+  transaction's `pendingEvents` and emit during commit, AFTER state observer
+  fanout and bridge publish. Lossless-by-default: `replay = 0`,
+  `extraBufferCapacity = 16`, `BufferOverflow.SUSPEND`. Off-action `emit`
+  throws `IllegalStateException`.
+- **`EventfulSupport<E>`** — delegate helper for vaults that already extend
+  another base and cannot extend `EventfulVault`. Same staging machinery
+  exposed as a delegate field.
+- **`@VaultInternalApi MutableState.applyCommittedRaw(value)`** — splits
+  observer fanout out of the bridge-publish path so `:vault-coroutines`
+  can interpose `SuspendingBridge.publishAwaited` between observers and
+  bridges during the `suspendAction` commit phase.
+- **`@VaultInternalApi Transaction.stagePendingEvent(channel, event)`** —
+  the per-transaction event buffer used by `EventfulVault.emit`. Discarded
+  on rollback; merged into parent on nested commit.
+
+### Removed
+
+- This module surface is unchanged in terms of removals; the only
+  removal in the 2.0 cut lives in `:vault-coroutines`. See that module's
+  changelog.
+
+### Changed (behavior, signature stable)
+
+- **Commit-phase ordering is now universal**: state observers fire
+  (post-`transformer.get`), then bridges publish (sync `Bridge.publish`;
+  for `SuspendingBridge` under `suspendAction`, `publishAwaited` is
+  awaited), then events `tryEmit` to their `MutableSharedFlow`. Subscribers
+  to `events` always see "saved" after `state` observers see the new state.
+
+### Changed (signature)
+
+- **`MutableState<T>.observe` visibility narrowed to `internal`.**
+  Migration: `(state as MutableState<T>).observe { ... }` →
+  `state effect { ... }` (uses the new top-level `State<T>.effect`
+  extension exposed by `:vault-coroutines`).
+
+---
+
 ## [Unreleased]
 
 ### Added — `:vault-validation` (new module)
