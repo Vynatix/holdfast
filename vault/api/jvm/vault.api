@@ -14,6 +14,19 @@ public abstract interface class com/vynatix/vault/Disposable {
 	public abstract fun dispose ()V
 }
 
+public abstract interface class com/vynatix/vault/Eventful {
+	public abstract fun emit (Ljava/lang/Object;)V
+	public abstract fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+}
+
+public abstract class com/vynatix/vault/EventfulVault : com/vynatix/vault/Vault, com/vynatix/vault/Eventful {
+	public fun <init> ()V
+	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
+	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun emit (Ljava/lang/Object;)V
+	public final fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+}
+
 public abstract interface class com/vynatix/vault/Initializer : kotlin/jvm/functions/Function0 {
 }
 
@@ -79,11 +92,13 @@ public final class com/vynatix/vault/Transaction {
 	public static final field Companion Lcom/vynatix/vault/Transaction$Companion;
 	public final fun commit ()V
 	public final fun commitDispatching (Lkotlin/jvm/functions/Function2;)V
+	public final fun commitDispatching (Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function1;)V
 	public final fun getEndTime ()Ljava/lang/Long;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getModifiedStates ()Ljava/util/Set;
 	public final fun getStatus ()Lcom/vynatix/vault/TransactionStatus;
 	public final fun rollback ()V
+	public final fun stagePendingEvent (Lkotlinx/coroutines/flow/MutableSharedFlow;Ljava/lang/Object;)V
 }
 
 public final class com/vynatix/vault/Transaction$Companion {

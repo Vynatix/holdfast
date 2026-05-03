@@ -13,6 +13,7 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -181,17 +182,28 @@ private fun ensureSerializer(vault: Vault<*>): MutexSerializer {
  */
 @Suppress("UNCHECKED_CAST")
 private suspend fun suspendingCommit(txn: Transaction) {
-    // Snapshot pending writes outside the commit's pendingLock, so we can
-    // suspend in publishAwaited without holding any internal vault lock.
-    // The commit itself runs the observer fanout and clears pendingWrites.
+    // Snapshot pending writes and pending events outside the commit's
+    // pendingLock, so we can suspend in publishAwaited and the events drain
+    // without holding any internal vault lock. The commit itself runs observer
+    // fanout, clears pendingWrites, and clears pendingEvents — but our
+    // drainEvents lambda intercepts the snapshot before the clear.
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
-    txn.commitDispatching { state, value ->
-        val ms = state as MutableState<Any>
-        // Step 1+2: replace + observers (no bridge publish yet).
-        ms.applyCommittedRaw(value)
-        publishQueue += ms to value
-    }
-    // Step 3: bridge publish phase. SuspendingBridge gets awaited;
+    val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
+    txn.commitDispatching(
+        applyTopLevel = { state, value ->
+            val ms = state as MutableState<Any>
+            // Step 1+2: replace + observers (no bridge publish yet).
+            ms.applyCommittedRaw(value)
+            publishQueue += ms to value
+        },
+        drainEvents = { snapshot ->
+            // Stash for after-bridge drain. Do NOT emit here — `commitDispatching`
+            // is non-suspending, and we want bridge publishes (which may suspend)
+            // to complete first per the commit-phase ordering contract.
+            eventsQueue.addAll(snapshot)
+        },
+    )
+    // Step 3a: bridge publish phase. SuspendingBridge gets awaited;
     // every other Bridge falls back to fire-and-forget Bridge.publish.
     for ((ms, value) in publishQueue) {
         val br = ms.bridge ?: continue
@@ -200,6 +212,14 @@ private suspend fun suspendingCommit(txn: Transaction) {
         } else {
             br.publish(value)
         }
+    }
+    // Step 3b: events drain. Use suspending `emit` so `BufferOverflow.SUSPEND`
+    // back-pressure is honored — slow collectors block the producer (this
+    // commit thread) rather than dropping events. We're already inside
+    // `withContext(NonCancellable)` from the caller, so cancellation between
+    // bridge publish and events does not interrupt the drain.
+    for ((channel, event) in eventsQueue) {
+        (channel as MutableSharedFlow<Any>).emit(event)
     }
 }
 

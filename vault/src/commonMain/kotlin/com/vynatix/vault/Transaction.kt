@@ -1,5 +1,6 @@
 package com.vynatix.vault
 
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlin.time.Clock
 
 /**
@@ -60,6 +61,21 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
     internal val pendingWrites: MutableMap<MutableState<*>, Any> = mutableMapOf()
 
     /**
+     * Per-transaction event buffer (channel → event) staged via [stagePendingEvent].
+     * Owner-thread-confined; ordered by insertion. On top-level [commit], drained
+     * AFTER state observers and AFTER bridge publishes — the third and final phase
+     * of commit fanout. On nested [commit], merged into the parent's buffer (so the
+     * outermost commit fires events from inner savepoints in the order they were
+     * staged across the whole transaction tree). On [rollback], discarded.
+     *
+     * The list elements are `(MutableSharedFlow<*>, Any)` rather than tied to a
+     * single typed channel because a vault may host multiple [Eventful] surfaces
+     * in the future (today: one per vault). The unchecked cast on emit is sound:
+     * [Eventful.emit]'s signature is `(E)` and the channel is `MutableSharedFlow<E>`.
+     */
+    internal val pendingEvents: MutableList<Pair<MutableSharedFlow<*>, Any>> = mutableListOf()
+
+    /**
      * Stage a [rawValue] directly as a pending write, bypassing [MutableState.beforeSet].
      * Used by [Vault.restore] to round-trip raw stored values (ciphertext,
      * post-`transformer.set` form) without re-running the transformer.
@@ -71,6 +87,23 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      */
     internal fun stagePendingRaw(state: MutableState<*>, rawValue: Any) {
         pendingWrites[state] = rawValue
+    }
+
+    /**
+     * Stage [event] onto this transaction's [pendingEvents] buffer, to be emitted
+     * to [channel] during the commit's event-drain phase. Public-internal because
+     * [Eventful.emit] (in `:vault` core) needs to call it; user code should not.
+     *
+     * Owner-thread-confined: callers MUST be the owner of this transaction (the
+     * blocking action's caller, or the suspending action's coroutine while the
+     * AsyncSerializer holds the lock). Concurrent stages from non-owner threads
+     * are undefined — same contract as [pendingWrites].
+     */
+    @VaultInternalApi
+    fun stagePendingEvent(channel: MutableSharedFlow<*>, event: Any) {
+        pendingLock.withLock {
+            pendingEvents += channel to event
+        }
     }
 
     /**
@@ -138,9 +171,40 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      */
     @VaultInternalApi
     fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit) {
+        commitDispatching(applyTopLevel, drainEvents = null)
+    }
+
+    /**
+     * Internal commit variant that lets the caller take over the event-drain
+     * phase (used by `:vault-coroutines.suspendAction` to interpose its
+     * suspending bridge publish between observer fanout and the event drain,
+     * and to honor SUSPEND back-pressure on the events SharedFlow).
+     *
+     * If [drainEvents] is null (the default), the event-drain phase calls
+     * `MutableSharedFlow.tryEmit` synchronously for each staged event — sync
+     * `commit()` semantics.
+     *
+     * If non-null, [drainEvents] is invoked synchronously with the
+     * pre-snapshotted event list AFTER observer fanout and BEFORE the status
+     * transition to Committed. The caller may either emit immediately, or simply
+     * stash the snapshot to a captured variable and emit later — typical usage in
+     * `suspendAction` is to stash the list, complete the bridge-publish phase,
+     * and then suspendingly emit the events so back-pressure is honored. The
+     * snapshot list is owned by the caller and reflects insertion order.
+     */
+    @VaultInternalApi
+    fun commitDispatching(
+        applyTopLevel: (MutableState<*>, Any) -> Unit,
+        drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?,
+    ) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
 
+        // Snapshot of events to drain after fanout, populated only on the
+        // top-level branch. Captured outside the pendingLock so the drain (which
+        // calls `tryEmit` or a caller-supplied suspending emit) runs without
+        // holding any internal vault lock.
+        val eventsToDrain = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
         try {
             pendingLock.withLock {
                 val parentTxn = parent
@@ -148,6 +212,9 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
                     // Savepoint commit: merge into parent. Last-write-wins on shared keys —
                     // savepoint mutations override any earlier parent pending for the same state.
                     parentTxn.pendingWrites.putAll(pendingWrites)
+                    // Events: append in order. Outer commit fires this savepoint's events
+                    // after its own (preserving stage order across the whole tree).
+                    parentTxn.pendingEvents.addAll(pendingEvents)
                 } else {
                     // Top-level commit: apply each pending write via the caller-supplied
                     // dispatcher. Observers and bridges see the value here, post-commit,
@@ -158,8 +225,33 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
                     pendingWrites.forEach { (state, value) ->
                         applyTopLevel(state, value)
                     }
+                    // Snapshot the events to drain after we release pendingLock. The drain
+                    // itself happens outside the lock — `tryEmit` may suspend or invoke
+                    // ready collectors synchronously, and we never want to hold an internal
+                    // lock across user code.
+                    eventsToDrain.addAll(pendingEvents)
                 }
                 pendingWrites.clear()
+                pendingEvents.clear()
+            }
+            // Phase 3 (top-level only): drain events AFTER observer fanout and AFTER
+            // bridge publishes. Order matters: a collector subscribed to both
+            // `state.asFlow()` and `vault.events` will see the state value before
+            // the event. If a caller-supplied [drainEvents] is provided, it owns
+            // the emit (typically a suspending emit honoring back-pressure).
+            // Otherwise we tryEmit each event — sync `commit()` cannot suspend, so
+            // a full SUSPEND-policy buffer falls back to drop here. Suspend-action
+            // callers should pass a drainEvents that uses `emit(...)` to honor
+            // back-pressure.
+            if (eventsToDrain.isNotEmpty()) {
+                if (drainEvents != null) {
+                    drainEvents(eventsToDrain)
+                } else {
+                    for ((channel, event) in eventsToDrain) {
+                        @Suppress("UNCHECKED_CAST")
+                        (channel as MutableSharedFlow<Any>).tryEmit(event)
+                    }
+                }
             }
             updateStatus(TransactionStatus.Committed)
         } catch (e: Exception) {
@@ -185,6 +277,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
         try {
             pendingLock.withLock {
                 pendingWrites.clear()
+                pendingEvents.clear()
             }
             updateStatus(TransactionStatus.RolledBack)
         } catch (e: Exception) {

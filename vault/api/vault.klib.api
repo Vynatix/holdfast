@@ -52,6 +52,13 @@ abstract interface <#A: kotlin/Any> com.vynatix.vault.bridge/Codec { // com.vyna
 
 abstract interface <#A: kotlin/Any> com.vynatix.vault/Bridge : com.vynatix.vault/Observable<#A>, com.vynatix.vault/Publisher<#A> // com.vynatix.vault/Bridge|null[0]
 
+abstract interface <#A: kotlin/Any> com.vynatix.vault/Eventful { // com.vynatix.vault/Eventful|null[0]
+    abstract val events // com.vynatix.vault/Eventful.events|{}events[0]
+        abstract fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#A> // com.vynatix.vault/Eventful.events.<get-events>|<get-events>(){}[0]
+
+    abstract fun emit(#A) // com.vynatix.vault/Eventful.emit|emit(1:0){}[0]
+}
+
 abstract interface <#A: kotlin/Any> com.vynatix.vault/State { // com.vynatix.vault/State|null[0]
     abstract val value // com.vynatix.vault/State.value|{}value[0]
         abstract fun <get-value>(): #A // com.vynatix.vault/State.value.<get-value>|<get-value>(){}[0]
@@ -107,6 +114,15 @@ sealed interface <#A: out kotlin/Any?> com.vynatix.vault/TransactionResult { // 
         final fun hashCode(): kotlin/Int // com.vynatix.vault/TransactionResult.Error.hashCode|hashCode(){}[0]
         final fun toString(): kotlin/String // com.vynatix.vault/TransactionResult.Error.toString|toString(){}[0]
     }
+}
+
+abstract class <#A: com.vynatix.vault/EventfulVault<#A, #B>, #B: kotlin/Any> com.vynatix.vault/EventfulVault : com.vynatix.vault/Eventful<#B>, com.vynatix.vault/Vault<#A> { // com.vynatix.vault/EventfulVault|null[0]
+    constructor <init>(kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.vault/EventfulVault.<init>|<init>(kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
+
+    final val events // com.vynatix.vault/EventfulVault.events|{}events[0]
+        final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#B> // com.vynatix.vault/EventfulVault.events.<get-events>|<get-events>(){}[0]
+
+    final fun emit(#B) // com.vynatix.vault/EventfulVault.emit|emit(1:1){}[0]
 }
 
 abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // com.vynatix.vault/Vault|null[0]
@@ -241,7 +257,9 @@ final class com.vynatix.vault/Transaction { // com.vynatix.vault/Transaction|nul
 
     final fun commit() // com.vynatix.vault/Transaction.commit|commit(){}[0]
     final fun commitDispatching(kotlin/Function2<com.vynatix.vault/MutableState<*>, kotlin/Any, kotlin/Unit>) // com.vynatix.vault/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.vault.MutableState<*>,kotlin.Any,kotlin.Unit>){}[0]
+    final fun commitDispatching(kotlin/Function2<com.vynatix.vault/MutableState<*>, kotlin/Any, kotlin/Unit>, kotlin/Function1<kotlin.collections/List<kotlin/Pair<kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any>>, kotlin/Unit>?) // com.vynatix.vault/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.vault.MutableState<*>,kotlin.Any,kotlin.Unit>;kotlin.Function1<kotlin.collections.List<kotlin.Pair<kotlinx.coroutines.flow.MutableSharedFlow<*>,kotlin.Any>>,kotlin.Unit>?){}[0]
     final fun rollback() // com.vynatix.vault/Transaction.rollback|rollback(){}[0]
+    final fun stagePendingEvent(kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any) // com.vynatix.vault/Transaction.stagePendingEvent|stagePendingEvent(kotlinx.coroutines.flow.MutableSharedFlow<*>;kotlin.Any){}[0]
 
     final object Companion { // com.vynatix.vault/Transaction.Companion|null[0]
         final fun createForExternal(kotlin/String, kotlin/Long): com.vynatix.vault/Transaction // com.vynatix.vault/Transaction.Companion.createForExternal|createForExternal(kotlin.String;kotlin.Long){}[0]
