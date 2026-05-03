@@ -45,7 +45,9 @@ sub.dispose()
 | `com.vynatix:vault` | Core library — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-vault `atomic`, encryption transformer, file-system store |
 | `com.vynatix:vault-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` for async transactional bodies |
 | `com.vynatix:vault-compose` | `@Composable` `collectAsState` / `rememberDisposable` |
-| `com.vynatix:vault-validation` | Boundary-validation primitives — `Boxed` / `Rule` / `Validator` + `ValidatingTransformer` for validate-on-write |
+| `com.vynatix:validation` | Standalone KMP boundary-validation library — `Boxed` / `Rule` / `Validator` / composite DSL / `ValidationResult` with multi-error accumulation. No Vault dep |
+| `com.vynatix:validation-coroutines` | Suspend extension — `SuspendRule` / `SuspendValidator` / `suspendValidator { }` DSL for async (DB-lookup, remote-feature-gate) validation |
+| `com.vynatix:vault-validation` | Vault adapter — `ValidatingTransformer` / `Vault.boxed { }` state factory / `BoxedCodec` for KvBridge persistence |
 
 ## Documentation
 
@@ -71,7 +73,7 @@ sub.dispose()
 - **`Vault.computed { } / Vault.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
 - **`atomic(vararg vaults) { }`** — cross-vault transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every vault.
 - **`suspendAction { }`** (`vault-coroutines`) — async-aware transactional body. Mutually exclusive with blocking `action` on the same vault via an internal coroutine `Mutex`.
-- **`ValidatingTransformer(validator)`** (`vault-validation`) — validate-on-write transformer that wraps raw primitives into typed `Boxed` domain objects at the boundary. A failed validation throws `IllegalArgumentException` and rolls the transaction back atomically.
+- **Validation 0.3.0** (`validation` + `validation-coroutines` + `vault-validation`) — standalone KMP refinement-types library, three-module split. `Validator<IN, OUT>` unified interface; class-based leaves (`object EmailValidator : BoxedValidator<String, Email>()`) and DSL-based composites (`val UserValidator = validator<User> { field("email", { it.email }, EmailValidator) }`). Multi-error accumulation via sealed `ValidationResult<O>` (no Arrow dep). Rich `Violation(message, path, code, rule, args)` for i18n. 14 prebuilt rules (string / number / collection). `Vault.boxed(EmailValidator) { "init@..." }` state factory + `BoxedCodec` for KvBridge persistence.
 
 ## Standard library (in-tree)
 
@@ -115,5 +117,7 @@ The core module ships drop-in helpers under `com.vynatix.vault.middleware`,
 # Companion modules
 ./gradlew :vault-coroutines:allTests :vault-coroutines:apiCheck
 ./gradlew :vault-compose:allTests    :vault-compose:apiCheck
+./gradlew :validation:allTests       :validation:apiCheck
+./gradlew :validation-coroutines:allTests :validation-coroutines:apiCheck
 ./gradlew :vault-validation:allTests :vault-validation:apiCheck
 ```

@@ -1352,84 +1352,181 @@ val r = vault.suspendAction {
 }
 ```
 
-### 14.11 `:vault-validation` — validate primitives at the boundary
+### 14.11 Validation 0.3.0 — three modules at the boundary
 
-The `com.vynatix:vault-validation` companion artifact ships boundary-validation
-primitives that plug into Vault's transformer pipeline. The premise: every
-primitive (`String`, `Long`, …) flowing into your domain should be validated
-and wrapped in a typed `Boxed<P>` — exactly once, at the system boundary.
-Inside the domain, you pass wrapper objects, never raw primitives. This is the
+`:validation` is a standalone KMP refinement-types library; `:vault-validation`
+is a thin Vault adapter on top of it; `:validation-coroutines` adds suspend
+support. The premise: every primitive (`String`, `Long`, …) flowing into your
+domain is validated and wrapped in a typed `Boxed<P>` exactly once, at the
+boundary. Inside the domain, you pass wrappers, never raw primitives — the
 canonical fix for the **primitive obsession** code smell.
 
-**Core types** (in `com.vynatix.vault.validation`):
+#### Module structure
+
+| Artifact | Role |
+|---|---|
+| `com.vynatix:validation` | Core lib. No Vault dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `ValidationResult`. |
+| `com.vynatix:validation-coroutines` | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
+| `com.vynatix:vault-validation` | Vault adapter. `ValidatingTransformer`, `Vault.boxed { }` factory, `BoxedCodec`. |
+
+#### Core surface (`com.vynatix.validation`)
+
 ```kotlin
-interface     Boxed<P>               { val value: P }
-fun interface Rule<P>                    { fun validate(primitive: P): Boolean }
-fun interface Condition<P, R : Rule<P>>  { fun run(primitive: P, rule: Array<out R>): Boolean }
-typealias     Factory<P, O>              = (P) -> O
-interface     Spec<P, R, O>              { val rule: Array<out R>; val condition: Condition<P, R>; val factory: Factory<P, O> }
-interface     Validator<P, R, O> {
-    val specs: Collection<Spec<P, R, O>>
-    infix fun of(value: P): O           // throws IllegalArgumentException on rejection
-    fun ofOrNull(value: P): O?
-    fun validate(value: P): Boolean
-    fun <P2, R2 : Rule<P2>> allConditions(): Condition<P2, R2>   // every rule must pass
-    fun <P2, R2 : Rule<P2>> anyConditions(): Condition<P2, R2>   // at least one rule
-    fun createSpec(factory: Factory<P, O>, condition: Condition<P, R>, vararg rule: R): Spec<P, R, O>
+interface       Boxed<P : Any>                 { val value: P }
+
+abstract class  Rule<P>(val code: String, val messageTemplate: String) {
+    abstract fun validate(value: P): Boolean
+    open fun message(value: P): String       = messageTemplate
+    open fun args(value: P): Map<String, Any?> = emptyMap()
 }
-class ValidatingTransformer<P, R, O>(validator): Transformer<O>
+
+data class      Violation(message, path, code, rule, args)
+
+sealed interface ValidationResult<out OUT> {
+    data class Success<OUT>(val value: OUT)   : ValidationResult<OUT>
+    data class Failure(val violations: NonEmptyList<Violation>) : ValidationResult<Nothing>
+    fun getOrThrow(): OUT     // throws ValidationException on Failure
+    fun getOrNull(): OUT?
+}
+
+enum class      SpecMode { ALL, ANY }
+data class      Spec<P : Any, O : Boxed<P>>(rules, mode, factory)
+
+interface       Validator<IN, OUT> {
+    fun validate(value: IN): ValidationResult<OUT>
+    infix fun of(value: IN): OUT              // throws ValidationException on Failure
+    fun ofOrNull(value: IN): OUT?
+}
+
+abstract class  BoxedValidator<P : Any, O : Boxed<P>> : Validator<P, O>
 ```
 
-**Define a validator**:
+#### Defining a leaf validator (class-based)
+
 ```kotlin
 data class Email(override val value: String) : Boxed<String>
 
-object EmailValidator : Validator<String, Rule<String>, Email> {
-    private val nonEmpty    = Rule<String> { it.isNotBlank() }
-    private val containsAt  = Rule<String> { it.contains('@') }
-    private val sensibleLen = Rule<String> { it.length in 3..254 }
+object EmailValidator : BoxedValidator<String, Email>() {
+    private val nonEmpty    = NonBlankRule()
+    private val sensibleLen = LengthInRule(3..254)
+    private val containsAt  = MatchesRule(Regex(".+@.+"))
 
     override val specs = listOf(
-        createSpec({ Email(it) }, allConditions(), nonEmpty, containsAt, sensibleLen),
+        Spec(listOf(nonEmpty, sensibleLen, containsAt), SpecMode.ALL, ::Email),
     )
 }
 
-val email = EmailValidator of "alice@example.com"     // typed Email
-EmailValidator of "not-an-email"                      // throws IllegalArgumentException
+val email = EmailValidator of "alice@example.com"       // typed Email
+EmailValidator of "not-an-email"                        // throws ValidationException
+
+val r = EmailValidator.validate(" ")                    // returns ValidationResult.Failure
+when (r) {
+    is ValidationResult.Success -> store(r.value)
+    is ValidationResult.Failure -> r.violations.forEach { v ->
+        log("${v.code}: ${v.message} args=${v.args}")
+    }
+}
 ```
 
-**Plug into a vault** with `ValidatingTransformer` for defence-in-depth:
+The 14 prebuilt rules (in `com.vynatix.validation.rules`) cover the basics —
+`NonEmptyRule`, `NonBlankRule`, `LengthInRule(IntRange)`, `MinLengthRule(n)`,
+`MaxLengthRule(n)`, `MatchesRule(Regex)`, `StartsWithRule(s)`, `EndsWithRule(s)`,
+`GtRule(n)`, `GteRule(n)`, `LtRule(n)`, `LteRule(n)`, `InRangeRule(range)`,
+`NonEmptyCollectionRule<T>`, `SizeInRule<T>(IntRange)`. Format-specific regexes
+(email, URL, UUID, IBAN) are intentionally **not** shipped — bring your own.
+
+#### Multi-spec leaves (one validator, multiple shapes)
+
+```kotlin
+object NumberValidator : BoxedValidator<String, Num>() {
+    override val specs = listOf(
+        Spec(listOf(IntegerRule()),     SpecMode.ALL) { Num.Int(it.toInt()) },
+        Spec(listOf(FloatRule()),       SpecMode.ALL) { Num.Float(it.toDouble()) },
+    )
+}
+NumberValidator of "42"     // Num.Int(42)
+NumberValidator of "3.14"   // Num.Float(3.14)
+```
+
+First matching spec wins. If no spec matches, every spec's failing rules
+contribute violations to the returned Failure.
+
+#### Composite validators (DSL block)
+
+```kotlin
+val UserValidator: Validator<User, User> = validator<User> {
+    field("email", { it.email }, EmailValidator)
+    field("age",   { it.age },   AgeValidator)
+    field("address", { it.address }, AddressValidator)         // sub-composite
+    if (admin) field("salaryUsd", { it.salaryUsd }, MoneyValidator)
+}
+```
+
+The DSL produces a `Validator<T, T>`. Sub-validators may be either leaves
+(producing `Boxed<P>`) or other composites (producing the same struct type).
+`Violation.path` threads automatically — a failure inside `User.address.zip`
+arrives as `["address", "zip"]`.
+
+Composites accumulate violations across **all** fields (not just the first
+failure), so HTTP/form layers can surface every problem at once.
+
+#### Vault integration (`vault-validation`)
+
 ```kotlin
 class UserVault : Vault<UserVault>() {
-    val email by state(transformer = ValidatingTransformer(EmailValidator)) {
-        EmailValidator of "init@example.com"
+    val email by boxed(EmailValidator) { "init@example.com" }
+}
+
+vault action {
+    email mutate (EmailValidator of "alice@example.com")     // OK
+    email mutate Email("not-an-email")                       // rolls back via transformer
+}
+
+// KvBridge persistence
+vault {
+    email bridge KvBridge(
+        kv     = kvStore,
+        key    = "user.email",
+        codec  = BoxedCodec(StringCodec, EmailValidator),
+    )
+}
+```
+
+`Vault.boxed(validator) { initial }` is sugar for
+`state(transformer = ValidatingTransformer(v)) { v of initial() }`.
+`ValidatingTransformer` re-validates on every write (defence-in-depth against
+constructor bypass via `data class copy`). `BoxedCodec` round-trips
+`Boxed<P>` through any `Codec<P>`.
+
+#### Suspend validation (`validation-coroutines`)
+
+```kotlin
+class UniqueUsernameRule(private val taken: Set<String>) : SuspendRule<String>(
+    code = "username.unique",
+    messageTemplate = "username already taken",
+) {
+    override suspend fun validate(value: String): Boolean {
+        delay(20)                            // simulated remote check
+        return value !in taken
     }
 }
 
-vault action { email mutate (EmailValidator of "new@example.com") }    // OK
-vault action { email mutate Email("not-an-email") }                    // rolls back
-```
-
-The transformer re-runs the validator on every write, so a caller who
-constructs `Email("garbage")` directly (e.g. via `data class copy`) still has
-their write rejected — and any other state mutation in the same transaction
-rolls back atomically.
-
-**Multiple specs** + **multiple rules per spec** — `anyConditions()` fans out
-across rules within one spec; the first matching spec in the list wins:
-```kotlin
-object TokenValidator : Validator<String, Rule<String>, Token> {
+class UsernameValidator(taken: Set<String>) : SuspendBoxedValidator<String, Username>() {
     override val specs = listOf(
-        // either Bearer or Basic prefix is acceptable
-        createSpec(
-            { Token(it) },
-            anyConditions(),
-            Rule { it.startsWith("Bearer ") },
-            Rule { it.startsWith("Basic ") },
-        ),
+        SuspendSpec(listOf(UniqueUsernameRule(taken)), SpecMode.ALL) { Username(it) },
     )
 }
+
+val v = suspendValidator<NewUser> {
+    field("username",    { it.username },    UsernameValidator)     // suspend leaf
+    field("displayName", { it.displayName }, DisplayNameValidator)  // sync leaf
+}
+
+val r: ValidationResult<NewUser> = v.validate(NewUser("alice", "Alice"))
 ```
+
+The composite DSL accepts either sync or suspend sub-validators via
+overloaded `field` factories.
 
 ---
 

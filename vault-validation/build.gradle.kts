@@ -14,6 +14,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":vault"))
+            api(project(":validation"))
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

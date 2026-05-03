@@ -6,43 +6,18 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:vault-validation>
-abstract fun interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>> com.vynatix.vault.validation/Condition { // com.vynatix.vault.validation/Condition|null[0]
-    abstract fun run(#A, kotlin/Array<out #B>): kotlin/Boolean // com.vynatix.vault.validation/Condition.run|run(1:0;kotlin.Array<out|1:1>){}[0]
+final class <#A: kotlin/Any, #B: com.vynatix.validation/Boxed<#A>> com.vynatix.vault.validation/BoxedCodec : com.vynatix.vault.bridge/Codec<#B> { // com.vynatix.vault.validation/BoxedCodec|null[0]
+    constructor <init>(com.vynatix.vault.bridge/Codec<#A>, com.vynatix.validation/Validator<#A, #B>) // com.vynatix.vault.validation/BoxedCodec.<init>|<init>(com.vynatix.vault.bridge.Codec<1:0>;com.vynatix.validation.Validator<1:0,1:1>){}[0]
+
+    final fun decode(kotlin/String): #B // com.vynatix.vault.validation/BoxedCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(#B): kotlin/String // com.vynatix.vault.validation/BoxedCodec.encode|encode(1:1){}[0]
 }
 
-abstract fun interface <#A: kotlin/Any?> com.vynatix.vault.validation/Rule { // com.vynatix.vault.validation/Rule|null[0]
-    abstract fun validate(#A): kotlin/Boolean // com.vynatix.vault.validation/Rule.validate|validate(1:0){}[0]
+final class <#A: kotlin/Any, #B: com.vynatix.validation/Boxed<#A>> com.vynatix.vault.validation/ValidatingTransformer : com.vynatix.vault/Transformer<#B> { // com.vynatix.vault.validation/ValidatingTransformer|null[0]
+    constructor <init>(com.vynatix.validation/Validator<#A, #B>) // com.vynatix.vault.validation/ValidatingTransformer.<init>|<init>(com.vynatix.validation.Validator<1:0,1:1>){}[0]
+
+    final fun get(#B): #B // com.vynatix.vault.validation/ValidatingTransformer.get|get(1:1){}[0]
+    final fun set(#B): #B // com.vynatix.vault.validation/ValidatingTransformer.set|set(1:1){}[0]
 }
 
-abstract interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Boxed<#A>> com.vynatix.vault.validation/Spec { // com.vynatix.vault.validation/Spec|null[0]
-    abstract val condition // com.vynatix.vault.validation/Spec.condition|{}condition[0]
-        abstract fun <get-condition>(): com.vynatix.vault.validation/Condition<#A, #B> // com.vynatix.vault.validation/Spec.condition.<get-condition>|<get-condition>(){}[0]
-    abstract val factory // com.vynatix.vault.validation/Spec.factory|{}factory[0]
-        abstract fun <get-factory>(): kotlin/Function1<#A, #C> // com.vynatix.vault.validation/Spec.factory.<get-factory>|<get-factory>(){}[0]
-    abstract val rule // com.vynatix.vault.validation/Spec.rule|{}rule[0]
-        abstract fun <get-rule>(): kotlin/Array<out #B> // com.vynatix.vault.validation/Spec.rule.<get-rule>|<get-rule>(){}[0]
-}
-
-abstract interface <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Boxed<#A>> com.vynatix.vault.validation/Validator { // com.vynatix.vault.validation/Validator|null[0]
-    abstract val specs // com.vynatix.vault.validation/Validator.specs|{}specs[0]
-        abstract fun <get-specs>(): kotlin.collections/Collection<com.vynatix.vault.validation/Spec<#A, #B, #C>> // com.vynatix.vault.validation/Validator.specs.<get-specs>|<get-specs>(){}[0]
-
-    open fun <#A1: kotlin/Any?, #B1: com.vynatix.vault.validation/Rule<#A1>> allConditions(): com.vynatix.vault.validation/Condition<#A1, #B1> // com.vynatix.vault.validation/Validator.allConditions|allConditions(){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Rule<0:0>>}[0]
-    open fun <#A1: kotlin/Any?, #B1: com.vynatix.vault.validation/Rule<#A1>> anyConditions(): com.vynatix.vault.validation/Condition<#A1, #B1> // com.vynatix.vault.validation/Validator.anyConditions|anyConditions(){0§<kotlin.Any?>;1§<com.vynatix.vault.validation.Rule<0:0>>}[0]
-    open fun createSpec(kotlin/Function1<#A, #C>, com.vynatix.vault.validation/Condition<#A, #B>, kotlin/Array<out #B>...): com.vynatix.vault.validation/Spec<#A, #B, #C> // com.vynatix.vault.validation/Validator.createSpec|createSpec(kotlin.Function1<1:0,1:2>;com.vynatix.vault.validation.Condition<1:0,1:1>;kotlin.Array<out|1:1>...){}[0]
-    open fun of(#A): #C // com.vynatix.vault.validation/Validator.of|of(1:0){}[0]
-    open fun ofOrNull(#A): #C? // com.vynatix.vault.validation/Validator.ofOrNull|ofOrNull(1:0){}[0]
-    open fun validate(#A): kotlin/Boolean // com.vynatix.vault.validation/Validator.validate|validate(1:0){}[0]
-}
-
-abstract interface <#A: kotlin/Any?> com.vynatix.vault.validation/Boxed { // com.vynatix.vault.validation/Boxed|null[0]
-    abstract val value // com.vynatix.vault.validation/Boxed.value|{}value[0]
-        abstract fun <get-value>(): #A // com.vynatix.vault.validation/Boxed.value.<get-value>|<get-value>(){}[0]
-}
-
-final class <#A: kotlin/Any?, #B: com.vynatix.vault.validation/Rule<#A>, #C: com.vynatix.vault.validation/Boxed<#A>> com.vynatix.vault.validation/ValidatingTransformer : com.vynatix.vault/Transformer<#C> { // com.vynatix.vault.validation/ValidatingTransformer|null[0]
-    constructor <init>(com.vynatix.vault.validation/Validator<#A, #B, #C>) // com.vynatix.vault.validation/ValidatingTransformer.<init>|<init>(com.vynatix.vault.validation.Validator<1:0,1:1,1:2>){}[0]
-
-    final fun get(#C): #C // com.vynatix.vault.validation/ValidatingTransformer.get|get(1:2){}[0]
-    final fun set(#C): #C // com.vynatix.vault.validation/ValidatingTransformer.set|set(1:2){}[0]
-}
+final fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any, #C: com.vynatix.validation/Boxed<#B>> (com.vynatix.vault/Vault<#A>).com.vynatix.vault.validation/boxed(com.vynatix.validation/Validator<#B, #C>, kotlin/Function0<#B>): com.vynatix.vault/StateDelegate<#C> // com.vynatix.vault.validation/boxed|boxed@com.vynatix.vault.Vault<0:0>(com.vynatix.validation.Validator<0:1,0:2>;kotlin.Function0<0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any>;2§<com.vynatix.validation.Boxed<0:1>>}[0]

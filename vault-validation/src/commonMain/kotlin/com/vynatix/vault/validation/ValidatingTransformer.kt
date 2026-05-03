@@ -1,42 +1,33 @@
 package com.vynatix.vault.validation
 
+import com.vynatix.validation.Boxed
+import com.vynatix.validation.ValidationException
+import com.vynatix.validation.ValidationResult
+import com.vynatix.validation.Validator
 import com.vynatix.vault.Transformer
 
 /**
- * A [Transformer] that re-validates a [Boxed]'s primitive against its
- * [Validator] on every write, throwing [IllegalArgumentException] (and rolling
- * back the enclosing transaction) when no spec matches.
+ * A Vault [Transformer] that re-validates a [Boxed]'s primitive against its
+ * [Validator] on every write. A failed validation throws [ValidationException]
+ * inside the transformer's `set`, which propagates to the enclosing
+ * `action { … }` and rolls every state mutation in the transaction back.
  *
- * Why use this when [Validator.of] already throws? Two reasons:
- *  1. Defence in depth — a caller that constructs a [Boxed] directly
- *     (bypassing the validator, e.g. via a `data class copy`) still has its
- *     invariant enforced when the value lands in the vault.
- *  2. Atomicity — a failed write inside an `action { … }` rolls back every
- *     other state mutation in the same transaction, not just this one.
+ * Why use this when [Validator.of] already throws? Defence in depth: a caller
+ * that constructs a [Boxed] directly (bypassing the validator, e.g. via
+ * `data class copy`) still has its invariant enforced when the value lands
+ * in the vault.
  *
- * Example:
- * ```kotlin
- * class UserVault : Vault<UserVault>() {
- *     val email by state(transformer = ValidatingTransformer(EmailValidator)) {
- *         EmailValidator of "init@example.com"
- *     }
- * }
- *
- * vault action { email mutate (EmailValidator of "new@example.com") }   // OK
- * vault action { email mutate Email("not-an-email") }                   // rolls back
- * ```
- *
- * The [get] side is identity — the stored object already carries its primitive.
+ * Wired automatically by [boxed]. Ship it standalone if you need a custom
+ * `state(transformer = …) { … }` declaration.
  */
-class ValidatingTransformer<PRIMITIVE, RULE : Rule<PRIMITIVE>, OBJECT : Boxed<PRIMITIVE>>(
-    private val validator: Validator<PRIMITIVE, RULE, OBJECT>,
-) : Transformer<OBJECT> {
-    override fun set(value: OBJECT): OBJECT {
-        // Re-run the validator on value.value; this throws IllegalArgumentException
-        // if no spec matches, which propagates to the action and rolls back.
-        validator of value.value
+class ValidatingTransformer<P : Any, O : Boxed<P>>(private val validator: Validator<P, O>) : Transformer<O> {
+    override fun set(value: O): O {
+        val result = validator.validate(value.value)
+        if (result is ValidationResult.Failure) {
+            throw ValidationException(result.violations)
+        }
         return value
     }
 
-    override fun get(value: OBJECT): OBJECT = value
+    override fun get(value: O): O = value
 }

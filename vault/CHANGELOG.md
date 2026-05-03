@@ -4,50 +4,135 @@ All notable changes to the Vault library are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-05-03
 
-### Added — `:vault-validation` (new module)
+Validation library reshape. The 0.2.0 `:vault-validation` surface is fully
+replaced and split into three modules; the rest of the Vault libraries (`:vault`,
+`:vault-coroutines`, `:vault-compose`) carry forward at 0.3.0 with no API
+changes — only the version label moves.
 
-- New companion artifact `com.vynatix:vault-validation` providing
-  boundary-validation primitives in commonMain (Android + iOS) that integrate
-  with Vault's transformer pipeline.
-- Core interfaces under `com.vynatix.vault.validation`:
-  `Boxed<PRIMITIVE>` (the typed wrapper carrying `val value: P`),
-  `Rule<PRIMITIVE>` (`fun interface`),
-  `Condition<P, R>` (`fun interface`, `run(primitive, rule: Array<out R>)`),
-  `Spec<P, R, O>` (`rule: Array<out R>` + `condition` + `factory`),
-  and `Validator<P, R, O>` with `infix of`, `validate`, `ofOrNull`, plus the
-  combinator/builder members `allConditions()`, `anyConditions()`, and
-  `createSpec(factory, condition, vararg rule)`. `Factory<P, O>` is a
-  `(P) -> O` typealias.
-- **`ValidatingTransformer<P, R, O>(validator)`** — a Vault `Transformer<O>`
-  that re-runs `validator of value.value` on every write. Defence-in-depth
-  against callers who construct a `Boxed` directly (e.g. via `data class
-  copy`) and bypass `Validator.of`. A failed validation throws
-  `IllegalArgumentException`, which propagates to the enclosing `action { }`
-  and rolls every state mutation in the transaction back.
-- 10 tests across `ValidatorTest` + `ValidatingTransformerTest` covering happy
-  path, `ofOrNull`, `validate`, multi-spec matching, multi-rule per spec with
-  both `allConditions()` and `anyConditions()`, transformer rollback on
-  constructor bypass, and cross-state atomicity. Verified on Android JVM + iOS
-  sim. ABI baseline at `vault-validation/api/vault-validation.klib.api`.
-  Published to local Maven at `com.vynatix:vault-validation:0.2.0` (4
-  publication targets: `kotlinMultiplatform`, `android`, `iosArm64`,
-  `iosSimulatorArm64`).
+This is a **hard break** for `:vault-validation` consumers. Pre-1.0 SemVer
+permits this. No deprecation shims. The 0.2.0 GAVs in `~/.m2` remain intact
+for retrieval if you've not yet migrated.
+
+### Added — `:validation` (new module)
+
+Standalone KMP boundary-validation library; **no Vault dependency**.
+
+- **`Boxed<P : Any>`** — typed wrapper interface carrying `val value: P`.
+- **`Rule<PRIMITIVE>`** — abstract class with `code: String`,
+  `messageTemplate: String`, abstract `validate(p): Boolean`, and
+  override-able `message(p)` / `args(p)` for i18n templating.
+- **`Violation`** — data class `(message, path, code, rule, args)`. Carries
+  rule reference for test introspection and a free-form `args` map for i18n
+  resolvers.
+- **`ValidationResult<O>`** — sealed `Success(value)` / `Failure(violations: NonEmptyList<Violation>)`.
+  `getOrThrow()` throws `ValidationException` (an `IllegalArgumentException`
+  subclass that exposes `violations`); `getOrNull()` returns null on failure.
+- **`NonEmptyList<T>`** — minimal in-house non-empty list. No Arrow dep.
+- **`Spec<P : Any, O : Boxed<P>>`** — data class `(rules, mode: SpecMode, factory)`.
+  Multi-spec validators (e.g. `NumberValidator` accepting Int OR Float) declare
+  multiple specs.
+- **`SpecMode { ALL, ANY }`** — combine rules within a spec.
+- **`Validator<IN, OUT>`** — unified interface with `validate(value)`,
+  `infix of(value)`, `ofOrNull(value)`. Both leaves and composites produce values
+  of this type — composites can `field(name, getter, validator)` either form.
+- **`BoxedValidator<P : Any, O : Boxed<P>>`** — abstract base for leaf
+  validators. Subclass override `specs`; the base implements `validate` /
+  `of` / `ofOrNull` for you.
+- **`validator<T> { field(name, getter, validator) }`** — composite DSL builder
+  producing `Validator<T, T>`. Conditional fields work (`if (admin) field(...)`).
+  Composites compose recursively — a field may take any `Validator<IN, OUT>`,
+  leaf or composite. Path tags thread automatically via
+  `ValidationResult.atPath(name)`.
+- **14 prebuilt rules** in `com.vynatix.validation.rules`:
+  - String: `NonEmptyRule`, `NonBlankRule`, `LengthInRule(IntRange)`,
+    `MinLengthRule(n)`, `MaxLengthRule(n)`, `MatchesRule(Regex)`,
+    `StartsWithRule(prefix)`, `EndsWithRule(suffix)`.
+  - Number (`Comparable<T>`): `GtRule(n)`, `GteRule(n)`, `LtRule(n)`,
+    `LteRule(n)`, `InRangeRule(range)`.
+  - Collection: `NonEmptyCollectionRule<T>`, `SizeInRule<T>(IntRange)`.
+
+  Format-specific regex rules (email, URL, UUID, IBAN) intentionally **not**
+  shipped — their canonical forms are debatable and ownership is a maintenance
+  trap. Adopters bring their own via `MatchesRule(myRegex)`.
+
+- 24 tests in `:validation` covering ValidationResult atPath/getOrThrow,
+  BoxedValidator multi-rule + multi-spec + ALL/ANY accumulation, composite
+  cross-field accumulation + nested path threading, and every prebuilt rule.
+
+### Added — `:validation-coroutines` (new module)
+
+Suspend extension. Mirrors the `:vault` / `:vault-coroutines` split.
+
+- **`SuspendRule<PRIMITIVE>`** — `suspend` analog of `Rule<PRIMITIVE>` for
+  out-of-process checks (DB unique-lookup, remote feature gate).
+- **`SuspendValidator<IN, OUT>`** — `suspend` analog of `Validator<IN, OUT>`.
+- **`SuspendBoxedValidator<P : Any, O : Boxed<P>>`** — abstract base for
+  suspend leaves; mirrors `BoxedValidator`.
+- **`SuspendSpec<P : Any, O : Boxed<P>>`** — data class with `suspend` factory.
+- **`suspendValidator<T> { field(...) }`** — suspend composite DSL with two
+  `field` overloads: one accepting sync `Validator<IN, OUT>`, one accepting
+  `SuspendValidator<IN, OUT>`. Mix sync and suspend leaves freely.
+- **`Rule<P>.asSuspend()`** / **`Validator<IN, OUT>.asSuspend()`** — lift sync
+  rules / validators into suspend types when needed for explicit composition.
+- 3 tests covering happy/failure paths and mixed sync+suspend composites.
+
+### Added — `:vault-validation` (rebuilt module)
+
+Vault adapter; tiny — just a transformer + state factory + codec.
+
+- **`ValidatingTransformer<P : Any, O : Boxed<P>>(validator)`** — Vault
+  `Transformer<O>` that re-validates on every write. Defence-in-depth against
+  constructor-bypass writes (e.g. `data class copy`). A failure throws
+  `ValidationException` and rolls the transaction back.
+- **`Vault.boxed(validator) { initial }`** — state factory extension; sugar
+  for `state(transformer = ValidatingTransformer(v)) { v of initial() }`.
+  Eliminates duplicate validator references at state declaration sites.
+- **`BoxedCodec<P : Any, O : Boxed<P>>(primitiveCodec, validator)`** —
+  `Codec<O>` for `KvBridge` persistence. Encodes by stripping the wrapper and
+  delegating to the primitive codec; decodes by running the primitive through
+  the validator.
+- 5 tests covering transformer happy/rollback paths, codec round-trip for
+  String- and Long-backed Boxed types, and decode-of-now-invalid-primitive
+  rollback.
+
+### Removed — `:vault-validation` 0.2.0 surface
+
+The following are gone in 0.3.0:
+
+- `com.vynatix.vault.validation.Civilizable` (renamed to `Boxed` in 0.2.x → moved to `com.vynatix.validation`)
+- `com.vynatix.vault.validation.Civilizer` / `Validator<P, R, O>` (replaced by `Validator<IN, OUT>` + `BoxedValidator<P, O>` in `com.vynatix.validation`)
+- `Variation` / `Spec<P, R, O>` (replaced by `Spec<P, O>` data class with `SpecMode`)
+- `Condition<P, R>` (dropped; replaced by `SpecMode { ALL, ANY }` enum)
+- `Declaration<P, O>` typealias (replaced by inline `(P) -> O`)
+- `createVariation` / `createSpec` builder members (composite DSL replaces them)
+- `allConditions()` / `anyConditions()` (replaced by `SpecMode`)
 
 ### Changed — Packaging
 
-- `astrid.publish.sonatype` is now applied to **all four** published modules
-  (`:vault`, `:vault-coroutines`, `:vault-compose`, `:vault-validation`),
-  replacing the bare `astrid.publish`. `publishToMavenLocal` continues to work
-  unchanged (signing block is no-op when credentials are absent); a real release
-  uses `publishAllPublicationsToSonatypeRepository` on each module.
+- Three new GAVs: `com.vynatix:validation:0.3.0`,
+  `com.vynatix:validation-coroutines:0.3.0`, plus the rebuilt
+  `com.vynatix:vault-validation:0.3.0`.
+- 6 published modules total, 24 GAVs across `kotlinMultiplatform` / `android`
+  / `iosArm64` / `iosSimulatorArm64` targets.
+- Default `astrid.publish` version bumped 0.2.0 → 0.3.0.
 
 ### Documentation
 
-- `vault/README.md` — modules table now includes `:vault-validation`;
-  capabilities section gains a `CivilizingTransformer` entry; build cheatsheet
-  adds `:vault-validation:allTests :vault-validation:apiCheck`.
+- `vault/README.md` — modules table includes the three validation modules; the
+  1.1 additions section gets a Validation 0.3.0 paragraph; build cheatsheet
+  adds the new `:validation:allTests :validation:apiCheck` and
+  `:validation-coroutines:allTests :validation-coroutines:apiCheck` lines.
+- `vault-validation/0.3.0-DESIGN.md` (new) — captures the 15 grilled design
+  decisions verbatim, with rationale.
+
+### Verification
+
+- `./gradlew :validation:allTests :validation-coroutines:allTests :vault-validation:allTests` — green on Android JVM + iOS sim.
+- `./gradlew apiCheck` clean across all 6 modules; new ABI baselines committed.
+- `./gradlew detekt ktlintCheck` clean across all 6 modules.
+- `publishToMavenLocal` produces 24 GAVs at 0.3.0 in `~/.m2/repository/com/vynatix/`.
 
 ## [0.2.0] — 2026-05-02
 
