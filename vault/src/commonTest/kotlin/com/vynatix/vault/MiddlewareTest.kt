@@ -1,5 +1,7 @@
 package com.vynatix.vault
 
+import com.vynatix.vault.testing.matcher.shouldBeSuccess
+import com.vynatix.vault.testing.vaultTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -57,21 +59,12 @@ private class ThrowingOnStartedMiddleware(val message: String) : Middleware<Midd
 class MiddlewareLifecycleTest {
 
     @Test
-    fun onTransactionStartedRunsBeforeActionBlock() {
-        val v = MiddlewareTestVault()
+    fun onTransactionStartedRunsBeforeActionBlock() = vaultTest {
         val events = mutableListOf<String>()
-        v.middlewares(GlobalRecordingMiddleware("M", events))
-
-        v action {
-            events.add("BLOCK")
-            n mutate 1
-        }
-
+        val v = MiddlewareTestVault().apply { middlewares(GlobalRecordingMiddleware("M", events)) }
+        track(v).action { events.add("BLOCK"); n mutate 1 }.shouldBeSuccess()
         assertEquals("M:started", events.first())
-        assertTrue("BLOCK" in events)
-        val startedIdx = events.indexOf("M:started")
-        val blockIdx = events.indexOf("BLOCK")
-        assertTrue(startedIdx < blockIdx, "onTransactionStarted must precede the action block")
+        assertTrue(events.indexOf("M:started") < events.indexOf("BLOCK"), "onTransactionStarted must precede the action block")
     }
 
     @Test

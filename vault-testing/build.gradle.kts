@@ -8,18 +8,21 @@ plugins {
 
 kotlin {
     android {
-        namespace = "com.vynatix.vault"
+        namespace = "com.vynatix.vault.testing"
     }
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":vault"))
+            api(project(":vault-coroutines"))
+            api(project(":vault-validation"))
+            api(libs.kotest.assertions.core)
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.coroutines.test)
             implementation(libs.atomicfu)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":vault-testing"))
         }
     }
 }
