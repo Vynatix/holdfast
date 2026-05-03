@@ -187,7 +187,8 @@ class MutableState<T : Any>(
      * visibility for adapter implementations (Flow/StateFlow). Application code
      * must use [effect].
      */
-    internal fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
+    @VaultInternalApi
+    fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
         observers.add(observer)
         // Initial callback uses the same view as the value getter — post-transformer.get —
         // so an observer never sees a value the getter wouldn't return for the same state.

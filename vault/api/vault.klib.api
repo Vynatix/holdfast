@@ -156,6 +156,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).mutate(#A1) // com.vynatix.vault/Vault.mutate|mutate@com.vynatix.vault.State<0:0>(0:0){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).observeFrom(com.vynatix.vault/Observable<#A1>): com.vynatix.vault/Disposable // com.vynatix.vault/Vault.observeFrom|observeFrom@com.vynatix.vault.State<0:0>(com.vynatix.vault.Observable<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> (com.vynatix.vault/State<#A1>).update(kotlin/Function1<#A1, #A1>) // com.vynatix.vault/Vault.update|update@com.vynatix.vault.State<0:0>(kotlin.Function1<0:0,0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> registerInternalState(kotlin/String, #A1, com.vynatix.vault/Transformer<#A1>? = ..., kotlin/Boolean = ...): com.vynatix.vault/MutableState<#A1> // com.vynatix.vault/Vault.registerInternalState|registerInternalState(kotlin.String;0:0;com.vynatix.vault.Transformer<0:0>?;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> state(com.vynatix.vault/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.vault/Initializer<#A1>): com.vynatix.vault/StateDelegate<#A1> // com.vynatix.vault/Vault.state|state(com.vynatix.vault.Transformer<0:0>?;kotlin.Boolean;com.vynatix.vault.Initializer<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.vault/TransactionResult<#A1> // com.vynatix.vault/Vault.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.vault/Vault.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
@@ -169,6 +170,7 @@ abstract class <#A: com.vynatix.vault/Vault<#A>> com.vynatix.vault/Vault { // co
     final fun internalDrainPostCommitTasks() // com.vynatix.vault/Vault.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
     final fun internalSetActiveTransaction(com.vynatix.vault/Transaction?) // com.vynatix.vault/Vault.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.vault.Transaction?){}[0]
     final fun middlewares(kotlin/Array<out com.vynatix.vault/Middleware<#A>>...) // com.vynatix.vault/Vault.middlewares|middlewares(kotlin.Array<out|com.vynatix.vault.Middleware<1:0>>...){}[0]
+    final fun postCommit(kotlin/Function0<kotlin/Unit>) // com.vynatix.vault/Vault.postCommit|postCommit(kotlin.Function0<kotlin.Unit>){}[0]
     final fun removeState(kotlin/String) // com.vynatix.vault/Vault.removeState|removeState(kotlin.String){}[0]
     final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.vault/Middleware<#A>> // com.vynatix.vault/Vault.snapshotMiddleware|snapshotMiddleware(){}[0]
     open fun onDispose() // com.vynatix.vault/Vault.onDispose|onDispose(){}[0]
@@ -229,6 +231,7 @@ final class <#A: kotlin/Any> com.vynatix.vault/MutableState : com.vynatix.vault/
         final fun <set-bridge>(com.vynatix.vault/Bridge<#A>?) // com.vynatix.vault/MutableState.bridge.<set-bridge>|<set-bridge>(com.vynatix.vault.Bridge<1:0>?){}[0]
 
     final fun applyCommittedRaw(#A): kotlin/Boolean // com.vynatix.vault/MutableState.applyCommittedRaw|applyCommittedRaw(1:0){}[0]
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault/Disposable // com.vynatix.vault/MutableState.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
 }
 
 final class com.vynatix.vault.bridge/FileSystemKvStore : com.vynatix.vault.bridge/KvStore { // com.vynatix.vault.bridge/FileSystemKvStore|null[0]

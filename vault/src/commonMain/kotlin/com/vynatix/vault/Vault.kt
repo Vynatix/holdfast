@@ -269,10 +269,14 @@ abstract class Vault<Self : Vault<Self>> {
      * finishes. If called outside any action, the task runs immediately.
      *
      * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
-     * instead of re-entering the parent's commit. Internal because the deferral
-     * contract is implementation detail.
+     * instead of re-entering the parent's commit. Also reachable by companion
+     * modules (`:vault-coroutines.suspendDerived`) that need the same deferral
+     * contract; marked `@VaultInternalApi` because the deferral is an
+     * implementation detail of the derived-recompute machinery, not a
+     * user-facing knob.
      */
-    internal fun postCommit(task: () -> Unit) {
+    @VaultInternalApi
+    fun postCommit(task: () -> Unit) {
         if (_activeTransaction != null) {
             postCommitTasks.add(task)
         } else {
@@ -438,12 +442,16 @@ abstract class Vault<Self : Vault<Self>> {
     }
 
     /**
-     * Internal: create-or-fetch a state under an arbitrary name. Used by
-     * [derived] to register synthetic backing states whose names ("__derived_N")
-     * never collide with user-declared property names (since Kotlin identifiers
-     * can't start with `__`).
+     * Create-or-fetch a state under an arbitrary name. Used by [derived] to
+     * register synthetic backing states whose names ("__derived_N") never
+     * collide with user-declared property names (since Kotlin identifiers
+     * can't start with `__`). Also reachable by companion modules
+     * (`:vault-coroutines.suspendDerived`) for the suspending-derived backing
+     * state; marked `@VaultInternalApi` because the synthesized name scheme
+     * is an implementation detail.
      */
-    internal fun <T : Any> registerInternalState(
+    @VaultInternalApi
+    fun <T : Any> registerInternalState(
         name: String,
         initial: T,
         transformer: Transformer<T>? = null,

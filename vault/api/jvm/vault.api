@@ -79,6 +79,7 @@ public final class com/vynatix/vault/MutableState : com/vynatix/vault/State {
 	public final fun getObserverCount ()I
 	public final fun getOwningVault ()Lcom/vynatix/vault/Vault;
 	public fun getValue ()Ljava/lang/Object;
+	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/vault/Disposable;
 	public final fun setBridge (Lcom/vynatix/vault/Bridge;)V
 }
 
@@ -205,6 +206,9 @@ public abstract class com/vynatix/vault/Vault {
 	public final fun mutate (Lcom/vynatix/vault/State;Ljava/lang/Object;)V
 	public final fun observeFrom (Lcom/vynatix/vault/State;Lcom/vynatix/vault/Observable;)Lcom/vynatix/vault/Disposable;
 	protected fun onDispose ()V
+	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
+	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/vault/Transformer;Z)Lcom/vynatix/vault/MutableState;
+	public static synthetic fun registerInternalState$default (Lcom/vynatix/vault/Vault;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/vault/Transformer;ZILjava/lang/Object;)Lcom/vynatix/vault/MutableState;
 	public final fun removeState (Ljava/lang/String;)V
 	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun setAsyncSerializer (Lcom/vynatix/vault/Vault$AsyncSerializer;)V

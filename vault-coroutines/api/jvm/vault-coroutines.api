@@ -20,6 +20,10 @@ public final class com/vynatix/vault/coroutines/SuspendActionKt {
 	public static final fun suspendAction (Lcom/vynatix/vault/Vault;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
+public final class com/vynatix/vault/coroutines/SuspendDerivedKt {
+	public static final fun suspendDerived (Lcom/vynatix/vault/Vault;[Lcom/vynatix/vault/State;Lkotlin/jvm/functions/Function2;)Lkotlin/Pair;
+}
+
 public abstract interface class com/vynatix/vault/coroutines/SuspendingBridge : com/vynatix/vault/Bridge {
 	public abstract fun publish (Ljava/lang/Object;)Z
 	public abstract fun publishAwaited (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
