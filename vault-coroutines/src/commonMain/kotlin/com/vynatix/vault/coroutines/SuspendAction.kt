@@ -201,8 +201,12 @@ private suspend fun suspendingCommit(txn: Transaction) {
         applyTopLevel = { state, value ->
             val ms = state as MutableState<Any>
             // Step 1+2: replace + observers (no bridge publish yet).
-            ms.applyCommittedRaw(value)
-            publishQueue += ms to value
+            // applyCommittedRaw returns false when the state is `distinct = true`
+            // and the new value equals the current — observer fanout was skipped
+            // by dedup. Mirror sync `applyCommitted`'s contract: skip the bridge
+            // publish in that case too, so suspendAction matches the sync-action
+            // dedup short-circuit (issue 30).
+            if (ms.applyCommittedRaw(value)) publishQueue += ms to value
         },
         drainEvents = { snapshot ->
             // Stash for after-bridge drain. Do NOT emit here — `commitDispatching`

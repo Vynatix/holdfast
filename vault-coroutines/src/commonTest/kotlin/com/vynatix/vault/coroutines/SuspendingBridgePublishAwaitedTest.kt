@@ -221,6 +221,73 @@ class SuspendingBridgePublishAwaitedTest {
 }
 
 /**
+ * Issue 30 acceptance: a `distinct = true` state bound to a `SuspendingBridge`
+ * does not republish when `suspendAction` re-applies the same value.
+ *
+ * The sync `vault.action { }` path already short-circuits both observer fanout
+ * and bridge publish on dedup via [com.vynatix.vault.MutableState.applyCommitted]'s
+ * single-pass dedup check. The suspending `suspendingCommit` dispatcher must
+ * match: if `applyCommittedRaw` returns false (deduped), the (state, value)
+ * pair must NOT be enqueued for the bridge publish phase.
+ */
+private class DistinctVault : Vault<DistinctVault>() {
+    val s by state(distinct = true) { "init" }
+}
+
+/**
+ * Probe-style [SuspendingKvStore] (issue 30 acceptance variant) that records
+ * exactly how many times `put` was called per key. The `<= 2` style assertion
+ * used elsewhere only proves the count is bounded; an `== 1` probe
+ * distinguishes "dedup short-circuited the publish" from "dedup happened but
+ * publish landed anyway". Distinct from the per-key-aggregate counter in
+ * `SuspendingKvBridgeTest.kt` only to avoid file-private name shadowing.
+ */
+private class DedupCountingSuspendingKvStore : SuspendingKvStore {
+    private val mutex = Mutex()
+    private val map = mutableMapOf<String, String>()
+    val puts = mutableMapOf<String, Int>()
+
+    override suspend fun get(key: String): String? = mutex.withLock { map[key] }
+
+    override suspend fun put(key: String, value: String) = mutex.withLock {
+        puts[key] = (puts[key] ?: 0) + 1
+        map[key] = value
+    }
+
+    override suspend fun remove(key: String) = mutex.withLock { map.remove(key); Unit }
+    override suspend fun snapshot(): Map<String, String> = mutex.withLock { map.toMap() }
+}
+
+class SuspendingBridgeDedupTest {
+
+    private val testScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @AfterTest
+    fun tearDown() {
+        testScope.coroutineContext[Job]?.cancel()
+    }
+
+    @Test
+    fun distinctTrueStateWithSuspendingBridgeUnderSuspendActionDoesNotRepublishOnDedup() = runBlocking {
+        val store = DedupCountingSuspendingKvStore()
+        val awaiting = store.suspendingBridge("myKey", StringCodec, scope = testScope)
+
+        val v = DistinctVault()
+        v.action { s bridge awaiting }
+
+        // First commit: value changes "init" -> "x". Apply succeeds, publish lands.
+        v.suspendAction { s mutate "x" }
+        // Second commit: "x" -> "x". Dedup short-circuits both observer fanout
+        // (already in MutableState.applyCommittedRaw) and the bridge publish
+        // (the fix in suspendingCommit's dispatcher).
+        v.suspendAction { s mutate "x" }
+
+        // Exact: one put for the first apply, none for the deduped second.
+        assertEquals(1, store.puts["myKey"], "expected exactly one put; saw ${store.puts}")
+    }
+}
+
+/**
  * Suspending KV store with a deliberate per-operation delay. Used to widen
  * the window between "action returns" and "persistence completes" so the
  * `publishAwaited` vs `publish` distinction is observable in tests.
