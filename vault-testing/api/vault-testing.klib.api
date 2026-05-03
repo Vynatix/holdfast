@@ -156,6 +156,16 @@ final class com.vynatix.vault.testing.concurrency/Barrier { // com.vynatix.vault
     final suspend fun await() // com.vynatix.vault.testing.concurrency/Barrier.await|await(){}[0]
 }
 
+final class com.vynatix.vault.testing.concurrency/OpenTransaction { // com.vynatix.vault.testing.concurrency/OpenTransaction|null[0]
+    final val isClosed // com.vynatix.vault.testing.concurrency/OpenTransaction.isClosed|{}isClosed[0]
+        final fun <get-isClosed>(): kotlin/Boolean // com.vynatix.vault.testing.concurrency/OpenTransaction.isClosed.<get-isClosed>|<get-isClosed>(){}[0]
+    final val transaction // com.vynatix.vault.testing.concurrency/OpenTransaction.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.vault/Transaction // com.vynatix.vault.testing.concurrency/OpenTransaction.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final suspend fun commit(): com.vynatix.vault/TransactionResult<kotlin/Unit> // com.vynatix.vault.testing.concurrency/OpenTransaction.commit|commit(){}[0]
+    final suspend fun rollback() // com.vynatix.vault.testing.concurrency/OpenTransaction.rollback|rollback(){}[0]
+}
+
 final class com.vynatix.vault.testing.matcher/BridgeObservedPredicate : com.vynatix.vault.testing.matcher/EventPredicate { // com.vynatix.vault.testing.matcher/BridgeObservedPredicate|null[0]
     final val description // com.vynatix.vault.testing.matcher/BridgeObservedPredicate.description|{}description[0]
         final fun <get-description>(): kotlin/String // com.vynatix.vault.testing.matcher/BridgeObservedPredicate.description.<get-description>|<get-description>(){}[0]
@@ -454,4 +464,5 @@ final inline fun <#A: kotlin/Any?> (com.vynatix.vault/TransactionResult<#A>).com
 final inline fun <#A: reified kotlin/Throwable> (com.vynatix.vault/TransactionResult<*>).com.vynatix.vault.testing.matcher/shouldBeError(kotlin/Function1<com.vynatix.vault/TransactionResult.Error, kotlin/Unit> = ...): com.vynatix.vault/TransactionResult.Error // com.vynatix.vault.testing.matcher/shouldBeError|shouldBeError@com.vynatix.vault.TransactionResult<*>(kotlin.Function1<com.vynatix.vault.TransactionResult.Error,kotlin.Unit>){0§<kotlin.Throwable>}[0]
 final suspend fun (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/eventually(kotlin.time/Duration = ..., kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction0<kotlin/Unit>) // com.vynatix.vault.testing.concurrency/eventually|eventually@com.vynatix.vault.testing.VaultTestScope(kotlin.time.Duration;kotlin.time.Duration;kotlin.coroutines.SuspendFunction0<kotlin.Unit>){}[0]
 final suspend fun (kotlin.coroutines/SuspendFunction0<kotlin/Unit>).com.vynatix.vault.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.vault.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.coroutines.SuspendFunction0<kotlin.Unit>(kotlin.time.Duration){}[0]
+final suspend fun <#A: com.vynatix.vault/Vault<#A>> (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/transaction(com.vynatix.vault.testing/VaultHandle<#A>, kotlin/Function1<#A, kotlin/Unit>): com.vynatix.vault.testing.concurrency/OpenTransaction // com.vynatix.vault.testing.concurrency/transaction|transaction@com.vynatix.vault.testing.VaultTestScope(com.vynatix.vault.testing.VaultHandle<0:0>;kotlin.Function1<0:0,kotlin.Unit>){0§<com.vynatix.vault.Vault<0:0>>}[0]
 final suspend fun <#A: kotlin/Any?> (com.vynatix.vault.testing/VaultTestScope).com.vynatix.vault.testing.concurrency/parallel(kotlin/Int, kotlinx.coroutines/CoroutineDispatcher = ..., kotlin.coroutines/SuspendFunction1<kotlin/Int, #A>): kotlin.collections/List<#A> // com.vynatix.vault.testing.concurrency/parallel|parallel@com.vynatix.vault.testing.VaultTestScope(kotlin.Int;kotlinx.coroutines.CoroutineDispatcher;kotlin.coroutines.SuspendFunction1<kotlin.Int,0:0>){0§<kotlin.Any?>}[0]

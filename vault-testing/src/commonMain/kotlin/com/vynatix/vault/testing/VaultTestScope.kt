@@ -5,6 +5,7 @@ import com.vynatix.vault.TransactionResult
 import com.vynatix.vault.Vault
 import com.vynatix.vault.testing.internal.BarrierRegistry
 import com.vynatix.vault.testing.internal.HandleRegistry
+import com.vynatix.vault.testing.internal.OpenTransactionRegistry
 import com.vynatix.vault.testing.internal.PendingErrorRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -47,6 +48,7 @@ class VaultTestScope internal constructor(val testScope: TestScope) :
 
     private val registry = HandleRegistry()
     private val barriers = BarrierRegistry()
+    private val openTransactions = OpenTransactionRegistry()
 
     /**
      * Register [vault] in this scope and return its [VaultHandle]. Calling
@@ -117,26 +119,34 @@ class VaultTestScope internal constructor(val testScope: TestScope) :
 
     internal fun barrierRegistry(): BarrierRegistry = barriers
 
+    internal fun openTransactionRegistry(): OpenTransactionRegistry = openTransactions
+
     /**
-     * Tear down this scope. Always cancels outstanding barriers, disposes each
-     * tracked handle's recorder middleware, removes every tracked handle's
-     * entries from the global [PendingErrorRegistry], and clears the handle
-     * registry. When [bodyAlreadyFailed] is `false`, also aggregates any
-     * unconsumed [TransactionResult.Error] values across all handles and throws
-     * an [AssertionError] listing them — forcing tests to actively assert on
-     * (or explicitly discard) every error they observe. When the body already
+     * Tear down this scope. Always cancels outstanding barriers, rolls back
+     * any leaked open transactions, disposes each tracked handle's recorder
+     * middleware, removes every tracked handle's entries from the global
+     * [PendingErrorRegistry], and clears the handle registry. When
+     * [bodyAlreadyFailed] is `false`, also aggregates any unconsumed
+     * [TransactionResult.Error] values across all handles and throws an
+     * [AssertionError] listing them — forcing tests to actively assert on (or
+     * explicitly discard) every error they observe. When the body already
      * threw, the original failure propagates and the unconsumed-error check is
      * suppressed so the user sees the root-cause exception rather than a
      * teardown-time message.
      *
      * Order is fixed: barriers cancel first so coroutines waiting in
-     * `arrive()`/`await()` resume; then recorders dispose (stopping further
-     * event capture); then the handle registry's pending-error bookkeeping is
-     * cleared. Recorder disposal swallows exceptions to keep teardown robust
-     * even when [bodyAlreadyFailed] is `true`.
+     * `arrive()`/`await()` resume; then [OpenTransactionRegistry.rollbackAll]
+     * discards pending writes from any leaked
+     * [com.vynatix.vault.testing.concurrency.OpenTransaction] (so a forgotten
+     * `transaction(...)` never leaks pending writes into the next test); then
+     * recorders dispose (stopping further event capture); then the handle
+     * registry's pending-error bookkeeping is cleared. Recorder disposal
+     * swallows exceptions to keep teardown robust even when [bodyAlreadyFailed]
+     * is `true`.
      */
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
         barriers.cancelAll()
+        openTransactions.rollbackAll()
 
         val handles = registry.allHandles()
         val unconsumed: List<Pair<VaultHandle<*>, TransactionResult.Error>> =
