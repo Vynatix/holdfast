@@ -13,8 +13,6 @@ fun <T : Any> State<T>.asStateFlow(
     started: SharingStarted = SharingStarted.WhileSubscribed(),
 ): StateFlow<T>
 
-fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T>
-
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
 ```
@@ -49,15 +47,6 @@ class CounterViewModel : ViewModel() {
 suspend fun waitForReady(vault: AccountVault) {
     vault.status.first { it == AccountStatus.Active }
 }
-```
-
-### Eager StateFlow for ad-hoc use
-
-```kotlin
-val eager = vault.balance.asEagerStateFlow()
-println(eager.state.value) // current value
-// later:
-eager.dispose()
 ```
 
 ## Build

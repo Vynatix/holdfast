@@ -18,13 +18,6 @@ abstract interface com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynat
     abstract suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.vault.coroutines/SuspendingKvStore.snapshot|snapshot(){}[0]
 }
 
-final class <#A: kotlin/Any> com.vynatix.vault.coroutines/EagerStateFlow : com.vynatix.vault/Disposable { // com.vynatix.vault.coroutines/EagerStateFlow|null[0]
-    final val state // com.vynatix.vault.coroutines/EagerStateFlow.state|{}state[0]
-        final fun <get-state>(): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/EagerStateFlow.state.<get-state>|<get-state>(){}[0]
-
-    final fun dispose() // com.vynatix.vault.coroutines/EagerStateFlow.dispose|dispose(){}[0]
-}
-
 final class com.vynatix.vault.coroutines/InMemorySuspendingKvStore : com.vynatix.vault.coroutines/SuspendingKvStore { // com.vynatix.vault.coroutines/InMemorySuspendingKvStore|null[0]
     constructor <init>(kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // com.vynatix.vault.coroutines/InMemorySuspendingKvStore.<init>|<init>(kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
 
@@ -52,7 +45,6 @@ open class <#A: kotlin/Any> com.vynatix.vault.coroutines/SuspendingKvBridge : co
 
 final fun <#A: kotlin/Any> (com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/bridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.vault.coroutines/SuspendingKvBridge<#A> // com.vynatix.vault.coroutines/bridge|bridge@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.vault.coroutines/SuspendingKvStore).com.vynatix.vault.coroutines/suspendingBridge(kotlin/String, com.vynatix.vault.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.vault.coroutines/SuspendingKvBridge.Awaiting<#A> // com.vynatix.vault.coroutines/suspendingBridge|suspendingBridge@com.vynatix.vault.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.vault.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
-final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asEagerStateFlow(): com.vynatix.vault.coroutines/EagerStateFlow<#A> // com.vynatix.vault.coroutines/asEagerStateFlow|asEagerStateFlow@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asFlow(): kotlinx.coroutines.flow/Flow<#A> // com.vynatix.vault.coroutines/asFlow|asFlow@com.vynatix.vault.State<0:0>(){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.vault/State<#A>).com.vynatix.vault.coroutines/asStateFlow(kotlinx.coroutines/CoroutineScope, kotlinx.coroutines.flow/SharingStarted = ...): kotlinx.coroutines.flow/StateFlow<#A> // com.vynatix.vault.coroutines/asStateFlow|asStateFlow@com.vynatix.vault.State<0:0>(kotlinx.coroutines.CoroutineScope;kotlinx.coroutines.flow.SharingStarted){0§<kotlin.Any>}[0]
 final suspend fun <#A: com.vynatix.vault/Vault<#A>, #B: kotlin/Any?> (#A).com.vynatix.vault.coroutines/suspendAction(kotlin.coroutines/SuspendFunction1<#A, #B>): com.vynatix.vault/TransactionResult<#B> // com.vynatix.vault.coroutines/suspendAction|suspendAction@0:0(kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.vault.Vault<0:0>>;1§<kotlin.Any?>}[0]

@@ -7,10 +7,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -67,31 +65,6 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
  */
 fun <T : Any> State<T>.asStateFlow(scope: CoroutineScope, started: SharingStarted = SharingStarted.WhileSubscribed()): StateFlow<T> =
     asFlow().stateIn(scope, started, this.value)
-
-/**
- * Hot, eager [StateFlow] independent of any scope. Subscribes to the state once
- * (eagerly, at construction) and forwards every commit to a [MutableStateFlow].
- * Returns a `StateFlow<T>` paired with a [Disposable] for explicit teardown.
- *
- * Use this when you don't have a [CoroutineScope] handy — typically a top-level
- * adapter for tooling. For Compose / ViewModel scopes, prefer the scope-bound
- * [asStateFlow] above.
- */
-fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T> {
-    val flow = MutableStateFlow(this.value)
-    val disposable = (this as MutableState<T>).observe { value ->
-        flow.value = value
-    }
-    return EagerStateFlow(flow.asStateFlow(), disposable)
-}
-
-/**
- * A [StateFlow] paired with the [Disposable] that owns its upstream observer
- * subscription. Call [dispose] to detach.
- */
-class EagerStateFlow<T : Any> internal constructor(val state: StateFlow<T>, private val disposable: Disposable) : Disposable {
-    override fun dispose(): Unit = disposable.dispose()
-}
 
 /**
  * Suspend until [predicate] holds for the state's value. Returns the value that

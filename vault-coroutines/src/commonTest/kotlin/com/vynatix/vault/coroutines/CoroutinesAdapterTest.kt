@@ -95,22 +95,6 @@ class AsStateFlowTest {
     }
 }
 
-class EagerStateFlowTest {
-
-    @Test fun eagerStateFlowReflectsLatestValueImmediately() {
-        val v = FlowVault()
-        v action { n mutate 11 }
-        val esf = v.n.asEagerStateFlow()
-        assertEquals(11, esf.state.value)
-        v action { n mutate 22 }
-        assertEquals(22, esf.state.value)
-        esf.dispose()
-        v action { n mutate 33 }
-        // After dispose, the EagerStateFlow stops updating.
-        assertEquals(22, esf.state.value, "after dispose, the EagerStateFlow stops tracking")
-    }
-}
-
 class FirstAndAwaitValueTest {
 
     @Test fun firstSuspendsUntilPredicateHolds() = runBlocking {

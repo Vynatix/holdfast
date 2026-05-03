@@ -1,8 +1,3 @@
-public final class com/vynatix/vault/coroutines/EagerStateFlow : com/vynatix/vault/Disposable {
-	public fun dispose ()V
-	public final fun getState ()Lkotlinx/coroutines/flow/StateFlow;
-}
-
 public final class com/vynatix/vault/coroutines/InMemorySuspendingKvStore : com/vynatix/vault/coroutines/SuspendingKvStore {
 	public fun <init> ()V
 	public fun <init> (Ljava/util/Map;)V
@@ -14,7 +9,6 @@ public final class com/vynatix/vault/coroutines/InMemorySuspendingKvStore : com/
 }
 
 public final class com/vynatix/vault/coroutines/StateFlowsKt {
-	public static final fun asEagerStateFlow (Lcom/vynatix/vault/State;)Lcom/vynatix/vault/coroutines/EagerStateFlow;
 	public static final fun asFlow (Lcom/vynatix/vault/State;)Lkotlinx/coroutines/flow/Flow;
 	public static final fun asStateFlow (Lcom/vynatix/vault/State;Lkotlinx/coroutines/CoroutineScope;Lkotlinx/coroutines/flow/SharingStarted;)Lkotlinx/coroutines/flow/StateFlow;
 	public static synthetic fun asStateFlow$default (Lcom/vynatix/vault/State;Lkotlinx/coroutines/CoroutineScope;Lkotlinx/coroutines/flow/SharingStarted;ILjava/lang/Object;)Lkotlinx/coroutines/flow/StateFlow;
