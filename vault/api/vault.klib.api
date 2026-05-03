@@ -204,6 +204,16 @@ final class <#A: kotlin/Any> com.vynatix.vault.bridge/KvBridge : com.vynatix.vau
     final fun publish(#A): kotlin/Boolean // com.vynatix.vault.bridge/KvBridge.publish|publish(1:0){}[0]
 }
 
+final class <#A: kotlin/Any> com.vynatix.vault/EventfulSupport : com.vynatix.vault/Eventful<#A> { // com.vynatix.vault/EventfulSupport|null[0]
+    constructor <init>(kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.vault/EventfulSupport.<init>|<init>(kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
+
+    final val events // com.vynatix.vault/EventfulSupport.events|{}events[0]
+        final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#A> // com.vynatix.vault/EventfulSupport.events.<get-events>|<get-events>(){}[0]
+
+    final fun bindVault(com.vynatix.vault/Vault<*>) // com.vynatix.vault/EventfulSupport.bindVault|bindVault(com.vynatix.vault.Vault<*>){}[0]
+    final fun emit(#A) // com.vynatix.vault/EventfulSupport.emit|emit(1:0){}[0]
+}
+
 final class <#A: kotlin/Any> com.vynatix.vault/MutableState : com.vynatix.vault/State<#A> { // com.vynatix.vault/MutableState|null[0]
     constructor <init>(#A, com.vynatix.vault/Transformer<#A>? = ..., com.vynatix.vault/Vault<*>, kotlin/Boolean = ...) // com.vynatix.vault/MutableState.<init>|<init>(1:0;com.vynatix.vault.Transformer<1:0>?;com.vynatix.vault.Vault<*>;kotlin.Boolean){}[0]
 

@@ -23,6 +23,15 @@ public abstract interface class com/vynatix/vault/Eventful {
 	public abstract fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
 }
 
+public final class com/vynatix/vault/EventfulSupport : com/vynatix/vault/Eventful {
+	public fun <init> ()V
+	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
+	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun bindVault (Lcom/vynatix/vault/Vault;)V
+	public fun emit (Ljava/lang/Object;)V
+	public fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+}
+
 public abstract class com/vynatix/vault/EventfulVault : com/vynatix/vault/Vault, com/vynatix/vault/Eventful {
 	public fun <init> ()V
 	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V

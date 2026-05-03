@@ -1,0 +1,120 @@
+@file:OptIn(VaultInternalApi::class)
+
+package com.vynatix.vault
+
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+
+/**
+ * Delegate-friendly counterpart to [EventfulVault]. Use when a vault must
+ * extend a base class other than [EventfulVault] (e.g. a domain-specific
+ * abstract base) but still wants the [Eventful] capability:
+ *
+ * ```
+ * class MyVault private constructor(
+ *     private val support: EventfulSupport<MyEvent>,
+ * ) : SomeDomainBase(), Eventful<MyEvent> by support {
+ *     constructor() : this(EventfulSupport())
+ *
+ *     init {
+ *         support.bindVault(this)
+ *     }
+ * }
+ * ```
+ *
+ * Behaves identically to [EventfulVault] w.r.t. event staging on transactions
+ * and the commit-phase ordering contract:
+ *
+ * 1. State observers fire (post-commit, post-`MutableState.applyCommitted`).
+ * 2. Bridges publish (sync `Bridge.publish` — fire-and-forget; or
+ *    `SuspendingBridge.publishAwaited` under `suspendAction`).
+ * 3. Events drain to [events] in the order they were [emit]-ted.
+ *
+ * Same back-pressure policy as [EventfulVault]: lossless events via
+ * `BufferOverflow.SUSPEND` by default — slow collectors back-pressure the
+ * commit thread rather than dropping events. Tune [extraBufferCapacity] for
+ * bursty workloads, or switch [onBufferOverflow] only if a class of events
+ * is genuinely droppable.
+ *
+ * ## Vault binding
+ *
+ * Because [EventfulSupport] does not extend [Vault], it has no direct view of
+ * the active transaction. The hosting vault MUST call [bindVault] exactly
+ * once during construction (typically in an `init` block). Calling [emit]
+ * before [bindVault] throws [IllegalStateException]. Calling [bindVault]
+ * twice on the same instance also throws — one support per vault.
+ *
+ * @param extraBufferCapacity Buffer slots beyond `replay = 0` available before
+ *   the producer suspends. Default 16; tune up if commits emit bursts of
+ *   events and downstream collectors are bursty too.
+ * @param onBufferOverflow What to do when the buffer is full. Default
+ *   [BufferOverflow.SUSPEND] (lossless). Use [BufferOverflow.DROP_OLDEST] /
+ *   [BufferOverflow.DROP_LATEST] only if a class of events is genuinely
+ *   droppable.
+ */
+class EventfulSupport<E : Any>(
+    extraBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
+    onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
+) : Eventful<E> {
+
+    private val _events: MutableSharedFlow<E> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = extraBufferCapacity,
+        onBufferOverflow = onBufferOverflow,
+    )
+
+    /**
+     * The hot [SharedFlow] of events emitted via this support. Subscribers
+     * see only events emitted after they subscribe (no replay).
+     */
+    override val events: SharedFlow<E> = _events.asSharedFlow()
+
+    @kotlin.concurrent.Volatile
+    private var boundVault: Vault<*>? = null
+
+    /**
+     * Wire this support to its hosting [Vault] so [emit] can locate the
+     * active transaction. Call exactly once, typically in the hosting class's
+     * `init` block. Subsequent calls throw [IllegalStateException].
+     *
+     * The reference is held weakly only by usage convention — the hosting
+     * vault's lifetime is expected to dominate this support's. The vault
+     * keeps a reference to `this` via the supertype delegation, so this is
+     * not a circular leak: when the vault is unreachable, both objects
+     * collect together.
+     */
+    fun bindVault(vault: Vault<*>) {
+        check(boundVault == null) {
+            "EventfulSupport.bindVault must be called at most once per instance"
+        }
+        boundVault = vault
+    }
+
+    /**
+     * Stage [event] onto the bound vault's active transaction's pendingEvents
+     * buffer. On commit, drained AFTER state observers and AFTER bridge
+     * publishes — same commit-phase contract as [EventfulVault].
+     *
+     * Throws [IllegalStateException] if [bindVault] has not been called or if
+     * called outside an `action` / `suspendAction`. Events MUST be
+     * transactional so rollback can discard them.
+     */
+    override fun emit(event: E) {
+        val vault = boundVault ?: error(
+            "EventfulSupport.emit called before bindVault. The hosting Vault must " +
+                "call support.bindVault(this) in its init block.",
+        )
+        val txn = vault.activeTransaction ?: error(
+            "emit(event) called outside of an action / suspendAction. " +
+                "Events must be staged inside a transaction so rollback can discard them.",
+        )
+        txn.stagePendingEvent(_events, event)
+    }
+
+    private companion object {
+        /** Default `extraBufferCapacity` for the events SharedFlow. Per design §3.6. */
+        private const val DEFAULT_EVENT_BUFFER_CAPACITY = 16
+    }
+}
