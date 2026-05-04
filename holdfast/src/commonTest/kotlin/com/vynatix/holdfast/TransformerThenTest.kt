@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -13,7 +13,7 @@ private class PrefixTransformer(private val prefix: String) : Transformer<String
     override fun get(value: String): String = value.removePrefix(prefix)
 }
 
-private class ChainedVault : Vault<ChainedVault>() {
+private class ChainedVault : Holdfast<ChainedVault>() {
     val a by state(transformer = UpperCaseTransformer().then(PrefixTransformer("v:"))) { "init" }
 }
 

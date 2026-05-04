@@ -1,6 +1,6 @@
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import platform.Foundation.NSTemporaryDirectory
 import kotlin.uuid.ExperimentalUuidApi

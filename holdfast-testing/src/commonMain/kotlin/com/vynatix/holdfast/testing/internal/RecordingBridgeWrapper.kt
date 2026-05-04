@@ -1,39 +1,39 @@
-package com.vynatix.vault.testing.internal
+package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.State
-import com.vynatix.vault.testing.BridgeObserved
-import com.vynatix.vault.testing.BridgePublished
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.testing.BridgeObserved
+import com.vynatix.holdfast.testing.BridgePublished
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.time.Clock
 
 /**
- * Privileged wrapper installed by [com.vynatix.vault.testing.VaultHandle] over
+ * Privileged wrapper installed by [com.vynatix.holdfast.testing.HoldfastHandle] over
  * each user-attached bridge on a tracked vault. Forwards every [observe] /
  * [publish] call to the wrapped [delegate] while pushing matching
  * [BridgePublished] / [BridgeObserved] events into the handle's [Recorder].
  *
  * Also captures the publish history and inbound observer reference so a
- * [com.vynatix.vault.testing.bridge.BridgeView] can read past publishes and
+ * [com.vynatix.holdfast.testing.bridge.BridgeView] can read past publishes and
  * synthesise inbound updates without touching the wrapped bridge — useful for
  * delegate types that don't expose their own recording (e.g. a real
- * [com.vynatix.vault.bridge.KvBridge]).
+ * [com.vynatix.holdfast.bridge.KvBridge]).
  *
  * Lifecycle:
  *  - The wrapper is constructed at handle install time
- *    ([com.vynatix.vault.testing.VaultHandle.init]); the previous bridge
- *    reference on the [com.vynatix.vault.MutableState] is replaced by `this`.
+ *    ([com.vynatix.holdfast.testing.HoldfastHandle.init]); the previous bridge
+ *    reference on the [com.vynatix.holdfast.MutableState] is replaced by `this`.
  *    Setting the new bridge re-runs the vault's attach path
- *    ([com.vynatix.vault.MutableState.bridge] setter), which disposes the old
+ *    ([com.vynatix.holdfast.MutableState.bridge] setter), which disposes the old
  *    inbound subscription and calls our [observe] — a single re-attach is
  *    therefore observable. Note: production code calling `bridge.observe`
  *    typically replays a load-on-attach value through the observer, so the
  *    re-attach can produce one synthetic-looking observed value. Tests that
  *    need to ignore that should attach the bridge before tracking, or check
  *    `published.size > N` rather than exact equality.
- *  - At handle dispose ([com.vynatix.vault.testing.VaultHandle.disposeRecorderInternal])
+ *  - At handle dispose ([com.vynatix.holdfast.testing.HoldfastHandle.disposeRecorderInternal])
  *    the wrapper remains attached to the vault but no further events are
  *    pushed because the recorder's buffer has been cleared. The wrapper
  *    itself is benign — it forwards to the delegate normally.

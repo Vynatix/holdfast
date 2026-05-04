@@ -1,12 +1,12 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class FileVault : Vault<FileVault>() {
+private class FileVault : Holdfast<FileVault>() {
     val balance by state { 0L }
     val name by state { "" }
 }

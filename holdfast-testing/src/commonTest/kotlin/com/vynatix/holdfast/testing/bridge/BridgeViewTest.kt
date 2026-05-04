@@ -1,18 +1,18 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.matcher.shouldBeSuccess
-import com.vynatix.vault.testing.matcher.shouldHaveLastPublished
-import com.vynatix.vault.testing.matcher.shouldHavePublished
-import com.vynatix.vault.testing.matcher.shouldHavePublishedInOrder
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+import com.vynatix.holdfast.testing.matcher.shouldHaveLastPublished
+import com.vynatix.holdfast.testing.matcher.shouldHavePublished
+import com.vynatix.holdfast.testing.matcher.shouldHavePublishedInOrder
+import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class TextVault : Vault<TextVault>() {
+private class TextVault : Holdfast<TextVault>() {
     val text by state { "" }
 }
 

@@ -1,6 +1,6 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
 
@@ -15,13 +15,13 @@ import kotlinx.atomicfu.atomic
  *
  * Example:
  * ```
- * class CartVault : Vault<CartVault>() {
+ * class CartVault : Holdfast<CartVault>() {
  *     val items by state { emptyList<Line>() }
  *     val total: State<Money> = computed { items.value.sumOf { it.price * it.qty } }
  * }
  * ```
  */
-fun <V : Vault<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
+fun <V : Holdfast<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
     val self = this
     return object : State<T> {
         override val value: T get() = self.compute()
@@ -54,7 +54,7 @@ fun <V : Vault<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  * disposable.dispose()
  * ```
  */
-fun <V : Vault<V>, T : Any> V.derived(vararg sources: State<*>, compute: V.() -> T): Pair<State<T>, Disposable> {
+fun <V : Holdfast<V>, T : Any> V.derived(vararg sources: State<*>, compute: V.() -> T): Pair<State<T>, Disposable> {
     val self = this
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"

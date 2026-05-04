@@ -1,11 +1,11 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private class EffectTestVault : Vault<EffectTestVault>() {
+private class EffectTestVault : Holdfast<EffectTestVault>() {
     val count by state { 0 }
     val label by state { "init" }
 }

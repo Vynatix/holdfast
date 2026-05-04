@@ -1,14 +1,14 @@
-package com.vynatix.vault.validation
+package com.vynatix.holdfast.hallmark
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.BoxedValidator
-import com.vynatix.validation.Spec
-import com.vynatix.validation.SpecMode
-import com.vynatix.validation.ValidationException
-import com.vynatix.validation.rules.MinLengthRule
-import com.vynatix.validation.rules.NonBlankRule
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.BoxedValidator
+import com.vynatix.hallmark.Spec
+import com.vynatix.hallmark.SpecMode
+import com.vynatix.hallmark.HallmarkException
+import com.vynatix.hallmark.rules.MinLengthRule
+import com.vynatix.hallmark.rules.NonBlankRule
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -22,7 +22,7 @@ private object UserEmailValidator : BoxedValidator<String, UserEmail>() {
     )
 }
 
-private class UserVault : Vault<UserVault>() {
+private class UserVault : Holdfast<UserVault>() {
     val email by boxed(UserEmailValidator) { "init@example.com" }
     val displayName by state { "init" }
 }
@@ -49,7 +49,7 @@ class ValidatingTransformerTest {
         }
 
         assertIs<TransactionResult.Error>(result)
-        assertTrue(result.exception is ValidationException)
+        assertTrue(result.exception is HallmarkException)
         assertEquals("init@example.com", v.email.value.value)
         assertEquals("before", v.displayName.value)
     }

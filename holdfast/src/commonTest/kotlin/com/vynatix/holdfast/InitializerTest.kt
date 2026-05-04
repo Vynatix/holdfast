@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
@@ -10,18 +10,18 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
-private class CountingInitVault(private val onInit: () -> Unit) : Vault<CountingInitVault>() {
+private class CountingInitVault(private val onInit: () -> Unit) : Holdfast<CountingInitVault>() {
     val n by state {
         onInit()
         0
     }
 }
 
-private class ThrowingInitVault : Vault<ThrowingInitVault>() {
+private class ThrowingInitVault : Holdfast<ThrowingInitVault>() {
     val n by state<Int> { error("initializer fails") }
 }
 
-private class FlakeyInitVault : Vault<FlakeyInitVault>() {
+private class FlakeyInitVault : Holdfast<FlakeyInitVault>() {
     var attemptCount = 0
     val n by state {
         attemptCount++
@@ -30,7 +30,7 @@ private class FlakeyInitVault : Vault<FlakeyInitVault>() {
     }
 }
 
-private class TwiceFlakeyInitVault : Vault<TwiceFlakeyInitVault>() {
+private class TwiceFlakeyInitVault : Holdfast<TwiceFlakeyInitVault>() {
     var attemptCount = 0
     val n by state {
         attemptCount++
@@ -39,7 +39,7 @@ private class TwiceFlakeyInitVault : Vault<TwiceFlakeyInitVault>() {
     }
 }
 
-private class DifferentExceptionInitVault : Vault<DifferentExceptionInitVault>() {
+private class DifferentExceptionInitVault : Holdfast<DifferentExceptionInitVault>() {
     var attemptCount = 0
     val n by state {
         attemptCount++
@@ -51,7 +51,7 @@ private class DifferentExceptionInitVault : Vault<DifferentExceptionInitVault>()
     }
 }
 
-private class SideEffectInitVault : Vault<SideEffectInitVault>() {
+private class SideEffectInitVault : Holdfast<SideEffectInitVault>() {
     val effects = mutableListOf<Int>()
     var attemptCount = 0
     val n by state {
@@ -62,12 +62,12 @@ private class SideEffectInitVault : Vault<SideEffectInitVault>() {
     }
 }
 
-private class CrossReferenceInitVault : Vault<CrossReferenceInitVault>() {
+private class CrossReferenceInitVault : Holdfast<CrossReferenceInitVault>() {
     val seed by state { 5 }
     val derived by state { seed.value * 2 }
 }
 
-private class ParallelInitVault : Vault<ParallelInitVault>() {
+private class ParallelInitVault : Holdfast<ParallelInitVault>() {
     val callCount = atomic(0)
     val n by state {
         callCount.incrementAndGet()

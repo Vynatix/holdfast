@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -9,8 +9,8 @@ import kotlinx.atomicfu.locks.synchronized
  * In-memory test [Bridge] that records every outbound [publish] and exposes a
  * [simulateInbound] hook for pushing values into the attached state as if they
  * came from an external source. Intended to be the most common bridge in unit
- * tests — replaces production [com.vynatix.vault.bridge.KvBridge] /
- * [com.vynatix.vault.coroutines.flow.FlowBridge] / etc. for tests that only
+ * tests — replaces production [com.vynatix.holdfast.bridge.KvBridge] /
+ * [com.vynatix.holdfast.coroutines.flow.FlowBridge] / etc. for tests that only
  * need to assert on the publish/observe contract.
  *
  * Usage:
@@ -29,7 +29,7 @@ import kotlinx.atomicfu.locks.synchronized
  *
  * On attach (when the vault calls [observe] from `MutableState.bridge` setter),
  * this bridge replays [initial] through the observer once — matching the
- * load-on-attach convention shared by [com.vynatix.vault.bridge.KvBridge].
+ * load-on-attach convention shared by [com.vynatix.holdfast.bridge.KvBridge].
  *
  * Concurrency: every internal mutation runs under a single
  * [SynchronizedObject]. The [published] / [lastPublished] reads return a
@@ -61,7 +61,7 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
         get() = synchronized(lock) { publishedList.lastOrNull() }
 
     /**
-     * Vault-driven inbound subscription. The vault's `MutableState.bridge`
+     * Holdfast-driven inbound subscription. The vault's `MutableState.bridge`
      * setter calls this once on attach. We:
      *  1. Store [observer] as the inbound observer (the only reference; this
      *     bridge supports a single attach-target as bridges are 1:1 with
@@ -69,7 +69,7 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
      *  2. Replay [initial] through [observer] — load-on-attach convention.
      *     If the user wants to skip the replay, they can attach the bridge
      *     before tracking the vault and ignore the initial emission, or pick
-     *     [com.vynatix.vault.testing.bridge.LatchedBridge] which never replays.
+     *     [com.vynatix.holdfast.testing.bridge.LatchedBridge] which never replays.
      *
      * The returned [Disposable] clears the inbound observer reference; calling
      * it twice is safe (idempotent).
@@ -90,7 +90,7 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
 
     /**
      * Append [value] to [published] and return `true`. Matches the
-     * [com.vynatix.vault.Publisher] contract: the bridge is a passive sink
+     * [com.vynatix.holdfast.Publisher] contract: the bridge is a passive sink
      * that always accepts the publish.
      */
     override fun publish(value: T): Boolean {

@@ -1,7 +1,7 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.EventfulVault
-import com.vynatix.vault.TransactionResult
+import com.vynatix.holdfast.EventfulHoldfast
+import com.vynatix.holdfast.TransactionResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,7 +24,7 @@ private sealed class OrderEvent {
     data object Updated : OrderEvent()
 }
 
-private class OrderingVault : EventfulVault<OrderingVault, OrderEvent>() {
+private class OrderingVault : EventfulHoldfast<OrderingVault, OrderEvent>() {
     val s by state { "init" }
     val n by state { 0 }
 }
@@ -172,7 +172,7 @@ class EventfulVaultCommitOrderingTest {
     private data class SmallEvent(val n: Int)
 
     private class SmallBufferVault :
-        EventfulVault<SmallBufferVault, SmallEvent>(
+        EventfulHoldfast<SmallBufferVault, SmallEvent>(
             extraBufferCapacity = 2,
             onBufferOverflow = BufferOverflow.SUSPEND,
         ) {

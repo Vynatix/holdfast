@@ -1,4 +1,4 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import kotlinx.coroutines.test.runTest
 import java.io.File
@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 
 /**
  * JVM/Android-specific persistence guarantees for [SuspendingFileSystemKvStore].
- * Runs on both `:vault-coroutines:jvmTest` and `:vault-coroutines:testAndroidHostTest`
+ * Runs on both `:holdfast-coroutines:jvmTest` and `:holdfast-coroutines:testAndroidHostTest`
  * via the `jvmAndAndroidHostTest` shared source set hierarchy.
  */
 class SuspendingFileSystemKvStoreJvmTest {

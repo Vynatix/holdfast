@@ -1,14 +1,14 @@
-package com.vynatix.vault.testing
+package com.vynatix.holdfast.testing
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class MultiVault : Vault<MultiVault>() {
+private class MultiVault : Holdfast<MultiVault>() {
     val a by state { 0 }
     val b by state { "" }
     val c by state { listOf<Int>() }
@@ -88,7 +88,7 @@ class TypedViewsTest {
     @Test
     fun middlewareEventsOfReturnsEmptyForUserClasses() = vaultTest {
         // v1 caveat: user middlewares installed via vault.middlewares() are
-        // NOT auto-wrapped — :vault has no public hook to enumerate or
+        // NOT auto-wrapped — :holdfast has no public hook to enumerate or
         // replace entries in the chain, and Middleware.invoke is final. Their
         // lifecycle events therefore don't make it into the timeline.
         val v = MultiVault()

@@ -1,11 +1,11 @@
-package com.vynatix.vault.crypto
+package com.vynatix.holdfast.crypto
 
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
-import com.vynatix.vault.bridge.InMemoryKvStore
-import com.vynatix.vault.bridge.KvBridge
-import com.vynatix.vault.bridge.StringCodec
-import com.vynatix.vault.effect
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.bridge.InMemoryKvStore
+import com.vynatix.holdfast.bridge.KvBridge
+import com.vynatix.holdfast.bridge.StringCodec
+import com.vynatix.holdfast.effect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 
 private val SEED = "test-key-1".encodeToByteArray()
 
-private class SecureVault : Vault<SecureVault>() {
+private class SecureVault : Holdfast<SecureVault>() {
     val token by state(EncryptingTransformer(XorCipher(SEED))) { "" }
     val opaque by state(EncryptingTransformer(XorCipher(SEED))) { "init" }
 }

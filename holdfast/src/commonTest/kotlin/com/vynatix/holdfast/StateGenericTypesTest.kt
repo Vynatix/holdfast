@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -17,7 +17,7 @@ private sealed interface Status {
 
 private data class Wrapped<T>(val value: T?)
 
-private class GenericTypesVault : Vault<GenericTypesVault>() {
+private class GenericTypesVault : Holdfast<GenericTypesVault>() {
     val text by state { "hello" }
     val profile by state { Profile("Alice", 30) }
     val list by state { listOf(1, 2, 3) }

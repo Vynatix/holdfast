@@ -1,0 +1,45 @@
+public final class com/vynatix/holdfast/hallmark/BoxedCodec : com/vynatix/holdfast/bridge/Codec {
+	public fun <init> (Lcom/vynatix/holdfast/bridge/Codec;Lcom/vynatix/hallmark/Validator;)V
+	public fun decode (Ljava/lang/String;)Lcom/vynatix/hallmark/Boxed;
+	public synthetic fun decode (Ljava/lang/String;)Ljava/lang/Object;
+	public fun encode (Lcom/vynatix/hallmark/Boxed;)Ljava/lang/String;
+	public synthetic fun encode (Ljava/lang/Object;)Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/hallmark/BoxedHandle {
+	public fun <init> (Lcom/vynatix/holdfast/State;Lcom/vynatix/hallmark/Validator;)V
+	public final fun civilize (Ljava/lang/Object;)Lcom/vynatix/hallmark/Boxed;
+	public final fun component1 ()Lcom/vynatix/holdfast/State;
+	public final fun component2 ()Lcom/vynatix/hallmark/Validator;
+	public final fun copy (Lcom/vynatix/holdfast/State;Lcom/vynatix/hallmark/Validator;)Lcom/vynatix/holdfast/hallmark/BoxedHandle;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/hallmark/BoxedHandle;Lcom/vynatix/holdfast/State;Lcom/vynatix/hallmark/Validator;ILjava/lang/Object;)Lcom/vynatix/holdfast/hallmark/BoxedHandle;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getState ()Lcom/vynatix/holdfast/State;
+	public final fun getValidator ()Lcom/vynatix/hallmark/Validator;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/hallmark/BoxedHandleDelegate {
+	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/hallmark/BoxedHandle;
+}
+
+public final class com/vynatix/holdfast/hallmark/BoxedHandleKt {
+	public static final fun assign (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/hallmark/BoxedHandle;Ljava/lang/Object;)V
+	public static final fun boxedHandle (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/hallmark/Validator;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/hallmark/BoxedHandleDelegate;
+}
+
+public final class com/vynatix/holdfast/hallmark/BoxedStateKt {
+	public static final fun boxed (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/hallmark/Validator;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/StateDelegate;
+}
+
+public final class com/vynatix/holdfast/hallmark/ValidatingTransformer : com/vynatix/holdfast/Transformer {
+	public fun <init> (Lcom/vynatix/hallmark/Validator;)V
+	public fun get (Lcom/vynatix/hallmark/Boxed;)Lcom/vynatix/hallmark/Boxed;
+	public synthetic fun get (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun set (Lcom/vynatix/hallmark/Boxed;)Lcom/vynatix/hallmark/Boxed;
+	public synthetic fun set (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun shouldTransform (Lcom/vynatix/hallmark/Boxed;)Z
+	public synthetic fun shouldTransform (Ljava/lang/Object;)Z
+}
+

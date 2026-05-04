@@ -1,9 +1,9 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.vault.State
-import com.vynatix.vault.Vault
-import com.vynatix.vault.snapshot
-import com.vynatix.vault.testing.VaultHandle
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.snapshot
+import com.vynatix.holdfast.testing.HoldfastHandle
 import kotlin.reflect.KProperty1
 
 /**
@@ -23,7 +23,7 @@ import kotlin.reflect.KProperty1
  * }
  * ```
  */
-class StateMatcher<V : Vault<V>> internal constructor(internal val vault: V) {
+class StateMatcher<V : Holdfast<V>> internal constructor(internal val vault: V) {
 
     /**
      * Assertions captured by the builder, keyed by property reference. Each
@@ -55,7 +55,7 @@ class StateMatcher<V : Vault<V>> internal constructor(internal val vault: V) {
  *
  * Use [shouldMatchExactly] when every declared state must be asserted.
  */
-infix fun <V : Vault<V>> VaultHandle<V>.shouldMatch(builder: StateMatcher<V>.() -> Unit) {
+infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatch(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(vault).apply(builder)
     val mismatches = collectMismatches(sm)
     if (mismatches.isNotEmpty()) {
@@ -66,11 +66,11 @@ infix fun <V : Vault<V>> VaultHandle<V>.shouldMatch(builder: StateMatcher<V>.() 
 /**
  * Strict state-matcher: same as [shouldMatch], but additionally requires every
  * state currently registered on the vault (i.e. every entry in
- * [Vault.properties]) to have an assertion in [builder]. States that are
+ * [Holdfast.properties]) to have an assertion in [builder]. States that are
  * registered but not asserted produce an [AssertionError] listing them
  * alphabetically.
  *
- * KMP note: a Vault registers a state lazily, on the first delegate read of
+ * KMP note: a Holdfast registers a state lazily, on the first delegate read of
  * its property. `shouldMatchExactly` checks `vault.properties.keys`, so a
  * declared-but-never-touched state is invisible to the matcher. In practice
  * this is benign — tests reach this matcher only after exercising the vault
@@ -78,7 +78,7 @@ infix fun <V : Vault<V>> VaultHandle<V>.shouldMatch(builder: StateMatcher<V>.() 
  * in [builder] would fail to type-check anyway because `prop.get(vault)` would
  * register it.
  */
-infix fun <V : Vault<V>> VaultHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
+infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(vault).apply(builder)
 
     val declaredStateNames = vault.properties.keys
@@ -97,23 +97,23 @@ infix fun <V : Vault<V>> VaultHandle<V>.shouldMatchExactly(builder: StateMatcher
 }
 
 /**
- * Snapshot equality: takes [com.vynatix.vault.snapshot]s of both this handle's
+ * Snapshot equality: takes [com.vynatix.holdfast.snapshot]s of both this handle's
  * vault and [other], requires they cover the same state names, and asserts
  * each named state has the same current `value`.
  *
  * Why `value` (post-`transformer.get`) instead of the raw snapshot entries:
- * raw entries are an internal-only field on [com.vynatix.vault.VaultSnapshot]
+ * raw entries are an internal-only field on [com.vynatix.holdfast.HoldfastSnapshot]
  * (used by `restore` to round-trip without re-running the transformer). For a
  * test-level "do these vaults look the same?" check, comparing the user-visible
  * `value` is more useful — for symmetric transformers it is identical to the
  * raw value, and for asymmetric ones (e.g.
- * [com.vynatix.vault.crypto.EncryptingTransformer]) it compares plaintext
+ * [com.vynatix.holdfast.crypto.EncryptingTransformer]) it compares plaintext
  * rather than ciphertext, which is what tests almost always want.
  *
  * Throws [AssertionError] on a state-name set mismatch or on any value
  * mismatch.
  */
-infix fun <V : Vault<V>> VaultHandle<V>.shouldMatchSnapshotOf(other: V) {
+infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchSnapshotOf(other: V) {
     val mySnap = vault.snapshot()
     val otherSnap = other.snapshot()
 
@@ -142,7 +142,7 @@ infix fun <V : Vault<V>> VaultHandle<V>.shouldMatchSnapshotOf(other: V) {
  * `"<state-name>: expected=<X> actual=<Y>"` strings — one per mismatch. An
  * empty list means every assertion passed.
  */
-private fun <V : Vault<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
+private fun <V : Holdfast<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
     val actualValue = prop.get(sm.vault).value
     if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
 }

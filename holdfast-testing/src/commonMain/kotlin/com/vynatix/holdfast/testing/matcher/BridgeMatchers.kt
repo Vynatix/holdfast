@@ -1,6 +1,6 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.vault.testing.bridge.BridgeView
+import com.vynatix.holdfast.testing.bridge.BridgeView
 
 /**
  * Assert that [value] appears at least once in this view's published history.

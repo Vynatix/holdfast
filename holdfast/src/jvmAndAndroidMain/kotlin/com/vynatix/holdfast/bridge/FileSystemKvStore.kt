@@ -1,4 +1,4 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 import java.io.File
 import java.nio.charset.StandardCharsets

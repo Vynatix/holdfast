@@ -1,11 +1,11 @@
-@file:OptIn(com.vynatix.vault.VaultInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.MutableState
-import com.vynatix.vault.State
-import com.vynatix.vault.effect
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.MutableState
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -58,7 +58,7 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
 }
 
 /**
- * Package-internal accessor: resolves the [CoroutineScope] of the [Vault] that
+ * Package-internal accessor: resolves the [CoroutineScope] of the [Holdfast] that
  * owns this [State]. The cast to [MutableState] stays here — never in any public
  * signature. Throws if the [State] was not produced by `vault.state { … }`.
  *
@@ -77,9 +77,9 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
  * immediately, then any subsequent commits while [scope] is active. When [scope]
  * cancels, the underlying observer is disposed.
  *
- * `scope` defaults to the owning vault's [com.vynatix.vault.Vault.scope] (resolved
- * via the chain documented on `Vault.scope` — per-vault override / bound scope /
- * `Vault.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
+ * `scope` defaults to the owning vault's [com.vynatix.holdfast.Holdfast.scope] (resolved
+ * via the chain documented on `Holdfast.scope` — per-vault override / bound scope /
+ * `Holdfast.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
  * call site `state.asStateFlow(myScope, started)` continues to compile.
  *
  * `started` defaults to [SharingStarted.WhileSubscribed] so the upstream

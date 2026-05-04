@@ -1,20 +1,20 @@
-# Changelog — `:vault-coroutines`
+# Changelog — `:holdfast-coroutines`
 
-All notable changes to `:vault-coroutines` are documented here. The format is
+All notable changes to `:holdfast-coroutines` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## 2.0.0 — 2026-05-03
 
-Coordinated 2.0 cut across `:vault`, `:vault-coroutines`, `:vault-compose`,
-and `:vault-validation`. `:vault-coroutines` 2.0 is a coroutine-first peer of
-`:vault` core with full feature parity — not the thin adapter framing of 1.x.
+Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,
+and `:holdfast-hallmark`. `:holdfast-coroutines` 2.0 is a coroutine-first peer of
+`:holdfast` core with full feature parity — not the thin adapter framing of 1.x.
 See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 
 ### Added
 
 - **`State<T>.effect`** — top-level `State<T>` extension, replacing the
-  `Vault<Self>` member-extension shipped in 1.x. Both prior call sites
+  `Holdfast<Self>` member-extension shipped in 1.x. Both prior call sites
   collapse to `state effect { ... }` without the implicit-cast leak.
 - **`State<T>.asStateFlow(scope, started)`** — single hot StateFlow API.
   `started` defaults to `SharingStarted.WhileSubscribed()`; pass
@@ -32,7 +32,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   `suspend fun publishAwaited(value)` is the contract; the default
   `Bridge.publish(value)` launches a fire-and-forget coroutine on the
   bridge's scope.
-- **`SuspendingKvStore.bridge(key, codec, scope = Vault.defaultScope)`**
+- **`SuspendingKvStore.bridge(key, codec, scope = Holdfast.defaultScope)`**
   (fire-and-forget) and **`SuspendingKvStore.suspendingBridge(...)`**
   (await-completion) factory functions, plus K2 context-parameter overloads
   for both. The two factories share the same store, key, and codec — caller
@@ -42,10 +42,10 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 - **`SuspendingFileSystemKvStore`** — `expect class` `SuspendingKvStore`
   impl on Android + JVM + iOS using `withContext(Dispatchers.IO)` for
   file ops.
-- **`suspendAtomic(vararg vaults, body)`** — multi-vault async transaction.
-  Vaults sorted by `Vault.lockOrderKey`; each vault's `AsyncSerializer.Mutex`
+- **`suspendAtomic(vararg vaults, body)`** — multi-holdfast async transaction.
+  Vaults sorted by `Holdfast.lockOrderKey`; each vault's `AsyncSerializer.Mutex`
   acquired in lock order via `withLock`. Mutually exclusive with blocking
-  `atomic` and per-vault `action` / `suspendAction` on the same vault.
+  `atomic` and per-holdfast `action` / `suspendAction` on the same vault.
   Commit phase wrapped in `withContext(NonCancellable)`; partial-commit
   cannot happen.
 - **`suspendDerived(vararg sources, compute)`** — push-recomputed derived
@@ -59,7 +59,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   Migration: `state.asEagerStateFlow().also { it.dispose() }` →
   `state.asStateFlow(started = SharingStarted.Eagerly)`. Disposal is now
   handled by scope cancellation.
-- **`Vault<Self>.effect` member-extension**. Replaced by the top-level
+- **`Holdfast<Self>.effect` member-extension**. Replaced by the top-level
   `State<T>.effect` extension; the `vault { state effect { ... } }`
   call-site form continues to compile.
 
@@ -109,7 +109,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 - **Sync `vault.action { }` inside a `suspendAtomic` body deadlocks.** The
   design spec called for both `action` and `suspendAction` inside the body
   to become savepoints. Reality: kotlinx `Mutex` is not owner-reentrant,
-  so sync `action` (which acquires the per-vault `transactionLock`,
+  so sync `action` (which acquires the per-holdfast `transactionLock`,
   separate from `AsyncSerializer.Mutex`) deadlocks when nested inside
   `suspendAtomic` for the same vault. Practical guidance documented in
   KDoc and [MIGRATING.md](../MIGRATING.md): inside a `suspendAtomic` body
@@ -118,7 +118,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 
 ### Targets
 
-- `:vault-coroutines` 2.0 ships for Android + iOS + JVM via the new
+- `:holdfast-coroutines` 2.0 ships for Android + iOS + JVM via the new
   `jvmAndAndroidMain` intermediate source set. JS / Wasm / non-iOS native
   targets are deferred to a demand-driven minor release.
 

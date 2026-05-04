@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to the Vault library are documented here. The format is
+All notable changes to the Holdfast library are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## 2.0.0 — 2026-05-03
 
-Coordinated 2.0 cut across `:vault`, `:vault-coroutines`, `:vault-compose`,
-and `:vault-validation`. See [MIGRATING.md](../MIGRATING.md) for the
+Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,
+and `:holdfast-hallmark`. See [MIGRATING.md](../MIGRATING.md) for the
 per-call-site rewrite cheatsheet.
 
 This release is built on top of 0.4.0 — every feature documented in the
@@ -18,38 +18,38 @@ described here.
 
 ### Added
 
-- **`Vault.scope: CoroutineScope`** with three-tier resolution: per-call
-  parameter → per-vault `override val scope` → process-default
-  `Vault.defaultScope`. The settable-once `Vault.defaultScope` lazily backs
+- **`Holdfast.scope: CoroutineScope`** with three-tier resolution: per-call
+  parameter → per-holdfast `override val scope` → process-default
+  `Holdfast.defaultScope`. The settable-once `Holdfast.defaultScope` lazily backs
   off to a process `SupervisorJob + Dispatchers.Default` if never assigned.
-  App-init pattern: `Vault.defaultScope = appScope` once at startup.
-- **`Vault.bindToScope(scope)`** — replaces the bound scope reference for
-  one vault. Optional. Calling on an already-bound vault rebinds.
-- **`Vault.dispose()`** — terminal lifecycle. Idempotent. Clears states,
+  App-init pattern: `Holdfast.defaultScope = appScope` once at startup.
+- **`Holdfast.bindToScope(scope)`** — replaces the bound scope reference for
+  one holdfast. Optional. Calling on an already-bound vault rebinds.
+- **`Holdfast.dispose()`** — terminal lifecycle. Idempotent. Clears states,
   detaches bridges, clears observers, terminates events `SharedFlow`. Does
   NOT cancel the bound scope (caller owns its lifecycle). Subsequent calls
   to scope-using or transactional APIs throw `IllegalStateException`.
 - **`Eventful<E>` interface** (`val events: SharedFlow<E>` + `fun emit(event)`)
-  and **`EventfulVault<Self, E>`** base class. Events stage into the active
+  and **`EventfulHoldfast<Self, E>`** base class. Events stage into the active
   transaction's `pendingEvents` and emit during commit, AFTER state observer
   fanout and bridge publish. Lossless-by-default: `replay = 0`,
   `extraBufferCapacity = 16`, `BufferOverflow.SUSPEND`. Off-action `emit`
   throws `IllegalStateException`.
 - **`EventfulSupport<E>`** — delegate helper for vaults that already extend
-  another base and cannot extend `EventfulVault`. Same staging machinery
+  another base and cannot extend `EventfulHoldfast`. Same staging machinery
   exposed as a delegate field.
 - **`@VaultInternalApi MutableState.applyCommittedRaw(value)`** — splits
-  observer fanout out of the bridge-publish path so `:vault-coroutines`
+  observer fanout out of the bridge-publish path so `:holdfast-coroutines`
   can interpose `SuspendingBridge.publishAwaited` between observers and
   bridges during the `suspendAction` commit phase.
 - **`@VaultInternalApi Transaction.stagePendingEvent(channel, event)`** —
-  the per-transaction event buffer used by `EventfulVault.emit`. Discarded
+  the per-transaction event buffer used by `EventfulHoldfast.emit`. Discarded
   on rollback; merged into parent on nested commit.
 
 ### Removed
 
 - This module surface is unchanged in terms of removals; the only
-  removal in the 2.0 cut lives in `:vault-coroutines`. See that module's
+  removal in the 2.0 cut lives in `:holdfast-coroutines`. See that module's
   changelog.
 
 ### Changed (behavior, signature stable)
@@ -65,25 +65,25 @@ described here.
 - **`MutableState<T>.observe` visibility narrowed to `internal`.**
   Migration: `(state as MutableState<T>).observe { ... }` →
   `state effect { ... }` (uses the new top-level `State<T>.effect`
-  extension exposed by `:vault-coroutines`).
+  extension exposed by `:holdfast-coroutines`).
 
 ---
 
 ## [0.4.0] — 2026-05-03
 
 Closes the deferred-features list from 0.3.0. Additive across the validation
-modules; one additive change to `:vault` core (`Transformer.then`); one new
-module (`:vault-validation-coroutines`).
+modules; one additive change to `:holdfast` core (`Transformer.then`); one new
+module (`:holdfast-hallmark-coroutines`).
 
 ### Added — `:validation`
 
-- **9 format-regex rules** in `com.vynatix.validation.rules`:
+- **9 format-regex rules** in `com.vynatix.hallmark.rules`:
   `EmailRule`, `UrlRule`, `UuidRule`, `Ipv4Rule`, `Ipv6Rule`, `E164PhoneRule`,
   `Iso8601DateRule`, `Iso8601DateTimeRule`, `IbanRule`. Each captures a
   practical pattern (NOT a strict RFC grammar) — the patterns target HTML5 /
   OWASP common usage, not edge-case correctness. Adopters needing stricter
   forms compose `MatchesRule(theirRegex)` or subclass `Rule<String>`.
-- **Collection field validators** in `com.vynatix.validation`:
+- **Collection field validators** in `com.vynatix.hallmark`:
   `each(name, getter, elementValidator)` validates every element of an
   `Iterable<E>` field with indexed path notation (`["addresses", "[2]", "zip"]`);
   `forKey(name, getter, key, valueValidator)` validates a specific map key
@@ -92,14 +92,14 @@ module (`:vault-validation-coroutines`).
 - **`MessageResolver` + `EnglishMessageResolver` default**. `interface
   MessageResolver { fun resolve(violation: Violation, locale: String? = null): String }`.
   Adopters wire their own (Android resources, kotlinx-i18n, in-house bundle)
-  to consume `Violation.code` + `Violation.args`. `ValidationResult.resolveAll(resolver)`
+  to consume `Violation.code` + `Violation.args`. `HallmarkResult.resolveAll(resolver)`
   helper for batch resolution.
 - **Schema export / introspection.** `Validator<IN, OUT>.describe(): ValidatorDescription`
   surfaces leaf specs/rules and composite field structure. Three sealed
   variants: `LeafDescription`, `CompositeDescription`, `OpaqueDescription`.
   Useful for OpenAPI / JSON-Schema generation and form-builder UIs.
 
-### Added — `:vault` core
+### Added — `:holdfast` core
 
 - **`Transformer<T>.then(other: Transformer<T>): Transformer<T>`** — composition
   primitive that lets adopters chain transformers (e.g.
@@ -107,7 +107,7 @@ module (`:vault-validation-coroutines`).
   other; get order: other then this (round-trip-preserving). `shouldTransform`
   is logical OR.
 
-### Added — `:vault-validation`
+### Added — `:holdfast-hallmark`
 
 - **`BoxedHandle<P, O>` + `boxedHandle()` factory** — alternative to `boxed()`
   that returns a property of type `BoxedHandle` instead of bare `State<O>`.
@@ -122,17 +122,17 @@ module (`:vault-validation-coroutines`).
   ```
   Implemented via Kotlin context parameters (`-Xcontext-parameters`,
   enabled globally in the `astrid.kmp.library` convention plugin). Throws
-  `ValidationException` and rolls back on validation failure.
+  `HallmarkException` and rolls back on validation failure.
 
-### Added — `:vault-validation-coroutines` (new module)
+### Added — `:holdfast-hallmark-coroutines` (new module)
 
-- New companion artifact `com.vynatix:vault-validation-coroutines`.
-- **`Vault<V>.suspendValidateAndMutate(state, suspendValidator, primitive)`** —
+- New companion artifact `com.vynatix:holdfast-hallmark-coroutines`.
+- **`Holdfast<V>.suspendValidateAndMutate(state, suspendValidator, primitive)`** —
   primary entry. Runs the suspend validator (which may do I/O), then mutates
   the Vault state inside a `suspendAction { }`. Atomic: validation failure
   rolls back the entire transaction.
 - Tests cover acceptance, rejection-with-rollback, and
-  `ValidationException` propagation.
+  `HallmarkException` propagation.
 
 ### Documentation
 
@@ -151,12 +151,12 @@ module (`:vault-validation-coroutines`).
 
 ## [0.3.0] — 2026-05-03
 
-Validation library reshape. The 0.2.0 `:vault-validation` surface is fully
-replaced and split into three modules; the rest of the Vault libraries (`:vault`,
-`:vault-coroutines`, `:vault-compose`) carry forward at 0.3.0 with no API
+Validation library reshape. The 0.2.0 `:holdfast-hallmark` surface is fully
+replaced and split into three modules; the rest of the Vault libraries (`:holdfast`,
+`:holdfast-coroutines`, `:holdfast-compose`) carry forward at 0.3.0 with no API
 changes — only the version label moves.
 
-This is a **hard break** for `:vault-validation` consumers. Pre-1.0 SemVer
+This is a **hard break** for `:holdfast-hallmark` consumers. Pre-1.0 SemVer
 permits this. No deprecation shims. The 0.2.0 GAVs in `~/.m2` remain intact
 for retrieval if you've not yet migrated.
 
@@ -171,8 +171,8 @@ Standalone KMP boundary-validation library; **no Vault dependency**.
 - **`Violation`** — data class `(message, path, code, rule, args)`. Carries
   rule reference for test introspection and a free-form `args` map for i18n
   resolvers.
-- **`ValidationResult<O>`** — sealed `Success(value)` / `Failure(violations: NonEmptyList<Violation>)`.
-  `getOrThrow()` throws `ValidationException` (an `IllegalArgumentException`
+- **`HallmarkResult<O>`** — sealed `Success(value)` / `Failure(violations: NonEmptyList<Violation>)`.
+  `getOrThrow()` throws `HallmarkException` (an `IllegalArgumentException`
   subclass that exposes `violations`); `getOrNull()` returns null on failure.
 - **`NonEmptyList<T>`** — minimal in-house non-empty list. No Arrow dep.
 - **`Spec<P : Any, O : Boxed<P>>`** — data class `(rules, mode: SpecMode, factory)`.
@@ -189,8 +189,8 @@ Standalone KMP boundary-validation library; **no Vault dependency**.
   producing `Validator<T, T>`. Conditional fields work (`if (admin) field(...)`).
   Composites compose recursively — a field may take any `Validator<IN, OUT>`,
   leaf or composite. Path tags thread automatically via
-  `ValidationResult.atPath(name)`.
-- **14 prebuilt rules** in `com.vynatix.validation.rules`:
+  `HallmarkResult.atPath(name)`.
+- **14 prebuilt rules** in `com.vynatix.hallmark.rules`:
   - String: `NonEmptyRule`, `NonBlankRule`, `LengthInRule(IntRange)`,
     `MinLengthRule(n)`, `MaxLengthRule(n)`, `MatchesRule(Regex)`,
     `StartsWithRule(prefix)`, `EndsWithRule(suffix)`.
@@ -202,13 +202,13 @@ Standalone KMP boundary-validation library; **no Vault dependency**.
   shipped — their canonical forms are debatable and ownership is a maintenance
   trap. Adopters bring their own via `MatchesRule(myRegex)`.
 
-- 24 tests in `:validation` covering ValidationResult atPath/getOrThrow,
+- 24 tests in `:validation` covering HallmarkResult atPath/getOrThrow,
   BoxedValidator multi-rule + multi-spec + ALL/ANY accumulation, composite
   cross-field accumulation + nested path threading, and every prebuilt rule.
 
 ### Added — `:validation-coroutines` (new module)
 
-Suspend extension. Mirrors the `:vault` / `:vault-coroutines` split.
+Suspend extension. Mirrors the `:holdfast` / `:holdfast-coroutines` split.
 
 - **`SuspendRule<PRIMITIVE>`** — `suspend` analog of `Rule<PRIMITIVE>` for
   out-of-process checks (DB unique-lookup, remote feature gate).
@@ -223,15 +223,15 @@ Suspend extension. Mirrors the `:vault` / `:vault-coroutines` split.
   rules / validators into suspend types when needed for explicit composition.
 - 3 tests covering happy/failure paths and mixed sync+suspend composites.
 
-### Added — `:vault-validation` (rebuilt module)
+### Added — `:holdfast-hallmark` (rebuilt module)
 
 Vault adapter; tiny — just a transformer + state factory + codec.
 
 - **`ValidatingTransformer<P : Any, O : Boxed<P>>(validator)`** — Vault
   `Transformer<O>` that re-validates on every write. Defence-in-depth against
   constructor-bypass writes (e.g. `data class copy`). A failure throws
-  `ValidationException` and rolls the transaction back.
-- **`Vault.boxed(validator) { initial }`** — state factory extension; sugar
+  `HallmarkException` and rolls the transaction back.
+- **`Holdfast.boxed(validator) { initial }`** — state factory extension; sugar
   for `state(transformer = ValidatingTransformer(v)) { v of initial() }`.
   Eliminates duplicate validator references at state declaration sites.
 - **`BoxedCodec<P : Any, O : Boxed<P>>(primitiveCodec, validator)`** —
@@ -242,12 +242,12 @@ Vault adapter; tiny — just a transformer + state factory + codec.
   String- and Long-backed Boxed types, and decode-of-now-invalid-primitive
   rollback.
 
-### Removed — `:vault-validation` 0.2.0 surface
+### Removed — `:holdfast-hallmark` 0.2.0 surface
 
 The following are gone in 0.3.0:
 
-- `com.vynatix.vault.validation.Civilizable` (renamed to `Boxed` in 0.2.x → moved to `com.vynatix.validation`)
-- `com.vynatix.vault.validation.Civilizer` / `Validator<P, R, O>` (replaced by `Validator<IN, OUT>` + `BoxedValidator<P, O>` in `com.vynatix.validation`)
+- `com.vynatix.holdfast.hallmark.Civilizable` (renamed to `Boxed` in 0.2.x → moved to `com.vynatix.hallmark`)
+- `com.vynatix.holdfast.hallmark.Civilizer` / `Validator<P, R, O>` (replaced by `Validator<IN, OUT>` + `BoxedValidator<P, O>` in `com.vynatix.hallmark`)
 - `Variation` / `Spec<P, R, O>` (replaced by `Spec<P, O>` data class with `SpecMode`)
 - `Condition<P, R>` (dropped; replaced by `SpecMode { ALL, ANY }` enum)
 - `Declaration<P, O>` typealias (replaced by inline `(P) -> O`)
@@ -258,7 +258,7 @@ The following are gone in 0.3.0:
 
 - Three new GAVs: `com.vynatix:validation:0.3.0`,
   `com.vynatix:validation-coroutines:0.3.0`, plus the rebuilt
-  `com.vynatix:vault-validation:0.3.0`.
+  `com.vynatix:holdfast-hallmark:0.3.0`.
 - 6 published modules total, 24 GAVs across `kotlinMultiplatform` / `android`
   / `iosArm64` / `iosSimulatorArm64` targets.
 - Default `astrid.publish` version bumped 0.2.0 → 0.3.0.
@@ -274,7 +274,7 @@ The following are gone in 0.3.0:
 
 ### Verification
 
-- `./gradlew :validation:allTests :validation-coroutines:allTests :vault-validation:allTests` — green on Android JVM + iOS sim.
+- `./gradlew :validation:allTests :validation-coroutines:allTests :holdfast-hallmark:allTests` — green on Android JVM + iOS sim.
 - `./gradlew apiCheck` clean across all 6 modules; new ABI baselines committed.
 - `./gradlew detekt ktlintCheck` clean across all 6 modules.
 - `publishToMavenLocal` produces 24 GAVs at 0.3.0 in `~/.m2/repository/com/vynatix/`.
@@ -287,35 +287,35 @@ the `@VaultInternalApi` opt-in annotation introduced in this release — compani
 modules (`vault-coroutines`, `vault-compose`) `@OptIn` to reach them; application
 code should not.
 
-### Added — Core (`com.vynatix.vault`)
+### Added — Core (`com.vynatix.holdfast`)
 
-- **`Vault.snapshot()` / `Vault.restore(snapshot)`** — capture the raw stored
-  value of every registered state into a `VaultSnapshot`; restore writes them
+- **`Holdfast.snapshot()` / `Holdfast.restore(snapshot)`** — capture the raw stored
+  value of every registered state into a `HoldfastSnapshot`; restore writes them
   back inside a single top-level `action`. Implemented via a new internal
   `Transaction.stagePendingRaw(state, rawValue)` that bypasses
   `transformer.set`, so asymmetric transformers (e.g. encryption, JSON
   codecs) round-trip losslessly. Restore of an unknown state name throws
   (caught by the wrapping action → `TransactionResult.Error`).
-- **`Vault.computed { }`** — read-time derived state. Cheap, stateless, NOT
+- **`Holdfast.computed { }`** — read-time derived state. Cheap, stateless, NOT
   observable; every read of `value` re-runs `compute`.
-- **`Vault.derived(vararg sources, compute): Pair<State<T>, Disposable>`** —
+- **`Holdfast.derived(vararg sources, compute): Pair<State<T>, Disposable>`** —
   push-recomputed derived state. Subscribes to each source via `effect`; on
   each source commit, runs `compute` inside a fresh top-level action and
   stages the result into a backing `MutableState`. Returns the derived state
   plus a `Disposable` for explicit teardown.
-- **`atomic(vararg vaults: Vault<*>, body): TransactionResult<R>`** — top-
+- **`atomic(vararg vaults: Holdfast<*>, body): TransactionResult<R>`** — top-
   level cross-vault transaction primitive. Each `Vault` gains a stable
   `lockOrderKey: Long` (process-monotonic, set at construction); `atomic`
   sorts vaults by this key and acquires each `transactionLock` in global
   order — deadlock-safe across any combination. Inner `v.action {}` joins
   the atomic frame as a savepoint of `v`'s root via the existing
   parent-chain machinery.
-- **`Vault.postCommit(task)`** — internal post-commit deferred-task queue,
+- **`Holdfast.postCommit(task)`** — internal post-commit deferred-task queue,
   drained at top-level action exit. Used by `derived` to defer a recompute
   past the parent's commit fanout (avoids re-entering `pendingWrites` mid-
   iteration). Foundation for future userland post-commit hooks.
 
-### Added — Standard library (`com.vynatix.vault.crypto`, `.bridge`)
+### Added — Standard library (`com.vynatix.holdfast.crypto`, `.bridge`)
 
 - **`Cipher`** interface + **`EncryptingTransformer(cipher) : Transformer<String>`** —
   encrypt-on-write, decrypt-on-read. Stored `currentValue` is ciphertext;
@@ -330,12 +330,12 @@ code should not.
   - iosMain: `NSData.writeToURL(atomically = true)`
   - URL-percent-encoded keys make any String a safe filename.
 
-### Added — `:vault-coroutines`
+### Added — `:holdfast-coroutines`
 
 - **`suspend fun V.suspendAction(body: suspend V.() -> R): TransactionResult<R>`** —
   async-aware transactional body. Backed by `kotlinx.coroutines.sync.Mutex`
-  installed lazily via the new `Vault.AsyncSerializer` hook. Mutually
-  exclusive with blocking `Vault.action` on the same vault — blocking
+  installed lazily via the new `Holdfast.AsyncSerializer` hook. Mutually
+  exclusive with blocking `Holdfast.action` on the same vault — blocking
   callers `tryLock`-spin via `threadYield()`. Cancellation rolls back the
   body; commit phase wraps in `withContext(NonCancellable)` so observer
   / bridge fanout completes cleanly even if the surrounding scope cancels
@@ -349,19 +349,19 @@ code should not.
   hooks. The annotation is `RequiresOptIn(level = ERROR)`; companion modules
   (`vault-coroutines`) `@file:OptIn(VaultInternalApi::class)` to reach the
   necessary internals. Application code should never opt in.
-- **`Vault.AsyncSerializer`** interface + `Vault.asyncSerializer` slot —
-  external-mutex extension point for `:vault-coroutines.suspendAction`.
+- **`Holdfast.AsyncSerializer`** interface + `Holdfast.asyncSerializer` slot —
+  external-mutex extension point for `:holdfast-coroutines.suspendAction`.
   When non-null, blocking `action` brackets each call with the serializer's
   `blockingAcquire` / `blockingRelease`.
-- **`Vault.suspendingOwner`** — recognized by `mutate`'s ownership check so
+- **`Holdfast.suspendingOwner`** — recognized by `mutate`'s ownership check so
   cross-thread coroutine-resume points inside a suspending body are still
   treated as in-transaction.
 - **`Transaction.createForExternal(id, ownerThreadId)`** — public-but-opt-in
   factory used by `suspendAction` to manufacture a top-level transaction
   outside the blocking lock.
-- **`Vault.runUnderLock(block)`** — public-but-opt-in lock-holder used by
+- **`Holdfast.runUnderLock(block)`** — public-but-opt-in lock-holder used by
   `atomic(...)`.
-- **`Vault.lockOrderKey: Long`** — public-but-opt-in process-monotonic
+- **`Holdfast.lockOrderKey: Long`** — public-but-opt-in process-monotonic
   ordering key; primary use is `atomic`'s sorted lock acquisition.
 
 ### Added — Packaging
@@ -391,7 +391,7 @@ code should not.
 
 ### BankingDemo updates
 
-- New `taxId` state on `AccountVault` declared with
+- New `taxId` state on `AccountHoldfast` declared with
   `state(EncryptingTransformer(XorCipher(seed)))` — exercises the new
   encryption transformer.
 - `transferTo` rewritten using `atomic(this, other) { … }`. The
@@ -411,10 +411,10 @@ code should not.
     `crossVaultAtomicTransferSucceedsAtomically` — end-to-end atomic.
 - Local `InMemoryKvStore` + `BalancePersistenceBridge` private fixtures
   removed — superseded by the stdlib `KvBridge(kv, key, codec)` over
-  `com.vynatix.vault.bridge.InMemoryKvStore`.
+  `com.vynatix.holdfast.bridge.InMemoryKvStore`.
 - Unused `freeze`/`unfreeze`/`close` operations annotated `@Suppress("unused")`
   for surface-completeness.
-- Redundant fully-qualified `com.vynatix.vault.middleware.*` /
+- Redundant fully-qualified `com.vynatix.holdfast.middleware.*` /
   `.bridge.*` references in `stdlibShowcase` replaced with imports.
 - BankingDemo now: 9 `@Test`s, ~14 ms on JVM.
 
@@ -430,8 +430,8 @@ code should not.
   `uncaughtObserverHandler`, `lockOrderKey`). New Section 14 "The 1.1 Surface"
   with 10 sub-sections covering snapshot/restore, computed/derived,
   `atomic(...)`, `EncryptingTransformer`/`Cipher`, `FileSystemKvStore`,
-  standard middleware, `KvBridge`/`Codec`/`KvStore`, `:vault-coroutines`,
-  `:vault-compose`, plus a 1.1-idioms cookbook (encrypted credentials,
+  standard middleware, `KvBridge`/`Codec`/`KvStore`, `:holdfast-coroutines`,
+  `:holdfast-compose`, plus a 1.1-idioms cookbook (encrypted credentials,
   one-line atomic transfer, running-total derived, undo via snapshot,
   async transactional fetch). One-page cheatsheet at the end shows the
   1.1 forms.
@@ -440,8 +440,8 @@ code should not.
 
 ### Verification
 
-- 305+ tests pass on Android JVM + iOS sim across `:vault`, `:vault-coroutines`,
-  `:vault-compose`.
+- 305+ tests pass on Android JVM + iOS sim across `:holdfast`, `:holdfast-coroutines`,
+  `:holdfast-compose`.
 - `apiCheck` clean for all three modules; `.api` baselines refreshed.
 - `detekt` + `ktlint` clean.
 - `:android:assembleDebug` succeeds against the new APIs.
@@ -465,12 +465,12 @@ will appear as diffs in `vault/api/*.api`.
 - `state(distinct = true)` — opt-in same-value dedup for observers and bridges.
 - `Transaction.modifiedStates: Set<State<*>>` — owner-thread-only read view of
   pending-write keys, for audit middleware and userland undo.
-- `@VaultActionDsl` `@DslMarker` on `Vault<Self>` — prevents accidental
+- `@VaultActionDsl` `@DslMarker` on `Holdfast<Self>` — prevents accidental
   outer-receiver access in nested DSLs.
-- `Vault.uncaughtObserverHandler: ((Throwable) -> Unit)?` — opt-in surfacing
+- `Holdfast.uncaughtObserverHandler: ((Throwable) -> Unit)?` — opt-in surfacing
   of commit-fire observer exceptions (default null preserves silent-swallow).
 
-### Added — Standard library (`com.vynatix.vault.middleware`, `com.vynatix.vault.bridge`)
+### Added — Standard library (`com.vynatix.holdfast.middleware`, `com.vynatix.holdfast.bridge`)
 - `LoggingMiddleware<V>(tag, log)` — drop-in tracing of every transaction.
 - `TimingMiddleware<V>(onResult)` — wall-clock duration measurements.
 - `ValidationMiddleware<V>(check)` — post-body invariant check with rollback.
@@ -480,13 +480,13 @@ will appear as diffs in `vault/api/*.api`.
   bridge backed by any `KvStore`.
 
 ### Added — New modules
-- **`com.vynatix:vault-coroutines`** — `State<T>.asFlow`, `asStateFlow(scope)`,
+- **`com.vynatix:holdfast-coroutines`** — `State<T>.asFlow`, `asStateFlow(scope)`,
   `asEagerStateFlow`, `first(predicate)`, `awaitValue(target)`.
-- **`com.vynatix:vault-compose`** — `@Composable State<T>.collectAsState()`,
+- **`com.vynatix:holdfast-compose`** — `@Composable State<T>.collectAsState()`,
   `@Composable rememberDisposable { … }`.
 
 ### Changed (BREAKING)
-- `Vault.action` is now generic in the body's return type. `TransactionResult`
+- `Holdfast.action` is now generic in the body's return type. `TransactionResult`
   is a `sealed interface TransactionResult<out R>`:
   - `Success<R>(transaction, value: R)`
   - `Error(exception, transaction): TransactionResult<Nothing>`
@@ -499,7 +499,7 @@ will appear as diffs in `vault/api/*.api`.
 - `infix State<T>.bridge(b)` now accepts `Bridge<T>?` (null detaches). Existing
   non-null callers compile unchanged.
 - `Transaction.endTime` is now `Long?` (epoch millis) instead of `String?`.
-- `Vault.middlewares(...)` documentation corrected: the LAST argument is the
+- `Holdfast.middlewares(...)` documentation corrected: the LAST argument is the
   outermost middleware. Place logging/audit middleware last so `onTransactionError`
   sees inner middlewares' failures.
 - The `UUID` and `Timestamp` classes are removed in favor of `kotlin.uuid.Uuid`
@@ -524,13 +524,13 @@ will appear as diffs in `vault/api/*.api`.
 
 ### Deferred to 0.2.0 *(all shipped — see entry above)*
 - ~~Cross-vault atomic actions~~ → shipped as `atomic(vararg vaults) { … }`.
-- ~~Snapshot / restore~~ → shipped as `Vault.snapshot()` / `Vault.restore()`.
-- ~~Derived state~~ → shipped as `Vault.computed { }` and `Vault.derived(...) { }`.
-- ~~Suspending action~~ → shipped as `:vault-coroutines.suspendAction { }`.
+- ~~Snapshot / restore~~ → shipped as `Holdfast.snapshot()` / `Holdfast.restore()`.
+- ~~Derived state~~ → shipped as `Holdfast.computed { }` and `Holdfast.derived(...) { }`.
+- ~~Suspending action~~ → shipped as `:holdfast-coroutines.suspendAction { }`.
 - ~~File-based bridge~~ → shipped as `FileSystemKvStore` over the existing
   `KvBridge`.
 - ~~Sonatype / signing publication~~ → shipped as
   `astrid.publish.sonatype` convention plugin.
 - ~~In-memory encryption transformer~~ (added scope) → shipped as
   `EncryptingTransformer` + `Cipher` + `XorCipher` in
-  `com.vynatix.vault.crypto`.
+  `com.vynatix.holdfast.crypto`.

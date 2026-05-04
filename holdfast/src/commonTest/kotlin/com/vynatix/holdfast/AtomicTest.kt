@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -8,11 +8,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-private class AccountVault(initial: Long = 0) : Vault<AccountVault>() {
+private class AccountVault(initial: Long = 0) : Holdfast<AccountVault>() {
     val balance by state { initial }
 }
 
-private class LedgerVault : Vault<LedgerVault>() {
+private class LedgerVault : Holdfast<LedgerVault>() {
     val entries by state { emptyList<String>() }
 }
 

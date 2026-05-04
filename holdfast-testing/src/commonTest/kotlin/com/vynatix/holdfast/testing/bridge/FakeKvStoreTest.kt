@@ -1,12 +1,12 @@
 @file:Suppress("InjectDispatcher")
 
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Vault
-import com.vynatix.vault.bridge.KvBridge
-import com.vynatix.vault.bridge.LongCodec
-import com.vynatix.vault.bridge.StringCodec
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.bridge.KvBridge
+import com.vynatix.holdfast.bridge.LongCodec
+import com.vynatix.holdfast.bridge.StringCodec
+import com.vynatix.holdfast.testing.vaultTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class SettingsVault : Vault<SettingsVault>() {
+private class SettingsVault : Holdfast<SettingsVault>() {
     val theme by state { "light" }
     val balance by state { 0L }
 }

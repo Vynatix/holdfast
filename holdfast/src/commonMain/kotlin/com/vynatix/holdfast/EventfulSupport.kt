@@ -1,6 +1,6 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
- * Delegate-friendly counterpart to [EventfulVault]. Use when a vault must
- * extend a base class other than [EventfulVault] (e.g. a domain-specific
+ * Delegate-friendly counterpart to [EventfulHoldfast]. Use when a vault must
+ * extend a base class other than [EventfulHoldfast] (e.g. a domain-specific
  * abstract base) but still wants the [Eventful] capability:
  *
  * ```
@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.asSharedFlow
  * }
  * ```
  *
- * Behaves identically to [EventfulVault] w.r.t. event staging on transactions
+ * Behaves identically to [EventfulHoldfast] w.r.t. event staging on transactions
  * and the commit-phase ordering contract:
  *
  * 1. State observers fire (post-commit, post-`MutableState.applyCommitted`).
@@ -32,15 +32,15 @@ import kotlinx.coroutines.flow.asSharedFlow
  *    `SuspendingBridge.publishAwaited` under `suspendAction`).
  * 3. Events drain to [events] in the order they were [emit]-ted.
  *
- * Same back-pressure policy as [EventfulVault]: lossless events via
+ * Same back-pressure policy as [EventfulHoldfast]: lossless events via
  * `BufferOverflow.SUSPEND` by default — slow collectors back-pressure the
  * commit thread rather than dropping events. Tune [extraBufferCapacity] for
  * bursty workloads, or switch [onBufferOverflow] only if a class of events
  * is genuinely droppable.
  *
- * ## Vault binding
+ * ## Holdfast binding
  *
- * Because [EventfulSupport] does not extend [Vault], it has no direct view of
+ * Because [EventfulSupport] does not extend [Holdfast], it has no direct view of
  * the active transaction. The hosting vault MUST call [bindVault] exactly
  * once during construction (typically in an `init` block). Calling [emit]
  * before [bindVault] throws [IllegalStateException]. Calling [bindVault]
@@ -72,10 +72,10 @@ class EventfulSupport<E : Any>(
     override val events: SharedFlow<E> = _events.asSharedFlow()
 
     @kotlin.concurrent.Volatile
-    private var boundVault: Vault<*>? = null
+    private var boundVault: Holdfast<*>? = null
 
     /**
-     * Wire this support to its hosting [Vault] so [emit] can locate the
+     * Wire this support to its hosting [Holdfast] so [emit] can locate the
      * active transaction. Call exactly once, typically in the hosting class's
      * `init` block. Subsequent calls throw [IllegalStateException].
      *
@@ -85,7 +85,7 @@ class EventfulSupport<E : Any>(
      * not a circular leak: when the vault is unreachable, both objects
      * collect together.
      */
-    fun bindVault(vault: Vault<*>) {
+    fun bindVault(vault: Holdfast<*>) {
         check(boundVault == null) {
             "EventfulSupport.bindVault must be called at most once per instance"
         }
@@ -95,7 +95,7 @@ class EventfulSupport<E : Any>(
     /**
      * Stage [event] onto the bound vault's active transaction's pendingEvents
      * buffer. On commit, drained AFTER state observers and AFTER bridge
-     * publishes — same commit-phase contract as [EventfulVault].
+     * publishes — same commit-phase contract as [EventfulHoldfast].
      *
      * Throws [IllegalStateException] if [bindVault] has not been called or if
      * called outside an `action` / `suspendAction`. Events MUST be
@@ -103,7 +103,7 @@ class EventfulSupport<E : Any>(
      */
     override fun emit(event: E) {
         val vault = boundVault ?: error(
-            "EventfulSupport.emit called before bindVault. The hosting Vault must " +
+            "EventfulSupport.emit called before bindVault. The hosting Holdfast must " +
                 "call support.bindVault(this) in its init block.",
         )
         val txn = vault.activeTransaction ?: error(

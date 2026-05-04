@@ -1,0 +1,10 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-compose>
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast.compose/collectAsState(com.vynatix.holdfast/State<#B>, androidx.compose.runtime/Composer?, kotlin/Int): androidx.compose.runtime/State<#B> // com.vynatix.holdfast.compose/collectAsState|collectAsState@0:0(com.vynatix.holdfast.State<0:1>;androidx.compose.runtime.Composer?;kotlin.Int){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any>}[0]
+final fun com.vynatix.holdfast.compose/rememberDisposable(kotlin/Function0<com.vynatix.holdfast/Disposable>, androidx.compose.runtime/Composer?, kotlin/Int): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.compose/rememberDisposable|rememberDisposable(kotlin.Function0<com.vynatix.holdfast.Disposable>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]

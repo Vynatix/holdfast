@@ -1,4 +1,4 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 /**
  * File-system-backed [KvStore]: each key maps to a single file under [rootPath].

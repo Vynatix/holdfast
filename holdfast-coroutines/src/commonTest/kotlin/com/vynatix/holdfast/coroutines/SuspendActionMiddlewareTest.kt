@@ -1,8 +1,8 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class MwVault : Vault<MwVault>() {
+private class MwVault : Holdfast<MwVault>() {
     val n by state { 0 }
 }
 

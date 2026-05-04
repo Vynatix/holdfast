@@ -1,4 +1,4 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex

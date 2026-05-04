@@ -1,7 +1,7 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.crypto.EncryptingTransformer
-import com.vynatix.vault.crypto.XorCipher
+import com.vynatix.holdfast.crypto.EncryptingTransformer
+import com.vynatix.holdfast.crypto.XorCipher
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -9,13 +9,13 @@ import kotlin.test.assertTrue
 
 private val SEED = "snap-test-seed".encodeToByteArray()
 
-private class SnapshotVault : Vault<SnapshotVault>() {
+private class SnapshotVault : Holdfast<SnapshotVault>() {
     val n by state { 0 }
     val s by state { "init" }
     val items by state { emptyList<String>() }
 }
 
-private class CryptoVault : Vault<CryptoVault>() {
+private class CryptoVault : Holdfast<CryptoVault>() {
     val token by state(EncryptingTransformer(XorCipher(SEED))) { "" }
     val plain by state { "p" }
 }
@@ -106,7 +106,7 @@ class SnapshotRestoreTest {
 
     @Test fun restoreOfUnknownStateNameRollsBack() {
         val v = SnapshotVault()
-        val foreign = VaultSnapshot(mapOf("not-here" to 42))
+        val foreign = HoldfastSnapshot(mapOf("not-here" to 42))
         val r = v.restore(foreign)
         assertIs<TransactionResult.Error>(r)
         assertEquals(0, v.n.value, "no states changed; transaction rolled back")

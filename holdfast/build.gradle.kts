@@ -1,18 +1,18 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("astrid.kmp.library")
-    id("astrid.kmp.jvm")
-    id("astrid.kmp.wasmJs")
-    id("astrid.quality")
-    id("astrid.dokka")
-    id("astrid.abi")
-    id("astrid.publish.sonatype")
+    id("holdfast.kmp.library")
+    id("holdfast.kmp.jvm")
+    id("holdfast.kmp.wasmJs")
+    id("holdfast.quality")
+    id("holdfast.dokka")
+    id("holdfast.abi")
+    id("holdfast.publish.sonatype")
 }
 
 kotlin {
     android {
-        namespace = "com.vynatix.vault"
+        namespace = "com.vynatix.holdfast"
     }
 
     jvm {
@@ -52,12 +52,12 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
-            implementation(project(":vault-testing"))
+            implementation(project(":holdfast-testing"))
         }
     }
 }
 
-// :vault publishes a wasmJs main artifact so :shared (which targets web via
+// :holdfast publishes a wasmJs main artifact so :shared (which targets web via
 // :web) can resolve it. The test suite uses `runBlocking` and
 // `newSingleThreadContext`, neither of which exists on wasmJs; coverage runs
 // on android/jvm/ios via `:check`. Disable wasmJs test compilation/execution

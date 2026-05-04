@@ -1,11 +1,11 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.platform.currentThreadId
+import com.vynatix.holdfast.platform.currentThreadId
 
 /**
- * The concrete implementation of [State] used by [Vault]. Carries:
+ * The concrete implementation of [State] used by [Holdfast]. Carries:
  *  - the stored value
  *  - the observer set
  *  - an optional [Transformer] that normalizes on `set` and projects on `get`
@@ -23,13 +23,13 @@ import com.vynatix.vault.platform.currentThreadId
 class MutableState<T : Any>(
     initialValue: T,
     private val transformer: Transformer<T>? = null,
-    @property:VaultInternalApi
-    val owningVault: Vault<*>,
+    @property:HoldfastInternalApi
+    val owningVault: Holdfast<*>,
     internal val distinct: Boolean = false,
 ) : State<T> {
-    private val stateLock = VaultLock()
-    private val observersLock = VaultLock()
-    private val bridgeLock = VaultLock()
+    private val stateLock = HoldfastLock()
+    private val observersLock = HoldfastLock()
+    private val bridgeLock = HoldfastLock()
 
     private val observers = mutableSetOf<(T) -> Unit>()
 
@@ -39,13 +39,13 @@ class MutableState<T : Any>(
      * subscriptions — adds and disposes both move it. Reads under [observersLock]
      * so the count is consistent with concurrent [observe]/dispose.
      *
-     * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+     * Marked `@HoldfastInternalApi`: companion-module test code (e.g. `:holdfast-coroutines`)
      * uses it to verify that `Flow`/`StateFlow`/`effect` adapters correctly dispose
      * their underlying observer registration on consumer cancellation. Application
      * code must never read this — depending on observer count couples consumers to
      * the internal subscription model.
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     val observerCount: Int
         get() = observersLock.withLock { observers.size }
 
@@ -94,8 +94,8 @@ class MutableState<T : Any>(
 
     /**
      * Raw access to the committed `currentValue`, bypassing `transformer.get`.
-     * Used by [Vault.snapshot] to capture the on-disk-equivalent representation
-     * (ciphertext, post-`transformer.set` form, etc.) so [Vault.restore] can
+     * Used by [Holdfast.snapshot] to capture the on-disk-equivalent representation
+     * (ciphertext, post-`transformer.set` form, etc.) so [Holdfast.restore] can
      * round-trip without re-running `transformer.set`.
      */
     internal val rawCurrentValue: T
@@ -104,10 +104,10 @@ class MutableState<T : Any>(
     /**
      * Commit-time apply (raw): writes `currentValue` and notifies observers, but
      * **does NOT publish to the bridge**. Strict subset of [applyCommitted]
-     * exposed as a `@VaultInternalApi` extension hook so companion modules
-     * (notably `:vault-coroutines.suspendAction`) can interpose between the
+     * exposed as a `@HoldfastInternalApi` extension hook so companion modules
+     * (notably `:holdfast-coroutines.suspendAction`) can interpose between the
      * observer fanout (step 1+2) and the bridge publish (step 3) — necessary
-     * for [com.vynatix.vault.coroutines.SuspendingBridge.publishAwaited] to be
+     * for [com.vynatix.holdfast.coroutines.SuspendingBridge.publishAwaited] to be
      * awaited under `withContext(NonCancellable)` instead of fire-and-forget.
      *
      * If [distinct] is true and the new processed value is `==` to
@@ -119,7 +119,7 @@ class MutableState<T : Any>(
      * if it was deduped. The boolean lets the caller skip their own bridge
      * publish in the dedup case.
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun applyCommittedRaw(processedValue: T): Boolean {
         val unchanged = stateLock.withLock {
             val same = distinct && currentValue == processedValue
@@ -141,7 +141,7 @@ class MutableState<T : Any>(
      * skips both observer fanout and bridge publish (opt-in dedup).
      */
     internal fun applyCommitted(processedValue: T) {
-        @OptIn(VaultInternalApi::class)
+        @OptIn(HoldfastInternalApi::class)
         if (!applyCommittedRaw(processedValue)) return
         bridgeLock.withLock { currentBridge?.publish(processedValue) }
     }
@@ -181,13 +181,13 @@ class MutableState<T : Any>(
      * Returns a [Disposable] that removes the observer when called. Double-dispose
      * is safe (idempotent).
      *
-     * Internal: the public surface is the top-level [com.vynatix.vault.effect]
-     * extension. Companion modules in the same library group (`:vault-coroutines`,
-     * `:vault-validation`) reach this directly through the package-internal
+     * Internal: the public surface is the top-level [com.vynatix.holdfast.effect]
+     * extension. Companion modules in the same library group (`:holdfast-coroutines`,
+     * `:holdfast-hallmark`) reach this directly through the package-internal
      * visibility for adapter implementations (Flow/StateFlow). Application code
      * must use [effect].
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
         observers.add(observer)
         // Initial callback uses the same view as the value getter — post-transformer.get —
@@ -227,7 +227,7 @@ class MutableState<T : Any>(
         }
 
     /**
-     * Internal entrypoint used by `Vault.removeState`/`clearStates` to release
+     * Internal entrypoint used by `Holdfast.removeState`/`clearStates` to release
      * resources without firing any observer notifications. Drops the observer set
      * and detaches any attached bridge (disposing its inbound subscription).
      */
@@ -248,12 +248,12 @@ class MutableState<T : Any>(
  * was not produced by `vault.state { … }` — only [MutableState] instances
  * carry an observer set.
  *
- * Marked `@VaultInternalApi`: companion-module test code (e.g. `:vault-coroutines`)
+ * Marked `@HoldfastInternalApi`: companion-module test code (e.g. `:holdfast-coroutines`)
  * uses it to verify that `Flow`/`StateFlow`/`effect` adapters dispose their
  * underlying observer registration on consumer cancellation. Application code
  * must never opt in.
  */
-@VaultInternalApi
+@HoldfastInternalApi
 val <T : Any> State<T>.observerCount: Int
     get() {
         val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (vault.state { ... })")

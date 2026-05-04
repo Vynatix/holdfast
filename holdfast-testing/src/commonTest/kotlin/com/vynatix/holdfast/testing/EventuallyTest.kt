@@ -1,6 +1,6 @@
-package com.vynatix.vault.testing
+package com.vynatix.holdfast.testing
 
-import com.vynatix.vault.testing.concurrency.eventually
+import com.vynatix.holdfast.testing.concurrency.eventually
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

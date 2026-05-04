@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 /**
  * Subscribe to commits on this state. Top-level extension on [State] so it can be
@@ -22,7 +22,7 @@ package com.vynatix.vault
  * d.dispose()
  * ```
  */
-@OptIn(VaultInternalApi::class)
+@OptIn(HoldfastInternalApi::class)
 infix fun <T : Any> State<T>.effect(handler: T.() -> Unit): Disposable {
     @Suppress("UNCHECKED_CAST")
     val mutable = (this as? MutableState<T>) ?: error("effect is only defined for State produced by vault.state { ... }")

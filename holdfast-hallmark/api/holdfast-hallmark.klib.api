@@ -1,0 +1,46 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-hallmark>
+final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/BoxedCodec : com.vynatix.holdfast.bridge/Codec<#B> { // com.vynatix.holdfast.hallmark/BoxedCodec|null[0]
+    constructor <init>(com.vynatix.holdfast.bridge/Codec<#A>, com.vynatix.hallmark/Validator<#A, #B>) // com.vynatix.holdfast.hallmark/BoxedCodec.<init>|<init>(com.vynatix.holdfast.bridge.Codec<1:0>;com.vynatix.hallmark.Validator<1:0,1:1>){}[0]
+
+    final fun decode(kotlin/String): #B // com.vynatix.holdfast.hallmark/BoxedCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(#B): kotlin/String // com.vynatix.holdfast.hallmark/BoxedCodec.encode|encode(1:1){}[0]
+}
+
+final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/BoxedHandle { // com.vynatix.holdfast.hallmark/BoxedHandle|null[0]
+    constructor <init>(com.vynatix.holdfast/State<#B>, com.vynatix.hallmark/Validator<#A, #B>) // com.vynatix.holdfast.hallmark/BoxedHandle.<init>|<init>(com.vynatix.holdfast.State<1:1>;com.vynatix.hallmark.Validator<1:0,1:1>){}[0]
+
+    final val state // com.vynatix.holdfast.hallmark/BoxedHandle.state|{}state[0]
+        final fun <get-state>(): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast.hallmark/BoxedHandle.state.<get-state>|<get-state>(){}[0]
+    final val validator // com.vynatix.holdfast.hallmark/BoxedHandle.validator|{}validator[0]
+        final fun <get-validator>(): com.vynatix.hallmark/Validator<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandle.validator.<get-validator>|<get-validator>(){}[0]
+
+    final fun civilize(#A): #B // com.vynatix.holdfast.hallmark/BoxedHandle.civilize|civilize(1:0){}[0]
+    final fun component1(): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast.hallmark/BoxedHandle.component1|component1(){}[0]
+    final fun component2(): com.vynatix.hallmark/Validator<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandle.component2|component2(){}[0]
+    final fun copy(com.vynatix.holdfast/State<#B> = ..., com.vynatix.hallmark/Validator<#A, #B> = ...): com.vynatix.holdfast.hallmark/BoxedHandle<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandle.copy|copy(com.vynatix.holdfast.State<1:1>;com.vynatix.hallmark.Validator<1:0,1:1>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.hallmark/BoxedHandle.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.hallmark/BoxedHandle.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.hallmark/BoxedHandle.toString|toString(){}[0]
+}
+
+final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/BoxedHandleDelegate { // com.vynatix.holdfast.hallmark/BoxedHandleDelegate|null[0]
+    final fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast.hallmark/BoxedHandle<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandleDelegate.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+}
+
+final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/ValidatingTransformer : com.vynatix.holdfast/Transformer<#B> { // com.vynatix.holdfast.hallmark/ValidatingTransformer|null[0]
+    constructor <init>(com.vynatix.hallmark/Validator<#A, #B>) // com.vynatix.holdfast.hallmark/ValidatingTransformer.<init>|<init>(com.vynatix.hallmark.Validator<1:0,1:1>){}[0]
+
+    final fun get(#B): #B // com.vynatix.holdfast.hallmark/ValidatingTransformer.get|get(1:1){}[0]
+    final fun set(#B): #B // com.vynatix.holdfast.hallmark/ValidatingTransformer.set|set(1:1){}[0]
+}
+
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>, #B: kotlin/Any, #C: com.vynatix.hallmark/Boxed<#B>> (com.vynatix.holdfast/Holdfast<#A>).com.vynatix.holdfast.hallmark/boxed(com.vynatix.hallmark/Validator<#B, #C>, kotlin/Function0<#B>): com.vynatix.holdfast/StateDelegate<#C> // com.vynatix.holdfast.hallmark/boxed|boxed@com.vynatix.holdfast.Holdfast<0:0>(com.vynatix.hallmark.Validator<0:1,0:2>;kotlin.Function0<0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any>;2§<com.vynatix.hallmark.Boxed<0:1>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>, #B: kotlin/Any, #C: com.vynatix.hallmark/Boxed<#B>> (com.vynatix.holdfast/Holdfast<#A>).com.vynatix.holdfast.hallmark/boxedHandle(com.vynatix.hallmark/Validator<#B, #C>, kotlin/Function0<#B>): com.vynatix.holdfast.hallmark/BoxedHandleDelegate<#B, #C> // com.vynatix.holdfast.hallmark/boxedHandle|boxedHandle@com.vynatix.holdfast.Holdfast<0:0>(com.vynatix.hallmark.Validator<0:1,0:2>;kotlin.Function0<0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any>;2§<com.vynatix.hallmark.Boxed<0:1>>}[0]
+final fun <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> (context(com.vynatix.holdfast/Holdfast<*>), com.vynatix.holdfast.hallmark/BoxedHandle<#A, #B>).com.vynatix.holdfast.hallmark/assign(#A) // com.vynatix.holdfast.hallmark/assign|assign(com.vynatix.holdfast.Holdfast<*>)@com.vynatix.holdfast.hallmark.BoxedHandle<0:0,0:1>(0:0){0§<kotlin.Any>;1§<com.vynatix.hallmark.Boxed<0:0>>}[0]

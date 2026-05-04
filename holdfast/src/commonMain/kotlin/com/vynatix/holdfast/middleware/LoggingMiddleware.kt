@@ -1,7 +1,7 @@
-package com.vynatix.vault.middleware
+package com.vynatix.holdfast.middleware
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.Holdfast
 
 /**
  * Drop-in middleware that logs every transaction's lifecycle to a sink. Default
@@ -17,7 +17,7 @@ import com.vynatix.vault.Vault
  * vault.middlewares(LoggingMiddleware("CounterVault"))
  * ```
  */
-class LoggingMiddleware<V : Vault<V>>(private val tag: String, private val log: (String) -> Unit = ::println) : Middleware<V>() {
+class LoggingMiddleware<V : Holdfast<V>>(private val tag: String, private val log: (String) -> Unit = ::println) : Middleware<V>() {
 
     override fun onTransactionStarted(context: MiddlewareContext<V>) {
         val parent = context.transaction.parent?.id

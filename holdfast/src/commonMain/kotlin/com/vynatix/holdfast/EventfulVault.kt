@@ -1,6 +1,6 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
- * [Vault] base class with a built-in [Eventful] surface. Subclass with a sealed
+ * [Holdfast] base class with a built-in [Eventful] surface. Subclass with a sealed
  * event hierarchy:
  *
  * ```
@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.asSharedFlow
  *     data class Failed(val cause: Throwable) : CounterEvent()
  * }
  *
- * class CounterVault : EventfulVault<CounterVault, CounterEvent>() {
+ * class CounterVault : EventfulHoldfast<CounterVault, CounterEvent>() {
  *     val count by state { 0 }
  *
  *     fun increment() = action {
@@ -55,10 +55,10 @@ import kotlinx.coroutines.flow.asSharedFlow
  *   [BufferOverflow.DROP_OLDEST] / [BufferOverflow.DROP_LATEST] only if you've
  *   decided a class of events is genuinely droppable.
  */
-abstract class EventfulVault<Self : EventfulVault<Self, E>, E : Any>(
+abstract class EventfulHoldfast<Self : EventfulHoldfast<Self, E>, E : Any>(
     extraBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
     onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
-) : Vault<Self>(),
+) : Holdfast<Self>(),
     Eventful<E> {
 
     private val _events: MutableSharedFlow<E> = MutableSharedFlow(
@@ -100,7 +100,7 @@ abstract class EventfulVault<Self : EventfulVault<Self, E>, E : Any>(
      * configures `replay > 0` would otherwise leave stale events visible to
      * late subscribers after the vault is gone. After this returns, no further
      * emits land — every entrypoint that could call [emit] (action / mutate /
-     * suspendAction) is already gated by the disposed check on [Vault].
+     * suspendAction) is already gated by the disposed check on [Holdfast].
      */
     override fun onDispose() {
         super.onDispose()

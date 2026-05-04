@@ -1,4 +1,4 @@
-package com.vynatix.vault.platform
+package com.vynatix.holdfast.platform
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toLong

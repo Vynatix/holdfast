@@ -1,11 +1,11 @@
-@file:OptIn(com.vynatix.vault.VaultInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.MutableState
-import com.vynatix.vault.State
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.MutableState
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Holdfast
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * Suspending counterpart of [com.vynatix.vault.derived].
+ * Suspending counterpart of [com.vynatix.holdfast.derived].
  *
  * Subscribes to each [sources] entry via the same observer machinery used by sync
  * `derived`, but the recompute body is `suspend`. On any source commit, a new
@@ -29,13 +29,13 @@ import kotlinx.coroutines.runBlocking
  * change triggers a new launched compute. Multiple in-flight computes race;
  * the LAST [suspendAction] commit becomes the visible value. There is no
  * coalescing or in-flight cancellation between iterations — racy commits
- * serialize through the vault's [Vault.AsyncSerializer], and the standard
+ * serialize through the vault's [Holdfast.AsyncSerializer], and the standard
  * staged-write semantics make the final committed value the visible one.
  * Callers who need strict latest-wins semantics with no intermediate flicker
  * should debounce upstream.
  *
  * **Cancellation**:
- *  - Cancelling [Vault.scope] cancels every in-flight compute (the launched
+ *  - Cancelling [Holdfast.scope] cancels every in-flight compute (the launched
  *    coroutines are children of `vault.scope`); no stale results land because
  *    a `suspendAction` whose body is cancelled rolls back instead of committing.
  *  - Calling [Disposable.dispose] on the returned handle disposes the source
@@ -45,7 +45,7 @@ import kotlinx.coroutines.runBlocking
  *    commits land harmlessly on a backing state nobody observes anymore.
  *
  * **Errors thrown by [compute]**: surface via the vault's middleware error
- * path. The launched `suspendAction` returns a [com.vynatix.vault.TransactionResult.Error]
+ * path. The launched `suspendAction` returns a [com.vynatix.holdfast.TransactionResult.Error]
  * whose middleware chain has already seen `onTransactionError`. Since the
  * launch is fire-and-forget on `vault.scope`, the error does NOT propagate to
  * any caller — install a middleware that logs/handles errors if you need
@@ -67,7 +67,7 @@ import kotlinx.coroutines.runBlocking
  * }
  * ```
  */
-fun <V : Vault<V>, T : Any> V.suspendDerived(
+fun <V : Holdfast<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable> {

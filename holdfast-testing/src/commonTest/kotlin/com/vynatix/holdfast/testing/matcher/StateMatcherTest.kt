@@ -1,12 +1,12 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 
-private class CountVault : Vault<CountVault>() {
+private class CountVault : Holdfast<CountVault>() {
     val count by state { 0 }
     val name by state { "x" }
 }

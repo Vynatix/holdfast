@@ -1,4 +1,4 @@
-package com.vynatix.vault.crypto
+package com.vynatix.holdfast.crypto
 
 /**
  * Bidirectional symmetric cipher contract used by [EncryptingTransformer].

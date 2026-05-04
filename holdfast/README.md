@@ -8,12 +8,12 @@ Android (JVM) and iOS (Native).
 ## Quick start
 
 ```kotlin
-class CounterVault : Vault<CounterVault>() {
+class CounterHoldfast : Holdfast<CounterHoldfast>() {
     val count by state { 0 }
     val label by state { "init" }
 }
 
-val vault = CounterVault()
+val vault = CounterHoldfast()
 
 // Subscribe.
 val sub = vault { count effect { println("count=$this") } }   // count=0
@@ -42,13 +42,13 @@ sub.dispose()
 
 | Artifact | Role |
 |---|---|
-| `com.vynatix:vault` | Core library — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-vault `atomic`, encryption transformer, file-system store |
-| `com.vynatix:vault-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` for async transactional bodies |
-| `com.vynatix:vault-compose` | `@Composable` `collectAsState` / `rememberDisposable` |
-| `com.vynatix:validation` | Standalone KMP boundary-validation library — `Boxed` / `Rule` / `Validator` / composite DSL / `ValidationResult` with multi-error accumulation. No Vault dep |
+| `com.vynatix:holdfast` | Core library — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-vault `atomic`, encryption transformer, file-system store |
+| `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` for async transactional bodies |
+| `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable` |
+| `com.vynatix:validation` | Standalone KMP boundary-validation library — `Boxed` / `Rule` / `Validator` / composite DSL / `HallmarkResult` with multi-error accumulation. No Vault dep |
 | `com.vynatix:validation-coroutines` | Suspend extension — `SuspendRule` / `SuspendValidator` / `suspendValidator { }` DSL for async (DB-lookup, remote-feature-gate) validation |
-| `com.vynatix:vault-validation` | Vault adapter — `ValidatingTransformer` / `Vault.boxed { }` state factory / `BoxedCodec` for KvBridge persistence / `BoxedHandle` |
-| `com.vynatix:vault-validation-coroutines` | Suspend-side Vault adapter — `Vault.suspendValidateAndMutate` integrating `SuspendValidator` with `suspendAction` |
+| `com.vynatix:holdfast-hallmark` | Vault adapter — `ValidatingTransformer` / `Holdfast.boxed { }` state factory / `BoxedCodec` for KvBridge persistence / `BoxedHandle` |
+| `com.vynatix:holdfast-hallmark-coroutines` | Suspend-side Vault adapter — `Holdfast.suspendValidateAndMutate` integrating `SuspendValidator` with `suspendAction` |
 
 ## Documentation
 
@@ -70,16 +70,16 @@ sub.dispose()
 
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
-- **`Vault.snapshot()` / `Vault.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
-- **`Vault.computed { } / Vault.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
+- **`Holdfast.snapshot()` / `Holdfast.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
+- **`Holdfast.computed { } / Holdfast.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
 - **`atomic(vararg vaults) { }`** — cross-vault transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every vault.
 - **`suspendAction { }`** (`vault-coroutines`) — async-aware transactional body. Mutually exclusive with blocking `action` on the same vault via an internal coroutine `Mutex`.
-- **Validation 0.4.0** (`validation` + `validation-coroutines` + `vault-validation` + `vault-validation-coroutines`) — standalone KMP refinement-types library, four-module split. `Validator<IN, OUT>` unified interface; class-based leaves (`object EmailValidator : BoxedValidator<String, Email>()`) and DSL-based composites (`val UserValidator = validator<User> { field("email", { it.email }, EmailValidator); each("addresses", { it.addresses }, AddressValidator); forKey("tags", { it.tags }, "primary", TagValidator) }`). Multi-error accumulation via sealed `ValidationResult<O>` (no Arrow dep). Rich `Violation(message, path, code, rule, args)` for i18n via the `MessageResolver` interface. 23 prebuilt rules (14 essentials + 9 format regexes: email, URL, UUID, IPv4/6, E.164, ISO8601, IBAN). `Vault.boxed(...) { ... }` state factory; `BoxedCodec` for KvBridge persistence; `BoxedHandle` for ergonomic state+validator pairs; suspend integration via `Vault.suspendValidateAndMutate`. `Validator.describe()` for schema export / introspection. `Transformer<T>.then(other)` for transformer composition. Konform migration doc shipped.
+- **Validation 0.4.0** (`validation` + `validation-coroutines` + `vault-validation` + `vault-validation-coroutines`) — standalone KMP refinement-types library, four-module split. `Validator<IN, OUT>` unified interface; class-based leaves (`object EmailValidator : BoxedValidator<String, Email>()`) and DSL-based composites (`val UserValidator = validator<User> { field("email", { it.email }, EmailValidator); each("addresses", { it.addresses }, AddressValidator); forKey("tags", { it.tags }, "primary", TagValidator) }`). Multi-error accumulation via sealed `HallmarkResult<O>` (no Arrow dep). Rich `Violation(message, path, code, rule, args)` for i18n via the `MessageResolver` interface. 23 prebuilt rules (14 essentials + 9 format regexes: email, URL, UUID, IPv4/6, E.164, ISO8601, IBAN). `Holdfast.boxed(...) { ... }` state factory; `BoxedCodec` for KvBridge persistence; `BoxedHandle` for ergonomic state+validator pairs; suspend integration via `Holdfast.suspendValidateAndMutate`. `Validator.describe()` for schema export / introspection. `Transformer<T>.then(other)` for transformer composition. Konform migration doc shipped.
 
 ## Standard library (in-tree)
 
-The core module ships drop-in helpers under `com.vynatix.vault.middleware`,
-`com.vynatix.vault.bridge`, and `com.vynatix.vault.crypto`:
+The core module ships drop-in helpers under `com.vynatix.holdfast.middleware`,
+`com.vynatix.holdfast.bridge`, and `com.vynatix.holdfast.crypto`:
 
 | Helper | Purpose |
 |---|---|
@@ -95,7 +95,7 @@ The core module ships drop-in helpers under `com.vynatix.vault.middleware`,
 
 ## Concurrency model
 
-- All vault writes serialize through a per-vault reentrant lock.
+- All vault writes serialize through a per-holdfast reentrant lock.
 - Transactions are thread-confined: only the action's owner thread sees pending
   writes. Cross-thread reads see committed values.
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
@@ -109,17 +109,17 @@ The core module ships drop-in helpers under `com.vynatix.vault.middleware`,
 ## Building
 
 ```
-./gradlew :vault:allTests              # 305+ unit tests on iOS sim + Android JVM
-./gradlew :vault:detekt :vault:ktlintCheck
-./gradlew :vault:apiCheck              # ABI binary-compat check
-./gradlew :vault:dokkaHtml             # API doc site at build/dokka/html
-./gradlew :vault:publishToMavenLocal   # publish 0.1.0 to ~/.m2/repository/com/vynatix
+./gradlew :holdfast:allTests              # 305+ unit tests on iOS sim + Android JVM
+./gradlew :holdfast:detekt :holdfast:ktlintCheck
+./gradlew :holdfast:apiCheck              # ABI binary-compat check
+./gradlew :holdfast:dokkaHtml             # API doc site at build/dokka/html
+./gradlew :holdfast:publishToMavenLocal   # publish 0.1.0 to ~/.m2/repository/com/vynatix
 
 # Companion modules
-./gradlew :vault-coroutines:allTests :vault-coroutines:apiCheck
-./gradlew :vault-compose:allTests    :vault-compose:apiCheck
+./gradlew :holdfast-coroutines:allTests :holdfast-coroutines:apiCheck
+./gradlew :holdfast-compose:allTests    :holdfast-compose:apiCheck
 ./gradlew :validation:allTests       :validation:apiCheck
 ./gradlew :validation-coroutines:allTests :validation-coroutines:apiCheck
-./gradlew :vault-validation:allTests :vault-validation:apiCheck
-./gradlew :vault-validation-coroutines:allTests :vault-validation-coroutines:apiCheck
+./gradlew :holdfast-hallmark:allTests :holdfast-hallmark:apiCheck
+./gradlew :holdfast-hallmark-coroutines:allTests :holdfast-hallmark-coroutines:apiCheck
 ```

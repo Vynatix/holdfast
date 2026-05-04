@@ -1,4 +1,4 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 /**
  * File-system-backed [SuspendingKvStore]: each key maps to a single file under

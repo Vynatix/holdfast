@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.bridge.KvBridge
-import com.vynatix.vault.bridge.KvStore
+import com.vynatix.holdfast.bridge.KvBridge
+import com.vynatix.holdfast.bridge.KvStore
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -9,7 +9,7 @@ import kotlinx.atomicfu.locks.synchronized
  * Thread-safe, in-memory [KvStore] for unit-testing [KvBridge]-based vaults
  * without touching the real filesystem (or any platform key-value backend).
  *
- * Functionally equivalent to [com.vynatix.vault.bridge.InMemoryKvStore] except:
+ * Functionally equivalent to [com.vynatix.holdfast.bridge.InMemoryKvStore] except:
  *   - All operations are guarded by a [SynchronizedObject] lock so [KvBridge]
  *     callers may publish from background dispatchers without corrupting state.
  *   - [contents] returns a defensive snapshot, decoupled from later mutations.

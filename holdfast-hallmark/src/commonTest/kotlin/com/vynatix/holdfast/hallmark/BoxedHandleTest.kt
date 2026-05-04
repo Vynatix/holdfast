@@ -1,14 +1,14 @@
-package com.vynatix.vault.validation
+package com.vynatix.holdfast.hallmark
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.BoxedValidator
-import com.vynatix.validation.Spec
-import com.vynatix.validation.SpecMode
-import com.vynatix.validation.ValidationException
-import com.vynatix.validation.rules.MinLengthRule
-import com.vynatix.validation.rules.NonBlankRule
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.BoxedValidator
+import com.vynatix.hallmark.Spec
+import com.vynatix.hallmark.SpecMode
+import com.vynatix.hallmark.HallmarkException
+import com.vynatix.hallmark.rules.MinLengthRule
+import com.vynatix.hallmark.rules.NonBlankRule
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -22,7 +22,7 @@ private object HandleEmailValidator : BoxedValidator<String, HandleEmail>() {
     )
 }
 
-private class HandleVault : Vault<HandleVault>() {
+private class HandleVault : Holdfast<HandleVault>() {
     val email by boxedHandle(HandleEmailValidator) { "init@example.com" }
 }
 
@@ -55,7 +55,7 @@ class BoxedHandleTest {
             email.state mutate email.civilize("ab") // too short
         }
         assertIs<TransactionResult.Error>(r)
-        assertTrue(r.exception is ValidationException)
+        assertTrue(r.exception is HallmarkException)
         // Initial value preserved
         assertEquals("init@example.com", v.email.state.value.value)
     }
@@ -74,10 +74,10 @@ class BoxedHandleTest {
     fun assignInfixRollsBackOnInvalidPrimitive() {
         val v = HandleVault()
         val r = v action {
-            email assign "ab" // too short — civilize throws ValidationException
+            email assign "ab" // too short — civilize throws HallmarkException
         }
         assertIs<TransactionResult.Error>(r)
-        assertTrue(r.exception is ValidationException)
+        assertTrue(r.exception is HallmarkException)
         assertEquals("init@example.com", v.email.state.value.value)
     }
 }

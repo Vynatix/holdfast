@@ -1,16 +1,16 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("astrid.kmp.library")
-    id("astrid.quality")
-    id("astrid.dokka")
-    id("astrid.abi")
-    id("astrid.publish.sonatype")
+    id("holdfast.kmp.library")
+    id("holdfast.quality")
+    id("holdfast.dokka")
+    id("holdfast.abi")
+    id("holdfast.publish.sonatype")
 }
 
 kotlin {
     android {
-        namespace = "com.vynatix.vault.validation.coroutines"
+        namespace = "com.vynatix.holdfast.hallmark.coroutines"
     }
 
     jvm {
@@ -23,11 +23,11 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(project(":vault"))
-            api(project(":vault-coroutines"))
-            api(project(":validation"))
-            api(project(":validation-coroutines"))
-            api(project(":vault-validation"))
+            api(project(":holdfast"))
+            api(project(":holdfast-coroutines"))
+            api("com.vynatix:hallmark:0.1.0")
+            api("com.vynatix:hallmark-coroutines:0.1.0")
+            api(project(":holdfast-hallmark"))
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

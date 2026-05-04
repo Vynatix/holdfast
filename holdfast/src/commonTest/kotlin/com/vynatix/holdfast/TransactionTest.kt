@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -9,12 +9,12 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-private class TxTestVault : Vault<TxTestVault>() {
+private class TxTestVault : Holdfast<TxTestVault>() {
     val count by state { 0 }
     val label by state { "initial" }
 }
 
-private class FiveStateVault : Vault<FiveStateVault>() {
+private class FiveStateVault : Holdfast<FiveStateVault>() {
     val a by state { 0 }
     val b by state { 0 }
     val c by state { 0 }
@@ -333,7 +333,7 @@ class TransactionStatusGuardsTest {
         val result = v action { count mutate 5 }
         assertIs<TransactionResult.Success<*>>(result)
 
-        // Vault.action already called commit(); second call hits the status guard.
+        // Holdfast.action already called commit(); second call hits the status guard.
         runCatching { result.transaction.commit() }
 
         assertEquals(5, v.count.value)

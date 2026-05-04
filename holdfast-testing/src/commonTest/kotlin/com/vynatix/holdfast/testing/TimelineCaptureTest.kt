@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing
+package com.vynatix.holdfast.testing
 
-import com.vynatix.vault.TransactionStatus
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -10,7 +10,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class TimelineCountVault : Vault<TimelineCountVault>() {
+private class TimelineCountVault : Holdfast<TimelineCountVault>() {
     val count by state { 0 }
     val name by state { "init" }
 }
@@ -96,7 +96,7 @@ class TimelineCaptureTest {
         // Both transactions must be Committed at this point.
         assertEquals(TransactionStatus.Committed, ctr.lastTransaction!!.status)
         // r1 still committed; r2 happened after.
-        assertEquals(TransactionStatus.Committed, (r1 as com.vynatix.vault.TransactionResult.Success).transaction.status)
+        assertEquals(TransactionStatus.Committed, (r1 as com.vynatix.holdfast.TransactionResult.Success).transaction.status)
     }
 
     @Test
@@ -121,7 +121,7 @@ class TimelineCaptureTest {
         assertEquals(1, rolled.size)
 
         // lastResult must be the second (Error) result.
-        assertIs<com.vynatix.vault.TransactionResult.Error>(ctr.lastResult)
+        assertIs<com.vynatix.holdfast.TransactionResult.Error>(ctr.lastResult)
         assertSame(errResult, ctr.lastResult)
     }
 

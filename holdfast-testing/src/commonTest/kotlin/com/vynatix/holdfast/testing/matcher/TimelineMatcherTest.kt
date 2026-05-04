@@ -1,26 +1,26 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.vault.Transaction
-import com.vynatix.vault.Vault
-import com.vynatix.vault.VaultInternalApi
-import com.vynatix.vault.testing.MiddlewareCompleted
-import com.vynatix.vault.testing.MiddlewareErrored
-import com.vynatix.vault.testing.MiddlewareStarted
-import com.vynatix.vault.testing.TransactionCommitted
-import com.vynatix.vault.testing.TransactionErrored
-import com.vynatix.vault.testing.TransactionRolledBack
-import com.vynatix.vault.testing.TransactionStarted
-import com.vynatix.vault.testing.VaultEvent
-import com.vynatix.vault.testing.internal.Recorder
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.HoldfastInternalApi
+import com.vynatix.holdfast.testing.MiddlewareCompleted
+import com.vynatix.holdfast.testing.MiddlewareErrored
+import com.vynatix.holdfast.testing.MiddlewareStarted
+import com.vynatix.holdfast.testing.TransactionCommitted
+import com.vynatix.holdfast.testing.TransactionErrored
+import com.vynatix.holdfast.testing.TransactionRolledBack
+import com.vynatix.holdfast.testing.TransactionStarted
+import com.vynatix.holdfast.testing.HoldfastEvent
+import com.vynatix.holdfast.testing.internal.Recorder
+import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-private class TimelineCountVault : Vault<TimelineCountVault>() {
+private class TimelineCountVault : Holdfast<TimelineCountVault>() {
     val count by state { 0 }
     val name by state { "x" }
 }
@@ -46,7 +46,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFirePassesWhenAllPredicatesMatch() {
-        val timeline = listOf<VaultEvent>(started("a"), committed("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"), committed("a"))
         timeline shouldFire {
             started
             committed
@@ -56,7 +56,7 @@ class TimelineMatcherTest {
     @Test
     fun shouldFireIgnoresOrder() {
         // Even reversed, set-membership doesn't care.
-        val timeline = listOf<VaultEvent>(committed("a"), started("a"))
+        val timeline = listOf<HoldfastEvent>(committed("a"), started("a"))
         timeline shouldFire {
             started
             committed
@@ -65,14 +65,14 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireIgnoresUnmatchedEvents() {
-        val timeline = listOf<VaultEvent>(started("a"), errored("a"), rolledBack("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"), errored("a"), rolledBack("a"))
         // Only `started` is asserted; the errored/rolledBack events are ignored.
         timeline shouldFire { started }
     }
 
     @Test
     fun shouldFireFailsListsUnsatisfiedPredicates() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFire {
                 started
@@ -90,14 +90,14 @@ class TimelineMatcherTest {
     @Test
     fun shouldFireAcceptsEmptyBuilderAsNoOp() {
         // Vacuously true — no predicates means nothing to match.
-        emptyList<VaultEvent>() shouldFire { }
+        emptyList<HoldfastEvent>() shouldFire { }
     }
 
     // -------- shouldFireInOrder (loose order) --------
 
     @Test
     fun shouldFireInOrderPasses() {
-        val timeline = listOf<VaultEvent>(started("a"), committed("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"), committed("a"))
         timeline shouldFireInOrder {
             started
             committed
@@ -107,7 +107,7 @@ class TimelineMatcherTest {
     @Test
     fun shouldFireInOrderAllowsEventsBetween() {
         // Loose: matched events need not be consecutive.
-        val timeline = listOf<VaultEvent>(
+        val timeline = listOf<HoldfastEvent>(
             started("a"),
             errored("a"), // "noise" between matched events
             rolledBack("a"),
@@ -121,7 +121,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireInOrderFailsOnReorder() {
-        val timeline = listOf<VaultEvent>(committed("a"), started("a"))
+        val timeline = listOf<HoldfastEvent>(committed("a"), started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFireInOrder {
                 started
@@ -136,7 +136,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireInOrderFailsWhenPredicateMissing() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFireInOrder {
                 started
@@ -150,7 +150,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireInExactOrderPasses() {
-        val timeline = listOf<VaultEvent>(started("a"), committed("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"), committed("a"))
         timeline shouldFireInExactOrder {
             started
             committed
@@ -160,7 +160,7 @@ class TimelineMatcherTest {
     @Test
     fun shouldFireInExactOrderFindsMatchingRunInLargerTimeline() {
         // Anchored anywhere in the timeline; what matters is contiguity once anchored.
-        val timeline = listOf<VaultEvent>(
+        val timeline = listOf<HoldfastEvent>(
             errored("noise"),
             started("a"),
             committed("a"),
@@ -175,7 +175,7 @@ class TimelineMatcherTest {
     @Test
     fun shouldFireInExactOrderFailsOnNonConsecutive() {
         // started then committed, but with an event between — strict mode rejects.
-        val timeline = listOf<VaultEvent>(
+        val timeline = listOf<HoldfastEvent>(
             started("a"),
             errored("a"),
             committed("a"),
@@ -195,7 +195,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireInExactOrderFailsWhenAnchorNotFound() {
-        val timeline = listOf<VaultEvent>(committed("a"))
+        val timeline = listOf<HoldfastEvent>(committed("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFireInExactOrder {
                 started
@@ -207,7 +207,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldFireInExactOrderFailsWhenRunsOutOfEvents() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFireInExactOrder {
                 started
@@ -223,7 +223,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldNotFirePassesOnAbsence() {
-        val timeline = listOf<VaultEvent>(started("a"), committed("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"), committed("a"))
         timeline shouldNotFire {
             rolledBack
             errored
@@ -232,7 +232,7 @@ class TimelineMatcherTest {
 
     @Test
     fun shouldNotFireFailsOnPresence() {
-        val timeline = listOf<VaultEvent>(
+        val timeline = listOf<HoldfastEvent>(
             started("a"),
             errored("a", IllegalStateException("boom")),
             rolledBack("a"),
@@ -254,7 +254,7 @@ class TimelineMatcherTest {
 
     @Test
     fun startedWithIdMatchesOnlyTargetTransaction() {
-        val timeline = listOf<VaultEvent>(
+        val timeline = listOf<HoldfastEvent>(
             started("a"),
             started("b"),
             committed("a"),
@@ -268,7 +268,7 @@ class TimelineMatcherTest {
 
     @Test
     fun startedWithIdFailsOnMissingId() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFire {
                 started("nope")
@@ -279,13 +279,13 @@ class TimelineMatcherTest {
 
     @Test
     fun rolledBackWithIdMatches() {
-        val timeline = listOf<VaultEvent>(rolledBack("X"))
+        val timeline = listOf<HoldfastEvent>(rolledBack("X"))
         timeline shouldFire { rolledBack("X") }
     }
 
     @Test
     fun erroredWithIdMatches() {
-        val timeline = listOf<VaultEvent>(errored("X"))
+        val timeline = listOf<HoldfastEvent>(errored("X"))
         timeline shouldFire { errored("X") }
     }
 
@@ -294,7 +294,7 @@ class TimelineMatcherTest {
     @Test
     fun unmatchedAnonymousPredicateDescriptionIsHelpful() {
         val err = assertFailsWith<AssertionError> {
-            emptyList<VaultEvent>() shouldFire { started }
+            emptyList<HoldfastEvent>() shouldFire { started }
         }
         assertContains(err.message.orEmpty(), "any transaction started")
     }
@@ -302,7 +302,7 @@ class TimelineMatcherTest {
     @Test
     fun unmatchedIdPredicateDescriptionIncludesId() {
         val err = assertFailsWith<AssertionError> {
-            emptyList<VaultEvent>() shouldFire { started("foo") }
+            emptyList<HoldfastEvent>() shouldFire { started("foo") }
         }
         assertContains(err.message.orEmpty(), "transaction 'foo' started")
     }
@@ -311,8 +311,8 @@ class TimelineMatcherTest {
 
     @Test
     fun middlewareInstancePredicateMatchesByReference() {
-        val mw = Recorder<TimelineCountVault>(com.vynatix.vault.testing.Capture.All)
-        val timeline = listOf<VaultEvent>(
+        val mw = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val timeline = listOf<HoldfastEvent>(
             MiddlewareStarted(middleware = mw, transaction = txn("a"), timestamp = 0L),
             MiddlewareCompleted(middleware = mw, transaction = txn("a"), timestamp = 1L),
         )
@@ -324,8 +324,8 @@ class TimelineMatcherTest {
 
     @Test
     fun middlewareErroredPredicateMatches() {
-        val mw = Recorder<TimelineCountVault>(com.vynatix.vault.testing.Capture.All)
-        val timeline = listOf<VaultEvent>(
+        val mw = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val timeline = listOf<HoldfastEvent>(
             MiddlewareStarted(middleware = mw, transaction = txn("a"), timestamp = 0L),
             MiddlewareErrored(middleware = mw, transaction = txn("a"), cause = IllegalStateException("e"), timestamp = 1L),
         )
@@ -337,9 +337,9 @@ class TimelineMatcherTest {
 
     @Test
     fun middlewareInstancePredicateRejectsDifferentInstance() {
-        val a = Recorder<TimelineCountVault>(com.vynatix.vault.testing.Capture.All)
-        val b = Recorder<TimelineCountVault>(com.vynatix.vault.testing.Capture.All)
-        val timeline = listOf<VaultEvent>(
+        val a = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val b = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val timeline = listOf<HoldfastEvent>(
             MiddlewareStarted(middleware = a, transaction = txn("t"), timestamp = 0L),
         )
         val err = assertFailsWith<AssertionError> {
@@ -529,7 +529,7 @@ class TimelineMatcherTest {
 
     @Test
     fun emptyBuilderForAllCombinatorsIsNoOp() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         timeline shouldFire { }
         timeline shouldFireInOrder { }
         timeline shouldFireInExactOrder { }
@@ -538,7 +538,7 @@ class TimelineMatcherTest {
 
     @Test
     fun assertContainsTimelineSizeInOrderFailure() {
-        val timeline = listOf<VaultEvent>(started("a"))
+        val timeline = listOf<HoldfastEvent>(started("a"))
         val err = assertFailsWith<AssertionError> {
             timeline shouldFireInOrder {
                 started

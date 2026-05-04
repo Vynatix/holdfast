@@ -1,4 +1,4 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test

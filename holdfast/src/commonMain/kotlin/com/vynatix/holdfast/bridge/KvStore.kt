@@ -1,4 +1,4 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 /**
  * Backend-agnostic key-value store contract used by [KvBridge].

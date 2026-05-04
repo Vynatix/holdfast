@@ -1,8 +1,8 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.validation.Boxed
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.hallmark.Boxed
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
@@ -10,7 +10,7 @@ import kotlin.test.assertFailsWith
 private data class Email(override val value: String) : Boxed<String>
 private data class PositiveInt(override val value: Int) : Boxed<Int>
 
-private class UserVault : Vault<UserVault>() {
+private class UserVault : Holdfast<UserVault>() {
     val email by state { Email("seed@example.com") }
     val ageBox by state { PositiveInt(1) }
 }

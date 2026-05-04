@@ -1,10 +1,10 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.platform.currentThreadId
-import com.vynatix.vault.testing.concurrency.parallel
-import com.vynatix.vault.testing.concurrency.transaction
-import com.vynatix.vault.testing.matcher.shouldBeSuccess
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.testing.concurrency.parallel
+import com.vynatix.holdfast.testing.concurrency.transaction
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+import com.vynatix.holdfast.testing.vaultTest
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -23,7 +23,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class ParallelVault : Vault<ParallelVault>() {
+private class ParallelVault : Holdfast<ParallelVault>() {
     val count by state { 0 }
     val a by state { 0 }
     val b by state { 0 }
@@ -31,18 +31,18 @@ private class ParallelVault : Vault<ParallelVault>() {
     val text by state { "" }
 }
 
-private class ReentrancyVault : Vault<ReentrancyVault>() {
+private class ReentrancyVault : Holdfast<ReentrancyVault>() {
     val count by state { 0 }
     val flag by state { "init" }
 }
 
-private class StressVault : Vault<StressVault>() {
+private class StressVault : Holdfast<StressVault>() {
     val n by state { 0 }
     val s by state { "" }
     val list by state { listOf<Int>() }
 }
 
-private class IdentityCheckBridgeVault : Vault<IdentityCheckBridgeVault>() {
+private class IdentityCheckBridgeVault : Holdfast<IdentityCheckBridgeVault>() {
     val count by state { 0 }
 }
 

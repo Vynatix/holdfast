@@ -1,4 +1,4 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 /**
  * Bidirectional serialization for a value of type [T] to/from a string.

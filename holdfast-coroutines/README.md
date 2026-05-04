@@ -1,6 +1,6 @@
 # vault-coroutines
 
-`Flow` / `StateFlow` / suspend integration for the [Vault](../vault/) library.
+`Flow` / `StateFlow` / suspend integration for the [Holdfast](../holdfast/) library.
 Pulls in `kotlinx-coroutines-core`; nothing else.
 
 ## Surface
@@ -33,7 +33,7 @@ viewModelScope.launch {
 
 ```kotlin
 class CounterViewModel : ViewModel() {
-    val vault = CounterVault()
+    val vault = CounterHoldfast()
     val count: StateFlow<Int> = vault.count.asStateFlow(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -44,7 +44,7 @@ class CounterViewModel : ViewModel() {
 ### Await predicate
 
 ```kotlin
-suspend fun waitForReady(vault: AccountVault) {
+suspend fun waitForReady(vault: AccountHoldfast) {
     vault.status.first { it == AccountStatus.Active }
 }
 ```
@@ -52,8 +52,8 @@ suspend fun waitForReady(vault: AccountVault) {
 ## Build
 
 ```
-./gradlew :vault-coroutines:allTests
-./gradlew :vault-coroutines:apiCheck
-./gradlew :vault-coroutines:dokkaHtml
-./gradlew :vault-coroutines:publishToMavenLocal
+./gradlew :holdfast-coroutines:allTests
+./gradlew :holdfast-coroutines:apiCheck
+./gradlew :holdfast-coroutines:dokkaHtml
+./gradlew :holdfast-coroutines:publishToMavenLocal
 ```

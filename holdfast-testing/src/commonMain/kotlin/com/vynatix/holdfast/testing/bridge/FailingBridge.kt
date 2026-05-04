@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 
 /**
  * Test [Bridge] that throws on attach ([observe]), publish, or both. Use to
@@ -32,9 +32,9 @@ import com.vynatix.vault.Disposable
  * site (`vault { state bridge bridge }`). Wrap that line in `assertFailsWith`
  * to assert on the attach-time failure.
  *
- * Vault's commit path catches [publish] throws inside the transaction's
- * commit-time error handling; the action's [com.vynatix.vault.TransactionResult]
- * surfaces the cause. Use [com.vynatix.vault.testing.matcher.shouldRollbackWith]
+ * Holdfast's commit path catches [publish] throws inside the transaction's
+ * commit-time error handling; the action's [com.vynatix.holdfast.TransactionResult]
+ * surfaces the cause. Use [com.vynatix.holdfast.testing.matcher.shouldRollbackWith]
  * to assert.
  */
 class FailingBridge<T : Any>(private val initial: T, val failOn: FailureMode, val cause: Throwable = RuntimeException("FailingBridge")) :
@@ -44,7 +44,7 @@ class FailingBridge<T : Any>(private val initial: T, val failOn: FailureMode, va
      * Selects which methods of [FailingBridge] throw [cause].
      *
      *  - [Publish] — only [Bridge.publish] throws; attach succeeds.
-     *  - [Observe] — only [com.vynatix.vault.Observable.observe] throws; publish succeeds.
+     *  - [Observe] — only [com.vynatix.holdfast.Observable.observe] throws; publish succeeds.
      *  - [Both] — every public method throws.
      */
     enum class FailureMode {

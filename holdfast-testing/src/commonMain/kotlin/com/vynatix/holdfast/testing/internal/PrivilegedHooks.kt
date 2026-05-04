@@ -1,15 +1,15 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault.testing.internal
+package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.vault.State
-import com.vynatix.vault.Transaction
-import com.vynatix.vault.Vault
-import com.vynatix.vault.VaultInternalApi
-import com.vynatix.vault.platform.currentThreadId
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.HoldfastInternalApi
+import com.vynatix.holdfast.platform.currentThreadId
 
 /**
- * Centralises every `@VaultInternalApi` access used by the testing module so the
+ * Centralises every `@HoldfastInternalApi` access used by the testing module so the
  * unsafe surface lives in one auditable file. Call sites elsewhere should reach
  * for these helpers rather than opt in directly — that way new dependencies on
  * vault internals are visible at PR time.
@@ -18,7 +18,7 @@ import com.vynatix.vault.platform.currentThreadId
  *  - **Recorder reads** — [snapshotCommittedStateValues] and [modifiedStates]
  *    let the timeline recorder observe committed values from inside a
  *    middleware hook without re-entering the read-your-own-writes overlay.
- *    Strict subset of what `:vault-coroutines.SuspendAction` uses.
+ *    Strict subset of what `:holdfast-coroutines.SuspendAction` uses.
  *  - **Manufactured-transaction hooks** — [openTransaction], [commitOpenTransaction],
  *    and [rollbackOpenTransaction] manufacture a transaction outside the
  *    blocking `action` path so a test can hold a transaction open across
@@ -38,7 +38,7 @@ internal object PrivilegedHooks {
      * transaction returns pending writes first (so the body sees its own
      * uncommitted mutations). The recorder needs the COMMITTED view at the
      * boundary between body return and commit apply — that's the `oldValue` of
-     * each [com.vynatix.vault.testing.EmissionEvent].
+     * each [com.vynatix.holdfast.testing.EmissionEvent].
      *
      * How we bypass: temporarily clear the vault's `_activeTransaction` via
      * `internalSetActiveTransaction(null)`, read every state, then restore.
@@ -51,7 +51,7 @@ internal object PrivilegedHooks {
      * and returns. The caller MUST keep the hold-lock invariant intact — never
      * call this from outside a middleware hook.
      */
-    fun snapshotCommittedStateValues(vault: Vault<*>): Map<State<*>, Any> {
+    fun snapshotCommittedStateValues(vault: Holdfast<*>): Map<State<*>, Any> {
         val active = vault.activeTransaction
         return if (active == null) {
             // No active transaction → state.value already returns the committed
@@ -78,18 +78,18 @@ internal object PrivilegedHooks {
     /**
      * Owner-thread-only read of the transaction's modified-state set. Wraps
      * [Transaction.modifiedStates] without adding any new logic — provided here
-     * so the call site in [com.vynatix.vault.testing.internal.Recorder] doesn't
+     * so the call site in [com.vynatix.holdfast.testing.internal.Recorder] doesn't
      * need its own `@OptIn`.
      *
      * Throws if invoked off the owner thread; the recorder's hooks always run
      * on the owner thread (the middleware chain is synchronous and on the
-     * thread that called [com.vynatix.vault.Vault.action]).
+     * thread that called [com.vynatix.holdfast.Holdfast.action]).
      */
     fun modifiedStates(transaction: Transaction): Set<State<*>> = transaction.modifiedStates
 
     /**
      * Manufacture a transaction on [vault] and run [body] against it without
-     * committing. Backs [com.vynatix.vault.testing.transaction] in the public
+     * committing. Backs [com.vynatix.holdfast.testing.transaction] in the public
      * DSL.
      *
      * Lifecycle:
@@ -99,7 +99,7 @@ internal object PrivilegedHooks {
      *     transaction. Refuses to clobber an existing in-flight action; an
      *     already-set `activeTransaction` indicates an outer `action` body or
      *     a still-open `transaction(...)` and the test must close that first.
-     *  3. Release the lock and run [body] with [Vault.selfForExternal] as the
+     *  3. Release the lock and run [body] with [Holdfast.selfForExternal] as the
      *     receiver — mutations stage into the new transaction's
      *     `pendingWrites`, identical to the staging that `vault.action`'s body
      *     performs.
@@ -108,7 +108,7 @@ internal object PrivilegedHooks {
      *     propagate. The vault is left in a clean state (no active txn,
      *     unchanged committed values).
      *
-     * No middleware runs — this matches `:vault-coroutines.suspendAction`'s
+     * No middleware runs — this matches `:holdfast-coroutines.suspendAction`'s
      * v1 contract for externally-manufactured transactions. The recorder
      * therefore does NOT see an open transaction in the timeline; assertions
      * about open transactions must be made via [OpenTransaction] directly.
@@ -118,7 +118,7 @@ internal object PrivilegedHooks {
      *   leaking the open transaction past the test scope's `tearDown` triggers
      *   the auto-rollback path.
      */
-    fun <V : Vault<V>> openTransaction(vault: V, body: V.() -> Unit): Transaction {
+    fun <V : Holdfast<V>> openTransaction(vault: V, body: V.() -> Unit): Transaction {
         val txn = Transaction.createForExternal(
             id = body::class.simpleName ?: "open-transaction",
             ownerThreadId = currentThreadId(),
@@ -150,16 +150,16 @@ internal object PrivilegedHooks {
      * `transactionLock`, fire observers and bridges, then clear the active
      * transaction and drain any post-commit tasks.
      *
-     * Mirrors the tail of `Vault.runBlockingActionUnderLock`: the lock guards
+     * Mirrors the tail of `Holdfast.runBlockingActionUnderLock`: the lock guards
      * against a peer `action` interleaving with the apply-and-fanout, the
      * `internalDrainPostCommitTasks` call lets `derived` recompute fan out
      * exactly like a production action would.
      *
      * Throws if [Transaction.commit] throws (commit-time `TransactionException`
      * or any state's `applyCommitted` throwing). The caller wraps this in
-     * `try/catch` to translate to [com.vynatix.vault.TransactionResult.Error].
+     * `try/catch` to translate to [com.vynatix.holdfast.TransactionResult.Error].
      */
-    fun commitOpenTransaction(vault: Vault<*>, transaction: Transaction) {
+    fun commitOpenTransaction(vault: Holdfast<*>, transaction: Transaction) {
         vault.runUnderLock {
             try {
                 transaction.commit()
@@ -177,12 +177,12 @@ internal object PrivilegedHooks {
      * then clear the active transaction. Idempotent on a non-Active
      * transaction — matching [Transaction.rollback]'s contract.
      *
-     * Used both by the user-facing [com.vynatix.vault.testing.concurrency.OpenTransaction.rollback]
+     * Used both by the user-facing [com.vynatix.holdfast.testing.concurrency.OpenTransaction.rollback]
      * and by the test-scope `tearDown` auto-rollback path. Catches and
      * swallows rollback exceptions to keep teardown robust under partially
      * failed tests.
      */
-    fun rollbackOpenTransaction(vault: Vault<*>, transaction: Transaction) {
+    fun rollbackOpenTransaction(vault: Holdfast<*>, transaction: Transaction) {
         vault.runUnderLock {
             runCatching { transaction.rollback() }
             if (vault.activeTransaction === transaction) {

@@ -1,10 +1,10 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
-import com.vynatix.vault.bridge.IntCodec
-import com.vynatix.vault.bridge.StringCodec
-import com.vynatix.vault.effect
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.bridge.IntCodec
+import com.vynatix.holdfast.bridge.StringCodec
+import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +38,7 @@ import kotlin.test.assertTrue
  *
  * Caller picks the action type to pick the persistence guarantee.
  */
-private class TwoFieldVault : Vault<TwoFieldVault>() {
+private class TwoFieldVault : Holdfast<TwoFieldVault>() {
     val s by state { "init" }
     val n by state { 0 }
 }
@@ -228,12 +228,12 @@ class SuspendingBridgePublishAwaitedTest {
  * does not republish when `suspendAction` re-applies the same value.
  *
  * The sync `vault.action { }` path already short-circuits both observer fanout
- * and bridge publish on dedup via [com.vynatix.vault.MutableState.applyCommitted]'s
+ * and bridge publish on dedup via [com.vynatix.holdfast.MutableState.applyCommitted]'s
  * single-pass dedup check. The suspending `suspendingCommit` dispatcher must
  * match: if `applyCommittedRaw` returns false (deduped), the (state, value)
  * pair must NOT be enqueued for the bridge publish phase.
  */
-private class DistinctVault : Vault<DistinctVault>() {
+private class DistinctVault : Holdfast<DistinctVault>() {
     val s by state(distinct = true) { "init" }
 }
 

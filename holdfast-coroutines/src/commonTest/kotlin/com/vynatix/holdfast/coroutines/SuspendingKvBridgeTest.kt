@@ -1,8 +1,8 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Vault
-import com.vynatix.vault.bridge.IntCodec
-import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.bridge.IntCodec
+import com.vynatix.holdfast.bridge.StringCodec
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
  * adapts a `SuspendingKvStore` to the sync `Bridge<T>` interface used by
  * `vault.action { }`. See issue 11.
  */
-private class BridgedVault : Vault<BridgedVault>() {
+private class BridgedVault : Holdfast<BridgedVault>() {
     val s by state { "init" }
     val n by state { 0 }
 }

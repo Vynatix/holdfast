@@ -1,4 +1,4 @@
-# `:vault-validation-coroutines` — suspend Vault adapter
+# `:holdfast-hallmark-coroutines` — suspend Vault adapter
 
 Bridges `:validation-coroutines`' `SuspendValidator` into Vault's
 `suspendAction { }`. Use when validation involves I/O (DB unique-name lookup,
@@ -26,7 +26,7 @@ class UsernameValidator(taken: Set<String>) : SuspendBoxedValidator<String, User
     )
 }
 
-class UserVault : Vault<UserVault>() {
+class UserVault : Holdfast<UserVault>() {
     val username by boxed(/* sync leaf */ UsernameFormatValidator) { "init" }
 }
 
@@ -36,13 +36,13 @@ suspend fun adoptUsername(name: String): TransactionResult<Unit> =
 
 `suspendValidateAndMutate` runs the suspend validator, then mutates the
 Vault state inside a `suspendAction { }`. On validation failure, throws
-`ValidationException` inside the action — every other state mutation in
+`HallmarkException` inside the action — every other state mutation in
 the transaction rolls back.
 
 ## Building
 
 ```
-./gradlew :vault-validation-coroutines:allTests
-./gradlew :vault-validation-coroutines:apiCheck
-./gradlew :vault-validation-coroutines:publishToMavenLocal
+./gradlew :holdfast-hallmark-coroutines:allTests
+./gradlew :holdfast-hallmark-coroutines:apiCheck
+./gradlew :holdfast-hallmark-coroutines:publishToMavenLocal
 ```

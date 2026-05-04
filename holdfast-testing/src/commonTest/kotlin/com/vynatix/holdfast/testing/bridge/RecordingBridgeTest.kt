@@ -1,18 +1,18 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.BridgeObserved
-import com.vynatix.vault.testing.BridgePublished
-import com.vynatix.vault.testing.matcher.shouldBeSuccess
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.BridgeObserved
+import com.vynatix.holdfast.testing.BridgePublished
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class ThemeVault : Vault<ThemeVault>() {
+private class ThemeVault : Holdfast<ThemeVault>() {
     val theme by state { "light" }
 }
 

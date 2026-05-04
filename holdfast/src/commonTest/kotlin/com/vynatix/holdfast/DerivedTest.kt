@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class DerivedVault : Vault<DerivedVault>() {
+private class DerivedVault : Holdfast<DerivedVault>() {
     val items by state { emptyList<Int>() }
     val tax by state { 1.0 }
     val multiplier by state { 1 }

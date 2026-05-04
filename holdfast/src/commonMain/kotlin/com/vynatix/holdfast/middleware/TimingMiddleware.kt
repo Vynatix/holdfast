@@ -1,8 +1,8 @@
-package com.vynatix.vault.middleware
+package com.vynatix.holdfast.middleware
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.TransactionStatus
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.Holdfast
 import kotlin.time.Clock
 
 /**
@@ -23,7 +23,7 @@ import kotlin.time.Clock
  * })
  * ```
  */
-class TimingMiddleware<V : Vault<V>>(private val onResult: (id: String, status: TransactionStatus, elapsedMs: Long) -> Unit) :
+class TimingMiddleware<V : Holdfast<V>>(private val onResult: (id: String, status: TransactionStatus, elapsedMs: Long) -> Unit) :
     Middleware<V>() {
 
     override fun onTransactionStarted(context: MiddlewareContext<V>) {

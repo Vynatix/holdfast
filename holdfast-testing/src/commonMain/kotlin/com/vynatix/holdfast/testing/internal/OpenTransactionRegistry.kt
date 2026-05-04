@@ -1,19 +1,19 @@
-package com.vynatix.vault.testing.internal
+package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.vault.testing.VaultTestScope
-import com.vynatix.vault.testing.concurrency.OpenTransaction
+import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.concurrency.OpenTransaction
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
 /**
  * Backing list for [OpenTransaction]s created via
- * [com.vynatix.vault.testing.concurrency.transaction]. Held inside the
- * [VaultTestScope] so the lifetime mirrors the test body; [rollbackAll] is
+ * [com.vynatix.holdfast.testing.concurrency.transaction]. Held inside the
+ * [HoldfastTestScope] so the lifetime mirrors the test body; [rollbackAll] is
  * called from `tearDown` to discard any leaked open transactions before the
  * scope's other resources are released.
  *
  * Thread-safe (an [OpenTransaction] can be opened on the test thread and
- * closed from a [com.vynatix.vault.testing.concurrency.parallel] worker, so
+ * closed from a [com.vynatix.holdfast.testing.concurrency.parallel] worker, so
  * `add` / `remove` may race). The lock is held only briefly around list
  * mutation; iteration during teardown takes a defensive snapshot first.
  */
@@ -39,7 +39,7 @@ internal class OpenTransactionRegistry {
      * [OpenTransaction.rollback]), and clear the list.
      *
      * Uses [OpenTransaction.rollbackSilentlyForTearDown] — a non-suspend
-     * variant — because [VaultTestScope.tearDown] is non-suspend. The
+     * variant — because [HoldfastTestScope.tearDown] is non-suspend. The
      * v1 implementation does no suspending work, so the synchronous variant
      * is faithful to the suspending API.
      */
@@ -63,4 +63,4 @@ internal class OpenTransactionRegistry {
  * [OpenTransaction]'s constructor can stay `internal` without leaking. Mirrors
  * the [registerBarrier] shape.
  */
-internal fun VaultTestScope.openTransactionsRegistry(): OpenTransactionRegistry = openTransactionRegistry()
+internal fun HoldfastTestScope.openTransactionsRegistry(): OpenTransactionRegistry = openTransactionRegistry()

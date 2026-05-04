@@ -1,6 +1,6 @@
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import kotlinx.coroutines.test.runTest
 import platform.Foundation.NSFileManager

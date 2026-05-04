@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.SharedFlow
  * Pick the right tool: state for "what is now," events for "what happened."
  *
  * Implementations:
- *  - [EventfulVault] — base class wiring an internal `MutableSharedFlow<E>` and the
+ *  - [EventfulHoldfast] — base class wiring an internal `MutableSharedFlow<E>` and the
  *    [emit] DSL that stages onto the active transaction's pendingEvents buffer.
  *  - Issue 15 will add `EventfulSupport<E>` — a delegate so a vault can mix this
  *    capability in alongside another base class.
@@ -38,7 +38,7 @@ interface Eventful<E : Any> {
      * after observer fanout and after bridge publish, the buffered events are
      * tryEmit-ted to [events] in the order they were staged.
      *
-     * Throws [IllegalStateException] if called outside of [Vault.action] /
+     * Throws [IllegalStateException] if called outside of [Holdfast.action] /
      * `vault-coroutines.suspendAction`. Events MUST be transactional — emitting
      * outside a transaction would bypass the rollback-discards-events guarantee.
      */

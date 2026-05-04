@@ -1,11 +1,11 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("astrid.kmp.library")
-    id("astrid.quality")
-    id("astrid.dokka")
-    id("astrid.abi")
-    id("astrid.publish.sonatype")
+    id("holdfast.kmp.library")
+    id("holdfast.quality")
+    id("holdfast.dokka")
+    id("holdfast.abi")
+    id("holdfast.publish.sonatype")
 }
 
 // ktlint 1.7.x does not yet parse Kotlin 2.2+ `context(name: Type)` parameters.
@@ -18,7 +18,7 @@ ktlint {
 
 kotlin {
     android {
-        namespace = "com.vynatix.vault.validation"
+        namespace = "com.vynatix.holdfast.hallmark"
     }
 
     jvm {
@@ -31,8 +31,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(project(":vault"))
-            api(project(":validation"))
+            api(project(":holdfast"))
+            api("com.vynatix:hallmark:0.1.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

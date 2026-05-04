@@ -1,6 +1,6 @@
 # vault-compose
 
-Compose Multiplatform runtime adapter for the [Vault](../vault/) library.
+Compose Multiplatform runtime adapter for the [Holdfast](../holdfast/) library.
 Brings only `compose.runtime` (no Material, no Foundation), so it's safe to
 depend on from any UI module that uses Compose.
 
@@ -8,7 +8,7 @@ depend on from any UI module that uses Compose.
 
 ```kotlin
 @Composable
-fun <V : Vault<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
+fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
@@ -20,7 +20,7 @@ fun rememberDisposable(make: () -> Disposable): Disposable
 
 ```kotlin
 @Composable
-fun CounterScreen(vault: CounterVault) {
+fun CounterScreen(vault: CounterHoldfast) {
     val count by vault.collectAsState(vault.count)
     val label by vault.collectAsState(vault.label)
 
@@ -37,7 +37,7 @@ fun CounterScreen(vault: CounterVault) {
 
 ```kotlin
 @Composable
-fun StatusListener(vault: AccountVault, channel: Observable<AccountStatus>) {
+fun StatusListener(vault: AccountHoldfast, channel: Observable<AccountStatus>) {
     rememberDisposable { vault { status observeFrom channel } }
 }
 ```
@@ -45,8 +45,8 @@ fun StatusListener(vault: AccountVault, channel: Observable<AccountStatus>) {
 ## Build
 
 ```
-./gradlew :vault-compose:allTests
-./gradlew :vault-compose:apiCheck
-./gradlew :vault-compose:dokkaHtml
-./gradlew :vault-compose:publishToMavenLocal
+./gradlew :holdfast-compose:allTests
+./gradlew :holdfast-compose:apiCheck
+./gradlew :holdfast-compose:dokkaHtml
+./gradlew :holdfast-compose:publishToMavenLocal
 ```

@@ -1,10 +1,10 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlin.time.Clock
 
 /**
- * One unit of atomicity in a [Vault]. A transaction holds:
+ * One unit of atomicity in a [Holdfast]. A transaction holds:
  *  - an [id] (the action's class simple name, falling back to a random UUID),
  *  - a [parent] reference forming the savepoint chain (null for top-level),
  *  - a buffer of pending writes ([pendingWrites]), thread-confined to [ownerThreadId],
@@ -21,18 +21,18 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
 
     companion object {
         /**
-         * Public-but-opt-in factory for `:vault-coroutines.suspendAction`. The
+         * Public-but-opt-in factory for `:holdfast-coroutines.suspendAction`. The
          * primary constructor stays `internal` so user code can't manufacture
          * spurious transactions; companion modules that need to construct
          * one (because they implement their own action variant) opt in here.
          */
-        @VaultInternalApi
+        @HoldfastInternalApi
         fun createForExternal(id: String, ownerThreadId: Long): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
     }
 
-    private val statusLock = VaultLock()
-    private val endTimeLock = VaultLock()
-    private val pendingLock = VaultLock()
+    private val statusLock = HoldfastLock()
+    private val endTimeLock = HoldfastLock()
+    private val pendingLock = HoldfastLock()
 
     @kotlin.concurrent.Volatile
     private var _status = TransactionStatus.Active
@@ -77,11 +77,11 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
 
     /**
      * Stage a [rawValue] directly as a pending write, bypassing [MutableState.beforeSet].
-     * Used by [Vault.restore] to round-trip raw stored values (ciphertext,
+     * Used by [Holdfast.restore] to round-trip raw stored values (ciphertext,
      * post-`transformer.set` form) without re-running the transformer.
      *
      * For symmetric transformers this is equivalent to a normal mutate; for
-     * asymmetric ones (e.g. [com.vynatix.vault.crypto.EncryptingTransformer]),
+     * asymmetric ones (e.g. [com.vynatix.holdfast.crypto.EncryptingTransformer]),
      * the difference is critical — restoring already-encrypted ciphertext via
      * `mutate` would re-encrypt it.
      */
@@ -92,14 +92,14 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
     /**
      * Stage [event] onto this transaction's [pendingEvents] buffer, to be emitted
      * to [channel] during the commit's event-drain phase. Public-internal because
-     * [Eventful.emit] (in `:vault` core) needs to call it; user code should not.
+     * [Eventful.emit] (in `:holdfast` core) needs to call it; user code should not.
      *
      * Owner-thread-confined: callers MUST be the owner of this transaction (the
      * blocking action's caller, or the suspending action's coroutine while the
      * AsyncSerializer holds the lock). Concurrent stages from non-owner threads
      * are undefined — same contract as [pendingWrites].
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun stagePendingEvent(channel: MutableSharedFlow<*>, event: Any) {
         pendingLock.withLock {
             pendingEvents += channel to event
@@ -114,7 +114,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      */
     val modifiedStates: Set<State<*>>
         get() {
-            check(ownerThreadId == com.vynatix.vault.platform.currentThreadId()) {
+            check(ownerThreadId == com.vynatix.holdfast.platform.currentThreadId()) {
                 "modifiedStates may only be read on the transaction's owner thread"
             }
             return pendingLock.withLock { pendingWrites.keys.toSet() }
@@ -147,7 +147,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * bridges fire.
      */
     fun commit() {
-        @OptIn(VaultInternalApi::class)
+        @OptIn(HoldfastInternalApi::class)
         commitDispatching { state, value ->
             @Suppress("UNCHECKED_CAST")
             (state as MutableState<Any>).applyCommitted(value)
@@ -155,10 +155,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
     }
 
     /**
-     * Internal commit variant for `:vault-coroutines.suspendAction`. Same
+     * Internal commit variant for `:holdfast-coroutines.suspendAction`. Same
      * idempotent semantics as [commit], but the per-pending-write apply step
      * is delegated to [applyTopLevel]. Used to interpose
-     * [com.vynatix.vault.coroutines.SuspendingBridge.publishAwaited] between
+     * [com.vynatix.holdfast.coroutines.SuspendingBridge.publishAwaited] between
      * the observer fanout (via [MutableState.applyCommittedRaw]) and the
      * bridge publish.
      *
@@ -169,14 +169,14 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * pending write, in iteration order. Throwing from it propagates as
      * [TransactionException] just like the sync path.
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit) {
         commitDispatching(applyTopLevel, drainEvents = null)
     }
 
     /**
      * Internal commit variant that lets the caller take over the event-drain
-     * phase (used by `:vault-coroutines.suspendAction` to interpose its
+     * phase (used by `:holdfast-coroutines.suspendAction` to interpose its
      * suspending bridge publish between observer fanout and the event drain,
      * and to honor SUSPEND back-pressure on the events SharedFlow).
      *
@@ -192,7 +192,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * and then suspendingly emit the events so back-pressure is honored. The
      * snapshot list is owned by the caller and reflects insertion order.
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit, drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
@@ -321,7 +321,7 @@ enum class TransactionStatus {
 class TransactionException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * The outcome of a [Vault.action]. Either [Success] (the body returned without
+ * The outcome of a [Holdfast.action]. Either [Success] (the body returned without
  * throwing and the commit succeeded — carrying the body's computed `value`) or
  * [Error] (the body or commit threw, the transaction is RolledBack).
  *

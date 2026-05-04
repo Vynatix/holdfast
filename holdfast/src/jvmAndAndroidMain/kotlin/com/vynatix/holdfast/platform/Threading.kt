@@ -1,4 +1,4 @@
-package com.vynatix.vault.platform
+package com.vynatix.holdfast.platform
 
 actual fun currentThreadId(): Long = Thread.currentThread().threadId()
 

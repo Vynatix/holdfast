@@ -1,8 +1,8 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.platform.currentThreadId
+import com.vynatix.holdfast.platform.currentThreadId
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -13,7 +13,7 @@ import kotlin.uuid.Uuid
  * root transaction. `mutate`/`update` calls outside an inner `action` stage
  * directly into the appropriate vault's root transaction.
  *
- * Locking: vaults are sorted by [Vault.lockOrderKey] before lock acquisition,
+ * Locking: vaults are sorted by [Holdfast.lockOrderKey] before lock acquisition,
  * giving a deadlock-safe global order across any combination of vaults. Each
  * vault's blocking `transactionLock` is held for the duration of the body.
  *
@@ -53,7 +53,7 @@ import kotlin.uuid.Uuid
  * ```
  */
 @OptIn(ExperimentalUuidApi::class)
-fun <R> atomic(vararg vaults: Vault<*>, body: () -> R): TransactionResult<R> {
+fun <R> atomic(vararg vaults: Holdfast<*>, body: () -> R): TransactionResult<R> {
     require(vaults.isNotEmpty()) { "atomic requires at least one vault" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = vaults.toSet().sortedBy { it.lockOrderKey }
@@ -64,7 +64,7 @@ fun <R> atomic(vararg vaults: Vault<*>, body: () -> R): TransactionResult<R> {
 
 /**
  * Tail-recursive helper that acquires each vault's transactionLock in order
- * via [Vault.runUnderLock], then opens a root [Transaction] per vault, then
+ * via [Holdfast.runUnderLock], then opens a root [Transaction] per vault, then
  * runs [body], then commits/rollbacks all roots, then unwinds.
  *
  * Recursive structure handles N vaults by chaining `runUnderLock` calls;
@@ -72,9 +72,9 @@ fun <R> atomic(vararg vaults: Vault<*>, body: () -> R): TransactionResult<R> {
  */
 @OptIn(ExperimentalUuidApi::class)
 private fun <R> acquireAndRun(
-    sorted: List<Vault<*>>,
+    sorted: List<Holdfast<*>>,
     index: Int,
-    rootsAcquired: MutableList<Pair<Vault<*>, Transaction>>,
+    rootsAcquired: MutableList<Pair<Holdfast<*>, Transaction>>,
     id: String,
     ownerThreadId: Long,
     body: () -> R,
@@ -109,7 +109,7 @@ private fun <R> acquireAndRun(
     }
 }
 
-private fun <R> executeBody(roots: List<Pair<Vault<*>, Transaction>>, body: () -> R): TransactionResult<R> {
+private fun <R> executeBody(roots: List<Pair<Holdfast<*>, Transaction>>, body: () -> R): TransactionResult<R> {
     val outcome: TransactionResult<R> = try {
         val value = body()
         // Commit each root in lock order. For roots we adopted (priorActive == root),

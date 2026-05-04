@@ -1,10 +1,10 @@
-@file:OptIn(com.vynatix.vault.VaultInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.MutableState
-import com.vynatix.vault.Transaction
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.MutableState
+import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.Holdfast
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -17,12 +17,12 @@ import kotlinx.coroutines.sync.Mutex
  * the two suspending entry points so a suspendAtomic and a suspendAction on
  * the same vault block each other.
  */
-internal class MutexSerializer : Vault.AsyncSerializer {
+internal class MutexSerializer : Holdfast.AsyncSerializer {
     val mutex = Mutex()
 
     override fun blockingAcquire() {
         while (!mutex.tryLock(SPIN_OWNER)) {
-            com.vynatix.vault.platform.threadYield()
+            com.vynatix.holdfast.platform.threadYield()
         }
     }
 
@@ -36,14 +36,14 @@ internal class MutexSerializer : Vault.AsyncSerializer {
 }
 
 /**
- * Lazy installation of the [Vault.AsyncSerializer] hook on each vault. The
+ * Lazy installation of the [Holdfast.AsyncSerializer] hook on each vault. The
  * hook is installed on first use and persists for the vault's lifetime — the
  * coroutine [Mutex] inside it serializes blocking action, [suspendAction], and
  * [suspendAtomic] for any vault that participates in any one of them.
  */
 private val installLock = object : SynchronizedObject() {}
 
-internal fun ensureSerializer(vault: Vault<*>): MutexSerializer {
+internal fun ensureSerializer(vault: Holdfast<*>): MutexSerializer {
     val installed = vault.asyncSerializer as? MutexSerializer
     if (installed != null) return installed
     return synchronized(installLock) {
@@ -67,8 +67,8 @@ internal fun ensureSerializer(vault: Vault<*>): MutexSerializer {
  *  - If the bound bridge is a [SuspendingBridge], call its [SuspendingBridge.publishAwaited]
  *    directly — the surrounding `withContext(NonCancellable)` ensures the write
  *    completes even if the calling scope cancels.
- *  - Otherwise (sync [com.vynatix.vault.Bridge] or no bridge), call
- *    [com.vynatix.vault.Bridge.publish] fire-and-forget, matching the sync
+ *  - Otherwise (sync [com.vynatix.holdfast.Bridge] or no bridge), call
+ *    [com.vynatix.holdfast.Bridge.publish] fire-and-forget, matching the sync
  *    action contract.
  *
  * Events are drained AFTER bridge publishes via suspending `emit` so

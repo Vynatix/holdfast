@@ -1,26 +1,26 @@
-package com.vynatix.vault.testing.concurrency
+package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.vault.Transaction
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.VaultHandle
-import com.vynatix.vault.testing.VaultTestScope
-import com.vynatix.vault.testing.internal.PrivilegedHooks
-import com.vynatix.vault.testing.internal.openTransactionsRegistry
+import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.HoldfastHandle
+import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
+import com.vynatix.holdfast.testing.internal.openTransactionsRegistry
 import kotlinx.atomicfu.atomic
 
 /**
  * Handle to an open, not-yet-committed transaction on a tracked vault.
  *
- * Returned from [com.vynatix.vault.testing.concurrency.transaction]; the test
+ * Returned from [com.vynatix.holdfast.testing.concurrency.transaction]; the test
  * decides whether to [commit] (apply pending writes, fire observers and
  * bridges) or [rollback] (discard pending writes). Both calls are terminal —
  * a second close call on the same instance throws [IllegalStateException]
  * "OpenTransaction already closed".
  *
  * Auto-rollback safety net: every [OpenTransaction] created inside a
- * [com.vynatix.vault.testing.vaultTest] block is registered with the hosting
- * [com.vynatix.vault.testing.VaultTestScope]. If the body returns without
+ * [com.vynatix.holdfast.testing.vaultTest] block is registered with the hosting
+ * [com.vynatix.holdfast.testing.HoldfastTestScope]. If the body returns without
  * having closed it, the scope's `tearDown` invokes [rollback] before clearing
  * the handle registry, so the vault is left in the same state as if no open
  * transaction had ever existed. This matches the
@@ -42,7 +42,7 @@ import kotlinx.atomicfu.atomic
  *    tests that want the peer to commit independently should close this open
  *    transaction first.
  *
- * Constructed exclusively by [com.vynatix.vault.testing.concurrency.transaction];
+ * Constructed exclusively by [com.vynatix.holdfast.testing.concurrency.transaction];
  * never instantiated by user code.
  */
 class OpenTransaction internal constructor(
@@ -54,7 +54,7 @@ class OpenTransaction internal constructor(
      * `transaction { ... }` call.
      */
     val transaction: Transaction,
-    private val handle: VaultHandle<*>,
+    private val handle: HoldfastHandle<*>,
     private val onClose: (OpenTransaction) -> Unit,
 ) {
 
@@ -69,7 +69,7 @@ class OpenTransaction internal constructor(
     /**
      * Apply the pending writes staged in [transaction] to the vault, fire
      * observers and bridges in the same single-fanout boundary that a
-     * production [Vault.action] commit produces.
+     * production [Holdfast.action] commit produces.
      *
      * Returns:
      *  - [TransactionResult.Success] with `Unit` value when commit succeeds.
@@ -144,14 +144,14 @@ class OpenTransaction internal constructor(
  * What the body does:
  *  - Receiver is the tracked vault. Mutations like `count mutate 999` stage
  *    into the new transaction's pending writes — same staging as inside a
- *    production [com.vynatix.vault.Vault.action] body.
+ *    production [com.vynatix.holdfast.Holdfast.action] body.
  *  - Reads honor read-your-own-writes on the body's owner thread; an
  *    off-owner-thread read (e.g. via [parallel]) sees the COMMITTED value,
  *    not the pending one.
  *
  * What it does NOT do:
  *  - Middleware does NOT run on the open transaction. This matches
- *    `:vault-coroutines.suspendAction`'s v1 contract — middleware is "NOT
+ *    `:holdfast-coroutines.suspendAction`'s v1 contract — middleware is "NOT
  *    invoked" for externally-manufactured transactions.
  *  - The body must NOT throw — this method propagates the throw immediately
  *    and rolls back the manufactured transaction (so the vault is left in a
@@ -163,7 +163,7 @@ class OpenTransaction internal constructor(
  *    the manufactured transaction as `activeTransaction`) and at
  *    commit/rollback (to apply or discard pending writes). The body runs
  *    without holding the lock, so async work between open and close is
- *    unrestricted — but a peer blocking [com.vynatix.vault.Vault.action]
+ *    unrestricted — but a peer blocking [com.vynatix.holdfast.Holdfast.action]
  *    from another thread will lock-wait until [OpenTransaction.commit] or
  *    [OpenTransaction.rollback] runs.
  *  - [transaction] itself is `suspend` so callers can compose it with other
@@ -171,7 +171,7 @@ class OpenTransaction internal constructor(
  *    does no suspending work in v1.
  *
  * Auto-rollback at scope exit: leaking an [OpenTransaction] past the
- * surrounding [com.vynatix.vault.testing.vaultTest] block triggers a
+ * surrounding [com.vynatix.holdfast.testing.vaultTest] block triggers a
  * synchronous rollback during `tearDown`. The rollback runs after the
  * barrier-cancel step but before the recorder-dispose step, so a vault that
  * never committed still has its pending writes discarded cleanly.
@@ -186,7 +186,7 @@ class OpenTransaction internal constructor(
  * ```
  */
 @Suppress("RedundantSuspendModifier")
-suspend fun <V : Vault<V>> VaultTestScope.transaction(on: VaultHandle<V>, body: V.() -> Unit): OpenTransaction {
+suspend fun <V : Holdfast<V>> HoldfastTestScope.transaction(on: HoldfastHandle<V>, body: V.() -> Unit): OpenTransaction {
     val txn = PrivilegedHooks.openTransaction(on.vault, body)
     val open = OpenTransaction(
         transaction = txn,

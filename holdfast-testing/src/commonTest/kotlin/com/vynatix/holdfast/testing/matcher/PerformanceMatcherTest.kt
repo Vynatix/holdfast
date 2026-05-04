@@ -1,4 +1,4 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test

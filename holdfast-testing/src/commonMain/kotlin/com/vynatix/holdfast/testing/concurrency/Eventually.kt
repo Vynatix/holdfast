@@ -1,6 +1,6 @@
-package com.vynatix.vault.testing.concurrency
+package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.vault.testing.VaultTestScope
+import com.vynatix.holdfast.testing.HoldfastTestScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -19,7 +19,7 @@ import kotlin.time.Duration.Companion.seconds
  * `"eventually: gave up after Xms (last: <inner-message>)"` and the most recent
  * failure as its cause.
  *
- * Both [within] and [every] are virtual-time durations under `vaultTest`:
+ * Both [within] and [every] are virtual-time durations under `holdfastTest`:
  * `delay` and `withTimeoutOrNull` participate in the test scheduler, so a poll
  * over `1.seconds` resolves in near-zero wall time. Real-time waiting only
  * happens when called outside `runTest`.
@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.seconds
  * @param block assertion or check to retry.
  */
 @Suppress("TooGenericExceptionCaught")
-suspend fun VaultTestScope.eventually(within: Duration = 1.seconds, every: Duration = 10.milliseconds, block: suspend () -> Unit) {
+suspend fun HoldfastTestScope.eventually(within: Duration = 1.seconds, every: Duration = 10.milliseconds, block: suspend () -> Unit) {
     var lastError: Throwable? = null
     val outcome = withTimeoutOrNull(within) {
         while (true) {

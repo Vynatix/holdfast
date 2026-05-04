@@ -1,9 +1,9 @@
-package com.vynatix.vault.testing
+package com.vynatix.holdfast.testing
 
-import com.vynatix.vault.Vault
-import com.vynatix.vault.testing.concurrency.AwaitingTimeoutException
-import com.vynatix.vault.testing.concurrency.awaiting
-import com.vynatix.vault.testing.matcher.shouldBeSuccess
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.testing.concurrency.AwaitingTimeoutException
+import com.vynatix.holdfast.testing.concurrency.awaiting
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.test.Test
@@ -14,7 +14,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
-private class AwaitingCounterVault : Vault<AwaitingCounterVault>() {
+private class AwaitingCounterVault : Holdfast<AwaitingCounterVault>() {
     val count by state { 0 }
 }
 

@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
 import kotlin.test.Test
@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class LifecycleVault : Vault<LifecycleVault>() {
+private class LifecycleVault : Holdfast<LifecycleVault>() {
     val a by state { 0 }
     val b by state { "init" }
 }

@@ -1,6 +1,6 @@
-package com.vynatix.vault.testing.concurrency
+package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.vault.testing.VaultTestScope
+import com.vynatix.holdfast.testing.HoldfastTestScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -12,7 +12,7 @@ import kotlinx.coroutines.coroutineScope
  * worker-index order.
  *
  * The default dispatcher is [Dispatchers.Default] — **not** the test scheduler
- * that drives `vaultTest`. Vault's `action { … }` acquires its lock with a
+ * that drives `holdfastTest`. Holdfast's `action { … }` acquires its lock with a
  * blocking spin-loop; on a single-threaded test dispatcher every worker would
  * pin the only thread at the spin-loop and the call would deadlock the moment
  * any worker tried to commit a transaction. Real threads from
@@ -29,7 +29,7 @@ import kotlinx.coroutines.coroutineScope
  * @param on dispatcher each worker runs on; defaults to [Dispatchers.Default].
  * @param body suspend block invoked once per worker with its zero-based index.
  */
-suspend fun <R> VaultTestScope.parallel(
+suspend fun <R> HoldfastTestScope.parallel(
     n: Int,
     on: CoroutineDispatcher = Dispatchers.Default,
     body: suspend (workerIndex: Int) -> R,

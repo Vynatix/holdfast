@@ -1,4 +1,4 @@
-package com.vynatix.vault.crypto
+package com.vynatix.holdfast.crypto
 
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -6,7 +6,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 /**
  * KMP-pure XOR cipher. **Educational only — NOT production-grade.**
  *
- * Provided so the [com.vynatix.vault.crypto] package is runnable without
+ * Provided so the [com.vynatix.holdfast.crypto] package is runnable without
  * pulling in a platform crypto dependency. For real use cases:
  *  - JVM: implement [Cipher] using `javax.crypto` (AES-GCM with a random IV).
  *  - iOS: implement [Cipher] using `CryptoKit` via cinterop.

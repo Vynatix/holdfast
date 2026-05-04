@@ -1,9 +1,9 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 /**
- * Captured raw state of every registered property of a [Vault] at the moment
- * [Vault.snapshot] was called. Stored values are RAW — post-`transformer.set`
- * — so that [Vault.restore] can round-trip without re-running the transformer.
+ * Captured raw state of every registered property of a [Holdfast] at the moment
+ * [Holdfast.snapshot] was called. Stored values are RAW — post-`transformer.set`
+ * — so that [Holdfast.restore] can round-trip without re-running the transformer.
  *
  * Snapshots are NOT typed against any particular vault instance. Restoring a
  * snapshot from one vault into a different vault is permitted as long as the
@@ -11,11 +11,11 @@ package com.vynatix.vault
  *
  * For symmetric transformers and untransformed states, the snapshot's stored
  * value is the same as `state.value`. For asymmetric transformers (e.g.
- * [com.vynatix.vault.crypto.EncryptingTransformer]), the snapshot stores
+ * [com.vynatix.holdfast.crypto.EncryptingTransformer]), the snapshot stores
  * ciphertext / post-`set` form, and restore writes that form back without
  * re-encrypting.
  */
-class VaultSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class HoldfastSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
     /** Names of every state captured in this snapshot. */
     val stateNames: Set<String> get() = rawValues.keys
 
@@ -33,14 +33,14 @@ class VaultSnapshot internal constructor(internal val rawValues: Map<String, Any
  * The returned snapshot is detached from the vault — mutations after `snapshot()`
  * do not affect previously-captured snapshots.
  */
-fun <V : Vault<V>> V.snapshot(): VaultSnapshot {
+fun <V : Holdfast<V>> V.snapshot(): HoldfastSnapshot {
     val raw = mutableMapOf<String, Any>()
     properties.forEach { (name, state) ->
         @Suppress("UNCHECKED_CAST")
         val ms = state as MutableState<Any>
         raw[name] = ms.rawCurrentValue
     }
-    return VaultSnapshot(raw.toMap())
+    return HoldfastSnapshot(raw.toMap())
 }
 
 /**
@@ -57,7 +57,7 @@ fun <V : Vault<V>> V.snapshot(): VaultSnapshot {
  * value via their `publish` (commit-time bridge fanout). To avoid this,
  * detach bridges before calling restore.
  */
-fun <V : Vault<V>> V.restore(snapshot: VaultSnapshot): TransactionResult<Unit> = action {
+fun <V : Holdfast<V>> V.restore(snapshot: HoldfastSnapshot): TransactionResult<Unit> = action {
     val txn = activeTransaction
         ?: error("restore must run inside an action — this should never happen since restore wraps in action")
     snapshot.rawValues.forEach { (name, rawValue) ->

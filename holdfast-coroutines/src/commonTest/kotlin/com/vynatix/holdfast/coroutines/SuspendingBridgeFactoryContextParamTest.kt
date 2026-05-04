@@ -1,6 +1,6 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.holdfast.bridge.StringCodec
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,9 +18,9 @@ import kotlin.test.assertEquals
  *   - `context(scope) { store.suspendingBridge(key, codec) }` → context-param overload,
  *     scope=scope
  *   - `store.suspendingBridge(key, codec)` outside any context block → default-param
- *     overload, falling back to `Vault.defaultScope`.
+ *     overload, falling back to `Holdfast.defaultScope`.
  *
- * The "outside context block, defaults to Vault.defaultScope" path is verified by the
+ * The "outside context block, defaults to Holdfast.defaultScope" path is verified by the
  * existing [SuspendingBridgePublishAwaitedTest] suite. Re-asserting it here under the
  * dual-overload setup is fragile because K2 implicit-receiver resolution inside
  * `runBlocking { }` can prefer the context-param overload. The structural guarantee —

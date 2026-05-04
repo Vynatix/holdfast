@@ -1,13 +1,13 @@
-package com.vynatix.vault.validation
+package com.vynatix.holdfast.hallmark
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.BoxedValidator
-import com.vynatix.validation.Spec
-import com.vynatix.validation.SpecMode
-import com.vynatix.validation.ValidationException
-import com.vynatix.validation.rules.MinLengthRule
-import com.vynatix.vault.bridge.LongCodec
-import com.vynatix.vault.bridge.StringCodec
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.BoxedValidator
+import com.vynatix.hallmark.Spec
+import com.vynatix.hallmark.SpecMode
+import com.vynatix.hallmark.HallmarkException
+import com.vynatix.hallmark.rules.MinLengthRule
+import com.vynatix.holdfast.bridge.LongCodec
+import com.vynatix.holdfast.bridge.StringCodec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -26,7 +26,7 @@ private object CreditCentsValidator : BoxedValidator<Long, CreditCents>() {
     override val specs = listOf(
         Spec(
             listOf(
-                object : com.vynatix.validation.Rule<Long>("positive", "must be positive") {
+                object : com.vynatix.hallmark.Rule<Long>("positive", "must be positive") {
                     override fun validate(value: Long) = value > 0
                 },
             ),
@@ -60,6 +60,6 @@ class BoxedCodecTest {
     fun decodeOfPersistedInvalidPrimitiveThrowsValidationException() {
         val codec = BoxedCodec(StringCodec, TokenValidator)
         // simulate persisted primitive that no longer satisfies MinLengthRule(5)
-        assertFailsWith<ValidationException> { codec.decode("ab") }
+        assertFailsWith<HallmarkException> { codec.decode("ab") }
     }
 }

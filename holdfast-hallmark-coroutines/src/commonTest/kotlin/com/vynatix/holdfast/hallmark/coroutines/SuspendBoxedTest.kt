@@ -1,14 +1,14 @@
-package com.vynatix.vault.validation.coroutines
+package com.vynatix.holdfast.hallmark.coroutines
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.SpecMode
-import com.vynatix.validation.ValidationException
-import com.vynatix.validation.coroutines.SuspendBoxedValidator
-import com.vynatix.validation.coroutines.SuspendRule
-import com.vynatix.validation.coroutines.SuspendSpec
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
-import com.vynatix.vault.validation.boxed
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.SpecMode
+import com.vynatix.hallmark.HallmarkException
+import com.vynatix.hallmark.coroutines.SuspendBoxedValidator
+import com.vynatix.hallmark.coroutines.SuspendRule
+import com.vynatix.hallmark.coroutines.SuspendSpec
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.hallmark.boxed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -28,11 +28,11 @@ private class UniqueUsernameRule(private val taken: Set<String>) :
     }
 }
 
-private object UsernameLeafValidator : com.vynatix.validation.BoxedValidator<String, Username>() {
+private object UsernameLeafValidator : com.vynatix.hallmark.BoxedValidator<String, Username>() {
     override val specs = listOf(
-        com.vynatix.validation.Spec(
+        com.vynatix.hallmark.Spec(
             listOf(
-                object : com.vynatix.validation.Rule<String>("username.format", "alphanumeric") {
+                object : com.vynatix.hallmark.Rule<String>("username.format", "alphanumeric") {
                     override fun validate(value: String) = value.all { it.isLetterOrDigit() }
                 },
             ),
@@ -47,7 +47,7 @@ private class UniqueUsernameValidator(taken: Set<String>) : SuspendBoxedValidato
     )
 }
 
-private class UserVault : Vault<UserVault>() {
+private class UserVault : Holdfast<UserVault>() {
     val username by boxed(UsernameLeafValidator) { "init" }
 }
 
@@ -69,6 +69,6 @@ class SuspendBoxedTest {
         assertIs<TransactionResult.Error>(r)
         // Initial value preserved
         assertEquals("init", v.username.value.value)
-        assertEquals(true, r.exception is ValidationException)
+        assertEquals(true, r.exception is HallmarkException)
     }
 }

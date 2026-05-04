@@ -1,22 +1,22 @@
-@file:OptIn(VaultInternalApi::class)
+@file:OptIn(HoldfastInternalApi::class)
 
-package com.vynatix.vault.testing.internal
+package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.TransactionStatus
-import com.vynatix.vault.Vault
-import com.vynatix.vault.VaultInternalApi
-import com.vynatix.vault.testing.Capture
-import com.vynatix.vault.testing.EmissionEvent
-import com.vynatix.vault.testing.MiddlewareCompleted
-import com.vynatix.vault.testing.MiddlewareErrored
-import com.vynatix.vault.testing.MiddlewareStarted
-import com.vynatix.vault.testing.TransactionCommitted
-import com.vynatix.vault.testing.TransactionErrored
-import com.vynatix.vault.testing.TransactionRolledBack
-import com.vynatix.vault.testing.TransactionStarted
-import com.vynatix.vault.testing.VaultEvent
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.HoldfastInternalApi
+import com.vynatix.holdfast.testing.Capture
+import com.vynatix.holdfast.testing.EmissionEvent
+import com.vynatix.holdfast.testing.MiddlewareCompleted
+import com.vynatix.holdfast.testing.MiddlewareErrored
+import com.vynatix.holdfast.testing.MiddlewareStarted
+import com.vynatix.holdfast.testing.TransactionCommitted
+import com.vynatix.holdfast.testing.TransactionErrored
+import com.vynatix.holdfast.testing.TransactionRolledBack
+import com.vynatix.holdfast.testing.TransactionStarted
+import com.vynatix.holdfast.testing.HoldfastEvent
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.channels.SendChannel
@@ -30,8 +30,8 @@ import kotlin.time.Clock
  *  1. **TransactionStarted** + **MiddlewareStarted (self)** — pushed from
  *     `onTransactionStarted`, before the body runs.
  *  2. **EmissionEvent** — pushed from `onTransactionCompleted`, one per state
- *     in [com.vynatix.vault.Transaction.modifiedStates]. The hook runs after
- *     the body returns successfully and BEFORE :vault calls `txn.commit()`,
+ *     in [com.vynatix.holdfast.Transaction.modifiedStates]. The hook runs after
+ *     the body returns successfully and BEFORE :holdfast calls `txn.commit()`,
  *     so `state.value` (read-your-own-writes overlay) returns the pending
  *     post-set value. To compute `oldValue` (the COMMITTED view, pre-action)
  *     we use [PrivilegedHooks.snapshotCommittedStateValues], which briefly
@@ -43,9 +43,9 @@ import kotlin.time.Clock
  *     the tail of `onTransactionCompleted`. The actual `txn.commit()` call
  *     (which applies pending writes and fires observers/bridges) runs
  *     immediately after the middleware chain unwinds, but the recorder cannot
- *     see that boundary from within :vault's existing API. The event is
+ *     see that boundary from within :holdfast's existing API. The event is
  *     recorded "about-to-commit" rather than "post-commit"; in practice the
- *     order in [com.vynatix.vault.testing.VaultHandle.timeline] is identical
+ *     order in [com.vynatix.holdfast.testing.HoldfastHandle.timeline] is identical
  *     because no observable change happens between the two points.
  *  4. **TransactionErrored** + **MiddlewareErrored (self)** + **synthetic
  *     TransactionRolledBack** — pushed from `onTransactionError`. The
@@ -56,18 +56,18 @@ import kotlin.time.Clock
  *
  * Limitations of this v1 strategy (escalated to the issue tracker for v2):
  *  - **Commit-time errors** that happen AFTER the body returns (e.g.
- *    [com.vynatix.vault.Transaction.commit] raising a
- *    [com.vynatix.vault.TransactionException]) are not captured — the recorder
+ *    [com.vynatix.holdfast.Transaction.commit] raising a
+ *    [com.vynatix.holdfast.TransactionException]) are not captured — the recorder
  *    has already pushed [TransactionCommitted] and unwound. The action returns
  *    [TransactionResult.Error] but the timeline reflects the body-success
  *    ordering.
- *  - **User-installed middlewares** are NOT wrapped (no public :vault hook
+ *  - **User-installed middlewares** are NOT wrapped (no public :holdfast hook
  *    exists for replacing entries in the middleware list, and `Middleware.invoke`
  *    is `final`). Their lifecycle events are therefore absent from the timeline.
- *    The recorder pushes self-events for itself so [com.vynatix.vault.testing.VaultHandle.middlewareEventsOf]
+ *    The recorder pushes self-events for itself so [com.vynatix.holdfast.testing.HoldfastHandle.middlewareEventsOf]
  *    is non-empty, but for any user-class M the typed view returns empty.
  *  - **suspendAction** does not run the middleware chain at all (see
- *    `:vault-coroutines.SuspendAction` — middlewares are documented as "NOT
+ *    `:holdfast-coroutines.SuspendAction` — middlewares are documented as "NOT
  *    invoked for 1.1"). The recorder therefore sees no events for suspending
  *    actions. This matches the production contract.
  *
@@ -76,29 +76,29 @@ import kotlin.time.Clock
  * buffer on the owner thread of the in-flight transaction, but reads (via
  * [snapshot]) can happen from any thread.
  */
-internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware<V>() {
+internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middleware<V>() {
 
     private val lock = SynchronizedObject()
-    private val events: MutableList<VaultEvent> = mutableListOf()
+    private val events: MutableList<HoldfastEvent> = mutableListOf()
 
     /**
-     * Live subscribers receiving every freshly-pushed [VaultEvent] via
+     * Live subscribers receiving every freshly-pushed [HoldfastEvent] via
      * [SendChannel.trySend]. Populated by [snapshotAndSubscribe] (used by the
      * `awaiting { ... }` primitive) and cleared via [unsubscribe]. Guarded by
      * the same [lock] as [events] so the replay-then-subscribe sequence in
      * [snapshotAndSubscribe] is atomic with respect to concurrent [push] calls
      * — no event can land between the snapshot copy and the subscribe.
      */
-    private val subscribers: MutableList<SendChannel<VaultEvent>> = mutableListOf()
+    private val subscribers: MutableList<SendChannel<HoldfastEvent>> = mutableListOf()
 
     /** Most recent transaction this recorder observed, regardless of outcome. */
     @kotlin.concurrent.Volatile
-    private var _lastTransaction: com.vynatix.vault.Transaction? = null
-    val lastTransaction: com.vynatix.vault.Transaction? get() = _lastTransaction
+    private var _lastTransaction: com.vynatix.holdfast.Transaction? = null
+    val lastTransaction: com.vynatix.holdfast.Transaction? get() = _lastTransaction
 
     /**
      * Most recent [TransactionResult] this recorder observed. Set by
-     * [recordResult], called from the [com.vynatix.vault.testing.VaultHandle]'s
+     * [recordResult], called from the [com.vynatix.holdfast.testing.HoldfastHandle]'s
      * action passthrough so the recorder sees the final result (post-commit
      * Success or post-rollback Error).
      */
@@ -107,7 +107,7 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
     val lastResult: TransactionResult<*>? get() = _lastResult
 
     /** Defensive copy; safe to iterate after return. */
-    fun snapshot(): List<VaultEvent> = synchronized(lock) { events.toList() }
+    fun snapshot(): List<HoldfastEvent> = synchronized(lock) { events.toList() }
 
     /**
      * Append [event] to the buffer, applying [Capture]'s policy. [Capture.None]
@@ -124,7 +124,7 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
      * already closed (e.g. an `awaiting` call is mid-cleanup) the failure is
      * silently swallowed by trySend.
      */
-    fun push(event: VaultEvent) {
+    fun push(event: HoldfastEvent) {
         if (capture is Capture.None) return
         synchronized(lock) {
             events.add(event)
@@ -147,7 +147,7 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
      * a clean cut, with each event delivered exactly once via either the
      * replay list or the channel.
      */
-    fun snapshotAndSubscribe(channel: SendChannel<VaultEvent>, out: MutableList<VaultEvent>) {
+    fun snapshotAndSubscribe(channel: SendChannel<HoldfastEvent>, out: MutableList<HoldfastEvent>) {
         synchronized(lock) {
             out.addAll(events)
             subscribers.add(channel)
@@ -159,7 +159,7 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
      * that was never subscribed (a no-op then) and on one that is already
      * closed — the recorder does not own the channel's lifecycle.
      */
-    fun unsubscribe(channel: SendChannel<VaultEvent>) {
+    fun unsubscribe(channel: SendChannel<HoldfastEvent>) {
         synchronized(lock) {
             subscribers.removeAll { it === channel }
         }
@@ -173,7 +173,7 @@ internal class Recorder<V : Vault<V>>(private val capture: Capture) : Middleware
      * Drop every recorded event and clear bookkeeping. Called from the test
      * scope's tearDown so a leaked handle reference doesn't keep events alive.
      * Does NOT detach this recorder from the vault's middleware list — that
-     * happens via [com.vynatix.vault.Vault.clearMiddleware] in the same
+     * happens via [com.vynatix.holdfast.Holdfast.clearMiddleware] in the same
      * tearDown path.
      */
     fun dispose() {

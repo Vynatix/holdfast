@@ -1,6 +1,6 @@
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 import platform.Foundation.NSTemporaryDirectory
 import kotlin.uuid.ExperimentalUuidApi

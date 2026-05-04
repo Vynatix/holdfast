@@ -1,9 +1,9 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.Vault
-import com.vynatix.vault.bridge.Codec
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.bridge.Codec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 /**
  * Bridge variant that extends [Bridge] with await-completion persistence semantics.
  *
- * `:vault-coroutines` 2.0 ships two ways of binding a `SuspendingKvStore` to vault state:
+ * `:holdfast-coroutines` 2.0 ships two ways of binding a `SuspendingKvStore` to vault state:
  *
  *  1. **Fire-and-forget** — [SuspendingKvStore.bridge] returns a plain `Bridge<T>`
  *     whose [Bridge.publish] schedules a save on a [Channel] with [Channel.CONFLATED]
@@ -83,7 +83,7 @@ interface SuspendingBridge<T : Any> : Bridge<T> {
  * @param key Storage key under which the encoded value is persisted.
  * @param codec String-codec for [T].
  * @param scope Coroutine scope hosting the channel drainer, the load job, and
- *   the fire-and-forget [publish] launches. Defaults to [Vault.defaultScope].
+ *   the fire-and-forget [publish] launches. Defaults to [Holdfast.defaultScope].
  * @return A `SuspendingKvBridge.Awaiting<T>` whose [publishAwaited] is wired
  *   to `store.put(key, codec.encode(value))`. The same `errors` flow as the
  *   plain bridge surfaces serialization and store failures.
@@ -91,13 +91,13 @@ interface SuspendingBridge<T : Any> : Bridge<T> {
 fun <T : Any> SuspendingKvStore.suspendingBridge(
     key: String,
     codec: Codec<T>,
-    scope: CoroutineScope = Vault.defaultScope,
+    scope: CoroutineScope = Holdfast.defaultScope,
 ): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
 
 /**
  * K2 context-parameter overload of [SuspendingKvStore.suspendingBridge]. Resolves the
  * bridge's driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
- * block instead of from [Vault.defaultScope]. Lets a consumer write
+ * block instead of from [Holdfast.defaultScope]. Lets a consumer write
  *
  * ```
  * context(viewModelScope: CoroutineScope)
@@ -108,7 +108,7 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
  *
  * without forwarding `viewModelScope` explicitly. Coexists with the default-param
  * overload — outside any `context(...)` block the call site resolves to the
- * default-param form and falls back to [Vault.defaultScope].
+ * default-param form and falls back to [Holdfast.defaultScope].
  *
  * Behavior is identical otherwise: see [SuspendingKvStore.suspendingBridge] for the
  * full contract.
@@ -147,7 +147,7 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
  * @param key Storage key under which the encoded value is persisted.
  * @param codec String-codec for [T].
  * @param scope Coroutine scope hosting the channel drainer and load job.
- *   Defaults to [Vault.defaultScope].
+ *   Defaults to [Holdfast.defaultScope].
  * @return A plain `Bridge<T>` (NOT a `SuspendingBridge<T>` — the
  *   await-completion factory is [suspendingBridge]). The returned bridge also
  *   exposes an `errors: SharedFlow<Throwable>` field via [SuspendingKvBridge].
@@ -155,13 +155,13 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
 fun <T : Any> SuspendingKvStore.bridge(
     key: String,
     codec: Codec<T>,
-    scope: CoroutineScope = Vault.defaultScope,
+    scope: CoroutineScope = Holdfast.defaultScope,
 ): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
 
 /**
  * K2 context-parameter overload of [SuspendingKvStore.bridge]. Resolves the bridge's
  * driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
- * block instead of from [Vault.defaultScope]. Lets a consumer write
+ * block instead of from [Holdfast.defaultScope]. Lets a consumer write
  *
  * ```
  * context(viewModelScope: CoroutineScope)
@@ -172,7 +172,7 @@ fun <T : Any> SuspendingKvStore.bridge(
  *
  * without forwarding `viewModelScope` explicitly. Coexists with the default-param
  * overload — outside any `context(...)` block the call site resolves to the
- * default-param form and falls back to [Vault.defaultScope].
+ * default-param form and falls back to [Holdfast.defaultScope].
  *
  * Behavior is identical otherwise: see [SuspendingKvStore.bridge] for the full contract.
  */

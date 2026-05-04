@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.Dispatchers
@@ -11,12 +11,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class BridgeTestVault : Vault<BridgeTestVault>() {
+private class BridgeTestVault : Holdfast<BridgeTestVault>() {
     val count by state { 0 }
     val text by state { "init" }
 }
 
-private class TransformingBridgeVault : Vault<TransformingBridgeVault>() {
+private class TransformingBridgeVault : Holdfast<TransformingBridgeVault>() {
     val n by state(IntDoublerTransformer()) { 0 }
 }
 

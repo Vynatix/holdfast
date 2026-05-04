@@ -1,13 +1,13 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("astrid.kmp.library")
-    id("astrid.kmp.jvm")
-    id("astrid.kmp.wasmJs")
-    id("astrid.quality")
-    id("astrid.dokka")
-    id("astrid.abi")
-    id("astrid.publish.sonatype")
+    id("holdfast.kmp.library")
+    id("holdfast.kmp.jvm")
+    id("holdfast.kmp.wasmJs")
+    id("holdfast.quality")
+    id("holdfast.dokka")
+    id("holdfast.abi")
+    id("holdfast.publish.sonatype")
 }
 
 kotlin {
@@ -19,7 +19,7 @@ kotlin {
     }
 
     android {
-        namespace = "com.vynatix.vault.coroutines"
+        namespace = "com.vynatix.holdfast.coroutines"
     }
 
     jvm {
@@ -52,7 +52,7 @@ kotlin {
         }
 
         commonMain.dependencies {
-            api(project(":vault"))
+            api(project(":holdfast"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.atomicfu)
         }

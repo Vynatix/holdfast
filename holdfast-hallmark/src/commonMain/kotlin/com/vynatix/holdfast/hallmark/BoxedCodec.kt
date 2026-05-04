@@ -1,15 +1,15 @@
-package com.vynatix.vault.validation
+package com.vynatix.holdfast.hallmark
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.Validator
-import com.vynatix.vault.bridge.Codec
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.Validator
+import com.vynatix.holdfast.bridge.Codec
 
 /**
- * Persists a [Boxed] [O] through any Vault [Codec] pipeline.
+ * Persists a [Boxed] [O] through any Holdfast [Codec] pipeline.
  *
  * Encoding strips the wrapper and delegates to [primitiveCodec]; decoding
  * runs the primitive through [validator] to re-wrap. Throws
- * [com.vynatix.validation.ValidationException] on decode if the persisted
+ * [com.vynatix.hallmark.HallmarkException] on decode if the persisted
  * primitive no longer validates (e.g. constraints tightened across versions).
  *
  * ```kotlin

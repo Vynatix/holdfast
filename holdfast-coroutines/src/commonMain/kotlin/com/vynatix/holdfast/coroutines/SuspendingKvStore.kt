@@ -1,7 +1,7 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 /**
- * Suspending peer of `com.vynatix.vault.bridge.KvStore`. Same shape — `get`, `put`,
+ * Suspending peer of `com.vynatix.holdfast.bridge.KvStore`. Same shape — `get`, `put`,
  * `remove`, `snapshot` — lifted into the suspending world. Designed for backends
  * whose I/O is genuinely async: DataStore, SQLDelight, Realm, network-backed stores.
  *
@@ -10,7 +10,7 @@ package com.vynatix.vault.coroutines
  *
  * The companion sync `KvStore` remains the right choice for in-memory or fast-blocking
  * backends. Use this interface only when await-completion semantics are needed
- * (consumed by `:vault-coroutines.suspendAction` via `SuspendingBridge`).
+ * (consumed by `:holdfast-coroutines.suspendAction` via `SuspendingBridge`).
  */
 interface SuspendingKvStore {
     suspend fun get(key: String): String?

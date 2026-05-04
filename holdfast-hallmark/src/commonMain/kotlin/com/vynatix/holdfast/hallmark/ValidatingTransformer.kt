@@ -1,14 +1,14 @@
-package com.vynatix.vault.validation
+package com.vynatix.holdfast.hallmark
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.ValidationException
-import com.vynatix.validation.ValidationResult
-import com.vynatix.validation.Validator
-import com.vynatix.vault.Transformer
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.HallmarkException
+import com.vynatix.hallmark.HallmarkResult
+import com.vynatix.hallmark.Validator
+import com.vynatix.holdfast.Transformer
 
 /**
- * A Vault [Transformer] that re-validates a [Boxed]'s primitive against its
- * [Validator] on every write. A failed validation throws [ValidationException]
+ * A Holdfast [Transformer] that re-validates a [Boxed]'s primitive against its
+ * [Validator] on every write. A failed validation throws [HallmarkException]
  * inside the transformer's `set`, which propagates to the enclosing
  * `action { … }` and rolls every state mutation in the transaction back.
  *
@@ -23,8 +23,8 @@ import com.vynatix.vault.Transformer
 class ValidatingTransformer<P : Any, O : Boxed<P>>(private val validator: Validator<P, O>) : Transformer<O> {
     override fun set(value: O): O {
         val result = validator.validate(value.value)
-        if (result is ValidationResult.Failure) {
-            throw ValidationException(result.violations)
+        if (result is HallmarkResult.Failure) {
+            throw HallmarkException(result.violations)
         }
         return value
     }

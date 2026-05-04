@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlin.reflect.KProperty
 
@@ -28,7 +28,7 @@ interface Bridge<T : Any> :
     Observable<T>,
     Publisher<T>
 
-/** Lazy initial-value provider for [Vault.state]. */
+/** Lazy initial-value provider for [Holdfast.state]. */
 fun interface Initializer<T : Any> : () -> T
 
 /**
@@ -41,7 +41,7 @@ interface State<T : Any> {
 }
 
 /**
- * Property delegate produced by [Vault.state]. Returns the same `State<T>` on
+ * Property delegate produced by [Holdfast.state]. Returns the same `State<T>` on
  * every access — delegate identity is preserved.
  */
 fun interface StateDelegate<T : Any> {

@@ -1,10 +1,10 @@
-package com.vynatix.vault.compose
+package com.vynatix.holdfast.compose
 
 import androidx.compose.runtime.Composable
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Holdfast
 import kotlin.test.Test
 
-private class ComposeBindingsVault : Vault<ComposeBindingsVault>() {
+private class ComposeBindingsVault : Holdfast<ComposeBindingsVault>() {
     val n by state { 0 }
     val s by state { "init" }
 }
@@ -34,7 +34,7 @@ class ComposeBindingsCompileTest {
             n.value
             s.value
             rememberDisposable {
-                com.vynatix.vault.Disposable { /* no-op */ }
+                com.vynatix.holdfast.Disposable { /* no-op */ }
             }
         }
         // Reference render to keep the closure in scope.

@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,10 +25,10 @@ private sealed class SupportEvent {
 }
 
 /**
- * Vault that mixes in [Eventful] via [EventfulSupport] delegation. The class
- * extends [Vault] (not [EventfulVault]) and binds the support helper in init —
+ * Holdfast that mixes in [Eventful] via [EventfulSupport] delegation. The class
+ * extends [Holdfast] (not [EventfulHoldfast]) and binds the support helper in init —
  * the contract proven by the test is that this composition delivers the same
- * commit-phase ordering as [EventfulVault].
+ * commit-phase ordering as [EventfulHoldfast].
  *
  * The constructor takes the [EventfulSupport] as a private parameter so the
  * same instance is referenced by both the supertype delegation and the
@@ -36,7 +36,7 @@ private sealed class SupportEvent {
  * `SupportVault()`.
  */
 private class SupportVault private constructor(private val support: EventfulSupport<SupportEvent>) :
-    Vault<SupportVault>(),
+    Holdfast<SupportVault>(),
     Eventful<SupportEvent> by support {
     constructor() : this(EventfulSupport())
 
@@ -112,7 +112,7 @@ class EventfulSupportTest {
 
     @Test fun stateEffectFiresBeforeEventCollector() = runBlocking {
         // Master verticality: a collector subscribed to BOTH the state and the
-        // events sees the state value before the event — same as EventfulVault.
+        // events sees the state value before the event — same as EventfulHoldfast.
         // We use `effect` (sync state observer) rather than asFlow so the order
         // of observation is deterministic relative to commit-phase fanout.
         val v = SupportVault()

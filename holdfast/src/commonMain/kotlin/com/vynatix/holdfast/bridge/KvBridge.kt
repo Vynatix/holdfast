@@ -1,7 +1,7 @@
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 
 /**
  * Generic save-on-commit + load-on-attach [Bridge] backed by a [KvStore].

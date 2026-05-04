@@ -1,6 +1,6 @@
 # The Vault Library — Complete Guide
 
-`com.vynatix.vault` is a Kotlin Multiplatform state-management library built around
+`com.vynatix.holdfast` is a Kotlin Multiplatform state-management library built around
 **transactional state**: every mutation lives inside a transaction; observers see only
 committed values; failed transactions never leak. It has no Compose dependency, no
 coroutine dependency in its API, and no dependencies on Android or iOS frameworks.
@@ -75,7 +75,7 @@ extensions like `infix fun State<T>.mutate(T)` resolve against the concrete
 vault type.
 
 ```kotlin
-class CounterVault : Vault<CounterVault>() {
+class CounterHoldfast : Holdfast<CounterHoldfast>() {
     val count by state { 0 }
     val label by state { "initial" }
     val email by state(EmailNormalizer()) { "" }   // with transformer
@@ -85,7 +85,7 @@ class CounterVault : Vault<CounterVault>() {
 ### Type hierarchy at a glance
 
 ```
-Vault<Self>                         abstract base; holds states + middleware + active txn
+Holdfast<Self>                         abstract base; holds states + middleware + active txn
  ├── state(transformer?, init)      registers a MutableState by property name
  ├── action { … }                   transactional batch
  ├── invoke { … }                   plain context block (just runs the lambda)
@@ -109,12 +109,12 @@ Disposable                          single dispose() method
 
 ```
 vault/src/commonMain/kotlin/com/vynatix/vault/
-  Vault.kt          base class, action/mutate/effect/bridge/invoke, ownership check
+  Holdfast.kt          base class, action/mutate/effect/bridge/invoke, ownership check
   MutableState.kt   per-state observers, bridge, transformer, applyCommitted
   Transaction.kt    pendingWrites, commit/rollback, status state machine
   Middleware.kt     three-hook interceptor with metadata bag
   Contract.kt       State, Bridge, Transformer, Initializer, StateDelegate, Disposable
-  VaultLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
+  HoldfastLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
   UUID.kt           v4 UUID generator (used for unnamed transactions)
   platform/
     Threading.kt    expect currentThreadId, threadYield
@@ -126,7 +126,7 @@ vault/src/commonMain/kotlin/com/vynatix/vault/
 
 ```kotlin
 // 1. Define a vault.
-class TodoVault : Vault<TodoVault>() {
+class TodoVault : Holdfast<TodoVault>() {
     val items by state { emptyList<String>() }
     val draft by state { "" }
 }
@@ -171,7 +171,7 @@ it; subsequent reads of the same property return the same `State` (delegate
 identity is preserved across reads).
 
 ```kotlin
-class Profile : Vault<Profile>() {
+class Profile : Holdfast<Profile>() {
     val name by state { "anon" }                    // identity transformer
     val email by state(EmailNormalizer()) { "" }    // applies on set/get
     val tags by state { emptySet<String>() }        // any T : Any
@@ -219,7 +219,7 @@ vault action {           // T_outer
 
 ### 4.3 `mutate(value)` — Write
 
-`State<T>.mutate(T)` is an extension on `Vault<Self>`. It buffers the
+`State<T>.mutate(T)` is an extension on `Holdfast<Self>`. It buffers the
 post-`transformer.set` value into the active transaction's `pendingWrites`.
 
 ```kotlin
@@ -287,13 +287,13 @@ observers, but does NOT call `publish` again — preventing publish loops.
 
 ### 4.6 `middlewares(...)` — Intercept
 
-`Vault.middlewares(vararg)` registers middleware that wrap every transaction.
+`Holdfast.middlewares(vararg)` registers middleware that wrap every transaction.
 Each middleware sees `onTransactionStarted` before the body runs,
 `onTransactionCompleted` after the body returns successfully, and
 `onTransactionError` if the body throws.
 
 ```kotlin
-class Logger<V : Vault<V>> : Middleware<V>() {
+class Logger<V : Holdfast<V>> : Middleware<V>() {
     override fun onTransactionStarted(c: MiddlewareContext<V>) =
         log("→ ${c.transaction.id}")
     override fun onTransactionCompleted(c: MiddlewareContext<V>) =
@@ -320,7 +320,7 @@ and no transaction. It exists so vault-extension members like `effect` and
 `bridge` can be called with vault-as-receiver:
 
 ```kotlin
-val d = vault { count effect { … } }      // effect is an extension on Vault<Self>
+val d = vault { count effect { … } }      // effect is an extension on Holdfast<Self>
 val v = vault { count.value }             // plain read
 ```
 
@@ -572,7 +572,7 @@ a separate state).
 
 | | `effect` | `bridge` | `Middleware` |
 |---|---|---|---|
-| Granularity | per-state | per-state | per-vault (all transactions) |
+| Granularity | per-state | per-state | per-holdfast (all transactions) |
 | When it fires | per-commit, on changed states | outbound: per-commit / inbound: any time | start, complete, error of every txn |
 | Has access to the transaction | no | no | yes (in `MiddlewareContext`) |
 | Can mutate state | yes (via action) | yes (via observe→applyFromBridge) | yes (next() runs body, can wrap with logic) |
@@ -621,7 +621,7 @@ control over edge values like a sentinel "not loaded" instance.
 ### 9.1 Logging every transaction
 
 ```kotlin
-class Logger<V : Vault<V>>(private val tag: String) : Middleware<V>() {
+class Logger<V : Holdfast<V>>(private val tag: String) : Middleware<V>() {
     override fun onTransactionStarted(c: MiddlewareContext<V>) {
         c.metadata["start"] = Clock.System.now().toEpochMilliseconds()
         println("$tag → ${c.transaction.id}")
@@ -640,8 +640,8 @@ vault.middlewares(Logger("Counter"))
 ### 9.2 Validation that aborts the transaction
 
 ```kotlin
-class NonNegativeBalance : Middleware<AccountVault>() {
-    override fun onTransactionCompleted(c: MiddlewareContext<AccountVault>) {
+class NonNegativeBalance : Middleware<AccountHoldfast>() {
+    override fun onTransactionCompleted(c: MiddlewareContext<AccountHoldfast>) {
         // Pending writes already buffered; check against current view.
         if (c.vault.balance.value < 0)
             error("Balance cannot go negative")
@@ -656,7 +656,7 @@ balance never becomes visible.
 ### 9.3 Optimistic UI with manual rollback
 
 ```kotlin
-class Composer : Vault<Composer>() {
+class Composer : Holdfast<Composer>() {
     val text by state { "" }
     val sending by state { false }
     val lastError by state<Throwable> { NoError }
@@ -743,7 +743,7 @@ The library has no native `derive(other) { … }` operator. The two idioms:
 **Read-only derived (compute on demand):** define a vault function.
 
 ```kotlin
-class CartVault : Vault<CartVault>() {
+class CartVault : Holdfast<CartVault>() {
     val items by state { emptyList<Line>() }
     fun total(): Money = items.value.sumOf { it.price * it.qty }
 }
@@ -752,7 +752,7 @@ class CartVault : Vault<CartVault>() {
 **Stored derived (compute in the action that updates the source):**
 
 ```kotlin
-class CartVault : Vault<CartVault>() {
+class CartVault : Holdfast<CartVault>() {
     val items by state { emptyList<Line>() }
     val total by state { Money.Zero }
     fun add(line: Line) = action {
@@ -916,7 +916,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun mutationFiresObserverOnce() {
-    val v = CounterVault()
+    val v = CounterHoldfast()
     val seen = mutableListOf<Int>()
     val sub = v { count effect { seen.add(this) } }
     seen.clear()
@@ -930,7 +930,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun rolledBackMutationsAreInvisible() {
-    val v = CounterVault()
+    val v = CounterHoldfast()
     val seen = mutableListOf<Int>()
     val sub = v { count effect { seen.add(this) } }
     seen.clear()
@@ -948,10 +948,10 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun bareMutateFiresMiddleware() {
-    val v = CounterVault()
+    val v = CounterHoldfast()
     var calls = 0
-    v.middlewares(object : Middleware<CounterVault>() {
-        override fun onTransactionStarted(c: MiddlewareContext<CounterVault>) { calls++ }
+    v.middlewares(object : Middleware<CounterHoldfast>() {
+        override fun onTransactionStarted(c: MiddlewareContext<CounterHoldfast>) { calls++ }
     })
     v { count mutate 42 }
     assertEquals(1, calls)
@@ -962,8 +962,8 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun foreignStateRejected() {
-    val a = CounterVault()
-    val b = CounterVault()
+    val a = CounterHoldfast()
+    val b = CounterHoldfast()
     val foreign = a.count
     val r = b action { foreign mutate 99 }
     assertIs<TransactionResult.Error>(r)
@@ -975,7 +975,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun noLostUpdatesUnder8Threads() = runBlocking {
-    val v = CounterVault()
+    val v = CounterHoldfast()
     val workers = 8; val perWorker = 200
     coroutineScope {
         repeat(workers) {
@@ -1008,7 +1008,7 @@ never T1's pending writes.
 
 ## 13. API Reference
 
-### `Vault<Self>`
+### `Holdfast<Self>`
 
 | Member | Signature | Description |
 |---|---|---|
@@ -1023,7 +1023,7 @@ never T1's pending writes.
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
 
-### Extensions on `State<T>` (member-extensions of `Vault<Self>`)
+### Extensions on `State<T>` (member-extensions of `Holdfast<Self>`)
 
 | Member | Signature | Description |
 |---|---|---|
@@ -1084,7 +1084,7 @@ read. `shouldTransform` lets you skip both for sentinel values (e.g. an
 ### `Middleware<V>`
 
 ```kotlin
-open class Middleware<V : Vault<V>> {
+open class Middleware<V : Holdfast<V>> {
     data class MiddlewareContext<V>(
         val vault: V,
         val transaction: Transaction,
@@ -1114,16 +1114,16 @@ enum class TransactionStatus { Active, Committed, RolledBack, Failed }
 Everything below ships in 1.1 on top of the 1.0 baseline above. Each
 capability is independently usable; pick the ones you need.
 
-### 14.1 `Vault.snapshot()` / `Vault.restore(snapshot)`
+### 14.1 `Holdfast.snapshot()` / `Holdfast.restore(snapshot)`
 
 ```kotlin
-class VaultSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class HoldfastSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
     val stateNames: Set<String>
     val size: Int
 }
 
-fun <V : Vault<V>> V.snapshot(): VaultSnapshot
-fun <V : Vault<V>> V.restore(snapshot: VaultSnapshot): TransactionResult<Unit>
+fun <V : Holdfast<V>> V.snapshot(): HoldfastSnapshot
+fun <V : Holdfast<V>> V.restore(snapshot: HoldfastSnapshot): TransactionResult<Unit>
 ```
 
 `snapshot` captures the raw stored value of every state that has been
@@ -1141,11 +1141,11 @@ Restore-time bridge publish: yes. Detach bridges first if the snapshot
 shouldn't echo back to your persistence layer. Restore of an unknown state
 name throws (caught by the wrapping action → `TransactionResult.Error`).
 
-### 14.2 `Vault.computed { }` / `Vault.derived(sources) { }`
+### 14.2 `Holdfast.computed { }` / `Holdfast.derived(sources) { }`
 
 ```kotlin
-fun <V : Vault<V>, T : Any> V.computed(compute: V.() -> T): State<T>
-fun <V : Vault<V>, T : Any> V.derived(
+fun <V : Holdfast<V>, T : Any> V.computed(compute: V.() -> T): State<T>
+fun <V : Holdfast<V>, T : Any> V.derived(
     vararg sources: State<*>,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable>
@@ -1159,21 +1159,21 @@ fun <V : Vault<V>, T : Any> V.derived(
   The returned `State<T>` is a real observable state — use `effect` to
   subscribe.
 
-The recompute is deferred via `Vault.postCommit` (an internal queue) so
+The recompute is deferred via `Holdfast.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
 Disposing the `Disposable` stops recomputation.
 
 ### 14.3 `atomic(vararg vaults) { body }`
 
 ```kotlin
-fun <R> atomic(vararg vaults: Vault<*>, body: () -> R): TransactionResult<R>
+fun <R> atomic(vararg vaults: Holdfast<*>, body: () -> R): TransactionResult<R>
 ```
 
 Brackets multiple vaults' transactions so they commit-or-rollback together.
 Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
 frame as savepoints of each vault's root. On body throw, every vault is
 rolled back; on body return, every vault commits in lock order with
-sequential observer fanout per-vault.
+sequential observer fanout per-holdfast.
 
 ```kotlin
 val r = atomic(accountA, accountB) {
@@ -1182,11 +1182,11 @@ val r = atomic(accountA, accountB) {
 }
 ```
 
-Vaults are sorted by `Vault.lockOrderKey` (process-monotonic, set at
+Vaults are sorted by `Holdfast.lockOrderKey` (process-monotonic, set at
 construction) before lock acquisition — deadlock-safe across any
 combination. Nested `atomic` is supported via reentrant locks.
 
-### 14.4 `EncryptingTransformer` + `Cipher` (`com.vynatix.vault.crypto`)
+### 14.4 `EncryptingTransformer` + `Cipher` (`com.vynatix.holdfast.crypto`)
 
 ```kotlin
 interface Cipher {
@@ -1209,7 +1209,7 @@ Production users implement `Cipher` over `javax.crypto` (JVM) or
 CryptoKit (iOS) — typically AES-GCM with a per-state IV embedded in
 the encoded output.
 
-### 14.5 `FileSystemKvStore` (`com.vynatix.vault.bridge`)
+### 14.5 `FileSystemKvStore` (`com.vynatix.holdfast.bridge`)
 
 ```kotlin
 expect class FileSystemKvStore(rootPath: String) : KvStore
@@ -1228,7 +1228,7 @@ vault { balance bridge KvBridge(kv, "balance:1", LongCodec) }
 
 Key encoding: URL-percent-encoded so any String is a safe filename.
 
-### 14.6 Standard middleware (`com.vynatix.vault.middleware`)
+### 14.6 Standard middleware (`com.vynatix.holdfast.middleware`)
 
 ```kotlin
 class LoggingMiddleware<V>(tag: String, log: (String) -> Unit = ::println)
@@ -1241,7 +1241,7 @@ is the outermost middleware (its `onTransactionStarted` runs first; its
 `onTransactionError` runs last). Place logging/audit middleware LAST so
 it sees errors thrown by validation middleware placed earlier.
 
-### 14.7 `KvBridge` + `Codec` + `KvStore` (`com.vynatix.vault.bridge`)
+### 14.7 `KvBridge` + `Codec` + `KvStore` (`com.vynatix.holdfast.bridge`)
 
 ```kotlin
 interface KvStore {
@@ -1267,7 +1267,7 @@ class KvBridge<T : Any>(kv: KvStore, key: String, codec: Codec<T>) : Bridge<T>
 Generic save-on-commit + load-on-attach. Combine with any `KvStore`
 implementation (in-memory, file system, MultiplatformSettings, …).
 
-### 14.8 `:vault-coroutines`
+### 14.8 `:holdfast-coroutines`
 
 ```kotlin
 fun <T : Any> State<T>.asFlow(): Flow<T>
@@ -1277,11 +1277,11 @@ fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T>
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
-suspend fun <V : Vault<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
-Mutually exclusive with blocking `Vault.action` on the same vault via an
+Mutually exclusive with blocking `Holdfast.action` on the same vault via an
 internal coroutine `Mutex` installed lazily. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
@@ -1299,11 +1299,11 @@ under the suspending path.
 Limitations: body should be single-threaded — spawned threads' `mutate`
 calls fall outside the recognized owner.
 
-### 14.9 `:vault-compose`
+### 14.9 `:holdfast-compose`
 
 ```kotlin
 @Composable
-fun <V : Vault<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
+fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
@@ -1318,7 +1318,7 @@ tied to the surrounding Composable.
 
 **Encrypted-at-rest credential**:
 ```kotlin
-class CredsVault : Vault<CredsVault>() {
+class CredsVault : Holdfast<CredsVault>() {
     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
 }
 val kv = FileSystemKvStore("$home/.app/creds")
@@ -1328,7 +1328,7 @@ vault { token bridge KvBridge(kv, "session", StringCodec) }
 
 **Cross-vault transfer with one-line atomicity**:
 ```kotlin
-fun AccountVault.transferTo(other: AccountVault, cents: Long) =
+fun AccountHoldfast.transferTo(other: AccountHoldfast, cents: Long) =
     atomic(this, other) {
         action { balance update { it - cents } }
         other.action { balance update { it + cents } }
@@ -1344,7 +1344,7 @@ val sub = vault { total effect { uiTotal.value = this } }
 
 **Snapshot-and-restore for undo**:
 ```kotlin
-val undoStack = ArrayDeque<VaultSnapshot>()
+val undoStack = ArrayDeque<HoldfastSnapshot>()
 fun saveCheckpoint() { undoStack.addLast(vault.snapshot()) }
 fun undo() = undoStack.removeLastOrNull()?.let { vault.restore(it) }
 ```
@@ -1362,7 +1362,7 @@ val r = vault.suspendAction {
 
 ### 14.11 Validation 0.3.0 — three modules at the boundary
 
-`:validation` is a standalone KMP refinement-types library; `:vault-validation`
+`:validation` is a standalone KMP refinement-types library; `:holdfast-hallmark`
 is a thin Vault adapter on top of it; `:validation-coroutines` adds suspend
 support. The premise: every primitive (`String`, `Long`, …) flowing into your
 domain is validated and wrapped in a typed `Boxed<P>` exactly once, at the
@@ -1373,11 +1373,11 @@ canonical fix for the **primitive obsession** code smell.
 
 | Artifact | Role |
 |---|---|
-| `com.vynatix:validation` | Core lib. No Vault dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `ValidationResult`. |
+| `com.vynatix:validation` | Core lib. No Vault dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
 | `com.vynatix:validation-coroutines` | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
-| `com.vynatix:vault-validation` | Vault adapter. `ValidatingTransformer`, `Vault.boxed { }` factory, `BoxedCodec`. |
+| `com.vynatix:holdfast-hallmark` | Vault adapter. `ValidatingTransformer`, `Holdfast.boxed { }` factory, `BoxedCodec`. |
 
-#### Core surface (`com.vynatix.validation`)
+#### Core surface (`com.vynatix.hallmark`)
 
 ```kotlin
 interface       Boxed<P : Any>                 { val value: P }
@@ -1390,10 +1390,10 @@ abstract class  Rule<P>(val code: String, val messageTemplate: String) {
 
 data class      Violation(message, path, code, rule, args)
 
-sealed interface ValidationResult<out OUT> {
-    data class Success<OUT>(val value: OUT)   : ValidationResult<OUT>
-    data class Failure(val violations: NonEmptyList<Violation>) : ValidationResult<Nothing>
-    fun getOrThrow(): OUT     // throws ValidationException on Failure
+sealed interface HallmarkResult<out OUT> {
+    data class Success<OUT>(val value: OUT)   : HallmarkResult<OUT>
+    data class Failure(val violations: NonEmptyList<Violation>) : HallmarkResult<Nothing>
+    fun getOrThrow(): OUT     // throws HallmarkException on Failure
     fun getOrNull(): OUT?
 }
 
@@ -1401,8 +1401,8 @@ enum class      SpecMode { ALL, ANY }
 data class      Spec<P : Any, O : Boxed<P>>(rules, mode, factory)
 
 interface       Validator<IN, OUT> {
-    fun validate(value: IN): ValidationResult<OUT>
-    infix fun of(value: IN): OUT              // throws ValidationException on Failure
+    fun validate(value: IN): HallmarkResult<OUT>
+    infix fun of(value: IN): OUT              // throws HallmarkException on Failure
     fun ofOrNull(value: IN): OUT?
 }
 
@@ -1425,18 +1425,18 @@ object EmailValidator : BoxedValidator<String, Email>() {
 }
 
 val email = EmailValidator of "alice@example.com"       // typed Email
-EmailValidator of "not-an-email"                        // throws ValidationException
+EmailValidator of "not-an-email"                        // throws HallmarkException
 
-val r = EmailValidator.validate(" ")                    // returns ValidationResult.Failure
+val r = EmailValidator.validate(" ")                    // returns HallmarkResult.Failure
 when (r) {
-    is ValidationResult.Success -> store(r.value)
-    is ValidationResult.Failure -> r.violations.forEach { v ->
+    is HallmarkResult.Success -> store(r.value)
+    is HallmarkResult.Failure -> r.violations.forEach { v ->
         log("${v.code}: ${v.message} args=${v.args}")
     }
 }
 ```
 
-The 14 prebuilt rules (in `com.vynatix.validation.rules`) cover the basics —
+The 14 prebuilt rules (in `com.vynatix.hallmark.rules`) cover the basics —
 `NonEmptyRule`, `NonBlankRule`, `LengthInRule(IntRange)`, `MinLengthRule(n)`,
 `MaxLengthRule(n)`, `MatchesRule(Regex)`, `StartsWithRule(s)`, `EndsWithRule(s)`,
 `GtRule(n)`, `GteRule(n)`, `LtRule(n)`, `LteRule(n)`, `InRangeRule(range)`,
@@ -1494,7 +1494,7 @@ field segments. A failure inside `user.addresses[2].zip` arrives as
 
 #### Format regex rules
 
-`com.vynatix.validation.rules` ships nine practical-but-not-RFC-strict
+`com.vynatix.hallmark.rules` ships nine practical-but-not-RFC-strict
 format checks: `EmailRule`, `UrlRule`, `UuidRule`, `Ipv4Rule`, `Ipv6Rule`,
 `E164PhoneRule`, `Iso8601DateRule`, `Iso8601DateTimeRule`, `IbanRule`. None
 of these claim full RFC compliance — they target the 95% case used by HTML5
@@ -1541,7 +1541,7 @@ adopter-side.
 Two state factories:
 
 ```kotlin
-class UserVault : Vault<UserVault>() {
+class UserVault : Holdfast<UserVault>() {
     val email       by boxed(EmailValidator) { "init@example.com" }       // State<Email>
     val displayName by boxedHandle(NameValidator) { "init" }              // BoxedHandle<String, Name>
 }
@@ -1597,7 +1597,7 @@ val v = suspendValidator<NewUser> {
     field("displayName", { it.displayName }, DisplayNameValidator)  // sync leaf
 }
 
-val r: ValidationResult<NewUser> = v.validate(NewUser("alice", "Alice"))
+val r: HallmarkResult<NewUser> = v.validate(NewUser("alice", "Alice"))
 ```
 
 The composite DSL accepts either sync or suspend sub-validators via
@@ -1617,18 +1617,18 @@ entire transaction.
 #### Transformer composition — `Transformer.then`
 
 ```kotlin
-import com.vynatix.vault.then
+import com.vynatix.holdfast.then
 
 val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
 
-class UserVault : Vault<UserVault>() {
+class UserVault : Holdfast<UserVault>() {
     val email by state(transformer = pipeline) { /* … */ }
 }
 ```
 
 `then` chains transformers: `set` runs `this.set` then `other.set`; `get`
 runs `other.get` then `this.get` (reverse order, so round-trip preserved).
-Ships in `:vault` core.
+Ships in `:holdfast` core.
 
 #### Migrating from Konform
 
@@ -1641,7 +1641,7 @@ surface. No runtime Konform dep.
 ## Appendix A — One-page cheatsheet
 
 ```kotlin
-class V : Vault<V>() {
+class V : Holdfast<V>() {
     val x by state { 0 }
     val s by state(MyTransformer()) { "" }
     val token by state(EncryptingTransformer(cipher)) { "" }   // 1.1

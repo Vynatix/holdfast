@@ -1,16 +1,16 @@
-package com.vynatix.vault.validation.coroutines
+package com.vynatix.holdfast.hallmark.coroutines
 
-import com.vynatix.validation.Boxed
-import com.vynatix.validation.coroutines.SuspendValidator
-import com.vynatix.vault.State
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.Vault
-import com.vynatix.vault.coroutines.suspendAction
+import com.vynatix.hallmark.Boxed
+import com.vynatix.hallmark.coroutines.SuspendValidator
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.coroutines.suspendAction
 
 /**
  * Run [suspendValidator] against [primitive] (a suspending operation, possibly
  * doing I/O), then atomically mutate [state] with the resulting [Boxed] inside
- * a `suspendAction { }`. Throws [com.vynatix.validation.ValidationException]
+ * a `suspendAction { }`. Throws [com.vynatix.hallmark.HallmarkException]
  * inside the action on validation failure — the action returns
  * [TransactionResult.Error] and every other state write in the transaction
  * rolls back atomically.
@@ -24,7 +24,7 @@ import com.vynatix.vault.coroutines.suspendAction
  * `vault action { state mutate (validator of primitive) }`. The difference is
  * that the validation step itself may suspend (e.g. unique-name lookup).
  */
-suspend fun <V : Vault<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(
+suspend fun <V : Holdfast<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(
     state: State<O>,
     suspendValidator: SuspendValidator<P, O>,
     primitive: P,

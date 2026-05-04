@@ -1,0 +1,538 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-testing>
+open annotation class com.vynatix.holdfast.testing.matcher/TimelineMatcherDsl : kotlin/Annotation { // com.vynatix.holdfast.testing.matcher/TimelineMatcherDsl|null[0]
+    constructor <init>() // com.vynatix.holdfast.testing.matcher/TimelineMatcherDsl.<init>|<init>(){}[0]
+}
+
+abstract interface com.vynatix.holdfast.testing/HoldfastAutoRegistration { // com.vynatix.holdfast.testing/HoldfastAutoRegistration|null[0]
+    open val lastResult // com.vynatix.holdfast.testing/HoldfastAutoRegistration.lastResult|@0:0{0§<com.vynatix.holdfast.Holdfast<0:0>>}lastResult[0]
+        open fun <#A2: com.vynatix.holdfast/Holdfast<#A2>> (#A2).<get-lastResult>(): com.vynatix.holdfast/TransactionResult<*>? // com.vynatix.holdfast.testing/HoldfastAutoRegistration.lastResult.<get-lastResult>|<get-lastResult>@0:0(){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open val lastTransaction // com.vynatix.holdfast.testing/HoldfastAutoRegistration.lastTransaction|@0:0{0§<com.vynatix.holdfast.Holdfast<0:0>>}lastTransaction[0]
+        open fun <#A2: com.vynatix.holdfast/Holdfast<#A2>> (#A2).<get-lastTransaction>(): com.vynatix.holdfast/Transaction? // com.vynatix.holdfast.testing/HoldfastAutoRegistration.lastTransaction.<get-lastTransaction>|<get-lastTransaction>@0:0(){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open val timeline // com.vynatix.holdfast.testing/HoldfastAutoRegistration.timeline|@0:0{0§<com.vynatix.holdfast.Holdfast<0:0>>}timeline[0]
+        open fun <#A2: com.vynatix.holdfast/Holdfast<#A2>> (#A2).<get-timeline>(): kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.timeline.<get-timeline>|<get-timeline>@0:0(){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open val transactions // com.vynatix.holdfast.testing/HoldfastAutoRegistration.transactions|@0:0{0§<com.vynatix.holdfast.Holdfast<0:0>>}transactions[0]
+        open fun <#A2: com.vynatix.holdfast/Holdfast<#A2>> (#A2).<get-transactions>(): kotlin.collections/List<com.vynatix.holdfast.testing/TransactionEvent> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.transactions.<get-transactions>|<get-transactions>@0:0(){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+
+    abstract fun <#A1: com.vynatix.holdfast/Holdfast<#A1>> track(#A1, com.vynatix.holdfast.testing/Capture = ...): com.vynatix.holdfast.testing/HoldfastHandle<#A1> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.track|track(0:0;com.vynatix.holdfast.testing.Capture){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open fun <#A1: com.vynatix.holdfast/Holdfast<#A1>, #B1: com.vynatix.holdfast/Middleware<#A1>> (#A1).middlewareEventsOf(#B1): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.middlewareEventsOf|middlewareEventsOf@0:0(0:1){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<com.vynatix.holdfast.Middleware<0:0>>}[0]
+    open fun <#A1: com.vynatix.holdfast/Holdfast<#A1>, #B1: kotlin/Any?> (#A1).action(kotlin/Function1<#A1, #B1>): com.vynatix.holdfast/TransactionResult<#B1> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.action|action@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any?>}[0]
+    open fun <#A1: com.vynatix.holdfast/Holdfast<#A1>, #B1: kotlin/Any?> (#A1).read(kotlin/Function1<#A1, #B1>): #B1 // com.vynatix.holdfast.testing/HoldfastAutoRegistration.read|read@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any?>}[0]
+    open fun <#A1: com.vynatix.holdfast/Holdfast<#A1>> (#A1).bridgeEvents(kotlin.reflect/KProperty1<#A1, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/BridgeEvent> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.bridgeEvents|bridgeEvents@0:0(kotlin.reflect.KProperty1<0:0,com.vynatix.holdfast.State<*>>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open fun <#A1: com.vynatix.holdfast/Holdfast<#A1>> (#A1).emissions(kotlin.reflect/KProperty1<#A1, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/EmissionEvent> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.emissions|emissions@0:0(kotlin.reflect.KProperty1<0:0,com.vynatix.holdfast.State<*>>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    open suspend fun <#A1: com.vynatix.holdfast/Holdfast<#A1>, #B1: kotlin/Any?> (#A1).suspendAction(kotlin.coroutines/SuspendFunction1<#A1, #B1>): com.vynatix.holdfast/TransactionResult<#B1> // com.vynatix.holdfast.testing/HoldfastAutoRegistration.suspendAction|suspendAction@0:0(kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any?>}[0]
+}
+
+sealed interface com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/EventPredicate|null[0]
+    abstract val description // com.vynatix.holdfast.testing.matcher/EventPredicate.description|{}description[0]
+        abstract fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/EventPredicate.description.<get-description>|<get-description>(){}[0]
+
+    abstract fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/EventPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+sealed interface com.vynatix.holdfast.testing/BridgeEvent : com.vynatix.holdfast.testing/HoldfastEvent { // com.vynatix.holdfast.testing/BridgeEvent|null[0]
+    abstract val state // com.vynatix.holdfast.testing/BridgeEvent.state|{}state[0]
+        abstract fun <get-state>(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/BridgeEvent.state.<get-state>|<get-state>(){}[0]
+}
+
+sealed interface com.vynatix.holdfast.testing/Capture { // com.vynatix.holdfast.testing/Capture|null[0]
+    final class RingBuffer : com.vynatix.holdfast.testing/Capture { // com.vynatix.holdfast.testing/Capture.RingBuffer|null[0]
+        constructor <init>(kotlin/Int) // com.vynatix.holdfast.testing/Capture.RingBuffer.<init>|<init>(kotlin.Int){}[0]
+
+        final val size // com.vynatix.holdfast.testing/Capture.RingBuffer.size|{}size[0]
+            final fun <get-size>(): kotlin/Int // com.vynatix.holdfast.testing/Capture.RingBuffer.size.<get-size>|<get-size>(){}[0]
+
+        final fun component1(): kotlin/Int // com.vynatix.holdfast.testing/Capture.RingBuffer.component1|component1(){}[0]
+        final fun copy(kotlin/Int = ...): com.vynatix.holdfast.testing/Capture.RingBuffer // com.vynatix.holdfast.testing/Capture.RingBuffer.copy|copy(kotlin.Int){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/Capture.RingBuffer.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/Capture.RingBuffer.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast.testing/Capture.RingBuffer.toString|toString(){}[0]
+    }
+
+    final object All : com.vynatix.holdfast.testing/Capture // com.vynatix.holdfast.testing/Capture.All|null[0]
+
+    final object None : com.vynatix.holdfast.testing/Capture // com.vynatix.holdfast.testing/Capture.None|null[0]
+}
+
+sealed interface com.vynatix.holdfast.testing/MiddlewareEvent : com.vynatix.holdfast.testing/HoldfastEvent { // com.vynatix.holdfast.testing/MiddlewareEvent|null[0]
+    abstract val middleware // com.vynatix.holdfast.testing/MiddlewareEvent.middleware|{}middleware[0]
+        abstract fun <get-middleware>(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareEvent.middleware.<get-middleware>|<get-middleware>(){}[0]
+    abstract val transaction // com.vynatix.holdfast.testing/MiddlewareEvent.transaction|{}transaction[0]
+        abstract fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareEvent.transaction.<get-transaction>|<get-transaction>(){}[0]
+}
+
+sealed interface com.vynatix.holdfast.testing/TransactionEvent : com.vynatix.holdfast.testing/HoldfastEvent { // com.vynatix.holdfast.testing/TransactionEvent|null[0]
+    abstract val transaction // com.vynatix.holdfast.testing/TransactionEvent.transaction|{}transaction[0]
+        abstract fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionEvent.transaction.<get-transaction>|<get-transaction>(){}[0]
+}
+
+sealed interface com.vynatix.holdfast.testing/HoldfastEvent { // com.vynatix.holdfast.testing/HoldfastEvent|null[0]
+    abstract val timestamp // com.vynatix.holdfast.testing/HoldfastEvent.timestamp|{}timestamp[0]
+        abstract fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/HoldfastEvent.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.testing.matcher/MiddlewareBuilder { // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder|null[0]
+    constructor <init>(com.vynatix.holdfast.testing.matcher/TimelineMatcher<#A>, kotlin/Function1<com.vynatix.holdfast/Middleware<*>, kotlin/Boolean>?, com.vynatix.holdfast/Middleware<*>?, kotlin/String) // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.<init>|<init>(com.vynatix.holdfast.testing.matcher.TimelineMatcher<1:0>;kotlin.Function1<com.vynatix.holdfast.Middleware<*>,kotlin.Boolean>?;com.vynatix.holdfast.Middleware<*>?;kotlin.String){}[0]
+
+    final val completed // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.completed|{}completed[0]
+        final fun <get-completed>(): com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.completed.<get-completed>|<get-completed>(){}[0]
+    final val errored // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.errored|{}errored[0]
+        final fun <get-errored>(): com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.errored.<get-errored>|<get-errored>(){}[0]
+    final val started // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.started|{}started[0]
+        final fun <get-started>(): com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate // com.vynatix.holdfast.testing.matcher/MiddlewareBuilder.started.<get-started>|<get-started>(){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.testing.matcher/StateMatcher { // com.vynatix.holdfast.testing.matcher/StateMatcher|null[0]
+    final fun <#A1: kotlin/Any> (kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<#A1>>).shouldEqual(#A1) // com.vynatix.holdfast.testing.matcher/StateMatcher.shouldEqual|shouldEqual@kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<0:0>>(0:0){0§<kotlin.Any>}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.testing.matcher/TimelineMatcher { // com.vynatix.holdfast.testing.matcher/TimelineMatcher|null[0]
+    final val committed // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed|{}committed[0]
+        final fun <get-committed>(): com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed.<get-committed>|<get-committed>(){}[0]
+    final val errored // com.vynatix.holdfast.testing.matcher/TimelineMatcher.errored|{}errored[0]
+        final fun <get-errored>(): com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.errored.<get-errored>|<get-errored>(){}[0]
+    final val rolledBack // com.vynatix.holdfast.testing.matcher/TimelineMatcher.rolledBack|{}rolledBack[0]
+        final fun <get-rolledBack>(): com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.rolledBack.<get-rolledBack>|<get-rolledBack>(){}[0]
+    final val started // com.vynatix.holdfast.testing.matcher/TimelineMatcher.started|{}started[0]
+        final fun <get-started>(): com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.started.<get-started>|<get-started>(){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Middleware<*>> middleware(#A1): com.vynatix.holdfast.testing.matcher/MiddlewareBuilder<#A> // com.vynatix.holdfast.testing.matcher/TimelineMatcher.middleware|middleware(0:0){0§<com.vynatix.holdfast.Middleware<*>>}[0]
+    final fun bridgeObserved(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.bridgeObserved|bridgeObserved(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final fun bridgePublished(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.bridgePublished|bridgePublished(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final fun committed(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed|committed(kotlin.String){}[0]
+    final fun emitted(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/EmissionPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.emitted|emitted(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final fun emitted(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>, kotlin/Any?): com.vynatix.holdfast.testing.matcher/EmissionPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.emitted|emitted(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>;kotlin.Any?){}[0]
+    final fun errored(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.errored|errored(kotlin.String){}[0]
+    final fun rolledBack(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.rolledBack|rolledBack(kotlin.String){}[0]
+    final fun started(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.started|started(kotlin.String){}[0]
+    final inline fun <#A1: reified com.vynatix.holdfast/Middleware<*>> middleware(): com.vynatix.holdfast.testing.matcher/MiddlewareBuilder<#A> // com.vynatix.holdfast.testing.matcher/TimelineMatcher.middleware|middleware(){0§<com.vynatix.holdfast.Middleware<*>>}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.testing/HoldfastHandle { // com.vynatix.holdfast.testing/HoldfastHandle|null[0]
+    final val captureMode // com.vynatix.holdfast.testing/HoldfastHandle.captureMode|{}captureMode[0]
+        final fun <get-captureMode>(): com.vynatix.holdfast.testing/Capture // com.vynatix.holdfast.testing/HoldfastHandle.captureMode.<get-captureMode>|<get-captureMode>(){}[0]
+    final val lastResult // com.vynatix.holdfast.testing/HoldfastHandle.lastResult|{}lastResult[0]
+        final fun <get-lastResult>(): com.vynatix.holdfast/TransactionResult<*>? // com.vynatix.holdfast.testing/HoldfastHandle.lastResult.<get-lastResult>|<get-lastResult>(){}[0]
+    final val lastTransaction // com.vynatix.holdfast.testing/HoldfastHandle.lastTransaction|{}lastTransaction[0]
+        final fun <get-lastTransaction>(): com.vynatix.holdfast/Transaction? // com.vynatix.holdfast.testing/HoldfastHandle.lastTransaction.<get-lastTransaction>|<get-lastTransaction>(){}[0]
+    final val timeline // com.vynatix.holdfast.testing/HoldfastHandle.timeline|{}timeline[0]
+        final fun <get-timeline>(): kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent> // com.vynatix.holdfast.testing/HoldfastHandle.timeline.<get-timeline>|<get-timeline>(){}[0]
+    final val transactions // com.vynatix.holdfast.testing/HoldfastHandle.transactions|{}transactions[0]
+        final fun <get-transactions>(): kotlin.collections/List<com.vynatix.holdfast.testing/TransactionEvent> // com.vynatix.holdfast.testing/HoldfastHandle.transactions.<get-transactions>|<get-transactions>(){}[0]
+    final val vault // com.vynatix.holdfast.testing/HoldfastHandle.vault|{}vault[0]
+        final fun <get-vault>(): #A // com.vynatix.holdfast.testing/HoldfastHandle.vault.<get-vault>|<get-vault>(){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Middleware<#A>> middlewareEventsOf(#A1): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/HoldfastHandle.middlewareEventsOf|middlewareEventsOf(0:0){0§<com.vynatix.holdfast.Middleware<1:0>>}[0]
+    final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast.testing/HoldfastHandle.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> read(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast.testing/HoldfastHandle.read|read(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun bridge(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.bridge/BridgeView<*> // com.vynatix.holdfast.testing/HoldfastHandle.bridge|bridge(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final fun bridgeEvents(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/BridgeEvent> // com.vynatix.holdfast.testing/HoldfastHandle.bridgeEvents|bridgeEvents(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final fun consumeAllPendingErrors() // com.vynatix.holdfast.testing/HoldfastHandle.consumeAllPendingErrors|consumeAllPendingErrors(){}[0]
+    final fun emissions(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/EmissionEvent> // com.vynatix.holdfast.testing/HoldfastHandle.emissions|emissions(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
+    final inline fun <#A1: reified com.vynatix.holdfast/Middleware<#A>> middlewareEventsOf(): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/HoldfastHandle.middlewareEventsOf|middlewareEventsOf(){0§<com.vynatix.holdfast.Middleware<1:0>>}[0]
+    final suspend fun <#A1: kotlin/Any?> suspendAction(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast.testing/HoldfastHandle.suspendAction|suspendAction(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/BridgeView { // com.vynatix.holdfast.testing.bridge/BridgeView|null[0]
+    final val lastPublished // com.vynatix.holdfast.testing.bridge/BridgeView.lastPublished|{}lastPublished[0]
+        final fun <get-lastPublished>(): #A? // com.vynatix.holdfast.testing.bridge/BridgeView.lastPublished.<get-lastPublished>|<get-lastPublished>(){}[0]
+    final val published // com.vynatix.holdfast.testing.bridge/BridgeView.published|{}published[0]
+        final fun <get-published>(): kotlin.collections/List<#A> // com.vynatix.holdfast.testing.bridge/BridgeView.published.<get-published>|<get-published>(){}[0]
+
+    final fun receiving(#A) // com.vynatix.holdfast.testing.bridge/BridgeView.receiving|receiving(1:0){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/FailingBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.testing.bridge/FailingBridge|null[0]
+    constructor <init>(#A, com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode, kotlin/Throwable = ...) // com.vynatix.holdfast.testing.bridge/FailingBridge.<init>|<init>(1:0;com.vynatix.holdfast.testing.bridge.FailingBridge.FailureMode;kotlin.Throwable){}[0]
+
+    final val cause // com.vynatix.holdfast.testing.bridge/FailingBridge.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable // com.vynatix.holdfast.testing.bridge/FailingBridge.cause.<get-cause>|<get-cause>(){}[0]
+    final val failOn // com.vynatix.holdfast.testing.bridge/FailingBridge.failOn|{}failOn[0]
+        final fun <get-failOn>(): com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode // com.vynatix.holdfast.testing.bridge/FailingBridge.failOn.<get-failOn>|<get-failOn>(){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.testing.bridge/FailingBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publish(#A): kotlin/Boolean // com.vynatix.holdfast.testing.bridge/FailingBridge.publish|publish(1:0){}[0]
+
+    final enum class FailureMode : kotlin/Enum<com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode> { // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode|null[0]
+        enum entry Both // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.Both|null[0]
+        enum entry Observe // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.Observe|null[0]
+        enum entry Publish // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.Publish|null[0]
+
+        final val entries // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.entries|#static{}entries[0]
+            final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode> // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+        final fun valueOf(kotlin/String): com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.valueOf|valueOf#static(kotlin.String){}[0]
+        final fun values(): kotlin/Array<com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode> // com.vynatix.holdfast.testing.bridge/FailingBridge.FailureMode.values|values#static(){}[0]
+    }
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/LatchedBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.testing.bridge/LatchedBridge|null[0]
+    constructor <init>(#A) // com.vynatix.holdfast.testing.bridge/LatchedBridge.<init>|<init>(1:0){}[0]
+
+    final val lastPublished // com.vynatix.holdfast.testing.bridge/LatchedBridge.lastPublished|{}lastPublished[0]
+        final fun <get-lastPublished>(): #A? // com.vynatix.holdfast.testing.bridge/LatchedBridge.lastPublished.<get-lastPublished>|<get-lastPublished>(){}[0]
+    final val published // com.vynatix.holdfast.testing.bridge/LatchedBridge.published|{}published[0]
+        final fun <get-published>(): kotlin.collections/List<#A> // com.vynatix.holdfast.testing.bridge/LatchedBridge.published.<get-published>|<get-published>(){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.testing.bridge/LatchedBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publish(#A): kotlin/Boolean // com.vynatix.holdfast.testing.bridge/LatchedBridge.publish|publish(1:0){}[0]
+    final fun releasePublish() // com.vynatix.holdfast.testing.bridge/LatchedBridge.releasePublish|releasePublish(){}[0]
+    final fun simulateInbound(#A) // com.vynatix.holdfast.testing.bridge/LatchedBridge.simulateInbound|simulateInbound(1:0){}[0]
+    final suspend fun awaitPublishAttempt(): #A // com.vynatix.holdfast.testing.bridge/LatchedBridge.awaitPublishAttempt|awaitPublishAttempt(){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/RecordingBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.testing.bridge/RecordingBridge|null[0]
+    constructor <init>(#A) // com.vynatix.holdfast.testing.bridge/RecordingBridge.<init>|<init>(1:0){}[0]
+
+    final val lastPublished // com.vynatix.holdfast.testing.bridge/RecordingBridge.lastPublished|{}lastPublished[0]
+        final fun <get-lastPublished>(): #A? // com.vynatix.holdfast.testing.bridge/RecordingBridge.lastPublished.<get-lastPublished>|<get-lastPublished>(){}[0]
+    final val published // com.vynatix.holdfast.testing.bridge/RecordingBridge.published|{}published[0]
+        final fun <get-published>(): kotlin.collections/List<#A> // com.vynatix.holdfast.testing.bridge/RecordingBridge.published.<get-published>|<get-published>(){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.testing.bridge/RecordingBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publish(#A): kotlin/Boolean // com.vynatix.holdfast.testing.bridge/RecordingBridge.publish|publish(1:0){}[0]
+    final fun simulateInbound(#A) // com.vynatix.holdfast.testing.bridge/RecordingBridge.simulateInbound|simulateInbound(1:0){}[0]
+}
+
+final class com.vynatix.holdfast.testing.bridge/FakeKvStore : com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast.testing.bridge/FakeKvStore|null[0]
+    constructor <init>() // com.vynatix.holdfast.testing.bridge/FakeKvStore.<init>|<init>(){}[0]
+
+    final val contents // com.vynatix.holdfast.testing.bridge/FakeKvStore.contents|{}contents[0]
+        final fun <get-contents>(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.testing.bridge/FakeKvStore.contents.<get-contents>|<get-contents>(){}[0]
+
+    final fun clear() // com.vynatix.holdfast.testing.bridge/FakeKvStore.clear|clear(){}[0]
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.holdfast.testing.bridge/FakeKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.holdfast.testing.bridge/FakeKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.holdfast.testing.bridge/FakeKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.testing.bridge/FakeKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException : kotlin.coroutines.cancellation/CancellationException // com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException|null[0]
+
+final class com.vynatix.holdfast.testing.concurrency/Barrier { // com.vynatix.holdfast.testing.concurrency/Barrier|null[0]
+    final suspend fun arrive() // com.vynatix.holdfast.testing.concurrency/Barrier.arrive|arrive(){}[0]
+    final suspend fun await() // com.vynatix.holdfast.testing.concurrency/Barrier.await|await(){}[0]
+}
+
+final class com.vynatix.holdfast.testing.concurrency/OpenTransaction { // com.vynatix.holdfast.testing.concurrency/OpenTransaction|null[0]
+    final val isClosed // com.vynatix.holdfast.testing.concurrency/OpenTransaction.isClosed|{}isClosed[0]
+        final fun <get-isClosed>(): kotlin/Boolean // com.vynatix.holdfast.testing.concurrency/OpenTransaction.isClosed.<get-isClosed>|<get-isClosed>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing.concurrency/OpenTransaction.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing.concurrency/OpenTransaction.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final suspend fun commit(): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast.testing.concurrency/OpenTransaction.commit|commit(){}[0]
+    final suspend fun rollback() // com.vynatix.holdfast.testing.concurrency/OpenTransaction.rollback|rollback(){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/EmissionPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/EmissionPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/EmissionPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/EmissionPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/EmissionPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/MiddlewareCompletedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/MiddlewareErroredPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/MiddlewareStartedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate : com.vynatix.holdfast.testing.matcher/EventPredicate { // com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate|null[0]
+    final val description // com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate.description.<get-description>|<get-description>(){}[0]
+
+    final fun matches(com.vynatix.holdfast.testing/HoldfastEvent): kotlin/Boolean // com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate.matches|matches(com.vynatix.holdfast.testing.HoldfastEvent){}[0]
+}
+
+final class com.vynatix.holdfast.testing/BridgeObserved : com.vynatix.holdfast.testing/BridgeEvent { // com.vynatix.holdfast.testing/BridgeObserved|null[0]
+    constructor <init>(com.vynatix.holdfast/State<*>, kotlin/Any?, kotlin/Long) // com.vynatix.holdfast.testing/BridgeObserved.<init>|<init>(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Long){}[0]
+
+    final val state // com.vynatix.holdfast.testing/BridgeObserved.state|{}state[0]
+        final fun <get-state>(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/BridgeObserved.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/BridgeObserved.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/BridgeObserved.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val value // com.vynatix.holdfast.testing/BridgeObserved.value|{}value[0]
+        final fun <get-value>(): kotlin/Any? // com.vynatix.holdfast.testing/BridgeObserved.value.<get-value>|<get-value>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/BridgeObserved.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.holdfast.testing/BridgeObserved.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.testing/BridgeObserved.component3|component3(){}[0]
+    final fun copy(com.vynatix.holdfast/State<*> = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/BridgeObserved // com.vynatix.holdfast.testing/BridgeObserved.copy|copy(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/BridgeObserved.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/BridgeObserved.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/BridgeObserved.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/BridgePublished : com.vynatix.holdfast.testing/BridgeEvent { // com.vynatix.holdfast.testing/BridgePublished|null[0]
+    constructor <init>(com.vynatix.holdfast/State<*>, kotlin/Any?, kotlin/Long) // com.vynatix.holdfast.testing/BridgePublished.<init>|<init>(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Long){}[0]
+
+    final val state // com.vynatix.holdfast.testing/BridgePublished.state|{}state[0]
+        final fun <get-state>(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/BridgePublished.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/BridgePublished.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/BridgePublished.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val value // com.vynatix.holdfast.testing/BridgePublished.value|{}value[0]
+        final fun <get-value>(): kotlin/Any? // com.vynatix.holdfast.testing/BridgePublished.value.<get-value>|<get-value>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/BridgePublished.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.holdfast.testing/BridgePublished.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.testing/BridgePublished.component3|component3(){}[0]
+    final fun copy(com.vynatix.holdfast/State<*> = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/BridgePublished // com.vynatix.holdfast.testing/BridgePublished.copy|copy(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/BridgePublished.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/BridgePublished.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/BridgePublished.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/EmissionEvent : com.vynatix.holdfast.testing/HoldfastEvent { // com.vynatix.holdfast.testing/EmissionEvent|null[0]
+    constructor <init>(com.vynatix.holdfast/State<*>, kotlin/Any?, kotlin/Any?, kotlin/Long) // com.vynatix.holdfast.testing/EmissionEvent.<init>|<init>(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Any?;kotlin.Long){}[0]
+
+    final val newValue // com.vynatix.holdfast.testing/EmissionEvent.newValue|{}newValue[0]
+        final fun <get-newValue>(): kotlin/Any? // com.vynatix.holdfast.testing/EmissionEvent.newValue.<get-newValue>|<get-newValue>(){}[0]
+    final val oldValue // com.vynatix.holdfast.testing/EmissionEvent.oldValue|{}oldValue[0]
+        final fun <get-oldValue>(): kotlin/Any? // com.vynatix.holdfast.testing/EmissionEvent.oldValue.<get-oldValue>|<get-oldValue>(){}[0]
+    final val state // com.vynatix.holdfast.testing/EmissionEvent.state|{}state[0]
+        final fun <get-state>(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/EmissionEvent.state.<get-state>|<get-state>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/EmissionEvent.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/EmissionEvent.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/State<*> // com.vynatix.holdfast.testing/EmissionEvent.component1|component1(){}[0]
+    final fun component2(): kotlin/Any? // com.vynatix.holdfast.testing/EmissionEvent.component2|component2(){}[0]
+    final fun component3(): kotlin/Any? // com.vynatix.holdfast.testing/EmissionEvent.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.holdfast.testing/EmissionEvent.component4|component4(){}[0]
+    final fun copy(com.vynatix.holdfast/State<*> = ..., kotlin/Any? = ..., kotlin/Any? = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/EmissionEvent // com.vynatix.holdfast.testing/EmissionEvent.copy|copy(com.vynatix.holdfast.State<*>;kotlin.Any?;kotlin.Any?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/EmissionEvent.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/EmissionEvent.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/EmissionEvent.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/MiddlewareCompleted : com.vynatix.holdfast.testing/MiddlewareEvent { // com.vynatix.holdfast.testing/MiddlewareCompleted|null[0]
+    constructor <init>(com.vynatix.holdfast/Middleware<*>, com.vynatix.holdfast/Transaction, kotlin/Long) // com.vynatix.holdfast.testing/MiddlewareCompleted.<init>|<init>(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+
+    final val middleware // com.vynatix.holdfast.testing/MiddlewareCompleted.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareCompleted.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/MiddlewareCompleted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareCompleted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/MiddlewareCompleted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareCompleted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareCompleted.component1|component1(){}[0]
+    final fun component2(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareCompleted.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareCompleted.component3|component3(){}[0]
+    final fun copy(com.vynatix.holdfast/Middleware<*> = ..., com.vynatix.holdfast/Transaction = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/MiddlewareCompleted // com.vynatix.holdfast.testing/MiddlewareCompleted.copy|copy(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/MiddlewareCompleted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/MiddlewareCompleted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/MiddlewareCompleted.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/MiddlewareErrored : com.vynatix.holdfast.testing/MiddlewareEvent { // com.vynatix.holdfast.testing/MiddlewareErrored|null[0]
+    constructor <init>(com.vynatix.holdfast/Middleware<*>, com.vynatix.holdfast/Transaction, kotlin/Throwable, kotlin/Long) // com.vynatix.holdfast.testing/MiddlewareErrored.<init>|<init>(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+
+    final val cause // com.vynatix.holdfast.testing/MiddlewareErrored.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable // com.vynatix.holdfast.testing/MiddlewareErrored.cause.<get-cause>|<get-cause>(){}[0]
+    final val middleware // com.vynatix.holdfast.testing/MiddlewareErrored.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareErrored.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/MiddlewareErrored.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareErrored.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/MiddlewareErrored.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareErrored.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareErrored.component1|component1(){}[0]
+    final fun component2(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareErrored.component2|component2(){}[0]
+    final fun component3(): kotlin/Throwable // com.vynatix.holdfast.testing/MiddlewareErrored.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareErrored.component4|component4(){}[0]
+    final fun copy(com.vynatix.holdfast/Middleware<*> = ..., com.vynatix.holdfast/Transaction = ..., kotlin/Throwable = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/MiddlewareErrored // com.vynatix.holdfast.testing/MiddlewareErrored.copy|copy(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/MiddlewareErrored.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/MiddlewareErrored.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/MiddlewareErrored.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/MiddlewareStarted : com.vynatix.holdfast.testing/MiddlewareEvent { // com.vynatix.holdfast.testing/MiddlewareStarted|null[0]
+    constructor <init>(com.vynatix.holdfast/Middleware<*>, com.vynatix.holdfast/Transaction, kotlin/Long) // com.vynatix.holdfast.testing/MiddlewareStarted.<init>|<init>(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+
+    final val middleware // com.vynatix.holdfast.testing/MiddlewareStarted.middleware|{}middleware[0]
+        final fun <get-middleware>(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareStarted.middleware.<get-middleware>|<get-middleware>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/MiddlewareStarted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareStarted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/MiddlewareStarted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareStarted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Middleware<*> // com.vynatix.holdfast.testing/MiddlewareStarted.component1|component1(){}[0]
+    final fun component2(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/MiddlewareStarted.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.testing/MiddlewareStarted.component3|component3(){}[0]
+    final fun copy(com.vynatix.holdfast/Middleware<*> = ..., com.vynatix.holdfast/Transaction = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/MiddlewareStarted // com.vynatix.holdfast.testing/MiddlewareStarted.copy|copy(com.vynatix.holdfast.Middleware<*>;com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/MiddlewareStarted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/MiddlewareStarted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/MiddlewareStarted.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/TransactionCommitted : com.vynatix.holdfast.testing/TransactionEvent { // com.vynatix.holdfast.testing/TransactionCommitted|null[0]
+    constructor <init>(com.vynatix.holdfast/Transaction, kotlin/Long) // com.vynatix.holdfast.testing/TransactionCommitted.<init>|<init>(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.holdfast.testing/TransactionCommitted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/TransactionCommitted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/TransactionCommitted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionCommitted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionCommitted.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.testing/TransactionCommitted.component2|component2(){}[0]
+    final fun copy(com.vynatix.holdfast/Transaction = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/TransactionCommitted // com.vynatix.holdfast.testing/TransactionCommitted.copy|copy(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/TransactionCommitted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/TransactionCommitted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TransactionCommitted.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/TransactionErrored : com.vynatix.holdfast.testing/TransactionEvent { // com.vynatix.holdfast.testing/TransactionErrored|null[0]
+    constructor <init>(com.vynatix.holdfast/Transaction, kotlin/Throwable, kotlin/Long) // com.vynatix.holdfast.testing/TransactionErrored.<init>|<init>(com.vynatix.holdfast.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+
+    final val cause // com.vynatix.holdfast.testing/TransactionErrored.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable // com.vynatix.holdfast.testing/TransactionErrored.cause.<get-cause>|<get-cause>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/TransactionErrored.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/TransactionErrored.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/TransactionErrored.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionErrored.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionErrored.component1|component1(){}[0]
+    final fun component2(): kotlin/Throwable // com.vynatix.holdfast.testing/TransactionErrored.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.testing/TransactionErrored.component3|component3(){}[0]
+    final fun copy(com.vynatix.holdfast/Transaction = ..., kotlin/Throwable = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/TransactionErrored // com.vynatix.holdfast.testing/TransactionErrored.copy|copy(com.vynatix.holdfast.Transaction;kotlin.Throwable;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/TransactionErrored.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/TransactionErrored.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TransactionErrored.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/TransactionRolledBack : com.vynatix.holdfast.testing/TransactionEvent { // com.vynatix.holdfast.testing/TransactionRolledBack|null[0]
+    constructor <init>(com.vynatix.holdfast/Transaction, kotlin/Long) // com.vynatix.holdfast.testing/TransactionRolledBack.<init>|<init>(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.holdfast.testing/TransactionRolledBack.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/TransactionRolledBack.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/TransactionRolledBack.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionRolledBack.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionRolledBack.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.testing/TransactionRolledBack.component2|component2(){}[0]
+    final fun copy(com.vynatix.holdfast/Transaction = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/TransactionRolledBack // com.vynatix.holdfast.testing/TransactionRolledBack.copy|copy(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/TransactionRolledBack.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/TransactionRolledBack.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TransactionRolledBack.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/TransactionStarted : com.vynatix.holdfast.testing/TransactionEvent { // com.vynatix.holdfast.testing/TransactionStarted|null[0]
+    constructor <init>(com.vynatix.holdfast/Transaction, kotlin/Long) // com.vynatix.holdfast.testing/TransactionStarted.<init>|<init>(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+
+    final val timestamp // com.vynatix.holdfast.testing/TransactionStarted.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/TransactionStarted.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/TransactionStarted.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionStarted.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TransactionStarted.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.testing/TransactionStarted.component2|component2(){}[0]
+    final fun copy(com.vynatix.holdfast/Transaction = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/TransactionStarted // com.vynatix.holdfast.testing/TransactionStarted.copy|copy(com.vynatix.holdfast.Transaction;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/TransactionStarted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/TransactionStarted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TransactionStarted.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.testing/HoldfastTestScope : com.vynatix.holdfast.testing/HoldfastAutoRegistration, kotlinx.coroutines/CoroutineScope { // com.vynatix.holdfast.testing/HoldfastTestScope|null[0]
+    final val backgroundScope // com.vynatix.holdfast.testing/HoldfastTestScope.backgroundScope|{}backgroundScope[0]
+        final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast.testing/HoldfastTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
+    final val coroutineContext // com.vynatix.holdfast.testing/HoldfastTestScope.coroutineContext|{}coroutineContext[0]
+        final fun <get-coroutineContext>(): kotlin.coroutines/CoroutineContext // com.vynatix.holdfast.testing/HoldfastTestScope.coroutineContext.<get-coroutineContext>|<get-coroutineContext>(){}[0]
+    final val testScheduler // com.vynatix.holdfast.testing/HoldfastTestScope.testScheduler|{}testScheduler[0]
+        final fun <get-testScheduler>(): kotlinx.coroutines.test/TestCoroutineScheduler // com.vynatix.holdfast.testing/HoldfastTestScope.testScheduler.<get-testScheduler>|<get-testScheduler>(){}[0]
+    final val testScope // com.vynatix.holdfast.testing/HoldfastTestScope.testScope|{}testScope[0]
+        final fun <get-testScope>(): kotlinx.coroutines.test/TestScope // com.vynatix.holdfast.testing/HoldfastTestScope.testScope.<get-testScope>|<get-testScope>(){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Holdfast<#A1>> track(#A1, com.vynatix.holdfast.testing/Capture): com.vynatix.holdfast.testing/HoldfastHandle<#A1> // com.vynatix.holdfast.testing/HoldfastTestScope.track|track(0:0;com.vynatix.holdfast.testing.Capture){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+    final fun autoTrackTimeline(com.vynatix.holdfast/Holdfast<*>): kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent> // com.vynatix.holdfast.testing/HoldfastTestScope.autoTrackTimeline|autoTrackTimeline(com.vynatix.holdfast.Holdfast<*>){}[0]
+    final inline fun <#A1: reified com.vynatix.holdfast/Middleware<*>> (com.vynatix.holdfast/Holdfast<*>).middlewareEventsOf(): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/HoldfastTestScope.middlewareEventsOf|middlewareEventsOf@com.vynatix.holdfast.Holdfast<*>(){0§<com.vynatix.holdfast.Middleware<*>>}[0]
+}
+
+final object com.vynatix.holdfast.testing.internal/PendingErrorRegistry : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.holdfast.testing.internal/PendingErrorRegistry|null[0]
+    final fun markConsumed(com.vynatix.holdfast/TransactionResult.Error) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.markConsumed|markConsumed(com.vynatix.holdfast.TransactionResult.Error){}[0]
+    final fun register(com.vynatix.holdfast/TransactionResult.Error, com.vynatix.holdfast.testing/HoldfastHandle<*>) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.register|register(com.vynatix.holdfast.TransactionResult.Error;com.vynatix.holdfast.testing.HoldfastHandle<*>){}[0]
+    final fun unregisterAll(com.vynatix.holdfast.testing/HoldfastHandle<*>) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.unregisterAll|unregisterAll(com.vynatix.holdfast.testing.HoldfastHandle<*>){}[0]
+}
+
+final fun (com.vynatix.holdfast.testing/HoldfastTestScope).com.vynatix.holdfast.testing.concurrency/barrier(kotlin/Int, kotlin.time/Duration = ...): com.vynatix.holdfast.testing.concurrency/Barrier // com.vynatix.holdfast.testing.concurrency/barrier|barrier@com.vynatix.holdfast.testing.HoldfastTestScope(kotlin.Int;kotlin.time.Duration){}[0]
+final fun (com.vynatix.holdfast/TransactionResult<*>).com.vynatix.holdfast.testing.matcher/shouldRollbackWith(kotlin.reflect/KClass<out kotlin/Throwable>) // com.vynatix.holdfast.testing.matcher/shouldRollbackWith|shouldRollbackWith@com.vynatix.holdfast.TransactionResult<*>(kotlin.reflect.KClass<out|kotlin.Throwable>){}[0]
+final fun (kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent>).com.vynatix.holdfast.testing.matcher/shouldFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFire|shouldFire@kotlin.collections.List<com.vynatix.holdfast.testing.HoldfastEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]
+final fun (kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent>).com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder|shouldFireInExactOrder@kotlin.collections.List<com.vynatix.holdfast.testing.HoldfastEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]
+final fun (kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent>).com.vynatix.holdfast.testing.matcher/shouldFireInOrder(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFireInOrder|shouldFireInOrder@kotlin.collections.List<com.vynatix.holdfast.testing.HoldfastEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]
+final fun (kotlin.collections/List<com.vynatix.holdfast.testing/HoldfastEvent>).com.vynatix.holdfast.testing.matcher/shouldNotFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldNotFire|shouldNotFire@kotlin.collections.List<com.vynatix.holdfast.testing.HoldfastEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]
+final fun (kotlin/Function0<kotlin/Unit>).com.vynatix.holdfast.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.holdfast.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.Function0<kotlin.Unit>(kotlin.time.Duration){}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFire|shouldFire@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder|shouldFireInExactOrder@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldFireInOrder(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFireInOrder|shouldFireInOrder@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldMatch(kotlin/Function1<com.vynatix.holdfast.testing.matcher/StateMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldMatch|shouldMatch@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.StateMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldMatchExactly(kotlin/Function1<com.vynatix.holdfast.testing.matcher/StateMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldMatchExactly|shouldMatchExactly@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.StateMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldMatchSnapshotOf(#A) // com.vynatix.holdfast.testing.matcher/shouldMatchSnapshotOf|shouldMatchSnapshotOf@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(0:0){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastHandle<#A>).com.vynatix.holdfast.testing.matcher/shouldNotFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<#A>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldNotFire|shouldNotFire@com.vynatix.holdfast.testing.HoldfastHandle<0:0>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> (com.vynatix.holdfast/State<#B>).com.vynatix.holdfast.testing.matcher/shouldBeBoxedAs(#A) // com.vynatix.holdfast.testing.matcher/shouldBeBoxedAs|shouldBeBoxedAs@com.vynatix.holdfast.State<0:1>(0:0){0§<kotlin.Any>;1§<com.vynatix.hallmark.Boxed<0:0>>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.holdfast.testing.bridge/BridgeView<#A>).com.vynatix.holdfast.testing.matcher/shouldHaveLastPublished(#A) // com.vynatix.holdfast.testing.matcher/shouldHaveLastPublished|shouldHaveLastPublished@com.vynatix.holdfast.testing.bridge.BridgeView<0:0>(0:0){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.holdfast.testing.bridge/BridgeView<#A>).com.vynatix.holdfast.testing.matcher/shouldHavePublished(#A) // com.vynatix.holdfast.testing.matcher/shouldHavePublished|shouldHavePublished@com.vynatix.holdfast.testing.bridge.BridgeView<0:0>(0:0){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.holdfast.testing.bridge/BridgeView<#A>).com.vynatix.holdfast.testing.matcher/shouldHavePublishedInOrder(kotlin.collections/List<#A>) // com.vynatix.holdfast.testing.matcher/shouldHavePublishedInOrder|shouldHavePublishedInOrder@com.vynatix.holdfast.testing.bridge.BridgeView<0:0>(kotlin.collections.List<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/BridgeView(com.vynatix.holdfast.testing.bridge/LatchedBridge<#A>): com.vynatix.holdfast.testing.bridge/BridgeView<#A> // com.vynatix.holdfast.testing.bridge/BridgeView|BridgeView(com.vynatix.holdfast.testing.bridge.LatchedBridge<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/BridgeView(com.vynatix.holdfast.testing.bridge/RecordingBridge<#A>): com.vynatix.holdfast.testing.bridge/BridgeView<#A> // com.vynatix.holdfast.testing.bridge/BridgeView|BridgeView(com.vynatix.holdfast.testing.bridge.RecordingBridge<0:0>){0§<kotlin.Any>}[0]
+final fun com.vynatix.holdfast.testing/vaultTest(kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction1<com.vynatix.holdfast.testing/HoldfastTestScope, kotlin/Unit>) // com.vynatix.holdfast.testing/vaultTest|vaultTest(kotlin.time.Duration;kotlin.coroutines.SuspendFunction1<com.vynatix.holdfast.testing.HoldfastTestScope,kotlin.Unit>){}[0]
+final inline fun <#A: kotlin/Any?> (com.vynatix.holdfast/TransactionResult<#A>).com.vynatix.holdfast.testing.matcher/shouldBeSuccess(kotlin/Function1<com.vynatix.holdfast/TransactionResult.Success<#A>, kotlin/Unit> = ...): com.vynatix.holdfast/TransactionResult.Success<#A> // com.vynatix.holdfast.testing.matcher/shouldBeSuccess|shouldBeSuccess@com.vynatix.holdfast.TransactionResult<0:0>(kotlin.Function1<com.vynatix.holdfast.TransactionResult.Success<0:0>,kotlin.Unit>){0§<kotlin.Any?>}[0]
+final inline fun <#A: reified kotlin/Throwable> (com.vynatix.holdfast/TransactionResult<*>).com.vynatix.holdfast.testing.matcher/shouldBeError(kotlin/Function1<com.vynatix.holdfast/TransactionResult.Error, kotlin/Unit> = ...): com.vynatix.holdfast/TransactionResult.Error // com.vynatix.holdfast.testing.matcher/shouldBeError|shouldBeError@com.vynatix.holdfast.TransactionResult<*>(kotlin.Function1<com.vynatix.holdfast.TransactionResult.Error,kotlin.Unit>){0§<kotlin.Throwable>}[0]
+final suspend fun (com.vynatix.holdfast.testing/HoldfastTestScope).com.vynatix.holdfast.testing.concurrency/awaiting(kotlin.time/Duration = ..., kotlin/Function1<com.vynatix.holdfast.testing/HoldfastEvent, kotlin/Boolean>): com.vynatix.holdfast.testing/HoldfastEvent // com.vynatix.holdfast.testing.concurrency/awaiting|awaiting@com.vynatix.holdfast.testing.HoldfastTestScope(kotlin.time.Duration;kotlin.Function1<com.vynatix.holdfast.testing.HoldfastEvent,kotlin.Boolean>){}[0]
+final suspend fun (com.vynatix.holdfast.testing/HoldfastTestScope).com.vynatix.holdfast.testing.concurrency/eventually(kotlin.time/Duration = ..., kotlin.time/Duration = ..., kotlin.coroutines/SuspendFunction0<kotlin/Unit>) // com.vynatix.holdfast.testing.concurrency/eventually|eventually@com.vynatix.holdfast.testing.HoldfastTestScope(kotlin.time.Duration;kotlin.time.Duration;kotlin.coroutines.SuspendFunction0<kotlin.Unit>){}[0]
+final suspend fun (kotlin.coroutines/SuspendFunction0<kotlin/Unit>).com.vynatix.holdfast.testing.matcher/shouldCompleteWithin(kotlin.time/Duration) // com.vynatix.holdfast.testing.matcher/shouldCompleteWithin|shouldCompleteWithin@kotlin.coroutines.SuspendFunction0<kotlin.Unit>(kotlin.time.Duration){}[0]
+final suspend fun <#A: com.vynatix.holdfast/Holdfast<#A>> (com.vynatix.holdfast.testing/HoldfastTestScope).com.vynatix.holdfast.testing.concurrency/transaction(com.vynatix.holdfast.testing/HoldfastHandle<#A>, kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast.testing.concurrency/OpenTransaction // com.vynatix.holdfast.testing.concurrency/transaction|transaction@com.vynatix.holdfast.testing.HoldfastTestScope(com.vynatix.holdfast.testing.HoldfastHandle<0:0>;kotlin.Function1<0:0,kotlin.Unit>){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final suspend fun <#A: kotlin/Any?> (com.vynatix.holdfast.testing/HoldfastTestScope).com.vynatix.holdfast.testing.concurrency/parallel(kotlin/Int, kotlinx.coroutines/CoroutineDispatcher = ..., kotlin.coroutines/SuspendFunction1<kotlin/Int, #A>): kotlin.collections/List<#A> // com.vynatix.holdfast.testing.concurrency/parallel|parallel@com.vynatix.holdfast.testing.HoldfastTestScope(kotlin.Int;kotlinx.coroutines.CoroutineDispatcher;kotlin.coroutines.SuspendFunction1<kotlin.Int,0:0>){0§<kotlin.Any?>}[0]

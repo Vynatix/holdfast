@@ -1,7 +1,7 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.testing.matcher.shouldBeSuccess
-import com.vynatix.vault.testing.vaultTest
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+import com.vynatix.holdfast.testing.vaultTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -13,7 +13,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class MiddlewareTestVault : Vault<MiddlewareTestVault>() {
+private class MiddlewareTestVault : Holdfast<MiddlewareTestVault>() {
     val n by state { 0 }
     val m by state { "init" }
 }

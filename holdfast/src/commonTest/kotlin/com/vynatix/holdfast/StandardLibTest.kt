@@ -1,14 +1,14 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
-import com.vynatix.vault.bridge.BooleanCodec
-import com.vynatix.vault.bridge.InMemoryKvStore
-import com.vynatix.vault.bridge.IntCodec
-import com.vynatix.vault.bridge.KvBridge
-import com.vynatix.vault.bridge.LongCodec
-import com.vynatix.vault.bridge.StringCodec
-import com.vynatix.vault.middleware.LoggingMiddleware
-import com.vynatix.vault.middleware.TimingMiddleware
-import com.vynatix.vault.middleware.ValidationMiddleware
+import com.vynatix.holdfast.bridge.BooleanCodec
+import com.vynatix.holdfast.bridge.InMemoryKvStore
+import com.vynatix.holdfast.bridge.IntCodec
+import com.vynatix.holdfast.bridge.KvBridge
+import com.vynatix.holdfast.bridge.LongCodec
+import com.vynatix.holdfast.bridge.StringCodec
+import com.vynatix.holdfast.middleware.LoggingMiddleware
+import com.vynatix.holdfast.middleware.TimingMiddleware
+import com.vynatix.holdfast.middleware.ValidationMiddleware
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -16,7 +16,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class StdLibVault : Vault<StdLibVault>() {
+private class StdLibVault : Holdfast<StdLibVault>() {
     val n by state { 0 }
     val s by state { "init" }
     val balance by state { 0L }

@@ -1,18 +1,18 @@
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.Vault
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.Holdfast
 
 /**
  * Optional async-hook surface for vault middleware. A class implementing both
  * [Middleware] and [SuspendingMiddlewareHooks] gets BOTH sync and suspending
  * callbacks under [suspendAction]; only the sync callbacks fire under the
- * blocking [Vault.action].
+ * blocking [Holdfast.action].
  *
  * ## Concentric-ring ordering
  *
  * For `vault.middlewares(A, B)` where the LAST argument is outermost (per
- * [Vault.middlewares]'s contract), a `suspendAction { body }` produces the
+ * [Holdfast.middlewares]'s contract), a `suspendAction { body }` produces the
  * full hook trace:
  *
  * ```
@@ -35,7 +35,7 @@ import com.vynatix.vault.Vault
  *
  * ## Sync vs suspend asymmetry
  *
- * The blocking [Vault.action] path does NOT invoke async hooks (they would
+ * The blocking [Holdfast.action] path does NOT invoke async hooks (they would
  * have to block the calling thread, defeating the purpose). A class that
  * implements ONLY [SuspendingMiddlewareHooks] (with the no-op default sync
  * hooks inherited from [Middleware]) WILL BE SILENT under sync `action` —
@@ -62,7 +62,7 @@ import com.vynatix.vault.Vault
  *
  * @see Middleware for the blocking sync hooks.
  */
-interface SuspendingMiddlewareHooks<V : Vault<V>> {
+interface SuspendingMiddlewareHooks<V : Holdfast<V>> {
     /**
      * Suspending counterpart to [Middleware.onTransactionStarted]. Fires
      * immediately AFTER this middleware's sync `onTransactionStarted` and

@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.validation.Boxed
-import com.vynatix.vault.State
+import com.vynatix.hallmark.Boxed
+import com.vynatix.holdfast.State
 
 /**
  * Assert that this state holds a [Boxed] wrapper whose primitive is `==` to

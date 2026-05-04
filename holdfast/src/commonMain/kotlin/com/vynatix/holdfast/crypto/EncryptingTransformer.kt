@@ -1,6 +1,6 @@
-package com.vynatix.vault.crypto
+package com.vynatix.holdfast.crypto
 
-import com.vynatix.vault.Transformer
+import com.vynatix.holdfast.Transformer
 
 /**
  * [Transformer] that encrypts on write and decrypts on read. The stored
@@ -17,7 +17,7 @@ import com.vynatix.vault.Transformer
  *
  * Example:
  * ```
- * class CredentialsVault : Vault<CredentialsVault>() {
+ * class CredentialsVault : Holdfast<CredentialsVault>() {
  *     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
  * }
  * vault action { token mutate "secret-jwt" }
@@ -26,7 +26,7 @@ import com.vynatix.vault.Transformer
  * // The MutableState's currentValue holds ciphertext; only get() returns plaintext.
  * ```
  *
- * Combine with [com.vynatix.vault.bridge.KvBridge] for at-rest encryption: the
+ * Combine with [com.vynatix.holdfast.bridge.KvBridge] for at-rest encryption: the
  * persisted bytes are ciphertext.
  */
 class EncryptingTransformer(private val cipher: Cipher) : Transformer<String> {

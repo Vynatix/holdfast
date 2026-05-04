@@ -1,7 +1,7 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 /**
- * Cross-cutting interceptor that wraps every transaction on a [Vault]. Subclass and
+ * Cross-cutting interceptor that wraps every transaction on a [Holdfast]. Subclass and
  * override the hooks of interest:
  *  - [onTransactionStarted] runs before the action body. Throwing here aborts the
  *    transaction.
@@ -14,17 +14,17 @@ package com.vynatix.vault
  *
  * Multiple middlewares form a chain. The LAST-registered middleware is outermost:
  * its `started` fires first, its `completed`/`error` fires last. Earlier-registered
- * middlewares are inner. Same ordering on both [Vault.action] and
- * `:vault-coroutines.suspendAction`. The shared [MiddlewareContext.metadata] map
+ * middlewares are inner. Same ordering on both [Holdfast.action] and
+ * `:holdfast-coroutines.suspendAction`. The shared [MiddlewareContext.metadata] map
  * carries per-transaction values across the same middleware's hooks (e.g. a start
  * time stashed in `started`, read in `completed`).
  */
-open class Middleware<T : Vault<T>> {
+open class Middleware<T : Holdfast<T>> {
     /**
      * Mutable context passed to each hook. The [metadata] map is per-transaction —
      * a fresh empty map is created for each invocation of [invoke].
      */
-    data class MiddlewareContext<T : Vault<T>>(
+    data class MiddlewareContext<T : Holdfast<T>>(
         val vault: T,
         val transaction: Transaction,
         val metadata: MutableMap<String, Any> = mutableMapOf(),
@@ -56,26 +56,26 @@ open class Middleware<T : Vault<T>> {
     }
 
     /**
-     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * Internal hook for `:holdfast-coroutines.suspendAction`. Invokes the
      * [onTransactionStarted] hook directly so the suspending chain runner can
      * compose hooks in concentric-ring order with per-hook `runCatching`
      * isolation. Not part of the stable public API; sync `action` continues
      * to use [invoke].
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun invokeOnTransactionStarted(context: MiddlewareContext<T>) = onTransactionStarted(context)
 
     /**
-     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * Internal hook for `:holdfast-coroutines.suspendAction`. Invokes the
      * [onTransactionCompleted] hook directly. See [invokeOnTransactionStarted].
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun invokeOnTransactionCompleted(context: MiddlewareContext<T>) = onTransactionCompleted(context)
 
     /**
-     * Internal hook for `:vault-coroutines.suspendAction`. Invokes the
+     * Internal hook for `:holdfast-coroutines.suspendAction`. Invokes the
      * [onTransactionError] hook directly. See [invokeOnTransactionStarted].
      */
-    @VaultInternalApi
+    @HoldfastInternalApi
     fun invokeOnTransactionError(context: MiddlewareContext<T>, error: Throwable) = onTransactionError(context, error)
 }

@@ -1,7 +1,7 @@
 @file:Suppress("MagicNumber", "TooManyFunctions", "LargeClass", "LongMethod", "TopLevelPropertyNaming")
 
 /*
- * BankingDemo — a single end-to-end exercise of every public Vault API.
+ * BankingDemo — a single end-to-end exercise of every public Holdfast API.
  *
  * This file is read top-to-bottom as a tutorial and runs as a test:
  *
@@ -22,7 +22,7 @@
  *                              snapshot/restore, derived state, cross-vault atomic)
  *
  * Coverage checklist:
- *   Vault<Self>, state, state(transformer), action, mutate, effect, bridge,
+ *   Holdfast<Self>, state, state(transformer), action, mutate, effect, bridge,
  *   middlewares, clearMiddleware, invoke, activeTransaction, properties, getState,
  *   hasState, removeState, clearStates, Transaction.commit/rollback (idempotent),
  *   Transaction.id/status/parent/endTime, TransactionResult.Success/Error,
@@ -30,38 +30,38 @@
  *   Transformer.set/get/shouldTransform, Disposable, kotlin.uuid.Uuid (used for
  *   ledger entry IDs), nested savepoint actions, cross-vault rejection,
  *   concurrent commits, EncryptingTransformer + XorCipher, FileSystemKvStore +
- *   KvBridge, Vault.snapshot()/restore(), Vault.derived(...) push-recomputed,
+ *   KvBridge, Holdfast.snapshot()/restore(), Holdfast.derived(...) push-recomputed,
  *   atomic(...) cross-vault transactions.
  *   (suspendAction is exercised in vault-coroutines/.../SuspendActionTest.kt.)
  */
 
-package com.vynatix.vault.demo
+package com.vynatix.holdfast.demo
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
-import com.vynatix.vault.Middleware
-import com.vynatix.vault.MutableState
-import com.vynatix.vault.Observable
-import com.vynatix.vault.State
-import com.vynatix.vault.Transaction
-import com.vynatix.vault.TransactionResult
-import com.vynatix.vault.TransactionStatus
-import com.vynatix.vault.Transformer
-import com.vynatix.vault.Vault
-import com.vynatix.vault.atomic
-import com.vynatix.vault.bridge.InMemoryKvStore
-import com.vynatix.vault.bridge.KvBridge
-import com.vynatix.vault.bridge.LongCodec
-import com.vynatix.vault.bridge.StringCodec
-import com.vynatix.vault.crypto.EncryptingTransformer
-import com.vynatix.vault.crypto.XorCipher
-import com.vynatix.vault.derived
-import com.vynatix.vault.effect
-import com.vynatix.vault.middleware.LoggingMiddleware
-import com.vynatix.vault.middleware.TimingMiddleware
-import com.vynatix.vault.middleware.ValidationMiddleware
-import com.vynatix.vault.restore
-import com.vynatix.vault.snapshot
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.MutableState
+import com.vynatix.holdfast.Observable
+import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.Transformer
+import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.atomic
+import com.vynatix.holdfast.bridge.InMemoryKvStore
+import com.vynatix.holdfast.bridge.KvBridge
+import com.vynatix.holdfast.bridge.LongCodec
+import com.vynatix.holdfast.bridge.StringCodec
+import com.vynatix.holdfast.crypto.EncryptingTransformer
+import com.vynatix.holdfast.crypto.XorCipher
+import com.vynatix.holdfast.derived
+import com.vynatix.holdfast.effect
+import com.vynatix.holdfast.middleware.LoggingMiddleware
+import com.vynatix.holdfast.middleware.TimingMiddleware
+import com.vynatix.holdfast.middleware.ValidationMiddleware
+import com.vynatix.holdfast.restore
+import com.vynatix.holdfast.snapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -143,7 +143,7 @@ private class AccountVault(
     initialHolderName: String = "",
     initialEmail: String = "",
     initialBalanceCents: Long = 0,
-) : Vault<AccountVault>() {
+) : Holdfast<AccountVault>() {
     val balanceCents by state { initialBalanceCents }
     val status by state { AccountStatus.Active }
     val holderName by state(NameNormalizer()) { initialHolderName }
@@ -167,7 +167,7 @@ private class AccountVault(
  * here on every account action — a clean demonstration that one vault can drive
  * cross-cutting policy in another.
  */
-private class BankVault : Vault<BankVault>() {
+private class BankVault : Holdfast<BankVault>() {
     val emergencyLockdown by state { false }
     val accountsCreated by state { 0 }
 }
@@ -189,7 +189,7 @@ private sealed class TraceEvent {
  *    `completed` / `error` to compute elapsed)
  *  - reading `Transaction.id`, `status`, `parent` to capture the savepoint chain
  */
-private class TracingMiddleware<V : Vault<V>>(private val sink: MutableList<TraceEvent>) : Middleware<V>() {
+private class TracingMiddleware<V : Holdfast<V>>(private val sink: MutableList<TraceEvent>) : Middleware<V>() {
     override fun onTransactionStarted(context: MiddlewareContext<V>) {
         context.metadata[KEY_START_MS] = nowMs()
         sink.add(TraceEvent.Started(context.transaction.id, context.transaction.parent?.id))
@@ -775,8 +775,8 @@ class BankingDemo {
 
     /**
      * Trims-by-stdlib version: same banking flow, but every cross-cutting concern
-     * uses the shipped helpers in [com.vynatix.vault.middleware] and
-     * [com.vynatix.vault.bridge] instead of the file-local TracingMiddleware /
+     * uses the shipped helpers in [com.vynatix.holdfast.middleware] and
+     * [com.vynatix.holdfast.bridge] instead of the file-local TracingMiddleware /
      * BalancePersistenceBridge. Demonstrates that a "real" consumer can wire up
      * logging, timing, validation, and KV-backed persistence without writing any
      * Bridge or Middleware subclass themselves.
@@ -864,9 +864,9 @@ class BankingDemo {
      */
     @Test
     fun fileSystemKvStorePersistsBalanceAcrossSimulatedRestart() {
-        val rootSuffix = "vault-banking-demo-fs-${com.vynatix.vault.bridge.randomDirSuffix()}"
-        val rootPath = com.vynatix.vault.bridge.tempRoot(rootSuffix)
-        val kv = com.vynatix.vault.bridge.FileSystemKvStore(rootPath)
+        val rootSuffix = "vault-banking-demo-fs-${com.vynatix.holdfast.bridge.randomDirSuffix()}"
+        val rootPath = com.vynatix.holdfast.bridge.tempRoot(rootSuffix)
+        val kv = com.vynatix.holdfast.bridge.FileSystemKvStore(rootPath)
 
         // Session 1: write.
         run {
@@ -882,7 +882,7 @@ class BankingDemo {
     }
 
     /**
-     * Phase L — `Vault.snapshot()` / `Vault.restore(snapshot)`.
+     * Phase L — `Holdfast.snapshot()` / `Holdfast.restore(snapshot)`.
      *
      * Snapshots capture raw stored values (post-`transformer.set` form).
      * Restore writes them back without re-running `set`, so asymmetric
@@ -922,7 +922,7 @@ class BankingDemo {
     }
 
     /**
-     * Phase M — `Vault.derived(...)` push-recomputed state.
+     * Phase M — `Holdfast.derived(...)` push-recomputed state.
      *
      * Subscribes to the `ledger` source state; whenever the ledger commits a
      * change, the derived `netDebits` recomputes inside a fresh action and

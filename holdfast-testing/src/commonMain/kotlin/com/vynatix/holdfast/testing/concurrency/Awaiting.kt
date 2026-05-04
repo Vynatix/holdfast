@@ -1,8 +1,8 @@
-package com.vynatix.vault.testing.concurrency
+package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.vault.testing.VaultEvent
-import com.vynatix.vault.testing.VaultTestScope
-import com.vynatix.vault.testing.internal.awaitingsRegistry
+import com.vynatix.holdfast.testing.HoldfastEvent
+import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.internal.awaitingsRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
@@ -12,7 +12,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Suspend until a [VaultEvent] from any tracked vault matches [predicate], or
+ * Suspend until a [HoldfastEvent] from any tracked vault matches [predicate], or
  * until [timeout] elapses.
  *
  * Subscribes to every tracked vault's recorder timeline as a single fan-in.
@@ -29,10 +29,10 @@ import kotlin.time.Duration.Companion.seconds
  * most recent five events across all tracked timelines for diagnosis.
  *
  * Both [timeout] and the resulting suspension participate in the test
- * scheduler's virtual time: under `vaultTest`, a 200 ms timeout completes in
+ * scheduler's virtual time: under `holdfastTest`, a 200 ms timeout completes in
  * near-zero wall time when no match arrives.
  *
- * Example — wait for the next [com.vynatix.vault.testing.TransactionCommitted]:
+ * Example — wait for the next [com.vynatix.holdfast.testing.TransactionCommitted]:
  * ```
  * val ctr = track(MyVault())
  * backgroundScope.launch {
@@ -44,7 +44,7 @@ import kotlin.time.Duration.Companion.seconds
  * ```
  *
  * Cleanup: every `awaiting` call registers its subscriber channel with the
- * hosting [VaultTestScope]. If the test body returns while a coroutine is
+ * hosting [HoldfastTestScope]. If the test body returns while a coroutine is
  * suspended in `awaiting`, the scope's `tearDown` closes the channel — the
  * suspended `receive()` resumes with a [ClosedReceiveChannelException] and
  * the awaiting body's `try/finally` runs the unsubscribe path. So a forgotten
@@ -65,9 +65,9 @@ import kotlin.time.Duration.Companion.seconds
  *   First `true` return wins; this function returns the matched event.
  * @return the first event for which [predicate] returned `true`.
  */
-suspend fun VaultTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (VaultEvent) -> Boolean): VaultEvent {
-    val channel = Channel<VaultEvent>(Channel.UNLIMITED)
-    val replays = mutableListOf<VaultEvent>()
+suspend fun HoldfastTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (HoldfastEvent) -> Boolean): HoldfastEvent {
+    val channel = Channel<HoldfastEvent>(Channel.UNLIMITED)
+    val replays = mutableListOf<HoldfastEvent>()
 
     // Snapshot timelines AND subscribe atomically — per-recorder, the snapshot
     // and subscribe both run under the recorder's buffer lock, so no event can
@@ -114,7 +114,7 @@ suspend fun VaultTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (V
     }
 }
 
-private fun buildTimeoutMessage(timeout: Duration, handles: List<com.vynatix.vault.testing.VaultHandle<*>>): String {
+private fun buildTimeoutMessage(timeout: Duration, handles: List<com.vynatix.holdfast.testing.HoldfastHandle<*>>): String {
     val recent = handles.flatMap { it.timeline }.takeLast(RECENT_TAIL_COUNT)
     return "awaiting: no event matched within ${timeout.inWholeMilliseconds}ms " +
         "(saw ${recent.size} events: $recent)"

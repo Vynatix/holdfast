@@ -1,4 +1,4 @@
-package com.vynatix.vault
+package com.vynatix.holdfast
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,7 +7,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class InspectionVault : Vault<InspectionVault>() {
+private class InspectionVault : Holdfast<InspectionVault>() {
     val a by state { 0 }
     val b by state { "init" }
 }

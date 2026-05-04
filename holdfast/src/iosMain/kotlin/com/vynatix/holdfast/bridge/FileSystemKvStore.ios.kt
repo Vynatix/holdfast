@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 
-package com.vynatix.vault.bridge
+package com.vynatix.holdfast.bridge
 
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi

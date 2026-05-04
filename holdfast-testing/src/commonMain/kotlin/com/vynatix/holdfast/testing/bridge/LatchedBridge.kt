@@ -1,7 +1,7 @@
-package com.vynatix.vault.testing.bridge
+package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.vault.Bridge
-import com.vynatix.vault.Disposable
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CompletableDeferred
@@ -12,7 +12,7 @@ import kotlinx.coroutines.CompletableDeferred
  * around the commit/publish boundary without producing a deadlock.
  *
  * Spec deviation (documented v1 limit): the spec calls for `publish()` to
- * **suspend** until [releasePublish] is called. The [com.vynatix.vault.Publisher.publish]
+ * **suspend** until [releasePublish] is called. The [com.vynatix.holdfast.Publisher.publish]
  * contract is a non-suspending `fun publish(value: T): Boolean`, so a literal
  * suspending implementation isn't possible. A blocking-thread implementation
  * (e.g. `runBlocking { gate.await() }` inside `publish`) would deadlock the
@@ -59,12 +59,12 @@ class LatchedBridge<T : Any>(@Suppress("unused") private val initial: T) : Bridg
         get() = synchronized(lock) { publishedList.lastOrNull() }
 
     /**
-     * Vault-driven inbound subscription. Records [observer] but does NOT
+     * Holdfast-driven inbound subscription. Records [observer] but does NOT
      * replay any initial value — load-on-attach is a per-bridge convention,
      * and a [LatchedBridge] is typically used to test publish semantics in
      * isolation, where an unexpected initial inbound delivery can muddle the
      * timeline. If you want load-on-attach behaviour, use
-     * [com.vynatix.vault.testing.bridge.RecordingBridge] instead.
+     * [com.vynatix.holdfast.testing.bridge.RecordingBridge] instead.
      */
     override fun observe(observer: (T) -> Unit): Disposable {
         synchronized(lock) {

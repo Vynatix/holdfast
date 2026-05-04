@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 
-package com.vynatix.vault.coroutines
+package com.vynatix.holdfast.coroutines
 
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi

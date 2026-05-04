@@ -1,6 +1,6 @@
-package com.vynatix.vault.testing.matcher
+package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.vault.testing.VaultEvent
+import com.vynatix.holdfast.testing.HoldfastEvent
 
 // ============================================================================
 // Internal runners — shared between handle-receiver and list-receiver
@@ -14,7 +14,7 @@ import com.vynatix.vault.testing.VaultEvent
  * one matching event in the timeline. Events that no predicate matches are
  * ignored (lenient — only the asserted set has to be covered).
  */
-internal fun List<VaultEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
+internal fun List<HoldfastEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
     if (matcher.predicates.isEmpty()) return
     val unsatisfied = matcher.predicates.filter { p -> none { e -> p.matches(e) } }
     if (unsatisfied.isNotEmpty()) {
@@ -27,7 +27,7 @@ internal fun List<VaultEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
  * the timeline forward from the previous predicate's match position. Allows
  * unmatched events between matched ones.
  */
-internal fun List<VaultEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) {
+internal fun List<HoldfastEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) {
     if (matcher.predicates.isEmpty()) return
     var startIdx = 0
     for ((i, p) in matcher.predicates.withIndex()) {
@@ -54,7 +54,7 @@ internal fun List<VaultEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) 
  * Tries each anchor in turn so a contiguous run anywhere in the timeline
  * succeeds.
  */
-internal fun List<VaultEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher<*>) {
+internal fun List<HoldfastEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher<*>) {
     if (matcher.predicates.isEmpty()) return
     val first = matcher.predicates[0]
     val candidates = indices.filter { idx -> first.matches(this[idx]) }
@@ -80,9 +80,9 @@ internal fun List<VaultEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher
  * Negation runner. Collect every predicate-event pair where the predicate
  * matches; any non-empty result is a failure listing the unwanted matches.
  */
-internal fun List<VaultEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
+internal fun List<HoldfastEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
     if (matcher.predicates.isEmpty()) return
-    val matched: List<Pair<EventPredicate, VaultEvent>> = matcher.predicates.flatMap { p ->
+    val matched: List<Pair<EventPredicate, HoldfastEvent>> = matcher.predicates.flatMap { p ->
         filter { e -> p.matches(e) }.map { e -> p to e }
     }
     if (matched.isNotEmpty()) {
@@ -94,7 +94,7 @@ internal fun List<VaultEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
 // Helpers
 // --------------------------------------------------------------------------
 
-private fun List<VaultEvent>.matchExactRunAt(anchor: Int, matcher: TimelineMatcher<*>): AssertionError? {
+private fun List<HoldfastEvent>.matchExactRunAt(anchor: Int, matcher: TimelineMatcher<*>): AssertionError? {
     matcher.predicates.forEachIndexed { i, p ->
         val targetIdx = anchor + i
         val failure = exactRunFailureAt(targetIdx, i, p)
@@ -103,7 +103,7 @@ private fun List<VaultEvent>.matchExactRunAt(anchor: Int, matcher: TimelineMatch
     return null
 }
 
-private fun List<VaultEvent>.exactRunFailureAt(targetIdx: Int, predicateIdx: Int, p: EventPredicate): AssertionError? = when {
+private fun List<HoldfastEvent>.exactRunFailureAt(targetIdx: Int, predicateIdx: Int, p: EventPredicate): AssertionError? = when {
     targetIdx >= size -> AssertionError(
         "shouldFireInExactOrder: ran out of events at predicate $predicateIdx (${p.description}) — " +
             "expected event at index $targetIdx but timeline size is $size",
@@ -126,7 +126,7 @@ private fun buildShouldFireMessage(unsatisfied: List<EventPredicate>): String = 
     }
 }
 
-private fun buildShouldNotFireMessage(matched: List<Pair<EventPredicate, VaultEvent>>): String = buildString {
+private fun buildShouldNotFireMessage(matched: List<Pair<EventPredicate, HoldfastEvent>>): String = buildString {
     append("shouldNotFire: ")
     append(matched.size)
     append(" predicate(s) unexpectedly matched:")

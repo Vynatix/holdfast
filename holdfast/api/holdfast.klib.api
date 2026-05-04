@@ -1,0 +1,371 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast>
+open annotation class com.vynatix.holdfast/HoldfastActionDsl : kotlin/Annotation { // com.vynatix.holdfast/HoldfastActionDsl|null[0]
+    constructor <init>() // com.vynatix.holdfast/HoldfastActionDsl.<init>|<init>(){}[0]
+}
+
+open annotation class com.vynatix.holdfast/HoldfastInternalApi : kotlin/Annotation { // com.vynatix.holdfast/HoldfastInternalApi|null[0]
+    constructor <init>() // com.vynatix.holdfast/HoldfastInternalApi.<init>|<init>(){}[0]
+}
+
+final enum class com.vynatix.holdfast/TransactionStatus : kotlin/Enum<com.vynatix.holdfast/TransactionStatus> { // com.vynatix.holdfast/TransactionStatus|null[0]
+    enum entry Active // com.vynatix.holdfast/TransactionStatus.Active|null[0]
+    enum entry Committed // com.vynatix.holdfast/TransactionStatus.Committed|null[0]
+    enum entry Failed // com.vynatix.holdfast/TransactionStatus.Failed|null[0]
+    enum entry RolledBack // com.vynatix.holdfast/TransactionStatus.RolledBack|null[0]
+
+    final val entries // com.vynatix.holdfast/TransactionStatus.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast/TransactionStatus> // com.vynatix.holdfast/TransactionStatus.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast/TransactionStatus.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<com.vynatix.holdfast/TransactionStatus> // com.vynatix.holdfast/TransactionStatus.values|values#static(){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/Initializer : kotlin/Function0<#A> // com.vynatix.holdfast/Initializer|null[0]
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/Observable { // com.vynatix.holdfast/Observable|null[0]
+    abstract fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/Observable.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/Publisher { // com.vynatix.holdfast/Publisher|null[0]
+    abstract fun publish(#A): kotlin/Boolean // com.vynatix.holdfast/Publisher.publish|publish(1:0){}[0]
+}
+
+abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/StateDelegate { // com.vynatix.holdfast/StateDelegate|null[0]
+    abstract fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast/State<#A> // com.vynatix.holdfast/StateDelegate.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+}
+
+abstract fun interface com.vynatix.holdfast/Disposable { // com.vynatix.holdfast/Disposable|null[0]
+    abstract fun dispose() // com.vynatix.holdfast/Disposable.dispose|dispose(){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast.bridge/Codec { // com.vynatix.holdfast.bridge/Codec|null[0]
+    abstract fun decode(kotlin/String): #A // com.vynatix.holdfast.bridge/Codec.decode|decode(kotlin.String){}[0]
+    abstract fun encode(#A): kotlin/String // com.vynatix.holdfast.bridge/Codec.encode|encode(1:0){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast/Bridge : com.vynatix.holdfast/Observable<#A>, com.vynatix.holdfast/Publisher<#A> // com.vynatix.holdfast/Bridge|null[0]
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast/Eventful { // com.vynatix.holdfast/Eventful|null[0]
+    abstract val events // com.vynatix.holdfast/Eventful.events|{}events[0]
+        abstract fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#A> // com.vynatix.holdfast/Eventful.events.<get-events>|<get-events>(){}[0]
+
+    abstract fun emit(#A) // com.vynatix.holdfast/Eventful.emit|emit(1:0){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast/State { // com.vynatix.holdfast/State|null[0]
+    abstract val value // com.vynatix.holdfast/State.value|{}value[0]
+        abstract fun <get-value>(): #A // com.vynatix.holdfast/State.value.<get-value>|<get-value>(){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast/Transformer { // com.vynatix.holdfast/Transformer|null[0]
+    abstract fun get(#A): #A // com.vynatix.holdfast/Transformer.get|get(1:0){}[0]
+    abstract fun set(#A): #A // com.vynatix.holdfast/Transformer.set|set(1:0){}[0]
+    open fun shouldTransform(#A): kotlin/Boolean // com.vynatix.holdfast/Transformer.shouldTransform|shouldTransform(1:0){}[0]
+}
+
+abstract interface com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast.bridge/KvStore|null[0]
+    abstract fun get(kotlin/String): kotlin/String? // com.vynatix.holdfast.bridge/KvStore.get|get(kotlin.String){}[0]
+    abstract fun put(kotlin/String, kotlin/String) // com.vynatix.holdfast.bridge/KvStore.put|put(kotlin.String;kotlin.String){}[0]
+    abstract fun remove(kotlin/String) // com.vynatix.holdfast.bridge/KvStore.remove|remove(kotlin.String){}[0]
+    abstract fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.bridge/KvStore.snapshot|snapshot(){}[0]
+}
+
+abstract interface com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.crypto/Cipher|null[0]
+    abstract fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.decrypt|decrypt(kotlin.String){}[0]
+    abstract fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+sealed interface <#A: out kotlin/Any?> com.vynatix.holdfast/TransactionResult { // com.vynatix.holdfast/TransactionResult|null[0]
+    final class <#A1: kotlin/Any?> Success : com.vynatix.holdfast/TransactionResult<#A1> { // com.vynatix.holdfast/TransactionResult.Success|null[0]
+        constructor <init>(com.vynatix.holdfast/Transaction, #A1) // com.vynatix.holdfast/TransactionResult.Success.<init>|<init>(com.vynatix.holdfast.Transaction;1:0){}[0]
+
+        final val transaction // com.vynatix.holdfast/TransactionResult.Success.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/TransactionResult.Success.transaction.<get-transaction>|<get-transaction>(){}[0]
+        final val value // com.vynatix.holdfast/TransactionResult.Success.value|{}value[0]
+            final fun <get-value>(): #A1 // com.vynatix.holdfast/TransactionResult.Success.value.<get-value>|<get-value>(){}[0]
+
+        final fun component1(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/TransactionResult.Success.component1|component1(){}[0]
+        final fun component2(): #A1 // com.vynatix.holdfast/TransactionResult.Success.component2|component2(){}[0]
+        final fun copy(com.vynatix.holdfast/Transaction = ..., #A1 = ...): com.vynatix.holdfast/TransactionResult.Success<#A1> // com.vynatix.holdfast/TransactionResult.Success.copy|copy(com.vynatix.holdfast.Transaction;1:0){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/TransactionResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/TransactionResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/TransactionResult.Success.toString|toString(){}[0]
+    }
+
+    final class Error : com.vynatix.holdfast/TransactionResult<kotlin/Nothing> { // com.vynatix.holdfast/TransactionResult.Error|null[0]
+        constructor <init>(kotlin/Throwable, com.vynatix.holdfast/Transaction) // com.vynatix.holdfast/TransactionResult.Error.<init>|<init>(kotlin.Throwable;com.vynatix.holdfast.Transaction){}[0]
+
+        final val exception // com.vynatix.holdfast/TransactionResult.Error.exception|{}exception[0]
+            final fun <get-exception>(): kotlin/Throwable // com.vynatix.holdfast/TransactionResult.Error.exception.<get-exception>|<get-exception>(){}[0]
+        final val transaction // com.vynatix.holdfast/TransactionResult.Error.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/TransactionResult.Error.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+        final fun component1(): kotlin/Throwable // com.vynatix.holdfast/TransactionResult.Error.component1|component1(){}[0]
+        final fun component2(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/TransactionResult.Error.component2|component2(){}[0]
+        final fun copy(kotlin/Throwable = ..., com.vynatix.holdfast/Transaction = ...): com.vynatix.holdfast/TransactionResult.Error // com.vynatix.holdfast/TransactionResult.Error.copy|copy(kotlin.Throwable;com.vynatix.holdfast.Transaction){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/TransactionResult.Error.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/TransactionResult.Error.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/TransactionResult.Error.toString|toString(){}[0]
+    }
+}
+
+abstract class <#A: com.vynatix.holdfast/EventfulHoldfast<#A, #B>, #B: kotlin/Any> com.vynatix.holdfast/EventfulHoldfast : com.vynatix.holdfast/Eventful<#B>, com.vynatix.holdfast/Holdfast<#A> { // com.vynatix.holdfast/EventfulHoldfast|null[0]
+    constructor <init>(kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.holdfast/EventfulHoldfast.<init>|<init>(kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
+
+    final val events // com.vynatix.holdfast/EventfulHoldfast.events|{}events[0]
+        final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#B> // com.vynatix.holdfast/EventfulHoldfast.events.<get-events>|<get-events>(){}[0]
+
+    final fun emit(#B) // com.vynatix.holdfast/EventfulHoldfast.emit|emit(1:1){}[0]
+    open fun onDispose() // com.vynatix.holdfast/EventfulHoldfast.onDispose|onDispose(){}[0]
+}
+
+abstract class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast/Holdfast { // com.vynatix.holdfast/Holdfast|null[0]
+    constructor <init>() // com.vynatix.holdfast/Holdfast.<init>|<init>(){}[0]
+
+    final val activeTransaction // com.vynatix.holdfast/Holdfast.activeTransaction|{}activeTransaction[0]
+        final fun <get-activeTransaction>(): com.vynatix.holdfast/Transaction? // com.vynatix.holdfast/Holdfast.activeTransaction.<get-activeTransaction>|<get-activeTransaction>(){}[0]
+    final val isDisposed // com.vynatix.holdfast/Holdfast.isDisposed|{}isDisposed[0]
+        final fun <get-isDisposed>(): kotlin/Boolean // com.vynatix.holdfast/Holdfast.isDisposed.<get-isDisposed>|<get-isDisposed>(){}[0]
+    final val lockOrderKey // com.vynatix.holdfast/Holdfast.lockOrderKey|{}lockOrderKey[0]
+        final fun <get-lockOrderKey>(): kotlin/Long // com.vynatix.holdfast/Holdfast.lockOrderKey.<get-lockOrderKey>|<get-lockOrderKey>(){}[0]
+    final val properties // com.vynatix.holdfast/Holdfast.properties|{}properties[0]
+        final fun <get-properties>(): kotlin.collections/Map<kotlin/String, com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Holdfast.properties.<get-properties>|<get-properties>(){}[0]
+    final val selfForExternal // com.vynatix.holdfast/Holdfast.selfForExternal|{}selfForExternal[0]
+        final fun <get-selfForExternal>(): #A // com.vynatix.holdfast/Holdfast.selfForExternal.<get-selfForExternal>|<get-selfForExternal>(){}[0]
+    open val scope // com.vynatix.holdfast/Holdfast.scope|{}scope[0]
+        open fun <get-scope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast/Holdfast.scope.<get-scope>|<get-scope>(){}[0]
+
+    final var asyncSerializer // com.vynatix.holdfast/Holdfast.asyncSerializer|{}asyncSerializer[0]
+        final fun <get-asyncSerializer>(): com.vynatix.holdfast/Holdfast.AsyncSerializer? // com.vynatix.holdfast/Holdfast.asyncSerializer.<get-asyncSerializer>|<get-asyncSerializer>(){}[0]
+        final fun <set-asyncSerializer>(com.vynatix.holdfast/Holdfast.AsyncSerializer?) // com.vynatix.holdfast/Holdfast.asyncSerializer.<set-asyncSerializer>|<set-asyncSerializer>(com.vynatix.holdfast.Holdfast.AsyncSerializer?){}[0]
+    final var suspendingOwner // com.vynatix.holdfast/Holdfast.suspendingOwner|{}suspendingOwner[0]
+        final fun <get-suspendingOwner>(): kotlin/Any? // com.vynatix.holdfast/Holdfast.suspendingOwner.<get-suspendingOwner>|<get-suspendingOwner>(){}[0]
+        final fun <set-suspendingOwner>(kotlin/Any?) // com.vynatix.holdfast/Holdfast.suspendingOwner.<set-suspendingOwner>|<set-suspendingOwner>(kotlin.Any?){}[0]
+    final var uncaughtObserverHandler // com.vynatix.holdfast/Holdfast.uncaughtObserverHandler|{}uncaughtObserverHandler[0]
+        final fun <get-uncaughtObserverHandler>(): kotlin/Function1<kotlin/Throwable, kotlin/Unit>? // com.vynatix.holdfast/Holdfast.uncaughtObserverHandler.<get-uncaughtObserverHandler>|<get-uncaughtObserverHandler>(){}[0]
+        final fun <set-uncaughtObserverHandler>(kotlin/Function1<kotlin/Throwable, kotlin/Unit>?) // com.vynatix.holdfast/Holdfast.uncaughtObserverHandler.<set-uncaughtObserverHandler>|<set-uncaughtObserverHandler>(kotlin.Function1<kotlin.Throwable,kotlin.Unit>?){}[0]
+
+    final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).bridge(com.vynatix.holdfast/Bridge<#A1>?) // com.vynatix.holdfast/Holdfast.bridge|bridge@com.vynatix.holdfast.State<0:0>(com.vynatix.holdfast.Bridge<0:0>?){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).mutate(#A1) // com.vynatix.holdfast/Holdfast.mutate|mutate@com.vynatix.holdfast.State<0:0>(0:0){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).observeFrom(com.vynatix.holdfast/Observable<#A1>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/Holdfast.observeFrom|observeFrom@com.vynatix.holdfast.State<0:0>(com.vynatix.holdfast.Observable<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).update(kotlin/Function1<#A1, #A1>) // com.vynatix.holdfast/Holdfast.update|update@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> registerInternalState(kotlin/String, #A1, com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Holdfast.registerInternalState|registerInternalState(kotlin.String;0:0;com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> state(com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/Initializer<#A1>): com.vynatix.holdfast/StateDelegate<#A1> // com.vynatix.holdfast/Holdfast.state|state(com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean;com.vynatix.holdfast.Initializer<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Holdfast.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast/Holdfast.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/Holdfast.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+    final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.holdfast/Holdfast.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
+    final fun clearMiddleware() // com.vynatix.holdfast/Holdfast.clearMiddleware|clearMiddleware(){}[0]
+    final fun clearStates() // com.vynatix.holdfast/Holdfast.clearStates|clearStates(){}[0]
+    final fun dispose() // com.vynatix.holdfast/Holdfast.dispose|dispose(){}[0]
+    final fun getState(kotlin/String): com.vynatix.holdfast/State<*>? // com.vynatix.holdfast/Holdfast.getState|getState(kotlin.String){}[0]
+    final fun hasState(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/Holdfast.hasState|hasState(kotlin.String){}[0]
+    final fun internalDrainPostCommitTasks() // com.vynatix.holdfast/Holdfast.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
+    final fun internalSetActiveTransaction(com.vynatix.holdfast/Transaction?) // com.vynatix.holdfast/Holdfast.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.holdfast.Transaction?){}[0]
+    final fun middlewares(kotlin/Array<out com.vynatix.holdfast/Middleware<#A>>...) // com.vynatix.holdfast/Holdfast.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.Middleware<1:0>>...){}[0]
+    final fun postCommit(kotlin/Function0<kotlin/Unit>) // com.vynatix.holdfast/Holdfast.postCommit|postCommit(kotlin.Function0<kotlin.Unit>){}[0]
+    final fun removeState(kotlin/String) // com.vynatix.holdfast/Holdfast.removeState|removeState(kotlin.String){}[0]
+    final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.holdfast/Middleware<#A>> // com.vynatix.holdfast/Holdfast.snapshotMiddleware|snapshotMiddleware(){}[0]
+    open fun onDispose() // com.vynatix.holdfast/Holdfast.onDispose|onDispose(){}[0]
+
+    abstract interface AsyncSerializer { // com.vynatix.holdfast/Holdfast.AsyncSerializer|null[0]
+        abstract fun blockingAcquire() // com.vynatix.holdfast/Holdfast.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]
+        abstract fun blockingRelease() // com.vynatix.holdfast/Holdfast.AsyncSerializer.blockingRelease|blockingRelease(){}[0]
+    }
+
+    final object Companion { // com.vynatix.holdfast/Holdfast.Companion|null[0]
+        final var defaultScope // com.vynatix.holdfast/Holdfast.Companion.defaultScope|{}defaultScope[0]
+            final fun <get-defaultScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast/Holdfast.Companion.defaultScope.<get-defaultScope>|<get-defaultScope>(){}[0]
+            final fun <set-defaultScope>(kotlinx.coroutines/CoroutineScope) // com.vynatix.holdfast/Holdfast.Companion.defaultScope.<set-defaultScope>|<set-defaultScope>(kotlinx.coroutines.CoroutineScope){}[0]
+    }
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.middleware/LoggingMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/LoggingMiddleware|null[0]
+    constructor <init>(kotlin/String, kotlin/Function1<kotlin/String, kotlin/Unit> = ...) // com.vynatix.holdfast.middleware/LoggingMiddleware.<init>|<init>(kotlin.String;kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.middleware/TimingMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/TimingMiddleware|null[0]
+    constructor <init>(kotlin/Function3<kotlin/String, com.vynatix.holdfast/TransactionStatus, kotlin/Long, kotlin/Unit>) // com.vynatix.holdfast.middleware/TimingMiddleware.<init>|<init>(kotlin.Function3<kotlin.String,com.vynatix.holdfast.TransactionStatus,kotlin.Long,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast.middleware/ValidationMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/ValidationMiddleware|null[0]
+    constructor <init>(kotlin/Function1<#A, kotlin/Unit>) // com.vynatix.holdfast.middleware/ValidationMiddleware.<init>|<init>(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast.bridge/KvBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.bridge/KvBridge|null[0]
+    constructor <init>(com.vynatix.holdfast.bridge/KvStore, kotlin/String, com.vynatix.holdfast.bridge/Codec<#A>) // com.vynatix.holdfast.bridge/KvBridge.<init>|<init>(com.vynatix.holdfast.bridge.KvStore;kotlin.String;com.vynatix.holdfast.bridge.Codec<1:0>){}[0]
+
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.bridge/KvBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publish(#A): kotlin/Boolean // com.vynatix.holdfast.bridge/KvBridge.publish|publish(1:0){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast/EventfulSupport : com.vynatix.holdfast/Eventful<#A> { // com.vynatix.holdfast/EventfulSupport|null[0]
+    constructor <init>(kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.holdfast/EventfulSupport.<init>|<init>(kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
+
+    final val events // com.vynatix.holdfast/EventfulSupport.events|{}events[0]
+        final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#A> // com.vynatix.holdfast/EventfulSupport.events.<get-events>|<get-events>(){}[0]
+
+    final fun bindVault(com.vynatix.holdfast/Holdfast<*>) // com.vynatix.holdfast/EventfulSupport.bindVault|bindVault(com.vynatix.holdfast.Holdfast<*>){}[0]
+    final fun emit(#A) // com.vynatix.holdfast/EventfulSupport.emit|emit(1:0){}[0]
+}
+
+final class <#A: kotlin/Any> com.vynatix.holdfast/MutableState : com.vynatix.holdfast/State<#A> { // com.vynatix.holdfast/MutableState|null[0]
+    constructor <init>(#A, com.vynatix.holdfast/Transformer<#A>? = ..., com.vynatix.holdfast/Holdfast<*>, kotlin/Boolean = ...) // com.vynatix.holdfast/MutableState.<init>|<init>(1:0;com.vynatix.holdfast.Transformer<1:0>?;com.vynatix.holdfast.Holdfast<*>;kotlin.Boolean){}[0]
+
+    final val observerCount // com.vynatix.holdfast/MutableState.observerCount|{}observerCount[0]
+        final fun <get-observerCount>(): kotlin/Int // com.vynatix.holdfast/MutableState.observerCount.<get-observerCount>|<get-observerCount>(){}[0]
+    final val owningVault // com.vynatix.holdfast/MutableState.owningVault|{}owningVault[0]
+        final fun <get-owningVault>(): com.vynatix.holdfast/Holdfast<*> // com.vynatix.holdfast/MutableState.owningVault.<get-owningVault>|<get-owningVault>(){}[0]
+    final val value // com.vynatix.holdfast/MutableState.value|{}value[0]
+        final fun <get-value>(): #A // com.vynatix.holdfast/MutableState.value.<get-value>|<get-value>(){}[0]
+
+    final var bridge // com.vynatix.holdfast/MutableState.bridge|{}bridge[0]
+        final fun <get-bridge>(): com.vynatix.holdfast/Bridge<#A>? // com.vynatix.holdfast/MutableState.bridge.<get-bridge>|<get-bridge>(){}[0]
+        final fun <set-bridge>(com.vynatix.holdfast/Bridge<#A>?) // com.vynatix.holdfast/MutableState.bridge.<set-bridge>|<set-bridge>(com.vynatix.holdfast.Bridge<1:0>?){}[0]
+
+    final fun applyCommittedRaw(#A): kotlin/Boolean // com.vynatix.holdfast/MutableState.applyCommittedRaw|applyCommittedRaw(1:0){}[0]
+    final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/MutableState.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+final class com.vynatix.holdfast.bridge/FileSystemKvStore : com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast.bridge/FileSystemKvStore|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast.bridge/FileSystemKvStore.<init>|<init>(kotlin.String){}[0]
+
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.holdfast.bridge/FileSystemKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.holdfast.bridge/FileSystemKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.holdfast.bridge/FileSystemKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.bridge/FileSystemKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.holdfast.bridge/InMemoryKvStore : com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast.bridge/InMemoryKvStore|null[0]
+    constructor <init>() // com.vynatix.holdfast.bridge/InMemoryKvStore.<init>|<init>(){}[0]
+
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.holdfast.bridge/InMemoryKvStore.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String) // com.vynatix.holdfast.bridge/InMemoryKvStore.put|put(kotlin.String;kotlin.String){}[0]
+    final fun remove(kotlin/String) // com.vynatix.holdfast.bridge/InMemoryKvStore.remove|remove(kotlin.String){}[0]
+    final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.bridge/InMemoryKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.holdfast.crypto/EncryptingTransformer : com.vynatix.holdfast/Transformer<kotlin/String> { // com.vynatix.holdfast.crypto/EncryptingTransformer|null[0]
+    constructor <init>(com.vynatix.holdfast.crypto/Cipher) // com.vynatix.holdfast.crypto/EncryptingTransformer.<init>|<init>(com.vynatix.holdfast.crypto.Cipher){}[0]
+
+    final fun get(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/EncryptingTransformer.get|get(kotlin.String){}[0]
+    final fun set(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/EncryptingTransformer.set|set(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast.crypto/XorCipher : com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.crypto/XorCipher|null[0]
+    constructor <init>(kotlin/ByteArray) // com.vynatix.holdfast.crypto/XorCipher.<init>|<init>(kotlin.ByteArray){}[0]
+
+    final fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.decrypt|decrypt(kotlin.String){}[0]
+    final fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transaction|null[0]
+    final val endTime // com.vynatix.holdfast/Transaction.endTime|{}endTime[0]
+        final fun <get-endTime>(): kotlin/Long? // com.vynatix.holdfast/Transaction.endTime.<get-endTime>|<get-endTime>(){}[0]
+    final val id // com.vynatix.holdfast/Transaction.id|{}id[0]
+        final fun <get-id>(): kotlin/String // com.vynatix.holdfast/Transaction.id.<get-id>|<get-id>(){}[0]
+    final val modifiedStates // com.vynatix.holdfast/Transaction.modifiedStates|{}modifiedStates[0]
+        final fun <get-modifiedStates>(): kotlin.collections/Set<com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Transaction.modifiedStates.<get-modifiedStates>|<get-modifiedStates>(){}[0]
+    final val status // com.vynatix.holdfast/Transaction.status|{}status[0]
+        final fun <get-status>(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast/Transaction.status.<get-status>|<get-status>(){}[0]
+
+    final fun commit() // com.vynatix.holdfast/Transaction.commit|commit(){}[0]
+    final fun commitDispatching(kotlin/Function2<com.vynatix.holdfast/MutableState<*>, kotlin/Any, kotlin/Unit>) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.holdfast.MutableState<*>,kotlin.Any,kotlin.Unit>){}[0]
+    final fun commitDispatching(kotlin/Function2<com.vynatix.holdfast/MutableState<*>, kotlin/Any, kotlin/Unit>, kotlin/Function1<kotlin.collections/List<kotlin/Pair<kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any>>, kotlin/Unit>?) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.holdfast.MutableState<*>,kotlin.Any,kotlin.Unit>;kotlin.Function1<kotlin.collections.List<kotlin.Pair<kotlinx.coroutines.flow.MutableSharedFlow<*>,kotlin.Any>>,kotlin.Unit>?){}[0]
+    final fun rollback() // com.vynatix.holdfast/Transaction.rollback|rollback(){}[0]
+    final fun stagePendingEvent(kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any) // com.vynatix.holdfast/Transaction.stagePendingEvent|stagePendingEvent(kotlinx.coroutines.flow.MutableSharedFlow<*>;kotlin.Any){}[0]
+
+    final object Companion { // com.vynatix.holdfast/Transaction.Companion|null[0]
+        final fun createForExternal(kotlin/String, kotlin/Long): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Transaction.Companion.createForExternal|createForExternal(kotlin.String;kotlin.Long){}[0]
+    }
+}
+
+final class com.vynatix.holdfast/TransactionException : kotlin/Exception { // com.vynatix.holdfast/TransactionException|null[0]
+    constructor <init>(kotlin/String, kotlin/Throwable? = ...) // com.vynatix.holdfast/TransactionException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final class com.vynatix.holdfast/HoldfastLock : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.holdfast/HoldfastLock|null[0]
+    constructor <init>() // com.vynatix.holdfast/HoldfastLock.<init>|<init>(){}[0]
+
+    final fun acquire() // com.vynatix.holdfast/HoldfastLock.acquire|acquire(){}[0]
+    final fun release() // com.vynatix.holdfast/HoldfastLock.release|release(){}[0]
+    final inline fun <#A1: kotlin/Any?> withLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/HoldfastLock.withLock|withLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+}
+
+final class com.vynatix.holdfast/HoldfastSnapshot { // com.vynatix.holdfast/HoldfastSnapshot|null[0]
+    final val size // com.vynatix.holdfast/HoldfastSnapshot.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // com.vynatix.holdfast/HoldfastSnapshot.size.<get-size>|<get-size>(){}[0]
+    final val stateNames // com.vynatix.holdfast/HoldfastSnapshot.stateNames|{}stateNames[0]
+        final fun <get-stateNames>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/HoldfastSnapshot.stateNames.<get-stateNames>|<get-stateNames>(){}[0]
+}
+
+open class <#A: com.vynatix.holdfast/Holdfast<#A>> com.vynatix.holdfast/Middleware { // com.vynatix.holdfast/Middleware|null[0]
+    constructor <init>() // com.vynatix.holdfast/Middleware.<init>|<init>(){}[0]
+
+    final fun invoke(#A, kotlin/Function0<kotlin/Unit>) // com.vynatix.holdfast/Middleware.invoke|invoke(1:0;kotlin.Function0<kotlin.Unit>){}[0]
+    final fun invokeOnTransactionCompleted(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>) // com.vynatix.holdfast/Middleware.invokeOnTransactionCompleted|invokeOnTransactionCompleted(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>){}[0]
+    final fun invokeOnTransactionError(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.holdfast/Middleware.invokeOnTransactionError|invokeOnTransactionError(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    final fun invokeOnTransactionStarted(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>) // com.vynatix.holdfast/Middleware.invokeOnTransactionStarted|invokeOnTransactionStarted(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>){}[0]
+    open fun onTransactionCompleted(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>) // com.vynatix.holdfast/Middleware.onTransactionCompleted|onTransactionCompleted(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>){}[0]
+    open fun onTransactionError(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>, kotlin/Throwable) // com.vynatix.holdfast/Middleware.onTransactionError|onTransactionError(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>;kotlin.Throwable){}[0]
+    open fun onTransactionStarted(com.vynatix.holdfast/Middleware.MiddlewareContext<#A>) // com.vynatix.holdfast/Middleware.onTransactionStarted|onTransactionStarted(com.vynatix.holdfast.Middleware.MiddlewareContext<1:0>){}[0]
+
+    final class <#A1: com.vynatix.holdfast/Holdfast<#A1>> MiddlewareContext { // com.vynatix.holdfast/Middleware.MiddlewareContext|null[0]
+        constructor <init>(#A1, com.vynatix.holdfast/Transaction, kotlin.collections/MutableMap<kotlin/String, kotlin/Any> = ...) // com.vynatix.holdfast/Middleware.MiddlewareContext.<init>|<init>(1:0;com.vynatix.holdfast.Transaction;kotlin.collections.MutableMap<kotlin.String,kotlin.Any>){}[0]
+
+        final val metadata // com.vynatix.holdfast/Middleware.MiddlewareContext.metadata|{}metadata[0]
+            final fun <get-metadata>(): kotlin.collections/MutableMap<kotlin/String, kotlin/Any> // com.vynatix.holdfast/Middleware.MiddlewareContext.metadata.<get-metadata>|<get-metadata>(){}[0]
+        final val transaction // com.vynatix.holdfast/Middleware.MiddlewareContext.transaction|{}transaction[0]
+            final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Middleware.MiddlewareContext.transaction.<get-transaction>|<get-transaction>(){}[0]
+        final val vault // com.vynatix.holdfast/Middleware.MiddlewareContext.vault|{}vault[0]
+            final fun <get-vault>(): #A1 // com.vynatix.holdfast/Middleware.MiddlewareContext.vault.<get-vault>|<get-vault>(){}[0]
+
+        final fun component1(): #A1 // com.vynatix.holdfast/Middleware.MiddlewareContext.component1|component1(){}[0]
+        final fun component2(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Middleware.MiddlewareContext.component2|component2(){}[0]
+        final fun component3(): kotlin.collections/MutableMap<kotlin/String, kotlin/Any> // com.vynatix.holdfast/Middleware.MiddlewareContext.component3|component3(){}[0]
+        final fun copy(#A1 = ..., com.vynatix.holdfast/Transaction = ..., kotlin.collections/MutableMap<kotlin/String, kotlin/Any> = ...): com.vynatix.holdfast/Middleware.MiddlewareContext<#A1> // com.vynatix.holdfast/Middleware.MiddlewareContext.copy|copy(1:0;com.vynatix.holdfast.Transaction;kotlin.collections.MutableMap<kotlin.String,kotlin.Any>){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/Middleware.MiddlewareContext.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/Middleware.MiddlewareContext.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/Middleware.MiddlewareContext.toString|toString(){}[0]
+    }
+}
+
+final object com.vynatix.holdfast.bridge/BooleanCodec : com.vynatix.holdfast.bridge/Codec<kotlin/Boolean> { // com.vynatix.holdfast.bridge/BooleanCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Boolean // com.vynatix.holdfast.bridge/BooleanCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Boolean): kotlin/String // com.vynatix.holdfast.bridge/BooleanCodec.encode|encode(kotlin.Boolean){}[0]
+}
+
+final object com.vynatix.holdfast.bridge/IntCodec : com.vynatix.holdfast.bridge/Codec<kotlin/Int> { // com.vynatix.holdfast.bridge/IntCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Int // com.vynatix.holdfast.bridge/IntCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Int): kotlin/String // com.vynatix.holdfast.bridge/IntCodec.encode|encode(kotlin.Int){}[0]
+}
+
+final object com.vynatix.holdfast.bridge/LongCodec : com.vynatix.holdfast.bridge/Codec<kotlin/Long> { // com.vynatix.holdfast.bridge/LongCodec|null[0]
+    final fun decode(kotlin/String): kotlin/Long // com.vynatix.holdfast.bridge/LongCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/Long): kotlin/String // com.vynatix.holdfast.bridge/LongCodec.encode|encode(kotlin.Long){}[0]
+}
+
+final object com.vynatix.holdfast.bridge/StringCodec : com.vynatix.holdfast.bridge/Codec<kotlin/String> { // com.vynatix.holdfast.bridge/StringCodec|null[0]
+    final fun decode(kotlin/String): kotlin/String // com.vynatix.holdfast.bridge/StringCodec.decode|decode(kotlin.String){}[0]
+    final fun encode(kotlin/String): kotlin/String // com.vynatix.holdfast.bridge/StringCodec.encode|encode(kotlin.String){}[0]
+}
+
+final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCount|@com.vynatix.holdfast.State<0:0>{0§<kotlin.Any>}observerCount[0]
+    final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.holdfast/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
+
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/computed(kotlin/Function1<#A, #B>): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast/computed|computed@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Holdfast<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/HoldfastSnapshot): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.HoldfastSnapshot){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Holdfast<#A>> (#A).com.vynatix.holdfast/snapshot(): com.vynatix.holdfast/HoldfastSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(){0§<com.vynatix.holdfast.Holdfast<0:0>>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any> (com.vynatix.holdfast/Transformer<#A>).com.vynatix.holdfast/then(com.vynatix.holdfast/Transformer<#A>): com.vynatix.holdfast/Transformer<#A> // com.vynatix.holdfast/then|then@com.vynatix.holdfast.Transformer<0:0>(com.vynatix.holdfast.Transformer<0:0>){0§<kotlin.Any>}[0]
+final fun <#A: kotlin/Any?> com.vynatix.holdfast/atomic(kotlin/Array<out com.vynatix.holdfast/Holdfast<*>>..., kotlin/Function0<#A>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/atomic|atomic(kotlin.Array<out|com.vynatix.holdfast.Holdfast<*>>...;kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+final fun com.vynatix.holdfast.platform/currentThreadId(): kotlin/Long // com.vynatix.holdfast.platform/currentThreadId|currentThreadId(){}[0]
+final fun com.vynatix.holdfast.platform/threadYield() // com.vynatix.holdfast.platform/threadYield|threadYield(){}[0]
