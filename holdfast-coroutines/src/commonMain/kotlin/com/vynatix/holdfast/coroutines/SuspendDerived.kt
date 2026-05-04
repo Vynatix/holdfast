@@ -6,11 +6,11 @@ import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.coroutines.platform.runBlockingForInitialSeed
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * Suspending counterpart of [com.vynatix.holdfast.derived].
@@ -78,7 +78,7 @@ fun <V : Holdfast<V>, T : Any> V.suspendDerived(
     // mirrors sync `derived`'s "initial value at construction" contract; it
     // does mean a long-running initial compute blocks the caller. Subsequent
     // recomputes are async-launched on `vault.scope`.
-    val initial: T = runBlocking { self.compute() }
+    val initial: T = runBlockingForInitialSeed { self.compute() }
     val name = "__suspendDerived_${suspendDerivedCounter.incrementAndGet()}"
     val backingState: MutableState<T> = self.registerInternalState(name, initial)
 
