@@ -1,10 +1,38 @@
 # Changelog
 
-All notable changes to the Holdfast library are documented here. The format is
-based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
-project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to Holdfast are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — with
+the caveat that **0.x releases carry no API stability guarantee**. Breaking
+changes may land in any 0.x bump; consumers should pin to an exact version.
 
-## 2.0.0 — 2026-05-03
+## [Unreleased]
+
+## 0.1.0 — Initial public release
+
+First public release on Maven Central as `com.vynatix:holdfast` (plus the
+companion modules `:holdfast-coroutines`, `:holdfast-compose`, `:holdfast-testing`,
+`:holdfast-hallmark`, `:holdfast-hallmark-coroutines`).
+
+The library was developed internally under the name `vault` (versions 1.x
+through 2.0). No prior version was published to Maven Central; the public
+artifact line begins at 0.1.0 under the `holdfast` name.
+
+The internal 1.x → 2.0 history is preserved below as design archive — it
+documents the evolution of the API but does not correspond to any published
+release. Reading order: this `0.1.0` entry first, then everything below as
+historical context for *why* certain API choices look the way they do.
+
+---
+
+## Internal-only history (preserved as design archive)
+
+The entries below describe internal versions never published to Maven Central.
+They predate the rename to Holdfast and use the original `Vault` / `:vault`
+names that were in effect at the time. Treat as design history, not as a
+release log a consumer ever migrated against.
+
+## 2.0.0 — 2026-05-03 (internal)
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,
 and `:holdfast-hallmark`. See [MIGRATING.md](../MIGRATING.md) for the

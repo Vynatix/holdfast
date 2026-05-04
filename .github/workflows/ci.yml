@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  jvm-and-android:
+    name: JVM + Android (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test (JVM + Android)
+        run: |
+          ./gradlew \
+            :holdfast:jvmTest :holdfast:testAndroidHostTest \
+            :holdfast-coroutines:jvmTest :holdfast-coroutines:testAndroidHostTest \
+            :holdfast-compose:jvmTest :holdfast-compose:testAndroidHostTest \
+            :holdfast-testing:jvmTest :holdfast-testing:testAndroidHostTest \
+            :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
+            :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
+            --stacktrace
+
+      - name: API check and Dokka
+        run: |
+          ./gradlew \
+            :holdfast:apiCheck :holdfast:dokkaHtml \
+            :holdfast-coroutines:apiCheck :holdfast-coroutines:dokkaHtml \
+            :holdfast-compose:apiCheck :holdfast-compose:dokkaHtml \
+            :holdfast-testing:apiCheck :holdfast-testing:dokkaHtml \
+            :holdfast-hallmark:apiCheck :holdfast-hallmark:dokkaHtml \
+            :holdfast-hallmark-coroutines:apiCheck :holdfast-hallmark-coroutines:dokkaHtml \
+            --stacktrace
+
+      - name: Lint and static analysis
+        run: |
+          ./gradlew \
+            :holdfast:detekt :holdfast:ktlintCheck \
+            :holdfast-coroutines:detekt :holdfast-coroutines:ktlintCheck \
+            :holdfast-compose:detekt :holdfast-compose:ktlintCheck \
+            :holdfast-testing:detekt :holdfast-testing:ktlintCheck \
+            :holdfast-hallmark:detekt :holdfast-hallmark:ktlintCheck \
+            :holdfast-hallmark-coroutines:detekt :holdfast-hallmark-coroutines:ktlintCheck \
+            --stacktrace
+
+  ios-and-jvm:
+    name: iOS + JVM (macos-15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: iOS sim arm64 and JVM tests
+        run: |
+          ./gradlew \
+            :holdfast:iosSimulatorArm64Test :holdfast:jvmTest \
+            :holdfast-coroutines:iosSimulatorArm64Test :holdfast-coroutines:jvmTest \
+            :holdfast-compose:iosSimulatorArm64Test :holdfast-compose:jvmTest \
+            :holdfast-testing:iosSimulatorArm64Test :holdfast-testing:jvmTest \
+            :holdfast-hallmark:iosSimulatorArm64Test :holdfast-hallmark:jvmTest \
+            :holdfast-hallmark-coroutines:iosSimulatorArm64Test :holdfast-hallmark-coroutines:jvmTest \
+            --stacktrace

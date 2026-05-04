@@ -1,4 +1,4 @@
-# vault-compose
+# holdfast-compose
 
 Compose Multiplatform runtime adapter for the [Holdfast](../holdfast/) library.
 Brings only `compose.runtime` (no Material, no Foundation), so it's safe to
@@ -16,29 +16,29 @@ fun rememberDisposable(make: () -> Disposable): Disposable
 
 ## Examples
 
-### Bind vault state to a Composable
+### Bind holdfast state to a Composable
 
 ```kotlin
 @Composable
-fun CounterScreen(vault: CounterHoldfast) {
-    val count by vault.collectAsState(vault.count)
-    val label by vault.collectAsState(vault.label)
+fun CounterScreen(holdfast: CounterHoldfast) {
+    val count by holdfast.collectAsState(holdfast.count)
+    val label by holdfast.collectAsState(holdfast.label)
 
     Column {
         Text("Count: $count — $label")
-        Button(onClick = { vault.action { count update { it + 1 } } }) {
+        Button(onClick = { holdfast.action { count update { it + 1 } } }) {
             Text("+1")
         }
     }
 }
 ```
 
-### Wire an inbound `Observable<T>` to a vault state for a Composable's lifetime
+### Wire an inbound `Observable<T>` to a holdfast state for a Composable's lifetime
 
 ```kotlin
 @Composable
-fun StatusListener(vault: AccountHoldfast, channel: Observable<AccountStatus>) {
-    rememberDisposable { vault { status observeFrom channel } }
+fun StatusListener(holdfast: AccountHoldfast, channel: Observable<AccountStatus>) {
+    rememberDisposable { holdfast { status observeFrom channel } }
 }
 ```
 

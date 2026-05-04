@@ -1,9 +1,9 @@
-# `:holdfast-hallmark-coroutines` — suspend Vault adapter
+# `:holdfast-hallmark-coroutines` — suspend Holdfast adapter
 
-Bridges `:validation-coroutines`' `SuspendValidator` into Vault's
+Bridges `:validation-coroutines`' `SuspendValidator` into Holdfast's
 `suspendAction { }`. Use when validation involves I/O (DB unique-name lookup,
 remote feature gate, moderation API call) and you want the result mutated
-into a Vault state atomically.
+into a Holdfast state atomically.
 
 ## Quick start
 
@@ -26,16 +26,16 @@ class UsernameValidator(taken: Set<String>) : SuspendBoxedValidator<String, User
     )
 }
 
-class UserVault : Holdfast<UserVault>() {
+class UserHoldfast : Holdfast<UserHoldfast>() {
     val username by boxed(/* sync leaf */ UsernameFormatValidator) { "init" }
 }
 
 suspend fun adoptUsername(name: String): TransactionResult<Unit> =
-    vault.suspendValidateAndMutate(vault.username, UsernameValidator(taken = …), name)
+    holdfast.suspendValidateAndMutate(holdfast.username, UsernameValidator(taken = …), name)
 ```
 
 `suspendValidateAndMutate` runs the suspend validator, then mutates the
-Vault state inside a `suspendAction { }`. On validation failure, throws
+Holdfast state inside a `suspendAction { }`. On validation failure, throws
 `HallmarkException` inside the action — every other state mutation in
 the transaction rolls back.
 

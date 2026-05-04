@@ -1,4 +1,4 @@
-# The Vault Library — Complete Guide
+# The Holdfast Library — Complete Guide
 
 `com.vynatix.holdfast` is a Kotlin Multiplatform state-management library built around
 **transactional state**: every mutation lives inside a transaction; observers see only
@@ -14,7 +14,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 ## Table of Contents
 
 1. [Mental Model](#1-mental-model)
-2. [The Shape of a Vault](#2-the-shape-of-a-vault)
+2. [The Shape of a Holdfast](#2-the-shape-of-a-holdfast)
 3. [Quickstart](#3-quickstart)
 4. [The Seven Primitives](#4-the-seven-primitives)
 5. [Transaction Lifecycle (Workflow Diagram)](#5-transaction-lifecycle-workflow-diagram)
@@ -34,7 +34,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 
 ### 30-second pitch
 
-A `Vault` is a state container whose unit of consistency is a **transaction**.
+A `Holdfast` is a state container whose unit of consistency is a **transaction**.
 You read state through `state` properties; you mutate inside `action { … }`;
 you subscribe with `effect`. Every transaction is **all-or-nothing** — if its
 body throws, no observer was ever told about the intermediate writes, no
@@ -43,36 +43,36 @@ same as before the action ran.
 
 ### Why it exists
 
-| Problem | Without Vault | With Vault |
+| Problem | Without Holdfast | With Holdfast |
 |---|---|---|
 | Multi-state writes can leave the system half-updated | You add ad-hoc try/catch and revert by hand | `action { … }` is atomic; throw rolls back everything |
 | Observers fire mid-write and see "impossible" intermediate states | You debounce or guard at every callsite | Observers only fire on commit |
 | Asymmetric serialization (`toJson`/`fromJson`) drifts on rollback | You hand-roll storage of pre-images | `transformer` keeps `set` and `get` separate; rollback never touches `set` |
-| Cross-vault writes silently corrupt the wrong store | Casts succeed, bug ships to prod | Ownership check throws on first foreign mutate |
+| Cross-holdfast writes silently corrupt the wrong store | Casts succeed, bug ships to prod | Ownership check throws on first foreign mutate |
 | Persistence layer publishes during rollback, polluting external systems | You manually distinguish "real" writes from rollback writes | Bridge publishes only on commit |
 | Adding logging / persistence requires touching every action | Cross-cutting concerns are scattered | `Middleware` wraps the whole transaction |
 
-### How Vault compares to other patterns
+### How Holdfast compares to other patterns
 
 | Pattern | Mutation site | Atomicity unit | Observer sees |
 |---|---|---|---|
 | `var` field + listeners | Anywhere | Single field | Every write |
 | `MutableStateFlow` | `value =` | Single state | Every distinct value |
 | Redux/Reducer | `dispatch(action)` | One action's reduce | Reducer's return |
-| **Vault** | `mutate` inside `action { }` | Whole `action { }` | Committed value only |
+| **Holdfast** | `mutate` inside `action { }` | Whole `action { }` | Committed value only |
 
-Vault is closest to "Redux with locality" — your mutations are co-located
+Holdfast is closest to "Redux with locality" — your mutations are co-located
 with the state they touch, not pushed through a central reducer, but
 visibility and atomicity come from a transaction boundary.
 
 ---
 
-## 2. The Shape of a Vault
+## 2. The Shape of a Holdfast
 
-A vault subclass declares its state using delegated properties. The base
+A holdfast subclass declares its state using delegated properties. The base
 class is generic in `Self` (the curiously-recurring-template pattern) so
 extensions like `infix fun State<T>.mutate(T)` resolve against the concrete
-vault type.
+holdfast type.
 
 ```kotlin
 class CounterHoldfast : Holdfast<CounterHoldfast>() {
@@ -108,7 +108,7 @@ Disposable                          single dispose() method
 ### File layout
 
 ```
-vault/src/commonMain/kotlin/com/vynatix/vault/
+holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
   Holdfast.kt          base class, action/mutate/effect/bridge/invoke, ownership check
   MutableState.kt   per-state observers, bridge, transformer, applyCommitted
   Transaction.kt    pendingWrites, commit/rollback, status state machine
@@ -125,21 +125,21 @@ vault/src/commonMain/kotlin/com/vynatix/vault/
 ## 3. Quickstart
 
 ```kotlin
-// 1. Define a vault.
-class TodoVault : Holdfast<TodoVault>() {
+// 1. Define a holdfast.
+class TodoHoldfast : Holdfast<TodoHoldfast>() {
     val items by state { emptyList<String>() }
     val draft by state { "" }
 }
 
 // 2. Create an instance.
-val vault = TodoVault()
+val holdfast = TodoHoldfast()
 
 // 3. Subscribe.
-val sub = vault { items effect { println("items=$this") } }
+val sub = holdfast { items effect { println("items=$this") } }
 // fires immediately with the initial value: items=[]
 
 // 4. Mutate atomically.
-vault action {
+holdfast action {
     draft mutate "buy milk"
     items mutate items.value + draft.value
     draft mutate ""
@@ -148,7 +148,7 @@ vault action {
 //   items=[buy milk]
 
 // 5. Failed transactions roll back.
-vault action {
+holdfast action {
     items mutate listOf("never visible")
     error("simulated failure")
 }
@@ -188,7 +188,7 @@ commit and observers fire; on throw the buffer is dropped and nobody
 notices the attempt happened.
 
 ```kotlin
-val result: TransactionResult = vault action {
+val result: TransactionResult = holdfast action {
     items mutate listOf("a", "b")
     draft mutate "drafted"
 }
@@ -207,9 +207,9 @@ inner's pending writes into the outer's; inner rollback drops just the
 savepoint; outer rollback discards everything.
 
 ```kotlin
-vault action {           // T_outer
+holdfast action {           // T_outer
     a mutate 1
-    vault action {       // T_inner with parent = T_outer
+    holdfast action {       // T_inner with parent = T_outer
         b mutate 2
     }                    // T_inner.commit merges {b->2} into T_outer
     error("outer fails") // discards both {a->1} and {b->2}
@@ -223,7 +223,7 @@ vault action {           // T_outer
 post-`transformer.set` value into the active transaction's `pendingWrites`.
 
 ```kotlin
-vault action {
+holdfast action {
     count mutate count.value + 1
 }
 ```
@@ -235,8 +235,8 @@ value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
-see only the committed value. This means standalone `vault { x mutate v }`
-is equivalent to `vault action { x mutate v }` — never a "raw" write that
+see only the committed value. This means standalone `holdfast { x mutate v }`
+is equivalent to `holdfast action { x mutate v }` — never a "raw" write that
 skips observers, middleware, or commit semantics.
 
 ### 4.4 `effect { … }` — Observe
@@ -249,12 +249,12 @@ state. It fires:
   (Same-value commits do not re-fire — see §6.)
 
 ```kotlin
-val sub = vault { count effect { println("count=$this") } }
+val sub = holdfast { count effect { println("count=$this") } }
 // → count=0   (initial)
-vault action { count mutate 5 }
+holdfast action { count mutate 5 }
 // → count=5
 sub.dispose()
-vault action { count mutate 6 }
+holdfast action { count mutate 6 }
 // (no output — disposed)
 ```
 
@@ -264,8 +264,8 @@ unsubscribe; observers held forever are a memory leak.
 ### 4.5 `bridge(b)` — External sync
 
 `State<T>.bridge(Bridge<T>)` connects a state to an external system that
-implements both `Observable<T>` (push to vault) and `Publisher<T>` (pull
-from vault).
+implements both `Observable<T>` (push to holdfast) and `Publisher<T>` (pull
+from holdfast).
 
 ```kotlin
 val persistence = object : Bridge<List<String>> {
@@ -277,7 +277,7 @@ val persistence = object : Bridge<List<String>> {
         File("todos.json").writeText(Json.encodeToString(value)); return true
     }
 }
-vault { items bridge persistence }
+holdfast { items bridge persistence }
 ```
 
 **Outbound** (`publish`) fires only on commit, never during the action body
@@ -302,7 +302,7 @@ class Logger<V : Holdfast<V>> : Middleware<V>() {
         log("✗ ${c.transaction.id}: $e")
 }
 
-vault.middlewares(Logger())
+holdfast.middlewares(Logger())
 ```
 
 Middleware composes left-to-right: `middlewares(A, B)` runs A's started
@@ -315,16 +315,16 @@ for cross-middleware communication.
 
 ### 4.7 `invoke { … }` — Context block
 
-`vault { … }` — the operator on `Vault` — runs `block(self)` with no locks
-and no transaction. It exists so vault-extension members like `effect` and
-`bridge` can be called with vault-as-receiver:
+`holdfast { … }` — the operator on `Holdfast` — runs `block(self)` with no locks
+and no transaction. It exists so holdfast-extension members like `effect` and
+`bridge` can be called with holdfast-as-receiver:
 
 ```kotlin
-val d = vault { count effect { … } }      // effect is an extension on Holdfast<Self>
-val v = vault { count.value }             // plain read
+val d = holdfast { count effect { … } }      // effect is an extension on Holdfast<Self>
+val v = holdfast { count.value }             // plain read
 ```
 
-`vault { x mutate y }` is a special case — `mutate` itself synthesizes an
+`holdfast { x mutate y }` is a special case — `mutate` itself synthesizes an
 implicit action when there is no active transaction. So this form still
 goes through middleware and observers.
 
@@ -334,7 +334,7 @@ goes through middleware and observers.
 
 ```
             ┌─────────────────────────────────────────────────────┐
-            │  vault action { body }   on owner thread            │
+            │  holdfast action { body }   on owner thread            │
             └──────────────────────┬──────────────────────────────┘
                                    │
                 ┌──────────────────▼─────────────────────┐
@@ -537,7 +537,7 @@ a separate state).
 
 | | `effect` | `bridge` |
 |---|---|---|
-| Direction | one-way (vault → callback) | two-way (vault ↔ external) |
+| Direction | one-way (holdfast → callback) | two-way (holdfast ↔ external) |
 | Inbound writes | not supported | yes, via `observe` |
 | Per-state count | many | one |
 | Disposed by | returned `Disposable` | reassigning `bridge =` (or never) |
@@ -549,7 +549,7 @@ a separate state).
    I'm currently inside…           and I want to…              do this
    ────────────────────────────    ─────────────────────────   ─────────────
    nothing                         atomic multi-write         action { … }
-   nothing                         single read or effect      vault { … }
+   nothing                         single read or effect      holdfast { … }
    an outer action                 atomic sub-batch with own  action { … }
                                    savepoint semantics        (becomes nested)
    an effect callback              atomic write               action { … }
@@ -558,7 +558,7 @@ a separate state).
                                                               by the time effects
                                                               fire — your action
                                                               becomes top-level)
-   a middleware hook               read state                 context.vault.x.value
+   a middleware hook               read state                 context.holdfast.x.value
    a middleware hook               write state                NOT recommended;
                                                               use action's body to
                                                               orchestrate writes
@@ -598,7 +598,7 @@ a separate state).
 | Pure? | yes — `set` and `get` are required pure | no — can `log`, `metrics.record`, etc. |
 | Fires per | every read (`get`) and every write (`set`) | every transaction (start/end/error) |
 | Can short-circuit? | no | yes — by throwing |
-| Sees other states? | no | yes — `context.vault` |
+| Sees other states? | no | yes — `context.holdfast` |
 | Examples | `EmailNormalizer`, `Encryption`, `JsonCodec` | `Logger`, `Validator`, `MetricsTimer` |
 
 ### 8.4 `state` initial value vs `state` with transformer
@@ -634,7 +634,7 @@ class Logger<V : Holdfast<V>>(private val tag: String) : Middleware<V>() {
         println("$tag ✗ ${c.transaction.id} → $e")
     }
 }
-vault.middlewares(Logger("Counter"))
+holdfast.middlewares(Logger("Counter"))
 ```
 
 ### 9.2 Validation that aborts the transaction
@@ -643,7 +643,7 @@ vault.middlewares(Logger("Counter"))
 class NonNegativeBalance : Middleware<AccountHoldfast>() {
     override fun onTransactionCompleted(c: MiddlewareContext<AccountHoldfast>) {
         // Pending writes already buffered; check against current view.
-        if (c.vault.balance.value < 0)
+        if (c.holdfast.balance.value < 0)
             error("Balance cannot go negative")
     }
 }
@@ -662,16 +662,16 @@ class Composer : Holdfast<Composer>() {
     val lastError by state<Throwable> { NoError }
 }
 
-suspend fun send(vault: Composer, api: Api) {
-    val draft = vault { text.value }
-    vault action {
+suspend fun send(holdfast: Composer, api: Api) {
+    val draft = holdfast { text.value }
+    holdfast action {
         sending mutate true
         text mutate ""           // optimistic clear
     }
     runCatching { api.send(draft) }
-        .onSuccess { vault action { sending mutate false } }
+        .onSuccess { holdfast action { sending mutate false } }
         .onFailure { e ->
-            vault action {
+            holdfast action {
                 sending mutate false
                 text mutate draft     // restore
                 lastError mutate e
@@ -680,7 +680,7 @@ suspend fun send(vault: Composer, api: Api) {
 }
 ```
 
-Vault's automatic rollback handles failures inside one action; for
+Holdfast's automatic rollback handles failures inside one action; for
 multi-step async work, you orchestrate the compensating action yourself.
 
 ### 9.4 Persistence via Bridge
@@ -705,7 +705,7 @@ class JsonFileBridge<T : Any>(
     }.getOrNull()
 }
 
-vault { items bridge JsonFileBridge(Path("todos.json"), TodoCodec) }
+holdfast { items bridge JsonFileBridge(Path("todos.json"), TodoCodec) }
 ```
 
 ### 9.5 Compose StateFlow adapter
@@ -725,10 +725,10 @@ class StateFlowBridge<T : Any>(initial: T) : Bridge<T> {
 }
 
 @Composable
-fun MyScreen(vault: TodoVault) {
-    val bridge = remember { StateFlowBridge(vault.items.value) }
-    DisposableEffect(vault) {
-        vault { items bridge bridge }
+fun MyScreen(holdfast: TodoHoldfast) {
+    val bridge = remember { StateFlowBridge(holdfast.items.value) }
+    DisposableEffect(holdfast) {
+        holdfast { items bridge bridge }
         onDispose { /* leave bridge attached or clear via state.bridge = null */ }
     }
     val items by bridge.state.collectAsState()
@@ -740,10 +740,10 @@ fun MyScreen(vault: TodoVault) {
 
 The library has no native `derive(other) { … }` operator. The two idioms:
 
-**Read-only derived (compute on demand):** define a vault function.
+**Read-only derived (compute on demand):** define a holdfast function.
 
 ```kotlin
-class CartVault : Holdfast<CartVault>() {
+class CartHoldfast : Holdfast<CartHoldfast>() {
     val items by state { emptyList<Line>() }
     fun total(): Money = items.value.sumOf { it.price * it.qty }
 }
@@ -752,7 +752,7 @@ class CartVault : Holdfast<CartVault>() {
 **Stored derived (compute in the action that updates the source):**
 
 ```kotlin
-class CartVault : Holdfast<CartVault>() {
+class CartHoldfast : Holdfast<CartHoldfast>() {
     val items by state { emptyList<Line>() }
     val total by state { Money.Zero }
     fun add(line: Line) = action {
@@ -779,7 +779,7 @@ action.
 ### 9.7 Read-your-own-writes inside an action
 
 ```kotlin
-vault action {
+holdfast action {
     count mutate 5
     val seen = count.value          // == 5 on this thread, even pre-commit
     count mutate seen + 10          // == 15 stored
@@ -793,9 +793,9 @@ the last committed value until this action commits.
 ### 9.8 Savepoint semantics
 
 ```kotlin
-vault action {                      // T_outer
+holdfast action {                      // T_outer
     a mutate 1
-    val inner = vault action {      // T_inner (parent = T_outer)
+    val inner = holdfast action {      // T_inner (parent = T_outer)
         b mutate 2
     }
     // inner is TransactionResult.Success — pendingWrites {b->2} merged into T_outer
@@ -811,9 +811,9 @@ Inner errors propagate to the outer's catch and roll the outer back. To
 runCatching:
 
 ```kotlin
-vault action {
+holdfast action {
     a mutate 1
-    val inner = runCatching { vault action { b mutate 2; error("flake") } }
+    val inner = runCatching { holdfast action { b mutate 2; error("flake") } }
     // inner.exception is set; b's pending was discarded by inner's rollback.
     // Outer continues with a's pending intact.
     c mutate 3
@@ -827,7 +827,7 @@ A transaction handed to you (e.g. via `TransactionResult.Success.transaction`)
 can be `rollback()`'d after the fact — it's a no-op if already finalized.
 
 ```kotlin
-val res = vault action { x mutate 1 }
+val res = holdfast action { x mutate 1 }
 // later, somewhere else:
 if (res is TransactionResult.Success) res.transaction.rollback()
 // no-op: already Committed.
@@ -847,8 +847,8 @@ class CompositeDisposable : Disposable {
 }
 
 val cd = CompositeDisposable().apply {
-    this += vault { count effect { … } }
-    this += vault { label effect { … } }
+    this += holdfast { count effect { … } }
+    this += holdfast { label effect { … } }
 }
 cd.dispose()
 ```
@@ -861,9 +861,9 @@ cd.dispose()
 
 | Operation | Lock | Reentrant? | Notes |
 |---|---|---|---|
-| `vault action { … }` | `transactionLock` | yes | The only entry point; nested actions reuse the same lock |
-| `vault.middlewares(...)` | `middlewareLock` | yes | Reading the chain is also under this lock |
-| `vault.state(…)` (delegate first read) | `propertiesLock` | yes | After first read, no lock for delegate |
+| `holdfast action { … }` | `transactionLock` | yes | The only entry point; nested actions reuse the same lock |
+| `holdfast.middlewares(...)` | `middlewareLock` | yes | Reading the chain is also under this lock |
+| `holdfast.state(…)` (delegate first read) | `propertiesLock` | yes | After first read, no lock for delegate |
 | `MutableState.value` read | `stateLock` (per state) | yes | Plus optional pending-write peek if owner thread |
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
@@ -890,8 +890,8 @@ mutate from a non-owner thread skips the pending path entirely and
 synthesizes its own one-shot transaction (which serializes through
 `transactionLock`).
 
-This means you can have `vault action { … }` running on T1 while T2
-calls `vault.count.value` — T2 reads a consistent committed snapshot,
+This means you can have `holdfast action { … }` running on T1 while T2
+calls `holdfast.count.value` — T2 reads a consistent committed snapshot,
 never T1's pending writes.
 
 ### 10.4 What is NOT thread-safe
@@ -902,9 +902,9 @@ never T1's pending writes.
 - Disposing an `effect` `Disposable` while the same observer is mid-fire
   on another thread. Dispose is idempotent and safe to call concurrently;
   the in-flight callback finishes uninterrupted.
-- A `Bridge<T>.observe` callback that calls back into the vault on a
+- A `Bridge<T>.observe` callback that calls back into the holdfast on a
   different thread *during* `applyFromBridge`. Lock-order analysis: the
-  callback runs while no vault locks are held (the bridge owns its own
+  callback runs while no holdfast locks are held (the bridge owns its own
   threading), so a re-entrant `mutate` from the callback acquires
   `transactionLock` cleanly.
 
@@ -958,7 +958,7 @@ never T1's pending writes.
 }
 ```
 
-### 11.4 Asserting cross-vault rejection
+### 11.4 Asserting cross-holdfast rejection
 
 ```kotlin
 @Test fun foreignStateRejected() {
@@ -998,8 +998,8 @@ never T1's pending writes.
 |---|---|---|
 | Observer fires twice for one logical event | Subscribed via `effect` AND wired through a bridge | Pick one |
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
-| `IllegalStateException: Failed to record state change` | Mutating in a foreign-vault state | The state belongs to a different vault — pass the right state |
-| `TransactionException: Cannot mutate state on a Committed transaction` | Holding a `Transaction` after `action` returned and trying to mutate via it directly | `Transaction` is owned by `action`; just call `vault action { … }` again |
+| `IllegalStateException: Failed to record state change` | Mutating in a foreign-holdfast state | The state belongs to a different holdfast — pass the right state |
+| `TransactionException: Cannot mutate state on a Committed transaction` | Holding a `Transaction` after `action` returned and trying to mutate via it directly | `Transaction` is owned by `action`; just call `holdfast action { … }` again |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
 | Effect callbacks leak after a Composable disappears | `Disposable` not captured | Use `DisposableEffect` and call `.dispose()` in `onDispose` |
 | Nested action's commit "doesn't seem to do anything" | Inner committed — but it's a savepoint; outer still owns the pending writes | This is correct. Inner's commit merged into outer; outer's commit/rollback is what the world sees |
@@ -1086,7 +1086,7 @@ read. `shouldTransform` lets you skip both for sentinel values (e.g. an
 ```kotlin
 open class Middleware<V : Holdfast<V>> {
     data class MiddlewareContext<V>(
-        val vault: V,
+        val holdfast: V,
         val transaction: Transaction,
         val metadata: MutableMap<String, Any> = mutableMapOf(),
     )
@@ -1132,9 +1132,9 @@ single top-level `action`, bypassing `transformer.set` so asymmetric
 transformers (encryption, JSON codecs) round-trip losslessly.
 
 ```kotlin
-val snap = vault.snapshot()
-vault action { count mutate 9999; label mutate "wrong" }
-vault.restore(snap)               // count + label back to snapshot values
+val snap = holdfast.snapshot()
+holdfast action { count mutate 9999; label mutate "wrong" }
+holdfast.restore(snap)               // count + label back to snapshot values
 ```
 
 Restore-time bridge publish: yes. Detach bridges first if the snapshot
@@ -1155,7 +1155,7 @@ fun <V : Holdfast<V>, T : Any> V.derived(
   has no observer mechanism — every read of `value` re-runs `compute`.
 - **`derived`**: push-recomputed. Subscribes to each source via `effect`;
   on each source commit, runs `compute()` inside a fresh top-level action
-  on the same vault and stages the result in a backing `MutableState`.
+  on the same holdfast and stages the result in a backing `MutableState`.
   The returned `State<T>` is a real observable state — use `effect` to
   subscribe.
 
@@ -1163,16 +1163,16 @@ The recompute is deferred via `Holdfast.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
 Disposing the `Disposable` stops recomputation.
 
-### 14.3 `atomic(vararg vaults) { body }`
+### 14.3 `atomic(vararg holdfasts) { body }`
 
 ```kotlin
-fun <R> atomic(vararg vaults: Holdfast<*>, body: () -> R): TransactionResult<R>
+fun <R> atomic(vararg holdfasts: Holdfast<*>, body: () -> R): TransactionResult<R>
 ```
 
-Brackets multiple vaults' transactions so they commit-or-rollback together.
+Brackets multiple holdfasts' transactions so they commit-or-rollback together.
 Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
-frame as savepoints of each vault's root. On body throw, every vault is
-rolled back; on body return, every vault commits in lock order with
+frame as savepoints of each holdfast's root. On body throw, every holdfast is
+rolled back; on body return, every holdfast commits in lock order with
 sequential observer fanout per-holdfast.
 
 ```kotlin
@@ -1182,7 +1182,7 @@ val r = atomic(accountA, accountB) {
 }
 ```
 
-Vaults are sorted by `Holdfast.lockOrderKey` (process-monotonic, set at
+Holdfasts are sorted by `Holdfast.lockOrderKey` (process-monotonic, set at
 construction) before lock acquisition — deadlock-safe across any
 combination. Nested `atomic` is supported via reentrant locks.
 
@@ -1221,8 +1221,8 @@ and iOS (`NSData.writeToURL(atomically=true)`).
 
 ```kotlin
 val kv = FileSystemKvStore(rootPath = "$home/.myapp")
-vault { balance bridge KvBridge(kv, "balance:1", LongCodec) }
-// balance auto-persists on every commit; new vaults attaching the same
+holdfast { balance bridge KvBridge(kv, "balance:1", LongCodec) }
+// balance auto-persists on every commit; new holdfasts attaching the same
 // KvBridge hydrate from disk via load-on-attach.
 ```
 
@@ -1236,7 +1236,7 @@ class TimingMiddleware<V>(onResult: (id: String, status: TransactionStatus, elap
 class ValidationMiddleware<V>(check: V.() -> Unit)
 ```
 
-Drop-in. Order in `vault.middlewares(...)` matters — the LAST argument
+Drop-in. Order in `holdfast.middlewares(...)` matters — the LAST argument
 is the outermost middleware (its `onTransactionStarted` runs first; its
 `onTransactionError` runs last). Place logging/audit middleware LAST so
 it sees errors thrown by validation middleware placed earlier.
@@ -1281,7 +1281,7 @@ suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): Trans
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
-Mutually exclusive with blocking `Holdfast.action` on the same vault via an
+Mutually exclusive with blocking `Holdfast.action` on the same holdfast via an
 internal coroutine `Mutex` installed lazily. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
@@ -1309,7 +1309,7 @@ fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compo
 fun rememberDisposable(make: () -> Disposable): Disposable
 ```
 
-Bridges vault state into Compose's snapshot system as a
+Bridges holdfast state into Compose's snapshot system as a
 `androidx.compose.runtime.State<T>`, triggering recomposition on every
 successful commit. Backed by `produceState`; subscription's lifecycle is
 tied to the surrounding Composable.
@@ -1318,15 +1318,15 @@ tied to the surrounding Composable.
 
 **Encrypted-at-rest credential**:
 ```kotlin
-class CredsVault : Holdfast<CredsVault>() {
+class CredsHoldfast : Holdfast<CredsHoldfast>() {
     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
 }
 val kv = FileSystemKvStore("$home/.app/creds")
-vault { token bridge KvBridge(kv, "session", StringCodec) }
+holdfast { token bridge KvBridge(kv, "session", StringCodec) }
 // token is plaintext on read; persisted file contains ciphertext.
 ```
 
-**Cross-vault transfer with one-line atomicity**:
+**Cross-holdfast transfer with one-line atomicity**:
 ```kotlin
 fun AccountHoldfast.transferTo(other: AccountHoldfast, cents: Long) =
     atomic(this, other) {
@@ -1337,21 +1337,21 @@ fun AccountHoldfast.transferTo(other: AccountHoldfast, cents: Long) =
 
 **Auto-recomputed running total**:
 ```kotlin
-val (total, dispose) = vault.derived(vault.items) { items.value.sumOf { it.amount } }
-val sub = vault { total effect { uiTotal.value = this } }
+val (total, dispose) = holdfast.derived(holdfast.items) { items.value.sumOf { it.amount } }
+val sub = holdfast { total effect { uiTotal.value = this } }
 // later: sub.dispose() ; dispose.dispose()
 ```
 
 **Snapshot-and-restore for undo**:
 ```kotlin
 val undoStack = ArrayDeque<HoldfastSnapshot>()
-fun saveCheckpoint() { undoStack.addLast(vault.snapshot()) }
-fun undo() = undoStack.removeLastOrNull()?.let { vault.restore(it) }
+fun saveCheckpoint() { undoStack.addLast(holdfast.snapshot()) }
+fun undo() = undoStack.removeLastOrNull()?.let { holdfast.restore(it) }
 ```
 
 **Async transactional fetch**:
 ```kotlin
-val r = vault.suspendAction {
+val r = holdfast.suspendAction {
     status mutate Status.Loading
     val data = api.fetch()                  // suspending I/O
     items mutate (items.value + data)
@@ -1363,7 +1363,7 @@ val r = vault.suspendAction {
 ### 14.11 Validation 0.3.0 — three modules at the boundary
 
 `:validation` is a standalone KMP refinement-types library; `:holdfast-hallmark`
-is a thin Vault adapter on top of it; `:validation-coroutines` adds suspend
+is a thin Holdfast adapter on top of it; `:validation-coroutines` adds suspend
 support. The premise: every primitive (`String`, `Long`, …) flowing into your
 domain is validated and wrapped in a typed `Boxed<P>` exactly once, at the
 boundary. Inside the domain, you pass wrappers, never raw primitives — the
@@ -1373,9 +1373,9 @@ canonical fix for the **primitive obsession** code smell.
 
 | Artifact | Role |
 |---|---|
-| `com.vynatix:validation` | Core lib. No Vault dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
+| `com.vynatix:validation` | Core lib. No Holdfast dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
 | `com.vynatix:validation-coroutines` | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
-| `com.vynatix:holdfast-hallmark` | Vault adapter. `ValidatingTransformer`, `Holdfast.boxed { }` factory, `BoxedCodec`. |
+| `com.vynatix:holdfast-hallmark` | Holdfast adapter. `ValidatingTransformer`, `Holdfast.boxed { }` factory, `BoxedCodec`. |
 
 #### Core surface (`com.vynatix.hallmark`)
 
@@ -1536,24 +1536,24 @@ Useful for OpenAPI / JSON-Schema generation, form-builder UIs, or doc
 generation. Ships introspection only — actual schema-format export is
 adopter-side.
 
-#### Vault integration (`vault-validation`)
+#### Holdfast integration (`holdfast-validation`)
 
 Two state factories:
 
 ```kotlin
-class UserVault : Holdfast<UserVault>() {
+class UserHoldfast : Holdfast<UserHoldfast>() {
     val email       by boxed(EmailValidator) { "init@example.com" }       // State<Email>
     val displayName by boxedHandle(NameValidator) { "init" }              // BoxedHandle<String, Name>
 }
 
-vault action {
+holdfast action {
     email mutate (EmailValidator of "alice@example.com")     // explicit validator at the call site
     displayName assign "Alice"                                // assign infix via BoxedHandle
     email mutate Email("not-an-email")                        // rolls back via transformer
 }
 
 // KvBridge persistence
-vault {
+holdfast {
     email bridge KvBridge(
         kv     = kvStore,
         key    = "user.email",
@@ -1603,14 +1603,14 @@ val r: HallmarkResult<NewUser> = v.validate(NewUser("alice", "Alice"))
 The composite DSL accepts either sync or suspend sub-validators via
 overloaded `field` factories.
 
-#### Vault adapter for suspend validation (`vault-validation-coroutines`)
+#### Holdfast adapter for suspend validation (`holdfast-validation-coroutines`)
 
 ```kotlin
 suspend fun adoptUsername(name: String): TransactionResult<Unit> =
-    vault.suspendValidateAndMutate(vault.username, UsernameValidator, name)
+    holdfast.suspendValidateAndMutate(holdfast.username, UsernameValidator, name)
 ```
 
-Runs the suspend validator (which may do I/O), then mutates the Vault state
+Runs the suspend validator (which may do I/O), then mutates the Holdfast state
 inside a `suspendAction { }`. Atomic: validation failure rolls back the
 entire transaction.
 
@@ -1621,7 +1621,7 @@ import com.vynatix.holdfast.then
 
 val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
 
-class UserVault : Holdfast<UserVault>() {
+class UserHoldfast : Holdfast<UserHoldfast>() {
     val email by state(transformer = pipeline) { /* … */ }
 }
 ```
@@ -1652,7 +1652,7 @@ val v = V()
 // Subscribe.
 val sub = v { x effect { println("x=$this") } }       // initial: x=0
 
-// Atomic single-vault mutation; body return flows into Success.
+// Atomic single-holdfast mutation; body return flows into Success.
 val r = v action { x update { it + 1 }; "$x.value done" }  // 1.1: update + <R>
 
 // Failed atomic mutation.
@@ -1671,7 +1671,7 @@ v { s bridge null }
 // Inbound-only push (1.1).
 val sub2 = v { s observeFrom externalObservable }
 
-// Cross-vault atomic (1.1).
+// Cross-holdfast atomic (1.1).
 atomic(accountA, accountB) {
     accountA.action { balance update { it - cents } }
     accountB.action { balance update { it + cents } }
@@ -1684,7 +1684,7 @@ v.restore(snap)
 // Push-recomputed derived state (1.1).
 val (total, d) = v.derived(v.items) { items.value.sumOf { it.amount } }
 
-// Suspending body (1.1, vault-coroutines).
+// Suspending body (1.1, holdfast-coroutines).
 val r2 = v.suspendAction { status mutate Loading; val data = api.fetch(); status mutate Loaded; data }
 
 // Cleanup.

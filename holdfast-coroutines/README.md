@@ -1,4 +1,4 @@
-# vault-coroutines
+# holdfast-coroutines
 
 `Flow` / `StateFlow` / suspend integration for the [Holdfast](../holdfast/) library.
 Pulls in `kotlinx-coroutines-core`; nothing else.
@@ -23,7 +23,7 @@ suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
 ```kotlin
 viewModelScope.launch {
-    vault.count.asFlow().collect { value ->
+    holdfast.count.asFlow().collect { value ->
         log("count = $value")
     }
 }
@@ -33,8 +33,8 @@ viewModelScope.launch {
 
 ```kotlin
 class CounterViewModel : ViewModel() {
-    val vault = CounterHoldfast()
-    val count: StateFlow<Int> = vault.count.asStateFlow(
+    val holdfast = CounterHoldfast()
+    val count: StateFlow<Int> = holdfast.count.asStateFlow(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
     )
@@ -44,8 +44,8 @@ class CounterViewModel : ViewModel() {
 ### Await predicate
 
 ```kotlin
-suspend fun waitForReady(vault: AccountHoldfast) {
-    vault.status.first { it == AccountStatus.Active }
+suspend fun waitForReady(holdfast: AccountHoldfast) {
+    holdfast.status.first { it == AccountStatus.Active }
 }
 ```
 
