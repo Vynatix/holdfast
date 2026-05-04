@@ -1,0 +1,69 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/**/build/
+
+# Kotlin
+.kotlin/
+*.kotlin_module
+
+# Android
+local.properties
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+proguard/
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Xcode / iOS
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# KMP / Native
+*.framework/
+!*.xcframework/
+
+# macOS
+.DS_Store
+*.swp
+
+# Logs / temp
+*.log
+*.tmp
+hs_err_pid*
+
+# Keystore (never commit)
+*.jks
+*.keystore
+keystore.properties
+
+# Git worktrees
+.worktrees/
