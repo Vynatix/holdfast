@@ -9,15 +9,15 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 
 /**
- * Issue 02 — `Store.bindToScope(scope)` rebindable per-vault scope binding.
+ * Issue 02 — `Store.bindToScope(scope)` rebindable per-store scope binding.
  *
  * Resolution order per source doc §3.1 / Q3:
- *   per-call → per-vault override → bound (bindToScope) → process default.
+ *   per-call → per-store override → bound (bindToScope) → process default.
  */
 class VaultBindToScopeTest {
     private class PlainVault : Store<PlainVault>()
 
-    /** Per-vault subclass override (resolution level 2) — must beat any bound scope. */
+    /** Per-store subclass override (resolution level 2) — must beat any bound scope. */
     private class OverrideVault(private val s: CoroutineScope) : Store<OverrideVault>() {
         override val scope: CoroutineScope get() = s
     }
@@ -52,7 +52,7 @@ class VaultBindToScopeTest {
 
     @Test
     fun per_vault_override_takes_precedence_over_bindToScope() {
-        // Resolution order: per-call → per-vault override → bound → default.
+        // Resolution order: per-call → per-store override → bound → default.
         // A subclass that `override val scope` MUST win over any bindToScope call.
         val overrideScope = newScope("override-scope")
         val boundScope = newScope("bound-scope")

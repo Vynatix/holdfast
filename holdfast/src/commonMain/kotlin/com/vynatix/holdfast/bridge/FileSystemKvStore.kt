@@ -14,7 +14,7 @@ package com.vynatix.holdfast.bridge
  * persistence with zero extra code:
  * ```
  * val kv = FileSystemKvStore(System.getProperty("user.home") + "/.myapp")
- * vault { balance bridge KvBridge(kv, "balance", LongCodec) }
+ * store { balance bridge KvBridge(kv, "balance", LongCodec) }
  * ```
  */
 expect class FileSystemKvStore(rootPath: String) : KvStore {

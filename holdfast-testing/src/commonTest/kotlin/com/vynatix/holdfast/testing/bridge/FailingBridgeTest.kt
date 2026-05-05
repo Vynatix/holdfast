@@ -70,7 +70,7 @@ class FailingBridgeTest {
             },
         )
 
-        // The bridge throws during commit-phase publish; vault wraps the
+        // The bridge throws during commit-phase publish; store wraps the
         // throw in TransactionException ("Commit failed") and surfaces it as
         // a TransactionResult.Error. The transaction status is Failed (not
         // RolledBack — it's a commit-time error, past the body-throw rollback

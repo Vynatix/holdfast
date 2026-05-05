@@ -109,7 +109,7 @@ class AwaitingTest {
         val a = track(AwaitingCounterVault())
         val b = track(AwaitingCounterVault())
         b.action { count mutate 99 }.shouldBeSuccess()
-        // The matching commit is on `b`. Predicate references the b vault's
+        // The matching commit is on `b`. Predicate references the b store's
         // state to verify identity-aware filtering works across the fan-in.
         val event = awaiting(timeout = 100.milliseconds) {
             it is TransactionCommitted && b.read { count.value } == 99

@@ -5,8 +5,8 @@ package com.vynatix.holdfast
  * [Store.snapshot] was called. Stored values are RAW — post-`transformer.set`
  * — so that [Store.restore] can round-trip without re-running the transformer.
  *
- * Snapshots are NOT typed against any particular vault instance. Restoring a
- * snapshot from one vault into a different vault is permitted as long as the
+ * Snapshots are NOT typed against any particular store instance. Restoring a
+ * snapshot from one store into a different store is permitted as long as the
  * destination has states with matching names; foreign state names are rejected.
  *
  * For symmetric transformers and untransformed states, the snapshot's stored
@@ -24,13 +24,13 @@ class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any
 }
 
 /**
- * Capture the current raw value of every registered state on this vault.
+ * Capture the current raw value of every registered state on this store.
  *
  * Only states that have been touched (delegate-initialized) at least once are
  * included; states whose delegate has not been read yet are absent from the
  * snapshot. Touch them explicitly first if you need them included.
  *
- * The returned snapshot is detached from the vault — mutations after `snapshot()`
+ * The returned snapshot is detached from the store — mutations after `snapshot()`
  * do not affect previously-captured snapshots.
  */
 fun <V : Store<V>> V.snapshot(): StoreSnapshot {
@@ -44,14 +44,14 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
 }
 
 /**
- * Restore every state in [snapshot] into this vault, atomically. Implemented
+ * Restore every state in [snapshot] into this store, atomically. Implemented
  * as a single top-level [action]: on success every state's `currentValue` is
  * set to the snapshot's raw value and observers/bridges fire once each;
  * on rollback nothing changes.
  *
  * Throws (caught by the wrapping action and surfaced as
  * [TransactionResult.Error]) if the snapshot contains a state name not
- * registered on this vault.
+ * registered on this store.
  *
  * Bridges that were attached when restore is called WILL receive the restored
  * value via their `publish` (commit-time bridge fanout). To avoid this,
@@ -62,7 +62,7 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
         ?: error("restore must run inside an action — this should never happen since restore wraps in action")
     snapshot.rawValues.forEach { (name, rawValue) ->
         val state = getState(name)
-            ?: error("snapshot contains state '$name' not registered on this vault")
+            ?: error("snapshot contains state '$name' not registered on this store")
 
         @Suppress("UNCHECKED_CAST")
         val ms = state as? MutableState<Any>

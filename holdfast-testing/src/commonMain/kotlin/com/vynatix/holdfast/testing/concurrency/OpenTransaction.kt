@@ -10,7 +10,7 @@ import com.vynatix.holdfast.testing.internal.openTransactionsRegistry
 import kotlinx.atomicfu.atomic
 
 /**
- * Handle to an open, not-yet-committed transaction on a tracked vault.
+ * Handle to an open, not-yet-committed transaction on a tracked store.
  *
  * Returned from [com.vynatix.holdfast.testing.concurrency.transaction]; the test
  * decides whether to [commit] (apply pending writes, fire observers and
@@ -22,7 +22,7 @@ import kotlinx.atomicfu.atomic
  * [com.vynatix.holdfast.testing.vaultTest] block is registered with the hosting
  * [com.vynatix.holdfast.testing.StoreTestScope]. If the body returns without
  * having closed it, the scope's `tearDown` invokes [rollback] before clearing
- * the handle registry, so the vault is left in the same state as if no open
+ * the handle registry, so the store is left in the same state as if no open
  * transaction had ever existed. This matches the
  * "off-thread reads see committed, never pending" invariant: a leaked open
  * transaction never accidentally leaks pending writes into a sibling test.
@@ -35,7 +35,7 @@ import kotlinx.atomicfu.atomic
  *    overlay and return the COMMITTED value, never the pending one — the
  *    `offThreadStateValueReadDuringActiveActionReturnsCommittedNotPending`
  *    invariant.
- *  - A peer `action` from another thread takes the vault's `transactionLock`,
+ *  - A peer `action` from another thread takes the store's `transactionLock`,
  *    sees `activeTransaction = ourOpenTxn`, and nests as a savepoint — its
  *    inner commit MERGES into our pending writes rather than firing observers
  *    or bridges. This is the production-faithful nested-action behavior;
@@ -67,7 +67,7 @@ class OpenTransaction internal constructor(
     val isClosed: Boolean get() = closedFlag.value
 
     /**
-     * Apply the pending writes staged in [transaction] to the vault, fire
+     * Apply the pending writes staged in [transaction] to the store, fire
      * observers and bridges in the same single-fanout boundary that a
      * production [Store.action] commit produces.
      *
@@ -87,7 +87,7 @@ class OpenTransaction internal constructor(
             error("OpenTransaction already closed")
         }
         return try {
-            PrivilegedHooks.commitOpenTransaction(handle.vault, transaction)
+            PrivilegedHooks.commitOpenTransaction(handle.store, transaction)
             TransactionResult.Success(transaction, Unit)
         } catch (e: Throwable) {
             TransactionResult.Error(e, transaction)
@@ -97,7 +97,7 @@ class OpenTransaction internal constructor(
     }
 
     /**
-     * Discard the pending writes staged in [transaction]. The vault's
+     * Discard the pending writes staged in [transaction]. The store's
      * committed values stay unchanged; observers and bridges receive no
      * notification. After return, [Transaction.status] is `RolledBack`.
      *
@@ -110,7 +110,7 @@ class OpenTransaction internal constructor(
             error("OpenTransaction already closed")
         }
         try {
-            PrivilegedHooks.rollbackOpenTransaction(handle.vault, transaction)
+            PrivilegedHooks.rollbackOpenTransaction(handle.store, transaction)
         } finally {
             onClose(this)
         }
@@ -128,7 +128,7 @@ class OpenTransaction internal constructor(
     internal fun rollbackSilentlyForTearDown() {
         if (!closedFlag.compareAndSet(expect = false, update = true)) return
         try {
-            PrivilegedHooks.rollbackOpenTransaction(handle.vault, transaction)
+            PrivilegedHooks.rollbackOpenTransaction(handle.store, transaction)
         } finally {
             onClose(this)
         }
@@ -136,13 +136,13 @@ class OpenTransaction internal constructor(
 }
 
 /**
- * Open a transaction on the tracked vault behind [on], run [body] inside it
+ * Open a transaction on the tracked store behind [on], run [body] inside it
  * (staging mutations into the transaction's pending writes), and return an
  * [OpenTransaction] handle. Subsequent calls to
  * [OpenTransaction.commit] or [OpenTransaction.rollback] decide the outcome.
  *
  * What the body does:
- *  - Receiver is the tracked vault. Mutations like `count mutate 999` stage
+ *  - Receiver is the tracked store. Mutations like `count mutate 999` stage
  *    into the new transaction's pending writes — same staging as inside a
  *    production [com.vynatix.holdfast.Holdfast.action] body.
  *  - Reads honor read-your-own-writes on the body's owner thread; an
@@ -154,12 +154,12 @@ class OpenTransaction internal constructor(
  *    `:holdfast-coroutines.suspendAction`'s v1 contract — middleware is "NOT
  *    invoked" for externally-manufactured transactions.
  *  - The body must NOT throw — this method propagates the throw immediately
- *    and rolls back the manufactured transaction (so the vault is left in a
+ *    and rolls back the manufactured transaction (so the store is left in a
  *    clean state). Tests asserting body-failure behavior should wrap the
  *    `transaction { ... }` call in `assertFailsWith`.
  *
  * Concurrency:
- *  - The vault's `transactionLock` is held only briefly at open (to install
+ *  - The store's `transactionLock` is held only briefly at open (to install
  *    the manufactured transaction as `activeTransaction`) and at
  *    commit/rollback (to apply or discard pending writes). The body runs
  *    without holding the lock, so async work between open and close is
@@ -173,7 +173,7 @@ class OpenTransaction internal constructor(
  * Auto-rollback at scope exit: leaking an [OpenTransaction] past the
  * surrounding [com.vynatix.holdfast.testing.vaultTest] block triggers a
  * synchronous rollback during `tearDown`. The rollback runs after the
- * barrier-cancel step but before the recorder-dispose step, so a vault that
+ * barrier-cancel step but before the recorder-dispose step, so a store that
  * never committed still has its pending writes discarded cleanly.
  *
  * Example:
@@ -187,7 +187,7 @@ class OpenTransaction internal constructor(
  */
 @Suppress("RedundantSuspendModifier")
 suspend fun <V : Store<V>> StoreTestScope.transaction(on: StoreHandle<V>, body: V.() -> Unit): OpenTransaction {
-    val txn = PrivilegedHooks.openTransaction(on.vault, body)
+    val txn = PrivilegedHooks.openTransaction(on.store, body)
     val open = OpenTransaction(
         transaction = txn,
         handle = on,

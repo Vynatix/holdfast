@@ -23,9 +23,9 @@ import kotlin.uuid.Uuid
  *
  * Locking: vaults are sorted by [Store.lockOrderKey] before lock acquisition,
  * giving deadlock-safe global ordering across any combination of vaults. Each
- * vault's [Store.AsyncSerializer] coroutine `Mutex` (the same one [suspendAction]
+ * store's [Store.AsyncSerializer] coroutine `Mutex` (the same one [suspendAction]
  * uses) is acquired in lock order. Mutually exclusive with blocking
- * [Store.action] and per-vault [suspendAction] on the same vault.
+ * [Store.action] and per-store [suspendAction] on the same store.
  *
  * Reentrancy: nested `suspendAtomic` calls within the same coroutine reuse
  * the outer call's locks. A nested call passing vaults already held by the
@@ -35,29 +35,29 @@ import kotlin.uuid.Uuid
  * owner-reentrant (re-acquiring with the same owner throws), so reentrancy is
  * managed at the suspendAtomic level.
  *
- * Body runs in caller's coroutine context. No vault-scope dependency. Inside
- * the body, `mutate`/`update` on any of the [vaults] stages into that vault's
- * root transaction's `pendingWrites`. `vault.suspendAction { … }` becomes a
- * savepoint of the vault's root transaction.
+ * Body runs in caller's coroutine context. No store-scope dependency. Inside
+ * the body, `mutate`/`update` on any of the [vaults] stages into that store's
+ * root transaction's `pendingWrites`. `store.suspendAction { … }` becomes a
+ * savepoint of the store's root transaction.
  *
  * On body return: under `withContext(NonCancellable)`, each newly-acquired
- * vault's root transaction commits in lock order. Per-vault sequential
- * observer / bridge / event fanout — same machinery as [suspendAction]. Cross-vault
+ * store's root transaction commits in lock order. Per-store sequential
+ * observer / bridge / event fanout — same machinery as [suspendAction]. Cross-store
  * sequential too (NOT parallel — same as sync [com.vynatix.holdfast.atomic],
  * per design §10). [SuspendingBridge.publishAwaited] is awaited; sync
  * [com.vynatix.holdfast.Bridge.publish] is fire-and-forget. Events drain via
  * suspending `emit` honoring `BufferOverflow.SUSPEND` back-pressure.
  *
  * On body throw or [CancellationException]: under `withContext(NonCancellable)`,
- * each newly-acquired vault's root transaction rolls back in REVERSE lock
+ * each newly-acquired store's root transaction rolls back in REVERSE lock
  * order. Locks release on the way out. The throwable rethrows
  * (`CancellationException`) or surfaces as [TransactionResult.Error].
  *
- * Limitation (2.0): blocking `vault.action { }` calls inside the body are NOT
- * supported on a vault that participates in this `suspendAtomic` — they would
+ * Limitation (2.0): blocking `store.action { }` calls inside the body are NOT
+ * supported on a store that participates in this `suspendAtomic` — they would
  * deadlock on the AsyncSerializer mutex (kotlinx Mutex is not owner-reentrant
  * even via `tryLock`). Use `mutate` (via the receiver-DSL
- * `vault { state mutate value }`) or stage via [suspendAction] inside the
+ * `store { state mutate value }`) or stage via [suspendAction] inside the
  * body. This may be relaxed in a future minor.
  *
  * Example:
@@ -77,7 +77,7 @@ suspend fun <R> suspendAtomic(
     vararg vaults: Store<*>,
     body: suspend () -> R,
 ): TransactionResult<R> {
-    require(vaults.isNotEmpty()) { "suspendAtomic requires at least one vault" }
+    require(vaults.isNotEmpty()) { "suspendAtomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = vaults.toSet().sortedBy { it.lockOrderKey }
 
@@ -114,14 +114,14 @@ suspend fun <R> suspendAtomic(
 /**
  * Recursive lock acquisition mirroring sync [com.vynatix.holdfast.atomic]'s
  * `acquireAndRun`. Each step either:
- *  - reuses a parent frame's already-held vault (no mutex acquire, adopt
+ *  - reuses a parent frame's already-held store (no mutex acquire, adopt
  *    outer's active transaction so mutates merge into the outer's pendingWrites),
  *    OR
- *  - acquires the next newly-held vault's mutex via `mutex.lock(owner)` and
+ *  - acquires the next newly-held store's mutex via `mutex.lock(owner)` and
  *    opens a new root transaction.
  *
  * On unwind, the order is reverse: newly-acquired locks release in reverse,
- * and each vault's transaction is committed (success path) or rolled back
+ * and each store's transaction is committed (success path) or rolled back
  * (failure path) under `withContext(NonCancellable)` before release.
  *
  * The frame element is installed via `withContext` only at the OUTERMOST
@@ -163,14 +163,14 @@ private suspend fun <R> acquireAndRun(
             frame.heldVaults += v
             val priorActive = v.activeTransaction
             val priorOwner = v.suspendingOwner
-            // Install a fresh root transaction for this vault. Subsequent
+            // Install a fresh root transaction for this store. Subsequent
             // mutate / update / suspendAction calls inside the body stage into
             // this root's pendingWrites.
             val root = Transaction.createForExternal(id, ownerThreadId)
             v.internalSetActiveTransaction(root)
             v.suspendingOwner = ownerKey
             rootsAcquired += RootEntry(
-                vault = v,
+                store = v,
                 txn = root,
                 priorActive = priorActive,
                 priorOwner = priorOwner,
@@ -205,11 +205,11 @@ private suspend fun <R> acquireAndRun(
         // root via the existing activeTransaction reference (savepoint reuse).
         val adoptedRoot = v.activeTransaction
             ?: error(
-                "Internal: suspendAtomic frame claims to hold vault ${v::class.simpleName}, " +
+                "Internal: suspendAtomic frame claims to hold store ${v::class.simpleName}, " +
                     "but its activeTransaction is null. Did the outer frame abort without unwinding?",
             )
         rootsAcquired += RootEntry(
-            vault = v,
+            store = v,
             txn = adoptedRoot,
             priorActive = adoptedRoot,
             priorOwner = v.suspendingOwner,
@@ -232,7 +232,7 @@ private suspend fun <R> acquireAndRun(
 
 /**
  * Run the body, then commit (success) or rollback (failure) each
- * newly-acquired vault's root transaction in the appropriate order under
+ * newly-acquired store's root transaction in the appropriate order under
  * [NonCancellable]. Adopted (reused) roots are NOT committed or rolled back
  * here — their lifecycle belongs to the outer frame.
  */
@@ -240,7 +240,7 @@ private suspend fun <R> executeBody(
     roots: List<RootEntry>,
     body: suspend () -> R,
 ): TransactionResult<R> {
-    // Pick the OUTERMOST (highest lock-order index) newly-held vault's root
+    // Pick the OUTERMOST (highest lock-order index) newly-held store's root
     // for the TransactionResult's `transaction` handle — gives the user a
     // stable terminal-state reference. If everything was adopted (a trivial
     // nested case with no new vaults), fall back to the last adopted root.
@@ -258,7 +258,7 @@ private suspend fun <R> executeBody(
                 val entry = roots[i]
                 if (entry.wasNewlyAcquired) {
                     runCatching { entry.txn.rollback() }
-                    entry.vault.internalDrainPostCommitTasks()
+                    entry.store.internalDrainPostCommitTasks()
                 }
             }
         }
@@ -269,22 +269,22 @@ private suspend fun <R> executeBody(
                 val entry = roots[i]
                 if (entry.wasNewlyAcquired) {
                     runCatching { entry.txn.rollback() }
-                    entry.vault.internalDrainPostCommitTasks()
+                    entry.store.internalDrainPostCommitTasks()
                 }
             }
         }
         return TransactionResult.Error(e, resultTxn)
     }
 
-    // Body returned. Commit each newly-acquired vault's root in lock order
-    // under NonCancellable. Per-vault sequential observer / bridge / event
+    // Body returned. Commit each newly-acquired store's root in lock order
+    // under NonCancellable. Per-store sequential observer / bridge / event
     // fanout via the shared suspendingCommit machinery.
     return withContext(NonCancellable) {
         try {
             for (entry in roots) {
                 if (entry.wasNewlyAcquired) {
                     suspendingCommit(entry.txn)
-                    entry.vault.internalDrainPostCommitTasks()
+                    entry.store.internalDrainPostCommitTasks()
                 }
                 // Adopted vaults: nothing to commit; their writes already
                 // merged into the outer frame's pendingWrites via the shared
@@ -292,7 +292,7 @@ private suspend fun <R> executeBody(
             }
             TransactionResult.Success(resultTxn, value)
         } catch (e: Throwable) {
-            // Commit failure on one vault: rollback any not-yet-committed
+            // Commit failure on one store: rollback any not-yet-committed
             // newly-acquired roots. Already-committed vaults' state changes
             // ARE visible — same partial-commit risk on commit failure as
             // sync `atomic`.
@@ -300,7 +300,7 @@ private suspend fun <R> executeBody(
                 val entry = roots[i]
                 if (entry.wasNewlyAcquired && entry.txn.status == TransactionStatus.Active) {
                     runCatching { entry.txn.rollback() }
-                    entry.vault.internalDrainPostCommitTasks()
+                    entry.store.internalDrainPostCommitTasks()
                 }
             }
             TransactionResult.Error(e, resultTxn)
@@ -314,7 +314,7 @@ private suspend fun <R> executeBody(
  * here) or adopted from an outer frame (lifecycle owned by the outer).
  */
 private class RootEntry(
-    val vault: Store<*>,
+    val store: Store<*>,
     val txn: Transaction,
     @Suppress("unused") val priorActive: Transaction?,
     @Suppress("unused") val priorOwner: Any?,

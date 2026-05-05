@@ -21,7 +21,7 @@ import kotlin.reflect.KProperty1
 /**
  * Test-scope handle to a tracked [Store]. Returned by [StoreTestScope.track]; the
  * registry keeps it alive for the duration of the test so subsequent `track`
- * calls with the same vault instance return the same handle.
+ * calls with the same store instance return the same handle.
  *
  * Every [TransactionResult.Error] returned by [action] or [suspendAction] is
  * recorded as a pending consumption. Calling
@@ -34,21 +34,21 @@ import kotlin.reflect.KProperty1
  * ignores an error.
  *
  * When [captureMode] is anything other than [Capture.None], the handle owns a
- * privileged recorder middleware installed on the tracked vault. The recorder
+ * privileged recorder middleware installed on the tracked store. The recorder
  * pushes [StoreEvent]s into [timeline] for every transaction lifecycle, with
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
  * known limits (commit-time errors after the body returns, user middlewares
  * not auto-wrapped, suspendAction not running middleware in 1.1).
  */
-class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMode: Capture) {
+class StoreHandle<V : Store<V>> internal constructor(val store: V, val captureMode: Capture) {
 
     private val handleLock = SynchronizedObject()
     private val pendingErrorList: MutableList<TransactionResult.Error> = mutableListOf()
 
     /**
      * Privileged recorder. `null` when [captureMode] is [Capture.None] — the
-     * recorder is not installed on the vault in that case, matching the spec
+     * recorder is not installed on the store in that case, matching the spec
      * that `Capture.None` records nothing and pays no per-action overhead.
      */
     internal val recorder: Recorder<V>? = if (captureMode is Capture.None) null else Recorder(captureMode)
@@ -77,13 +77,13 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
         // closest to the body and its `onTransactionCompleted` fires closest to
         // commit time. This puts emission events at the natural boundary between
         // body return and commit apply.
-        recorder?.let { vault.middlewares(it) }
+        recorder?.let { store.middlewares(it) }
 
         // Wrap every currently-attached bridge so the recorder sees publish /
-        // observe events on the timeline. We iterate vault.properties, cast
+        // observe events on the timeline. We iterate store.properties, cast
         // each State to MutableState (the only concrete State implementation
         // produced by Store.state — the cast is sound for any state created
-        // by the vault DSL). Setting state.bridge re-runs the attach path,
+        // by the store DSL). Setting state.bridge re-runs the attach path,
         // which disposes the old inbound subscription and calls our wrapper's
         // observe — the wrap is therefore visible to production code as a
         // single re-attach. See RecordingBridgeWrapper KDoc for the
@@ -95,16 +95,16 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
     private fun wrapAttachedBridges(recorder: Recorder<V>) {
         // Re-wrap of an already-wrapped bridge is a no-op (idempotent track
         // calls land here via HandleRegistry.getOrCreate returning the same
-        // handle, so this init runs only once per vault — but defensive in
+        // handle, so this init runs only once per store — but defensive in
         // case future entry points cycle here).
-        val wrappable = vault.properties.values
+        val wrappable = store.properties.values
             .mapNotNull { state -> (state as? MutableState<Any>)?.let { state to it } }
             .mapNotNull { (state, mutable) -> mutable.bridge?.let { Triple(state, mutable, it) } }
             .filter { (_, _, attached) -> attached !is RecordingBridgeWrapper<*> }
         for ((state, mutable, attached) in wrappable) {
             val wrapper = RecordingBridgeWrapper(state = state, delegate = attached, recorder = recorder)
             bridgeWrappers[state] = wrapper
-            // Replace the attached bridge — vault setter disposes the old
+            // Replace the attached bridge — store setter disposes the old
             // inbound subscription and calls wrapper.observe.
             mutable.bridge = wrapper as Bridge<Any>
         }
@@ -119,7 +119,7 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
         get() = synchronized(handleLock) { pendingErrorList.toList() }
 
     /**
-     * Every event the recorder has captured for this vault, in push order.
+     * Every event the recorder has captured for this store, in push order.
      * Returns an empty list when [captureMode] is [Capture.None]. The list is
      * a defensive copy taken under the recorder's lock — safe to iterate
      * without contention with concurrent actions.
@@ -153,30 +153,30 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
 
     /**
      * Filter of [timeline] for [EmissionEvent]s targeting [prop]'s state on
-     * this vault. Resolves [prop] against the live vault instance, so
+     * this store. Resolves [prop] against the live store instance, so
      * `MyVault::count` returns events for the same `State<*>` reference the
      * recorder pushed at commit time. Order is preserved.
      */
     fun emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> {
-        val target = prop.get(vault)
+        val target = prop.get(store)
         return timeline.filterIsInstance<EmissionEvent>().filter { it.state === target }
     }
 
     /**
      * Filter of [timeline] for [BridgeEvent]s targeting [prop]'s state on this
-     * vault. Populated by the [Recorder] when bridges attached to tracked
+     * store. Populated by the [Recorder] when bridges attached to tracked
      * states publish / observe — see [RecordingBridgeWrapper] for the wrap
      * strategy and the v1 limit (bridges attached AFTER `track(v)` are not
      * wrapped).
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
-        val target = prop.get(vault)
+        val target = prop.get(store)
         return timeline.filterIsInstance<BridgeEvent>().filter { it.state === target }
     }
 
     /**
      * Look up the bridge attached to the [State] referenced by [prop] on this
-     * handle's vault and return a [BridgeView] facade for inspecting publish
+     * handle's store and return a [BridgeView] facade for inspecting publish
      * history and synthesising inbound updates.
      *
      * The lookup walks two sources, in order:
@@ -197,7 +197,7 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
      * @throws IllegalStateException if the state has no bridge attached.
      */
     fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
-        val state = prop.get(vault)
+        val state = prop.get(store)
         val wrapper = bridgeWrappers[state]
         if (wrapper != null) {
             return BridgeView(BridgeView.WrappedSource(wrapper))
@@ -207,7 +207,7 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
         // try to construct a view from a known test-bridge type.
         @Suppress("UNCHECKED_CAST")
         val mutable = (state as? MutableState<Any>)
-            ?: error("bridge(${prop.name}): state was not created by this vault — cannot inspect its bridge")
+            ?: error("bridge(${prop.name}): state was not created by this store — cannot inspect its bridge")
         val attached = mutable.bridge ?: error(
             "bridge(${prop.name}): no bridge attached. Attach via `state bridge bridge` before calling.",
         )
@@ -252,21 +252,21 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
         .filter { it.middleware === instance }
 
     /**
-     * Run [block] with the tracked vault as receiver and return its value. The
-     * block sees `vault.value` for each [com.vynatix.holdfast.State] without going
+     * Run [block] with the tracked store as receiver and return its value. The
+     * block sees `store.value` for each [com.vynatix.holdfast.State] without going
      * through an action — useful for plain read assertions.
      */
-    fun <R> read(block: V.() -> R): R = block(vault)
+    fun <R> read(block: V.() -> R): R = block(store)
 
     /**
-     * Run [body] inside a blocking [Store.action] on the tracked vault. Returns
+     * Run [body] inside a blocking [Store.action] on the tracked store. Returns
      * the [TransactionResult] verbatim — production-faithful, no transformation
      * or implicit assertion. If the result is an [TransactionResult.Error], it
      * is recorded for the scope-exit unconsumed-error guard; assert on it via a
      * `shouldBe*` matcher (or [consumeAllPendingErrors]) to clear the mark.
      */
     fun <R> action(body: V.() -> R): TransactionResult<R> {
-        val result = vault action body
+        val result = store action body
         recorder?.recordResult(result)
         trackResult(result)
         return result
@@ -274,14 +274,14 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
 
     /**
      * Run [body] inside a [com.vynatix.holdfast.coroutines.suspendAction] on the
-     * tracked vault. Returns the [TransactionResult] verbatim — production-
+     * tracked store. Returns the [TransactionResult] verbatim — production-
      * faithful, no transformation or implicit assertion. If the result is an
      * [TransactionResult.Error], it is recorded for the scope-exit
      * unconsumed-error guard; assert on it via a `shouldBe*` matcher (or
      * [consumeAllPendingErrors]) to clear the mark.
      */
     suspend fun <R> suspendAction(body: suspend V.() -> R): TransactionResult<R> {
-        val result = vault.suspendAction(body)
+        val result = store.suspendAction(body)
         recorder?.recordResult(result)
         trackResult(result)
         return result
@@ -330,7 +330,7 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
     }
 
     /**
-     * Detach the recorder middleware from the tracked vault and drop every
+     * Detach the recorder middleware from the tracked store and drop every
      * recorded event. Called from [StoreTestScope.tearDown] in a fixed order
      * (after barriers cancel, before the handle registry clears) so no
      * post-teardown action accidentally records events.
@@ -339,17 +339,17 @@ class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMo
      * [com.vynatix.holdfast.Holdfast.clearMiddleware] for removal — there is no
      * single-entry uninstall. Tests that install user middlewares before
      * `track(v)` and expect them to persist past teardown should re-install
-     * them in the next test. (Pragmatically, vault instances rarely outlive a
+     * them in the next test. (Pragmatically, store instances rarely outlive a
      * `holdfastTest` block.)
      */
     internal fun disposeRecorderInternal() {
         val r = recorder ?: return
-        // Order: clear vault's middleware list first (so no subsequent action on
-        // this vault can fire the recorder), then drop the recorder's buffer.
+        // Order: clear store's middleware list first (so no subsequent action on
+        // this store can fire the recorder), then drop the recorder's buffer.
         // Catch any throw so teardown stays robust under leaked handles.
-        runCatching { vault.clearMiddleware() }
+        runCatching { store.clearMiddleware() }
         // Drop the wrapper map; the wrappers remain attached to states (the
-        // vault still references them) but they hold a reference to a
+        // store still references them) but they hold a reference to a
         // recorder we are about to clear, so future publishes from a leaked
         // post-teardown action would push events into an empty buffer (no
         // observable effect). Clearing the map releases our reference so a

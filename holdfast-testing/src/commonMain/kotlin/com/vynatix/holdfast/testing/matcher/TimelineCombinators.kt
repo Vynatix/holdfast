@@ -17,7 +17,7 @@ import com.vynatix.holdfast.testing.StoreHandle
  * [EventPredicate.description] on its own line.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldFire(builder: TimelineMatcher<V>.() -> Unit) {
-    timeline.runShouldFire(TimelineMatcher(vaultRef = vault).apply(builder))
+    timeline.runShouldFire(TimelineMatcher(vaultRef = store).apply(builder))
 }
 
 /**
@@ -29,7 +29,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldFire(builder: TimelineMatcher<V>.(
  * after the previous predicate's matched index.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldFireInOrder(builder: TimelineMatcher<V>.() -> Unit) {
-    timeline.runShouldFireInOrder(TimelineMatcher(vaultRef = vault).apply(builder))
+    timeline.runShouldFireInOrder(TimelineMatcher(vaultRef = store).apply(builder))
 }
 
 /**
@@ -41,7 +41,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldFireInOrder(builder: TimelineMatch
  * disagreed with the actual event.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldFireInExactOrder(builder: TimelineMatcher<V>.() -> Unit) {
-    timeline.runShouldFireInExactOrder(TimelineMatcher(vaultRef = vault).apply(builder))
+    timeline.runShouldFireInExactOrder(TimelineMatcher(vaultRef = store).apply(builder))
 }
 
 /**
@@ -51,13 +51,13 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldFireInExactOrder(builder: Timeline
  * Failure: [AssertionError] listing each predicate-event pair that did match.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldNotFire(builder: TimelineMatcher<V>.() -> Unit) {
-    timeline.runShouldNotFire(TimelineMatcher(vaultRef = vault).apply(builder))
+    timeline.runShouldNotFire(TimelineMatcher(vaultRef = store).apply(builder))
 }
 
 // ============================================================================
 // Combinators (list-receiver) — synthetic-timeline form for matcher self-tests.
 //
-// Predicates that need a vault context (e.g. `emitted(MyVault::count)`) throw
+// Predicates that need a store context (e.g. `emitted(MyVault::count)`) throw
 // [IllegalStateException] when invoked via these overloads — use the
 // [StoreHandle]-receiver form for those.
 // ============================================================================

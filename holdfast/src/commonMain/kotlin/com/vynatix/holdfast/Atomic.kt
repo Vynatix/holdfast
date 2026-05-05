@@ -9,22 +9,22 @@ import kotlin.uuid.Uuid
 /**
  * Run [body] in a way that brackets multiple vaults' transactions so they
  * commit-or-rollback together. Inside the body, calls like `v1.action { … }`
- * and `v2.action { … }` join the atomic frame as savepoints of each vault's
+ * and `v2.action { … }` join the atomic frame as savepoints of each store's
  * root transaction. `mutate`/`update` calls outside an inner `action` stage
- * directly into the appropriate vault's root transaction.
+ * directly into the appropriate store's root transaction.
  *
  * Locking: vaults are sorted by [Store.lockOrderKey] before lock acquisition,
  * giving a deadlock-safe global order across any combination of vaults. Each
- * vault's blocking `transactionLock` is held for the duration of the body.
+ * store's blocking `transactionLock` is held for the duration of the body.
  *
- * Two-phase commit (in-memory): on body return, each vault's root transaction
+ * Two-phase commit (in-memory): on body return, each store's root transaction
  * commits in lock order. Each commit applies its pending writes via
- * `MutableState.applyCommitted` and fires observers/bridges for that vault.
- * Observer fanout for vault A completes before vault B's begins; an observer
+ * `MutableState.applyCommitted` and fires observers/bridges for that store.
+ * Observer fanout for store A completes before store B's begins; an observer
  * on A that calls `b.action {}` runs before B's commit applies, giving
- * predictable cross-vault ordering.
+ * predictable cross-store ordering.
  *
- * On any throw from [body]: every vault's root transaction is rolled back
+ * On any throw from [body]: every store's root transaction is rolled back
  * (pending writes dropped, no state mutation visible). The atomic returns
  * `TransactionResult.Error(thrown)`. Inner action errors do NOT
  * automatically rollback the atomic — propagate via re-throw or check
@@ -32,7 +32,7 @@ import kotlin.uuid.Uuid
  *
  * Limitations (1.1):
  *  - Body is non-suspending. For mixed async, run `atomic` inside a
- *    `suspendAction` — but only for the suspending vault; do not include
+ *    `suspendAction` — but only for the suspending store; do not include
  *    other vaults that may have concurrent suspending callers.
  *  - Body must be single-threaded — spawned threads' mutates won't be
  *    recognized as in-frame.
@@ -54,7 +54,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 fun <R> atomic(vararg vaults: Store<*>, body: () -> R): TransactionResult<R> {
-    require(vaults.isNotEmpty()) { "atomic requires at least one vault" }
+    require(vaults.isNotEmpty()) { "atomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = vaults.toSet().sortedBy { it.lockOrderKey }
     val ownerThreadId = currentThreadId()
@@ -63,8 +63,8 @@ fun <R> atomic(vararg vaults: Store<*>, body: () -> R): TransactionResult<R> {
 }
 
 /**
- * Tail-recursive helper that acquires each vault's transactionLock in order
- * via [Store.runUnderLock], then opens a root [Transaction] per vault, then
+ * Tail-recursive helper that acquires each store's transactionLock in order
+ * via [Store.runUnderLock], then opens a root [Transaction] per store, then
  * runs [body], then commits/rollbacks all roots, then unwinds.
  *
  * Recursive structure handles N vaults by chaining `runUnderLock` calls;
@@ -84,13 +84,13 @@ private fun <R> acquireAndRun(
     }
     val v = sorted[index]
     return v.runUnderLock {
-        // Open a root transaction for this vault. The previous _activeTransaction
+        // Open a root transaction for this store. The previous _activeTransaction
         // (which may belong to an enclosing atomic or a synchronous action) becomes
         // this root's parent — preserving savepoint semantics for nested atomics.
         val priorActive = v.activeTransaction
         val root = if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
             // Adopt the existing transaction as our root — we're nested inside an
-            // outer action/atomic on this thread for this vault.
+            // outer action/atomic on this thread for this store.
             priorActive
         } else {
             Transaction.createForExternal(id, ownerThreadId).also {

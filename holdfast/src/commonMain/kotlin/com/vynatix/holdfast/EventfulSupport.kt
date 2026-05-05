@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
- * Delegate-friendly counterpart to [EventfulStore]. Use when a vault must
+ * Delegate-friendly counterpart to [EventfulStore]. Use when a store must
  * extend a base class other than [EventfulStore] (e.g. a domain-specific
  * abstract base) but still wants the [Eventful] capability:
  *
@@ -41,10 +41,10 @@ import kotlinx.coroutines.flow.asSharedFlow
  * ## Store binding
  *
  * Because [EventfulSupport] does not extend [Store], it has no direct view of
- * the active transaction. The hosting vault MUST call [bindVault] exactly
+ * the active transaction. The hosting store MUST call [bindVault] exactly
  * once during construction (typically in an `init` block). Calling [emit]
  * before [bindVault] throws [IllegalStateException]. Calling [bindVault]
- * twice on the same instance also throws — one support per vault.
+ * twice on the same instance also throws — one support per store.
  *
  * @param extraBufferCapacity Buffer slots beyond `replay = 0` available before
  *   the producer suspends. Default 16; tune up if commits emit bursts of
@@ -80,20 +80,20 @@ class EventfulSupport<E : Any>(
      * `init` block. Subsequent calls throw [IllegalStateException].
      *
      * The reference is held weakly only by usage convention — the hosting
-     * vault's lifetime is expected to dominate this support's. The vault
+     * store's lifetime is expected to dominate this support's. The store
      * keeps a reference to `this` via the supertype delegation, so this is
-     * not a circular leak: when the vault is unreachable, both objects
+     * not a circular leak: when the store is unreachable, both objects
      * collect together.
      */
-    fun bindVault(vault: Store<*>) {
+    fun bindVault(store: Store<*>) {
         check(boundVault == null) {
             "EventfulSupport.bindVault must be called at most once per instance"
         }
-        boundVault = vault
+        boundVault = store
     }
 
     /**
-     * Stage [event] onto the bound vault's active transaction's pendingEvents
+     * Stage [event] onto the bound store's active transaction's pendingEvents
      * buffer. On commit, drained AFTER state observers and AFTER bridge
      * publishes — same commit-phase contract as [EventfulStore].
      *
@@ -102,11 +102,11 @@ class EventfulSupport<E : Any>(
      * transactional so rollback can discard them.
      */
     override fun emit(event: E) {
-        val vault = boundVault ?: error(
+        val store = boundVault ?: error(
             "EventfulSupport.emit called before bindVault. The hosting Store must " +
                 "call support.bindVault(this) in its init block.",
         )
-        val txn = vault.activeTransaction ?: error(
+        val txn = store.activeTransaction ?: error(
             "emit(event) called outside of an action / suspendAction. " +
                 "Events must be staged inside a transaction so rollback can discard them.",
         )

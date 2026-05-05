@@ -26,7 +26,7 @@ import kotlin.uuid.Uuid
  * blocking [Store.action].
  *
  * Concurrency contract for 1.1:
- *  - **Mutually exclusive with blocking [Store.action]** on the same vault: a
+ *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
  *    blocking `action` will block until the in-flight `suspendAction` completes,
  *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
  *    lazily on first use.
@@ -47,7 +47,7 @@ import kotlin.uuid.Uuid
  *
  * Example:
  * ```
- * val r = vault.suspendAction {
+ * val r = store.suspendAction {
  *     val data = api.fetch()              // suspending I/O
  *     items mutate (items.value + data)   // staged into the transaction
  *     val saved = persistence.save()      // suspending I/O
@@ -65,7 +65,7 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             id = body::class.simpleName ?: Uuid.random().toString(),
             ownerThreadId = currentThreadId(),
         )
-        // We own the serializer; no other action can run on this vault until we
+        // We own the serializer; no other action can run on this store until we
         // release. Set the active transaction and the suspending-owner key so
         // mutate() inside the body recognizes us as the owner.
         internalSetActiveTransaction(txn)
@@ -80,7 +80,7 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         // visible to the next, matching the sync `Middleware.invoke` contract.
         val contexts: List<Middleware.MiddlewareContext<V>> = middlewareChain.map { _ ->
             Middleware.MiddlewareContext(
-                vault = selfForExternal,
+                store = selfForExternal,
                 transaction = txn,
             )
         }

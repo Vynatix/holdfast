@@ -4,14 +4,14 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 
 /**
- * Optional async-hook surface for vault middleware. A class implementing both
+ * Optional async-hook surface for store middleware. A class implementing both
  * [Middleware] and [SuspendingMiddlewareHooks] gets BOTH sync and suspending
  * callbacks under [suspendAction]; only the sync callbacks fire under the
  * blocking [Store.action].
  *
  * ## Concentric-ring ordering
  *
- * For `vault.middlewares(A, B)` where the LAST argument is outermost (per
+ * For `store.middlewares(A, B)` where the LAST argument is outermost (per
  * [Store.middlewares]'s contract), a `suspendAction { body }` produces the
  * full hook trace:
  *

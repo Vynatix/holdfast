@@ -15,7 +15,7 @@ import kotlinx.coroutines.sync.Mutex
  * spin via `tryLock` + platform yield; suspending [suspendAction] / [suspendAtomic]
  * callers use the natural `Mutex.lock(owner)` suspending wait. Shared between
  * the two suspending entry points so a suspendAtomic and a suspendAction on
- * the same vault block each other.
+ * the same store block each other.
  */
 internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
@@ -36,21 +36,21 @@ internal class MutexSerializer : Store.AsyncSerializer {
 }
 
 /**
- * Lazy installation of the [Store.AsyncSerializer] hook on each vault. The
- * hook is installed on first use and persists for the vault's lifetime — the
+ * Lazy installation of the [Store.AsyncSerializer] hook on each store. The
+ * hook is installed on first use and persists for the store's lifetime — the
  * coroutine [Mutex] inside it serializes blocking action, [suspendAction], and
- * [suspendAtomic] for any vault that participates in any one of them.
+ * [suspendAtomic] for any store that participates in any one of them.
  */
 private val installLock = object : SynchronizedObject() {}
 
-internal fun ensureSerializer(vault: Store<*>): MutexSerializer {
-    val installed = vault.asyncSerializer as? MutexSerializer
+internal fun ensureSerializer(store: Store<*>): MutexSerializer {
+    val installed = store.asyncSerializer as? MutexSerializer
     if (installed != null) return installed
     return synchronized(installLock) {
-        val again = vault.asyncSerializer as? MutexSerializer
+        val again = store.asyncSerializer as? MutexSerializer
         if (again != null) return@synchronized again
         val fresh = MutexSerializer()
-        vault.asyncSerializer = fresh
+        store.asyncSerializer = fresh
         fresh
     }
 }

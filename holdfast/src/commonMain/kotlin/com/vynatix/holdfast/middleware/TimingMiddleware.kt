@@ -17,8 +17,8 @@ import kotlin.time.Clock
  *
  * Example:
  * ```
- * vault.middlewares(TimingMiddleware { id, status, ms ->
- *     metrics.histogram("vault.txn.${status.name.lowercase()}").record(ms.toDouble())
+ * store.middlewares(TimingMiddleware { id, status, ms ->
+ *     metrics.histogram("store.txn.${status.name.lowercase()}").record(ms.toDouble())
  *     if (ms > 100) log.warn("slow transaction $id: ${ms}ms")
  * })
  * ```

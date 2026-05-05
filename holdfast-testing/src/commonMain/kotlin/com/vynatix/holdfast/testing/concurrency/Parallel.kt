@@ -19,7 +19,7 @@ import kotlinx.coroutines.coroutineScope
  * [Dispatchers.Default] make progress.
  *
  * Pass an explicit dispatcher only if [body] is purely suspending and never
- * touches a tracked vault.
+ * touches a tracked store.
  *
  * If any worker throws, the whole call fails with that exception; siblings are
  * cancelled cooperatively via [coroutineScope]'s structured-concurrency

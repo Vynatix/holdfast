@@ -11,7 +11,7 @@ import com.vynatix.holdfast.platform.currentThreadId
  *  - an optional [Transformer] that normalizes on `set` and projects on `get`
  *  - an optional [Bridge] for two-way sync with an external system
  *
- * You will rarely instantiate this directly — `vault.state { … }` does it for you.
+ * You will rarely instantiate this directly — `store.state { … }` does it for you.
  * This class is `public` (not `internal`) only because the `bridge` setter must be
  * reachable from extension code; everything else of interest is on the [State] interface.
  *
@@ -245,7 +245,7 @@ class MutableState<T : Any>(
  * Test-only window onto the live observer count for a [State]. Convenience
  * extension so test code can read it from a [State] reference (the public
  * surface) without an explicit cast to [MutableState]. Throws if the [State]
- * was not produced by `vault.state { … }` — only [MutableState] instances
+ * was not produced by `store.state { … }` — only [MutableState] instances
  * carry an observer set.
  *
  * Marked `@StoreInternalApi`: companion-module test code (e.g. `:holdfast-coroutines`)
@@ -256,6 +256,6 @@ class MutableState<T : Any>(
 @StoreInternalApi
 val <T : Any> State<T>.observerCount: Int
     get() {
-        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (vault.state { ... })")
+        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (store.state { ... })")
         return ms.observerCount
     }

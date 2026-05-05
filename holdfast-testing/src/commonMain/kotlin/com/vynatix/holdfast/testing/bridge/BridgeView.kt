@@ -4,13 +4,13 @@ import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
 
 /**
- * Inspection facade for a [Bridge] attached to a tracked vault. Exposes the
+ * Inspection facade for a [Bridge] attached to a tracked store. Exposes the
  * publish history and provides a [receiving] hook to push inbound values
  * through the bridge as if from the external system.
  *
  * Construct in three ways:
  *  - [com.vynatix.holdfast.testing.StoreHandle.bridge] — looks up the bridge
- *    attached to a state on the tracked vault, returning a `BridgeView<*>`
+ *    attached to a state on the tracked store, returning a `BridgeView<*>`
  *    backed by the recorder's wrapper. Throws if no bridge is attached.
  *  - [BridgeView] (with a [RecordingBridge]) — wraps a test
  *    bridge for assertions on the publish/inbound contract.
@@ -20,15 +20,15 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * Usage:
  * ```
  * val bridge = RecordingBridge<String>(initial = "")
- * vault { theme bridge bridge }
- * vault action { theme mutate "dark" }
+ * store { theme bridge bridge }
+ * store action { theme mutate "dark" }
  *
  * val view = BridgeView(bridge)
  * view.published shouldBe listOf("dark")
  * view.lastPublished shouldBe "dark"
  *
  * view receiving "light"
- * vault.read { theme.value } shouldBe "light"
+ * store.read { theme.value } shouldBe "light"
  * ```
  *
  * Or, using [com.vynatix.holdfast.testing.StoreHandle.bridge]:
@@ -61,12 +61,12 @@ class BridgeView<T : Any> internal constructor(private val source: Source<T>) {
 
     /**
      * Synthesise an inbound update from the external system. Invokes the
-     * inbound observer registered by the vault's bridge attachment, so the
-     * state on the bound vault is updated as if a real external source had
+     * inbound observer registered by the store's bridge attachment, so the
+     * state on the bound store is updated as if a real external source had
      * pushed [value]. Equivalent to calling `simulateInbound` directly on a
      * [RecordingBridge] or [LatchedBridge].
      *
-     * If the underlying bridge has not been attached to a vault yet (no
+     * If the underlying bridge has not been attached to a store yet (no
      * [Bridge.observe] call), the call is a silent no-op — there is no
      * observer to invoke.
      */

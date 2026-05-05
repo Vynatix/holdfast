@@ -30,7 +30,7 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
 
 /**
  * Push-recomputed [State]: subscribes to each [source] via [State.effect] and
- * recomputes [compute] inside a fresh [action] on this vault on every commit
+ * recomputes [compute] inside a fresh [action] on this store on every commit
  * that touches a source. The returned `State<T>` is a real [MutableState]
  * with its own observer fanout — bind it via `effect` like any other state.
  *
@@ -41,15 +41,15 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *  - Each source commit triggers a derived commit (extra transaction).
  *    Chains of derived states fan out cost-multiplicatively. Document & batch
  *    upstream when this matters.
- *  - Recompute runs on the source's commit thread. The per-vault
+ *  - Recompute runs on the source's commit thread. The per-store
  *    transactionLock serializes interleaved writes from multiple threads.
  *
  * Example:
  * ```
- * val (totalState, disposable) = vault.derived(items, taxRate) {
+ * val (totalState, disposable) = store.derived(items, taxRate) {
  *     items.value.sumOf { it.price * it.qty } * taxRate.value
  * }
- * vault { totalState effect { uiTotal.value = this } }
+ * store { totalState effect { uiTotal.value = this } }
  * // …later:
  * disposable.dispose()
  * ```

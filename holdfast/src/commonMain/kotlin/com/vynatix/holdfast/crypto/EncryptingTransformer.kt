@@ -20,9 +20,9 @@ import com.vynatix.holdfast.Transformer
  * class CredentialsVault : Store<CredentialsVault>() {
  *     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
  * }
- * vault action { token mutate "secret-jwt" }
- * vault.token.value          // "secret-jwt" (decrypted)
- * vault.properties["token"]?.value // "secret-jwt" (read goes through get)
+ * store action { token mutate "secret-jwt" }
+ * store.token.value          // "secret-jwt" (decrypted)
+ * store.properties["token"]?.value // "secret-jwt" (read goes through get)
  * // The MutableState's currentValue holds ciphertext; only get() returns plaintext.
  * ```
  *

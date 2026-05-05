@@ -24,7 +24,7 @@ private class CtxFlowVault : Store<CtxFlowVault>() {
  *
  * Both styles must compile and route through the right pipeline:
  *   - `context(scope) { state.asStateFlow() }`         → context-param overload, scope=scope
- *   - `state.asStateFlow()` outside any context block  → default-param overload, scope=vault.scope
+ *   - `state.asStateFlow()` outside any context block  → default-param overload, scope=store.scope
  */
 class AsStateFlowContextParamTest {
 
@@ -32,7 +32,7 @@ class AsStateFlowContextParamTest {
         val ctxScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ctxtest"))
         try {
             val v = CtxFlowVault()
-            // No bindToScope: the context-param overload should not need a vault.scope.
+            // No bindToScope: the context-param overload should not need a store.scope.
             val sf: StateFlow<Int> = context(ctxScope) {
                 v.count.asStateFlow(started = SharingStarted.Eagerly)
             }
@@ -45,7 +45,7 @@ class AsStateFlowContextParamTest {
         }
     }
 
-    // The "outside context block, defaults to vault.scope" case is verified by the
+    // The "outside context block, defaults to store.scope" case is verified by the
     // existing AsStateFlowDefaultsTest (issue 07). Re-asserting it here under the
     // context-param dual-overload setup is fragile because K2 implicit-receiver
     // resolution inside `runBlocking { }` can prefer the context-param overload

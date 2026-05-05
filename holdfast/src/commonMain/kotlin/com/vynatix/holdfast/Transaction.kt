@@ -69,8 +69,8 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * staged across the whole transaction tree). On [rollback], discarded.
      *
      * The list elements are `(MutableSharedFlow<*>, Any)` rather than tied to a
-     * single typed channel because a vault may host multiple [Eventful] surfaces
-     * in the future (today: one per vault). The unchecked cast on emit is sound:
+     * single typed channel because a store may host multiple [Eventful] surfaces
+     * in the future (today: one per store). The unchecked cast on emit is sound:
      * [Eventful.emit]'s signature is `(E)` and the channel is `MutableSharedFlow<E>`.
      */
     internal val pendingEvents: MutableList<Pair<MutableSharedFlow<*>, Any>> = mutableListOf()
@@ -200,7 +200,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
         // Snapshot of events to drain after fanout, populated only on the
         // top-level branch. Captured outside the pendingLock so the drain (which
         // calls `tryEmit` or a caller-supplied suspending emit) runs without
-        // holding any internal vault lock.
+        // holding any internal store lock.
         val eventsToDrain = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
         try {
             pendingLock.withLock {
@@ -233,7 +233,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
             }
             // Phase 3 (top-level only): drain events AFTER observer fanout and AFTER
             // bridge publishes. Order matters: a collector subscribed to both
-            // `state.asFlow()` and `vault.events` will see the state value before
+            // `state.asFlow()` and `store.events` will see the state value before
             // the event. If a caller-supplied [drainEvents] is provided, it owns
             // the emit (typically a suspending emit honoring back-pressure).
             // Otherwise we tryEmit each event — sync `commit()` cannot suspend, so

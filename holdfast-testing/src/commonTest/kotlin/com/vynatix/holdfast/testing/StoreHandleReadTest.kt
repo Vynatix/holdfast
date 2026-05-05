@@ -27,7 +27,7 @@ class VaultHandleReadTest {
     @Test
     fun readSeesMutationsViaAction() = vaultTest {
         val ctr = track(CounterVault())
-        ctr.vault action { count mutate 100 }
+        ctr.store action { count mutate 100 }
         assertEquals(100, ctr.read { count.value })
     }
 }

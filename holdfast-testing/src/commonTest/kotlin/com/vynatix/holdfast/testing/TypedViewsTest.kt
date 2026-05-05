@@ -70,7 +70,7 @@ class TypedViewsTest {
         val ctr = track(MultiVault())
         ctr.action { a mutate 1 }
         val em = ctr.emissions(MultiVault::a).single()
-        assertSame(ctr.vault.a, em.state)
+        assertSame(ctr.store.a, em.state)
     }
 
     @Test
@@ -87,7 +87,7 @@ class TypedViewsTest {
 
     @Test
     fun middlewareEventsOfReturnsEmptyForUserClasses() = vaultTest {
-        // v1 caveat: user middlewares installed via vault.middlewares() are
+        // v1 caveat: user middlewares installed via store.middlewares() are
         // NOT auto-wrapped — :holdfast has no public hook to enumerate or
         // replace entries in the chain, and Middleware.invoke is final. Their
         // lifecycle events therefore don't make it into the timeline.
@@ -156,9 +156,9 @@ class TypedViewsTest {
         assertEquals(3, em.size)
 
         // Verify each state appears exactly once.
-        assertEquals(1, em.count { it.state === ctr.vault.a })
-        assertEquals(1, em.count { it.state === ctr.vault.b })
-        assertEquals(1, em.count { it.state === ctr.vault.c })
+        assertEquals(1, em.count { it.state === ctr.store.a })
+        assertEquals(1, em.count { it.state === ctr.store.b })
+        assertEquals(1, em.count { it.state === ctr.store.c })
     }
 
     @Test

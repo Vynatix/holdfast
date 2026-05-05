@@ -25,7 +25,7 @@ open class Middleware<T : Store<T>> {
      * a fresh empty map is created for each invocation of [invoke].
      */
     data class MiddlewareContext<T : Store<T>>(
-        val vault: T,
+        val store: T,
         val transaction: Transaction,
         val metadata: MutableMap<String, Any> = mutableMapOf(),
     )
@@ -41,10 +41,10 @@ open class Middleware<T : Store<T>> {
         }
     }
 
-    operator fun invoke(vault: T, next: () -> Unit) {
+    operator fun invoke(store: T, next: () -> Unit) {
         val context = MiddlewareContext(
-            vault = vault,
-            transaction = vault.activeTransaction
+            store = store,
+            transaction = store.activeTransaction
                 ?: throw TransactionException("No active transaction for middleware to wrap"),
         )
         execute(context, next)

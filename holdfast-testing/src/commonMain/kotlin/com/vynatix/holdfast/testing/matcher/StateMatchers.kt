@@ -23,12 +23,12 @@ import kotlin.reflect.KProperty1
  * }
  * ```
  */
-class StateMatcher<V : Store<V>> internal constructor(internal val vault: V) {
+class StateMatcher<V : Store<V>> internal constructor(internal val store: V) {
 
     /**
      * Assertions captured by the builder, keyed by property reference. Each
      * value is the user-supplied expected `T` for the [State] returned by
-     * `prop.get(vault).value`. Order is insertion order so failure messages
+     * `prop.get(store).value`. Order is insertion order so failure messages
      * read in the order the user wrote them.
      */
     internal val expected: MutableMap<KProperty1<V, State<*>>, Any?> = mutableMapOf()
@@ -47,7 +47,7 @@ class StateMatcher<V : Store<V>> internal constructor(internal val vault: V) {
 /**
  * Lenient state-matcher: captures the assertions inside [builder] and verifies
  * each named state's `value` is `==` to the supplied expected value. Other
- * states on the vault are ignored — only the fields touched in [builder] are
+ * states on the store are ignored — only the fields touched in [builder] are
  * checked.
  *
  * Throws [AssertionError] listing each mismatch as
@@ -56,7 +56,7 @@ class StateMatcher<V : Store<V>> internal constructor(internal val vault: V) {
  * Use [shouldMatchExactly] when every declared state must be asserted.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatch(builder: StateMatcher<V>.() -> Unit) {
-    val sm = StateMatcher(vault).apply(builder)
+    val sm = StateMatcher(store).apply(builder)
     val mismatches = collectMismatches(sm)
     if (mismatches.isNotEmpty()) {
         throw AssertionError("State mismatch:\n${mismatches.joinToString("\n")}")
@@ -65,23 +65,23 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatch(builder: StateMatcher<V>.() 
 
 /**
  * Strict state-matcher: same as [shouldMatch], but additionally requires every
- * state currently registered on the vault (i.e. every entry in
+ * state currently registered on the store (i.e. every entry in
  * [Store.properties]) to have an assertion in [builder]. States that are
  * registered but not asserted produce an [AssertionError] listing them
  * alphabetically.
  *
  * KMP note: a Store registers a state lazily, on the first delegate read of
- * its property. `shouldMatchExactly` checks `vault.properties.keys`, so a
+ * its property. `shouldMatchExactly` checks `store.properties.keys`, so a
  * declared-but-never-touched state is invisible to the matcher. In practice
- * this is benign — tests reach this matcher only after exercising the vault
+ * this is benign — tests reach this matcher only after exercising the store
  * (which touches every state of interest), and listing a never-touched state
- * in [builder] would fail to type-check anyway because `prop.get(vault)` would
+ * in [builder] would fail to type-check anyway because `prop.get(store)` would
  * register it.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
-    val sm = StateMatcher(vault).apply(builder)
+    val sm = StateMatcher(store).apply(builder)
 
-    val declaredStateNames = vault.properties.keys
+    val declaredStateNames = store.properties.keys
     val assertedStateNames = sm.expected.keys.map { it.name }.toSet()
     val unasserted = declaredStateNames - assertedStateNames
     if (unasserted.isNotEmpty()) {
@@ -98,7 +98,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
 
 /**
  * Snapshot equality: takes [com.vynatix.holdfast.snapshot]s of both this handle's
- * vault and [other], requires they cover the same state names, and asserts
+ * store and [other], requires they cover the same state names, and asserts
  * each named state has the same current `value`.
  *
  * Why `value` (post-`transformer.get`) instead of the raw snapshot entries:
@@ -114,7 +114,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
  * mismatch.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
-    val mySnap = vault.snapshot()
+    val mySnap = store.snapshot()
     val otherSnap = other.snapshot()
 
     if (mySnap.stateNames != otherSnap.stateNames) {
@@ -128,7 +128,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
     }
 
     val mismatches = mySnap.stateNames.sorted().mapNotNull { name ->
-        val mine = vault.getState(name)?.value
+        val mine = store.getState(name)?.value
         val theirs = other.getState(name)?.value
         if (mine == theirs) null else "$name: this=$mine other=$theirs"
     }
@@ -143,6 +143,6 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
  * empty list means every assertion passed.
  */
 private fun <V : Store<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
-    val actualValue = prop.get(sm.vault).value
+    val actualValue = prop.get(sm.store).value
     if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
 }

@@ -59,7 +59,7 @@ class SuspendAtomicSuccessTest {
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(70L, a.balance.value)
         assertEquals(30L, b.balance.value)
-        // Each vault's observer fires with its post-commit value. Per-vault
+        // Each store's observer fires with its post-commit value. Per-store
         // sequential fanout in lock order — a's observer fires before b's.
         assertEquals(listOf(70L), seenA)
         assertEquals(listOf(30L), seenB)
@@ -118,7 +118,7 @@ class SuspendAtomicRollbackTest {
             error("simulated mid-transfer failure")
         }
         assertIs<TransactionResult.Error>(r)
-        // Neither vault sees the partial state.
+        // Neither store sees the partial state.
         assertEquals(100L, a.balance.value)
         assertEquals(0L, b.balance.value)
     }
@@ -139,8 +139,8 @@ class SuspendAtomicRollbackTest {
             error("rollback")
         }
 
-        assertTrue(seenA.isEmpty(), "vault a observer must not fire on rollback; saw $seenA")
-        assertTrue(seenB.isEmpty(), "vault b observer must not fire on rollback; saw $seenB")
+        assertTrue(seenA.isEmpty(), "store a observer must not fire on rollback; saw $seenA")
+        assertTrue(seenB.isEmpty(), "store b observer must not fire on rollback; saw $seenB")
         subA.dispose()
         subB.dispose()
     }
@@ -322,7 +322,7 @@ class SuspendAtomicEventsTest {
         balanceObserverA.dispose()
         balanceObserverB.dispose()
 
-        // Per-vault: state observer fires before that vault's events.
+        // Per-store: state observer fires before that store's events.
         // Across vaults: a (lower lockOrderKey) commits before b.
         val aStateIdx = timeline.indexOf("a-state=70")
         val aEventIdx = timeline.indexOf("a-event")
@@ -334,12 +334,12 @@ class SuspendAtomicEventsTest {
         assertTrue(bStateIdx >= 0, "b state observer did not fire; saw $timeline")
         assertTrue(bEventIdx >= 0, "b event did not fire; saw $timeline")
         // State observers run synchronously on the commit thread — their order
-        // reflects per-vault and cross-vault commit ordering directly.
+        // reflects per-store and cross-store commit ordering directly.
         assertTrue(
             bStateIdx < aEventIdx || aStateIdx < bStateIdx,
             "state ordering must reflect lock order; saw $timeline",
         )
-        // Cross-vault state ordering: a (lower lockOrderKey) commits before b.
+        // Cross-store state ordering: a (lower lockOrderKey) commits before b.
         assertTrue(aStateIdx < bStateIdx, "a's state observer must fire before b's; saw $timeline")
         // Events are dispatched to collectors asynchronously, but their
         // emission order to the SharedFlow is the lock order.
@@ -376,8 +376,8 @@ class SuspendAtomicEventsTest {
 class SuspendAtomicMutualExclusionTest {
 
     @Test fun concurrentSuspendAtomicSerializesOnSharedMutex() = runBlocking {
-        // Two suspendAtomic calls on overlapping vault sets serialize
-        // via the shared AsyncSerializer mutex on each vault.
+        // Two suspendAtomic calls on overlapping store sets serialize
+        // via the shared AsyncSerializer mutex on each store.
         val a = AccountVault(initial = 0)
         val b = AccountVault(initial = 0)
         val sentinel = mutableListOf<String>()
@@ -417,8 +417,8 @@ class SuspendAtomicMutualExclusionTest {
     }
 
     @Test fun suspendAtomicSerializesWithSuspendActionOnSharedVault() = runBlocking {
-        // suspendAction on vault `a` and suspendAtomic(a, b) must serialize
-        // since they share the same per-vault Mutex.
+        // suspendAction on store `a` and suspendAtomic(a, b) must serialize
+        // since they share the same per-store Mutex.
         val a = AccountVault(initial = 0)
         val b = AccountVault(initial = 0)
         val sentinel = mutableListOf<String>()
@@ -492,7 +492,7 @@ class SuspendAtomicRequireVaultTest {
             suspendAtomic { /* no vaults */ }
             kotlin.test.fail("expected IllegalArgumentException")
         } catch (e: IllegalArgumentException) {
-            assertTrue(e.message?.contains("at least one vault") == true)
+            assertTrue(e.message?.contains("at least one store") == true)
         }
     }
 

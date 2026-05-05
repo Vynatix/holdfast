@@ -84,8 +84,8 @@ class VaultLockErrorPathTest {
     @OptIn(DelicateCoroutinesApi::class)
     @Test
     fun releaseFromNonOwnerThreadThrowsIllegalStateException() {
-        val ownerCtx = newSingleThreadContext("vault-lock-owner")
-        val intruderCtx = newSingleThreadContext("vault-lock-intruder")
+        val ownerCtx = newSingleThreadContext("store-lock-owner")
+        val intruderCtx = newSingleThreadContext("store-lock-intruder")
         try {
             val captured = runBlocking {
                 val lock = StoreLock()
@@ -142,7 +142,7 @@ class VaultLockContentionTest {
     @OptIn(DelicateCoroutinesApi::class)
     @Test
     fun concurrentAcquireBlocksUntilOwnerReleasesAndAllWaitersEventuallyAcquire() {
-        val ownerCtx = newSingleThreadContext("vault-lock-contention-owner")
+        val ownerCtx = newSingleThreadContext("store-lock-contention-owner")
         try {
             runBlocking {
                 val lock = StoreLock()

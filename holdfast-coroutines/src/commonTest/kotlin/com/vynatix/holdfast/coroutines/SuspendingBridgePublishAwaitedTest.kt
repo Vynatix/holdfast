@@ -30,9 +30,9 @@ import kotlin.test.assertTrue
  * The defining contract: same `SuspendingKvStore` used to manufacture both a
  * `bridge(...)` (fire-and-forget) and a `suspendingBridge(...)` (await-completion).
  *
- *  - Inside `vault.action { ... }`, both behave fire-and-forget — `publish`
+ *  - Inside `store.action { ... }`, both behave fire-and-forget — `publish`
  *    returns immediately and the persistence write happens off-thread.
- *  - Inside `vault.suspendAction { ... }`, the suspendingBridge's
+ *  - Inside `store.suspendAction { ... }`, the suspendingBridge's
  *    `publishAwaited` is awaited under `withContext(NonCancellable)` while
  *    the regular bridge still publishes fire-and-forget.
  *
@@ -86,7 +86,7 @@ class SuspendingBridgePublishAwaitedTest {
     }
 
     /**
-     * Inside `vault.action { }` (sync), the suspendingBridge falls back to its
+     * Inside `store.action { }` (sync), the suspendingBridge falls back to its
      * default `publish` — `scope.launch { publishAwaited(value) }; return true`.
      * The action returns BEFORE the persistence write completes. We verify by
      * checking that the store does NOT yet have the value immediately after
@@ -227,7 +227,7 @@ class SuspendingBridgePublishAwaitedTest {
  * Issue 30 acceptance: a `distinct = true` state bound to a `SuspendingBridge`
  * does not republish when `suspendAction` re-applies the same value.
  *
- * The sync `vault.action { }` path already short-circuits both observer fanout
+ * The sync `store.action { }` path already short-circuits both observer fanout
  * and bridge publish on dedup via [com.vynatix.holdfast.MutableState.applyCommitted]'s
  * single-pass dedup check. The suspending `suspendingCommit` dispatcher must
  * match: if `applyCommittedRaw` returns false (deduped), the (state, value)

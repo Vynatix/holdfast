@@ -109,7 +109,7 @@ class TimelineCaptureTest {
 
         // lastTransaction should reflect the rolled-back txn from the second action.
         val last = assertNotNull(ctr.lastTransaction)
-        // The body threw, so vault rolled back -> status RolledBack.
+        // The body threw, so store rolled back -> status RolledBack.
         assertEquals(TransactionStatus.RolledBack, last.status)
 
         // Timeline should contain TransactionErrored + TransactionRolledBack

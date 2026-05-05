@@ -16,18 +16,18 @@ import kotlinx.atomicfu.locks.synchronized
  * Usage:
  * ```
  * val bridge = RecordingBridge<String>(initial = "init")
- * vault { theme bridge bridge }
- * vault action { theme mutate "dark" }
+ * store { theme bridge bridge }
+ * store action { theme mutate "dark" }
  *
  * bridge.published shouldBe listOf("dark")
  * bridge.lastPublished shouldBe "dark"
  *
  * // Simulate an inbound update from the external system:
  * bridge.simulateInbound("light")
- * vault.read { theme.value } shouldBe "light"
+ * store.read { theme.value } shouldBe "light"
  * ```
  *
- * On attach (when the vault calls [observe] from `MutableState.bridge` setter),
+ * On attach (when the store calls [observe] from `MutableState.bridge` setter),
  * this bridge replays [initial] through the observer once — matching the
  * load-on-attach convention shared by [com.vynatix.holdfast.bridge.KvBridge].
  *
@@ -61,14 +61,14 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
         get() = synchronized(lock) { publishedList.lastOrNull() }
 
     /**
-     * Store-driven inbound subscription. The vault's `MutableState.bridge`
+     * Store-driven inbound subscription. The store's `MutableState.bridge`
      * setter calls this once on attach. We:
      *  1. Store [observer] as the inbound observer (the only reference; this
      *     bridge supports a single attach-target as bridges are 1:1 with
      *     states by contract).
      *  2. Replay [initial] through [observer] — load-on-attach convention.
      *     If the user wants to skip the replay, they can attach the bridge
-     *     before tracking the vault and ignore the initial emission, or pick
+     *     before tracking the store and ignore the initial emission, or pick
      *     [com.vynatix.holdfast.testing.bridge.LatchedBridge] which never replays.
      *
      * The returned [Disposable] clears the inbound observer reference; calling
@@ -100,7 +100,7 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
 
     /**
      * Synthesise an inbound update from the external system. Calls the
-     * registered observer (set by the vault's bridge attachment) so the state
+     * registered observer (set by the store's bridge attachment) so the state
      * is updated as if a real external source had pushed [value].
      *
      * If the bridge has not been attached yet (no [observe] call), this is a

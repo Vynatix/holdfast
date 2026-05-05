@@ -145,7 +145,7 @@ class MemoryLifecycleTest {
     fun vaultRemainsFunctionalAfterAllObserversAndBridgesAreClearedAndStatesRemoved() {
         // Stand-in for "GC-cleanup-friendly" — without a multiplatform WeakReference we
         // test the observable side: after wiping observers, bridges, and states, the
-        // vault is still usable for fresh operations without crashes or stale wiring.
+        // store is still usable for fresh operations without crashes or stale wiring.
         val v = LifecycleVault()
         val seen = mutableListOf<Int>()
         val d = v { a effect { seen.add(this) } }
@@ -160,7 +160,7 @@ class MemoryLifecycleTest {
         v { (a as MutableState<Int>).bridge = null }
         v.clearStates()
 
-        // Re-use the vault: fresh state on next access, action commits, no leftover wiring.
+        // Re-use the store: fresh state on next access, action commits, no leftover wiring.
         v action { a mutate 99 }
         assertEquals(99, v.a.value)
         assertEquals(1, bridge.publishCount.value, "old bridge cleared; no new publishes")
@@ -171,7 +171,7 @@ class MemoryLifecycleTest {
     fun replacingBridgeDisposesPreviousInboundObserverRegistration() {
         // Regression: prior to A1, the bridge setter discarded the Disposable returned
         // by `value?.observe { … }`. After swap, an external `deliver` on the OLD
-        // bridge would still drive applyFromBridge on the vault's state. Verify
+        // bridge would still drive applyFromBridge on the store's state. Verify
         // the inbound observer is detached on swap.
         val v = LifecycleVault()
         val first = TwoWayBridge()

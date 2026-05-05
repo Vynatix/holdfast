@@ -22,7 +22,7 @@ package com.vynatix.holdfast.coroutines
  * persistence with await-completion semantics:
  * ```
  * val kv = SuspendingFileSystemKvStore("/path/to/state")
- * vault { balance suspendBridge SuspendingBridge(kv, "balance", LongCodec) }
+ * store { balance suspendBridge SuspendingBridge(kv, "balance", LongCodec) }
  * ```
  */
 expect class SuspendingFileSystemKvStore(directory: String) : SuspendingKvStore {

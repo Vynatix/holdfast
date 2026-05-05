@@ -204,7 +204,7 @@ class KvBridgeTest {
             v { balance bridge KvBridge(kv, "balance", LongCodec) }
             v action { balance mutate 42 }
         }
-        // Session 2: read (fresh vault, same store)
+        // Session 2: read (fresh store, same store)
         val v2 = StdLibVault()
         v2 { balance bridge KvBridge(kv, "balance", LongCodec) }
         assertEquals(42L, v2.balance.value)
@@ -231,7 +231,7 @@ class KvBridgeTest {
         v action { s mutate "persisted" }
         assertEquals("persisted", kv.get("s"))
 
-        // Round trip via fresh vault.
+        // Round trip via fresh store.
         val v2 = StdLibVault()
         v2 { s bridge KvBridge(kv, "s", StringCodec) }
         assertEquals("persisted", v2.s.value)

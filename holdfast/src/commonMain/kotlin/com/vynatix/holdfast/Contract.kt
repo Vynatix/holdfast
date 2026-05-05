@@ -3,7 +3,7 @@ package com.vynatix.holdfast
 import kotlin.reflect.KProperty
 
 /**
- * Read-only side of a two-way external sync. The vault calls [observe] when a
+ * Read-only side of a two-way external sync. The store calls [observe] when a
  * [Bridge] is attached; implementations typically replay any persisted/initial
  * value through `observer` for load-on-attach.
  */
@@ -12,7 +12,7 @@ fun interface Observable<T : Any> {
 }
 
 /**
- * Write-only side of a two-way external sync. The vault calls [publish] on every
+ * Write-only side of a two-way external sync. The store calls [publish] on every
  * successful commit that includes a state attached via [Bridge].
  */
 fun interface Publisher<T : Any> {
@@ -32,7 +32,7 @@ interface Bridge<T : Any> :
 fun interface Initializer<T : Any> : () -> T
 
 /**
- * Read-only contract for a piece of vault state. Read `value` to see the
+ * Read-only contract for a piece of store state. Read `value` to see the
  * post-`transformer.get` view; on the owner thread of an active transaction,
  * `value` reflects pending writes (read-your-own-writes).
  */
@@ -81,7 +81,7 @@ interface Transformer<T : Any> {
  * Useful for chaining domain transformers — e.g. validate-then-encrypt:
  * ```kotlin
  * val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
- * vault { state(transformer = pipeline) { … } }
+ * store { state(transformer = pipeline) { … } }
  * ```
  *
  * If either transformer's [shouldTransform] returns false on the inbound

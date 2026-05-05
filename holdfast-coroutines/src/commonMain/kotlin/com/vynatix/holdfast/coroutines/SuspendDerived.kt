@@ -17,8 +17,8 @@ import kotlinx.coroutines.launch
  *
  * Subscribes to each [sources] entry via the same observer machinery used by sync
  * `derived`, but the recompute body is `suspend`. On any source commit, a new
- * compute is **launched on `vault.scope`** — the scheduling is enqueued via the
- * vault's `postCommit` queue so the launch happens after the parent action's
+ * compute is **launched on `store.scope`** — the scheduling is enqueued via the
+ * store's `postCommit` queue so the launch happens after the parent action's
  * commit fanout, matching `derived`'s deferral pattern. The launched coroutine
  * runs the suspending [compute] and stages the result into a synthetic backing
  * state via an internal [suspendAction]. The synthetic backing state is a real
@@ -29,25 +29,25 @@ import kotlinx.coroutines.launch
  * change triggers a new launched compute. Multiple in-flight computes race;
  * the LAST [suspendAction] commit becomes the visible value. There is no
  * coalescing or in-flight cancellation between iterations — racy commits
- * serialize through the vault's [Store.AsyncSerializer], and the standard
+ * serialize through the store's [Store.AsyncSerializer], and the standard
  * staged-write semantics make the final committed value the visible one.
  * Callers who need strict latest-wins semantics with no intermediate flicker
  * should debounce upstream.
  *
  * **Cancellation**:
  *  - Cancelling [Store.scope] cancels every in-flight compute (the launched
- *    coroutines are children of `vault.scope`); no stale results land because
+ *    coroutines are children of `store.scope`); no stale results land because
  *    a `suspendAction` whose body is cancelled rolls back instead of committing.
  *  - Calling [Disposable.dispose] on the returned handle disposes the source
  *    observer subscriptions AND cancels the most recent launched job. Any
  *    older in-flight launches that race past the dispose call are still
- *    cancelled-or-rolled-back if `vault.scope` later cancels; if not, their
+ *    cancelled-or-rolled-back if `store.scope` later cancels; if not, their
  *    commits land harmlessly on a backing state nobody observes anymore.
  *
- * **Errors thrown by [compute]**: surface via the vault's middleware error
+ * **Errors thrown by [compute]**: surface via the store's middleware error
  * path. The launched `suspendAction` returns a [com.vynatix.holdfast.TransactionResult.Error]
  * whose middleware chain has already seen `onTransactionError`. Since the
- * launch is fire-and-forget on `vault.scope`, the error does NOT propagate to
+ * launch is fire-and-forget on `store.scope`, the error does NOT propagate to
  * any caller — install a middleware that logs/handles errors if you need
  * visibility. (`Throwable`s thrown synchronously from the initial eager
  * compute DO propagate to the caller of [suspendDerived]; that path runs
@@ -61,7 +61,7 @@ import kotlinx.coroutines.launch
  *
  * Example:
  * ```
- * val (fullName, dispose) = vault.suspendDerived(firstName, lastName) {
+ * val (fullName, dispose) = store.suspendDerived(firstName, lastName) {
  *     delay(50)                       // network call, db lookup, etc.
  *     "${firstName.value} ${lastName.value}"
  * }
@@ -77,7 +77,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     // thread to evaluate the suspending compute once at registration. This
     // mirrors sync `derived`'s "initial value at construction" contract; it
     // does mean a long-running initial compute blocks the caller. Subsequent
-    // recomputes are async-launched on `vault.scope`.
+    // recomputes are async-launched on `store.scope`.
     val initial: T = runBlockingForInitialSeed { self.compute() }
     val name = "__suspendDerived_${suspendDerivedCounter.incrementAndGet()}"
     val backingState: MutableState<T> = self.registerInternalState(name, initial)
@@ -85,7 +85,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     // Holder for the most recent launched job, so dispose() can cancel it.
     // We cancel on dispose to avoid leaking work past the consumer's lifetime;
     // older in-flight jobs (from prior source changes) are children of
-    // `vault.scope` and ride that scope's cancellation.
+    // `store.scope` and ride that scope's cancellation.
     val latestJob = atomic<Job?>(null)
     // Disposed flag: skip scheduling further recomputes after dispose.
     val disposed = atomic(false)
@@ -103,7 +103,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
             // Defer scheduling the launch past the parent's commit fanout, same
             // as sync `derived`. `postCommit` ensures the launch is queued
             // outside any pendingWrites iteration. The launch itself is async
-            // by definition (vault.scope.launch), so the actual recompute runs
+            // by definition (store.scope.launch), so the actual recompute runs
             // on the scope's dispatcher.
             self.postCommit {
                 if (disposed.value) return@postCommit
@@ -133,6 +133,6 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
  * Monotonic counter for synthesizing suspendDerived backing-state property
  * names. Each call to [suspendDerived] produces a unique name like
  * `__suspendDerived_42`. Distinct from sync `derived`'s counter so the two
- * never collide on the same vault.
+ * never collide on the same store.
  */
 private val suspendDerivedCounter = atomic(0L)

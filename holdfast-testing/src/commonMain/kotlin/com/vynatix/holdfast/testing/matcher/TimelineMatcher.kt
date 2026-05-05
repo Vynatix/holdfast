@@ -40,13 +40,13 @@ annotation class TimelineMatcherDsl
  * by index off the registered list).
  *
  * KProperty1-based predicates ([emitted], [bridgePublished], [bridgeObserved])
- * need a vault context to resolve the property reference to a [State]
+ * need a store context to resolve the property reference to a [State]
  * reference. The handle-receiver combinators ([StoreHandle.shouldFire] etc.)
- * pass [vaultRef] from `handle.vault`. The list-receiver combinators (e.g.
+ * pass [vaultRef] from `handle.store`. The list-receiver combinators (e.g.
  * `List<StoreEvent>.shouldFire`) pass `null`, in which case calling
  * [emitted] / [bridgePublished] / [bridgeObserved] throws
  * [IllegalStateException] — the synthetic-timeline form is only meant for
- * predicates that don't need a vault.
+ * predicates that don't need a store.
  */
 @TimelineMatcherDsl
 class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: V?) {
@@ -131,7 +131,7 @@ class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: 
      * EmissionEvent's `state` field.
      *
      * Throws [IllegalStateException] if [vaultRef] is null (i.e. when invoked
-     * via the [List]-receiver combinator without a vault context).
+     * via the [List]-receiver combinator without a store context).
      */
     fun emitted(prop: KProperty1<V, State<*>>): EmissionPredicate = register(
         EmissionPredicate(
@@ -168,7 +168,7 @@ class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: 
     private fun resolveState(prop: KProperty1<V, State<*>>, surface: String): State<*> {
         val v = vaultRef
             ?: error(
-                "$surface(${prop.name}) requires a vault context. Use " +
+                "$surface(${prop.name}) requires a store context. Use " +
                     "StoreHandle.$surface { … } instead of List<StoreEvent>.$surface { … }, " +
                     "or build a synthetic-timeline test that doesn't reference state properties.",
             )
@@ -307,7 +307,7 @@ class MiddlewareErroredPredicate internal constructor(
 
 /**
  * Match [EmissionEvent] events for a specific State. [target] is pre-resolved
- * via `prop.get(vault)` at builder-construction time; matching uses `===` so
+ * via `prop.get(store)` at builder-construction time; matching uses `===` so
  * structurally-equal but distinct State instances do not collide.
  *
  * If [checkNewValue] is true, the predicate additionally requires

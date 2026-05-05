@@ -13,7 +13,7 @@ import kotlin.uuid.Uuid
 
 /**
  * Process-monotonic counter used to assign each [Store] a stable [Store.lockOrderKey]
- * at construction. Used by `atomic(...)` to acquire multi-vault locks in a
+ * at construction. Used by `atomic(...)` to acquire multi-store locks in a
  * deadlock-safe global order.
  */
 private val vaultLockOrderKeyGen = atomic(0L)
@@ -28,7 +28,7 @@ private val vaultLockOrderKeyGen = atomic(0L)
  * the buffer atomically.
  *
  * Concurrency contract:
- *  - All reads and writes through `mutate`/`action` are serialized via a per-vault
+ *  - All reads and writes through `mutate`/`action` are serialized via a per-store
  *    reentrant lock.
  *  - [activeTransaction] is volatile; reads from any thread are valid for inspection
  *    but must not be relied on for race-free decisions outside the owner thread.
@@ -49,7 +49,7 @@ private val vaultLockOrderKeyGen = atomic(0L)
 abstract class Store<Self : Store<Self>> {
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
-     * sorts its vault arguments by this key before acquiring locks, giving
+     * sorts its store arguments by this key before acquiring locks, giving
      * deadlock-safe global ordering across any combination of vaults.
      */
     @StoreInternalApi
@@ -68,24 +68,24 @@ abstract class Store<Self : Store<Self>> {
     private var boundScope: CoroutineScope? = null
 
     /**
-     * The [CoroutineScope] this vault's long-running async work runs on. Resolution order
-     * (per-call → per-vault override → bound → process-global default):
+     * The [CoroutineScope] this store's long-running async work runs on. Resolution order
+     * (per-call → per-store override → bound → process-global default):
      *
      *  1. **Per-call** — APIs that take an explicit `scope: CoroutineScope` parameter use that.
-     *  2. **Per-vault** — a subclass may `override val scope: CoroutineScope` (use a getter,
+     *  2. **Per-store** — a subclass may `override val scope: CoroutineScope` (use a getter,
      *     not a `val` initializer, to avoid lazy-init order traps in singleton vaults).
      *     A subclass override sits ABOVE this property in the resolution chain, so it
      *     beats any [bindToScope] call.
      *  3. **Bound** — the scope passed to the most recent [bindToScope] call on this
-     *     vault instance, if any. Rebindable.
+     *     store instance, if any. Rebindable.
      *  4. **Global** — falls back to [Store.Companion.defaultScope].
      */
     open val scope: CoroutineScope
         get() = boundScope ?: defaultScope
 
     /**
-     * Bind this vault to [scope] for resolution level 3 (see [scope]). After this call,
-     * `vault.scope` returns [scope] (unless a subclass has its own `override val scope`,
+     * Bind this store to [scope] for resolution level 3 (see [scope]). After this call,
+     * `store.scope` returns [scope] (unless a subclass has its own `override val scope`,
      * which beats the bound scope). Calling [bindToScope] again replaces the binding.
      *
      * Thread safety: the binding field is `@Volatile`; the latest write becomes
@@ -94,8 +94,8 @@ abstract class Store<Self : Store<Self>> {
      * the binding.
      *
      * Lifecycle note: [bindToScope] does NOT cancel the previously-bound scope and
-     * does NOT cancel the new scope when the vault is later disposed. Scope lifetimes
-     * are owned by the caller. See [dispose] for terminal teardown of the vault.
+     * does NOT cancel the new scope when the store is later disposed. Scope lifetimes
+     * are owned by the caller. See [dispose] for terminal teardown of the store.
      */
     fun bindToScope(scope: CoroutineScope) {
         boundScope = scope
@@ -105,12 +105,12 @@ abstract class Store<Self : Store<Self>> {
      * Atomic disposed flag. CAS'd to `true` exactly once on the first [dispose] call;
      * subsequent calls observe `true` and return without throwing (idempotent contract).
      * Every public entry point reads this — when `true`, they throw
-     * `IllegalStateException("vault disposed")`.
+     * `IllegalStateException("store disposed")`.
      */
     private val disposedFlag = atomic(false)
 
     /**
-     * Whether [dispose] has been called on this vault. Once `true`, every public
+     * Whether [dispose] has been called on this store. Once `true`, every public
      * mutation entrypoint (`action`, `mutate`, `update`, `effect`, `bridge`,
      * `observeFrom`, `removeState`, `clearStates`, etc.) and every state-registry
      * read throws [IllegalStateException]. Cold APIs in companion modules
@@ -120,10 +120,10 @@ abstract class Store<Self : Store<Self>> {
     val isDisposed: Boolean get() = disposedFlag.value
 
     /**
-     * Terminally tear down this vault. Idempotent.
+     * Terminally tear down this store. Idempotent.
      *
      * After `dispose()`:
-     *  - Every state-mutation API throws `IllegalStateException("vault disposed")`.
+     *  - Every state-mutation API throws `IllegalStateException("store disposed")`.
      *  - Every state-registry read API throws.
      *  - All registered observers are dropped; all bridges are detached.
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
@@ -146,7 +146,7 @@ abstract class Store<Self : Store<Self>> {
             postCommitTasks.clear()
         }
         // Snapshot the property map under its lock, then call shutdownSilently outside
-        // any vault-side lock — `shutdownSilently` takes the per-state observer + bridge
+        // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
         // locks, and we don't want to invert ordering.
         val toShutdown = propertiesLock.withLock {
             val snap = _properties.values.toList()
@@ -154,7 +154,7 @@ abstract class Store<Self : Store<Self>> {
             snap
         }
         toShutdown.forEach { runCatching { it.shutdownSilently() } }
-        // Drop middleware so a stray reference to a disposed vault can't keep
+        // Drop middleware so a stray reference to a disposed store can't keep
         // captured state alive.
         middlewareLock.withLock { middlewareList.clear() }
         // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
@@ -167,12 +167,12 @@ abstract class Store<Self : Store<Self>> {
      * (e.g. `EventfulStore` resets its events SharedFlow). Default no-op.
      *
      * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
-     * leave the vault half-disposed.
+     * leave the store half-disposed.
      */
     protected open fun onDispose() {}
 
     private fun checkNotDisposed() {
-        if (disposedFlag.value) error("vault disposed")
+        if (disposedFlag.value) error("store disposed")
     }
 
     private val transactionLock = StoreLock()
@@ -194,8 +194,8 @@ abstract class Store<Self : Store<Self>> {
     private val _properties = mutableMapOf<String, MutableState<*>>()
 
     /**
-     * Snapshot view of every state currently registered with this vault, keyed by
-     * property name. The map is a copy — modifying it does not affect the vault.
+     * Snapshot view of every state currently registered with this store, keyed by
+     * property name. The map is a copy — modifying it does not affect the store.
      * The contained `State<*>` references are LIVE — reading `.value` reflects the
      * current state. Callers MUST NOT cast these back to `MutableState` to bypass
      * the transactional API; doing so leads to undefined behavior.
@@ -224,7 +224,7 @@ abstract class Store<Self : Store<Self>> {
 
     /**
      * Hook for an external mutual-exclusion mechanism that needs to coordinate
-     * with this vault's blocking [action]. Set at most once, by the
+     * with this store's blocking [action]. Set at most once, by the
      * `:holdfast-coroutines` `suspendAction` extension when it first wraps a
      * suspending body — the serializer's blocking acquire/release brackets every
      * blocking [action] call so that concurrent suspending callers see a serial
@@ -336,7 +336,7 @@ abstract class Store<Self : Store<Self>> {
      * The body's value is captured into [TransactionResult.Success.value] for direct
      * read-after-action use:
      * ```
-     * val r = vault action { compute() }
+     * val r = store action { compute() }
      * when (r) {
      *     is TransactionResult.Success -> useResult(r.value)
      *     is TransactionResult.Error   -> handle(r.exception)
@@ -351,9 +351,9 @@ abstract class Store<Self : Store<Self>> {
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
         checkNotDisposed()
-        // If a suspending caller (vault-coroutines.suspendAction) has installed a
+        // If a suspending caller (store-coroutines.suspendAction) has installed a
         // serializer, block here until they release. This makes blocking action and
-        // suspending action mutually exclusive on the same vault.
+        // suspending action mutually exclusive on the same store.
         val serializer = asyncSerializer
         serializer?.blockingAcquire()
         try {
@@ -409,7 +409,7 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Plain context block — runs `block(self)` with no locks and no transaction.
      * Provides the `Self` receiver so member-extensions like [effect] and [bridge]
-     * can be called fluently: `vault { count effect { … } }`.
+     * can be called fluently: `store { count effect { … } }`.
      */
     operator fun <R> invoke(block: Self.() -> R): R = block(self)
 
@@ -500,7 +500,7 @@ abstract class Store<Self : Store<Self>> {
      * the operation.
      *
      * ```
-     * vault action {
+     * store action {
      *     count update { it + 1 }
      *     items update { it + entry }
      * }
@@ -548,8 +548,8 @@ abstract class Store<Self : Store<Self>> {
 
     /**
      * O(1) ownership check via [MutableState.owningVault]. Throws if [State] was
-     * created by a different vault — without this, a foreign-vault state would
-     * silently pass the type cast and corrupt either vault's state.
+     * created by a different store — without this, a foreign-store state would
+     * silently pass the type cast and corrupt either store's state.
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
         @Suppress("UNCHECKED_CAST")
@@ -656,10 +656,10 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Internal hook for `atomic(...)`. Runs [block] under this vault's
+     * Internal hook for `atomic(...)`. Runs [block] under this store's
      * `transactionLock`. The reentrant lock makes this safe to call when the
      * same thread already holds the lock (e.g., nested `atomic` calls overlap
-     * on a vault).
+     * on a store).
      */
     @StoreInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
@@ -678,7 +678,7 @@ abstract class Store<Self : Store<Self>> {
 
         /**
          * Process-global default scope used by every [Store] that has neither a
-         * per-vault override nor a per-call scope argument. Settable at most once
+         * per-store override nor a per-call scope argument. Settable at most once
          * per process via CAS — the first non-null assignment wins; subsequent
          * assignments throw [IllegalStateException].
          *

@@ -58,10 +58,10 @@ private class DualHookMiddleware(private val tag: String, private val log: Mutab
  * Used to prove sync `action` is silent for it (no sync-hook surface), while
  * `suspendAction` invokes its async hooks.
  *
- * It must still extend [Middleware] for `vault.middlewares(...)` to accept it
+ * It must still extend [Middleware] for `store.middlewares(...)` to accept it
  * (the registration signature requires `Middleware<V>`). To express "only
  * suspending hooks", the sync hook overrides simply do nothing — the contract
- * point being that `vault.action { }` neither fires async hooks nor crashes.
+ * point being that `store.action { }` neither fires async hooks nor crashes.
  */
 private class AsyncOnlyMiddleware(private val tag: String, private val log: MutableList<String>) :
     Middleware<HooksVault>(),

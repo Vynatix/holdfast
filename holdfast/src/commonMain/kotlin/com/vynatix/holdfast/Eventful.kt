@@ -18,10 +18,10 @@ import kotlinx.coroutines.flow.SharedFlow
  * Implementations:
  *  - [EventfulStore] — base class wiring an internal `MutableSharedFlow<E>` and the
  *    [emit] DSL that stages onto the active transaction's pendingEvents buffer.
- *  - Issue 15 will add `EventfulSupport<E>` — a delegate so a vault can mix this
+ *  - Issue 15 will add `EventfulSupport<E>` — a delegate so a store can mix this
  *    capability in alongside another base class.
  *
- * The single event type per vault is intentional. Multiple kinds of events are
+ * The single event type per store is intentional. Multiple kinds of events are
  * expressed via a `sealed class E` hierarchy in user code.
  */
 interface Eventful<E : Any> {
@@ -39,7 +39,7 @@ interface Eventful<E : Any> {
      * tryEmit-ted to [events] in the order they were staged.
      *
      * Throws [IllegalStateException] if called outside of [Store.action] /
-     * `vault-coroutines.suspendAction`. Events MUST be transactional — emitting
+     * `store-coroutines.suspendAction`. Events MUST be transactional — emitting
      * outside a transaction would bypass the rollback-discards-events guarantee.
      */
     fun emit(event: E)

@@ -24,7 +24,7 @@ class AsStateFlowDefaultsTest {
         val v = DefaultsVault()
         v.bindToScope(vaultScope)
 
-        // No-args call: scope defaults to vault.scope (= vaultScope after bindToScope).
+        // No-args call: scope defaults to store.scope (= vaultScope after bindToScope).
         val sf = v.count.asStateFlow()
         v action { count mutate 11 }
 
@@ -49,7 +49,7 @@ class AsStateFlowDefaultsTest {
 
     @Test fun startedKeywordAloneCompilesAndPropagates() = runBlocking {
         // Replacement path for the removed `asEagerStateFlow()` — pass `started` only,
-        // letting `scope` default to `vault.scope`.
+        // letting `scope` default to `store.scope`.
         val vaultScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val v = DefaultsVault()
         v.bindToScope(vaultScope)
@@ -64,8 +64,8 @@ class AsStateFlowDefaultsTest {
     }
 
     @Test fun zeroArgAsStateFlowUsesVaultScopeForCollection() = runBlocking {
-        // Verifies the StateFlow's upstream subscription lives in vault.scope:
-        // cancelling the vault scope must terminate the upstream pipe so the
+        // Verifies the StateFlow's upstream subscription lives in store.scope:
+        // cancelling the store scope must terminate the upstream pipe so the
         // collector exits.
         val vaultScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val v = DefaultsVault()
@@ -75,10 +75,10 @@ class AsStateFlowDefaultsTest {
         val collector = launch {
             sf.collect { /* no-op */ }
         }
-        // Cancelling the vault scope must let the upstream subscription wind down.
+        // Cancelling the store scope must let the upstream subscription wind down.
         vaultScope.cancel()
         // The collector itself isn't bound to vaultScope; cancel it manually so the
-        // test exits. The assertion is "vault.scope is genuinely the upstream scope":
+        // test exits. The assertion is "store.scope is genuinely the upstream scope":
         // the SharingStarted.Eagerly upstream was active; cancelling vaultScope cuts it.
         collector.cancel()
     }

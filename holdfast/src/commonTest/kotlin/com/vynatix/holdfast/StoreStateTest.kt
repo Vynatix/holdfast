@@ -174,7 +174,7 @@ class CrossVaultMutationTest {
             assertEquals(
                 0,
                 vaultA.a.value,
-                "vault A's state was silently mutated from vault B's action; cross-vault writes should be rejected",
+                "store A's state was silently mutated from store B's action; cross-store writes should be rejected",
             )
         }
     }
@@ -195,7 +195,7 @@ class CrossVaultMutationTest {
         assertEquals(
             5,
             vaultA.a.value,
-            "vault A's state was modified by vault B's failed transaction; current value: ${vaultA.a.value}",
+            "store A's state was modified by store B's failed transaction; current value: ${vaultA.a.value}",
         )
     }
 
@@ -210,7 +210,7 @@ class CrossVaultMutationTest {
         vaultB action {
             seenInB.value = vaultA.a.value
         }
-        assertEquals(42, seenInB.value, "reading foreign vault state from inside another vault's action works")
+        assertEquals(42, seenInB.value, "reading foreign store state from inside another store's action works")
     }
 
     @Test
@@ -246,7 +246,7 @@ class CrossVaultMutationTest {
         assertEquals(
             emptyList(),
             bObserved,
-            "vault A's commit must not fire vault B's observers",
+            "store A's commit must not fire store B's observers",
         )
         d.dispose()
     }

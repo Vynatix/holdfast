@@ -74,11 +74,11 @@ interface StoreAutoRegistration {
     /**
      * Auto-registration's underlying registry call. Implemented by
      * [StoreTestScope] using its [com.vynatix.holdfast.testing.internal.HandleRegistry].
-     * Idempotent by reference identity — repeated calls with the same vault
+     * Idempotent by reference identity — repeated calls with the same store
      * return the same handle, ignoring a different [capture] on the second
      * call.
      */
-    fun <V : Store<V>> track(vault: V, capture: Capture = Capture.All): StoreHandle<V>
+    fun <V : Store<V>> track(store: V, capture: Capture = Capture.All): StoreHandle<V>
 
     /**
      * Auto-registering wrapper around [StoreHandle.action]. Calls

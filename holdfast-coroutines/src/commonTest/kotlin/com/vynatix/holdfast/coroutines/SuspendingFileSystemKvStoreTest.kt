@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
 class SuspendingFileSystemKvStoreTest {
 
     private fun newKvStore(suffix: String): SuspendingFileSystemKvStore =
-        SuspendingFileSystemKvStore(suspendingTempRoot("vault-coro-fs-$suffix-${suspendingRandomDirSuffix()}"))
+        SuspendingFileSystemKvStore(suspendingTempRoot("store-coro-fs-$suffix-${suspendingRandomDirSuffix()}"))
 
     @Test
     fun putThenGetReturnsTheValue() = runTest {

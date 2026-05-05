@@ -69,8 +69,8 @@ class AtomicRollbackTest {
             error("simulated mid-transfer failure")
         }
         assertIs<TransactionResult.Error>(r)
-        assertEquals(100L, a.balance.value, "vault a rolled back")
-        assertEquals(0L, b.balance.value, "vault b rolled back")
+        assertEquals(100L, a.balance.value, "store a rolled back")
+        assertEquals(0L, b.balance.value, "store b rolled back")
     }
 
     @Test fun atomicErrorIsCarriedInTransactionResult() {

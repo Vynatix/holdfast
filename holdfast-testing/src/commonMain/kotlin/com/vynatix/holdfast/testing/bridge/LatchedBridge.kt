@@ -16,7 +16,7 @@ import kotlinx.coroutines.CompletableDeferred
  * contract is a non-suspending `fun publish(value: T): Boolean`, so a literal
  * suspending implementation isn't possible. A blocking-thread implementation
  * (e.g. `runBlocking { gate.await() }` inside `publish`) would deadlock the
- * test: vault commits run on the calling thread, so a blocked publish blocks
+ * test: store commits run on the calling thread, so a blocked publish blocks
  * the same thread that needs to call [releasePublish].
  *
  * Practical implementation:
@@ -134,7 +134,7 @@ class LatchedBridge<T : Any>(@Suppress("unused") private val initial: T) : Bridg
 
     /**
      * Synthesise an inbound update through the registered observer (set by
-     * the vault's bridge attachment). If no observer is attached, the call
+     * the store's bridge attachment). If no observer is attached, the call
      * is a silent no-op.
      */
     fun simulateInbound(value: T) {

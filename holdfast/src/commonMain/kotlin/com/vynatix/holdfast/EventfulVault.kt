@@ -68,10 +68,10 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
     )
 
     /**
-     * The hot [SharedFlow] of events emitted by this vault. Subscribers see only
+     * The hot [SharedFlow] of events emitted by this store. Subscribers see only
      * events emitted after they subscribe (no replay).
      *
-     * Observable from outside the vault. Internal staging uses [_events]
+     * Observable from outside the store. Internal staging uses [_events]
      * directly so [emit] doesn't pay an `asSharedFlow()` indirection cost on the
      * hot path.
      */
@@ -98,7 +98,7 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
      * On dispose, clear any replay slot the events SharedFlow may hold. We use
      * `replay = 0` by default so this is normally a no-op, but a subclass that
      * configures `replay > 0` would otherwise leave stale events visible to
-     * late subscribers after the vault is gone. After this returns, no further
+     * late subscribers after the store is gone. After this returns, no further
      * emits land — every entrypoint that could call [emit] (action / mutate /
      * suspendAction) is already gated by the disposed check on [Store].
      */

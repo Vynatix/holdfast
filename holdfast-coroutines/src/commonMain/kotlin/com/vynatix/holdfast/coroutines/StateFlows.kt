@@ -32,7 +32,7 @@ import kotlinx.coroutines.flow.stateIn
  * default `BUFFERED` capacity (64). Under fast-emit / slow-collect, `trySend` returned
  * `false` past 64 backlog and values silently dropped — including, potentially, the
  * latest. The 2.0 contract is "you may miss intermediate values; you will always see
- * the latest." For lossless event delivery, use a vault's `events: SharedFlow<E>`
+ * the latest." For lossless event delivery, use a store's `events: SharedFlow<E>`
  * (issue 14) rather than state subscriptions.
  *
  * Thread safety: emissions happen on whatever thread runs the commit. Collectors
@@ -60,15 +60,15 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
 /**
  * Package-internal accessor: resolves the [CoroutineScope] of the [Store] that
  * owns this [State]. The cast to [MutableState] stays here — never in any public
- * signature. Throws if the [State] was not produced by `vault.state { … }`.
+ * signature. Throws if the [State] was not produced by `store.state { … }`.
  *
  * Used as the default for [asStateFlow]'s `scope` parameter so callers can write
- * `state.asStateFlow()` and pick up the vault's scope automatically.
+ * `state.asStateFlow()` and pick up the store's scope automatically.
  */
 internal val <T : Any> State<T>.owningScope: CoroutineScope
     get() {
         @Suppress("UNCHECKED_CAST")
-        val mutable = (this as? MutableState<T>) ?: error("owningScope is only defined for State produced by vault.state { ... }")
+        val mutable = (this as? MutableState<T>) ?: error("owningScope is only defined for State produced by store.state { ... }")
         return mutable.owningVault.scope
     }
 
@@ -77,8 +77,8 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
  * immediately, then any subsequent commits while [scope] is active. When [scope]
  * cancels, the underlying observer is disposed.
  *
- * `scope` defaults to the owning vault's [com.vynatix.holdfast.Holdfast.scope] (resolved
- * via the chain documented on `Store.scope` — per-vault override / bound scope /
+ * `scope` defaults to the owning store's [com.vynatix.holdfast.Holdfast.scope] (resolved
+ * via the chain documented on `Store.scope` — per-store override / bound scope /
  * `Store.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
  * call site `state.asStateFlow(myScope, started)` continues to compile.
  *
@@ -95,18 +95,18 @@ fun <T : Any> State<T>.asStateFlow(
 /**
  * K2 context-parameter overload of [asStateFlow]. Resolves the sharing [CoroutineScope]
  * from the surrounding `context(scope: CoroutineScope) { … }` block instead of from the
- * owning vault. Lets a consumer write
+ * owning store. Lets a consumer write
  *
  * ```
  * context(viewModelScope: CoroutineScope)
- * class MyViewModel(vault: MyVault) {
- *     val flow = vault.count.asStateFlow()
+ * class MyViewModel(store: MyVault) {
+ *     val flow = store.count.asStateFlow()
  * }
  * ```
  *
  * without forwarding `viewModelScope` explicitly through every adapter call. Coexists
  * with the default-param overload — outside any `context(...)` block, the call site
- * resolves to the default-param form and picks up `vault.scope`.
+ * resolves to the default-param form and picks up `store.scope`.
  *
  * Behavior is identical to the default-param overload otherwise: the returned
  * [StateFlow] subscribes upstream while [started] permits, replays the current value
@@ -123,7 +123,7 @@ fun <T : Any> State<T>.asStateFlow(
  * or in await-style application code.
  *
  * ```
- * val finished = vault.status.first { it == Status.Done }
+ * val finished = store.status.first { it == Status.Done }
  * ```
  */
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T = asFlow().first(predicate)

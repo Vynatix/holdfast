@@ -233,7 +233,7 @@ class EffectNotificationTest {
         val d1 = v1 {
             count effect {
                 if (this == 5) {
-                    // Different vault → different transactionLock; no nesting hazard.
+                    // Different store → different transactionLock; no nesting hazard.
                     v2 action { count mutate 100 }
                 }
             }
@@ -255,7 +255,7 @@ class EffectTopLevelExtensionTest {
     fun topLevelEffectFiresOnCommitOutsideVaultBlock() {
         val v = EffectTestVault()
         val seen = mutableListOf<Int>()
-        // Direct top-level call: no `vault { … }` wrapping.
+        // Direct top-level call: no `store { … }` wrapping.
         val d = v.count effect { seen.add(this) }
         v action { count mutate 7 }
         assertEquals(listOf(0, 7), seen)
@@ -275,7 +275,7 @@ class EffectTopLevelExtensionTest {
 
     @Test
     fun memberCallSiteInsideVaultBlockStillCompiles() {
-        // Acceptance: existing `vault { state effect { … } }` keeps working.
+        // Acceptance: existing `store { state effect { … } }` keeps working.
         val v = EffectTestVault()
         val seen = mutableListOf<Int>()
         val d = v { count effect { seen.add(this) } }

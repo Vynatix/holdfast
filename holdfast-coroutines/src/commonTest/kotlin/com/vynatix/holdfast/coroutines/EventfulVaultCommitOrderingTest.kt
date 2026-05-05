@@ -31,7 +31,7 @@ private class OrderingVault : EventfulStore<OrderingVault, OrderEvent>() {
 
 /**
  * The master verticality test for issue 14: a collector subscribed to BOTH
- * `state.asFlow()` and `vault.events` MUST observe the state value before the
+ * `state.asFlow()` and `store.events` MUST observe the state value before the
  * event in commit-phase ordering.
  *
  * In `suspendAction`, the commit fans out:

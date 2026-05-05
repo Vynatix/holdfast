@@ -11,7 +11,7 @@ import kotlin.reflect.KProperty
  * Bundles a Store [State] with the [Validator] that gates it. Returned by
  * [boxedHandle].
  *
- * Inside a `vault action { ... }` block the handle exposes:
+ * Inside a `store action { ... }` block the handle exposes:
  *  - [state] — the underlying Store state, used as the receiver for `mutate`.
  *  - [validator] — the static validator, used to civilize raw primitives.
  *  - [civilize] — convenience: civilize a primitive into the wrapped form.
@@ -22,7 +22,7 @@ import kotlin.reflect.KProperty
  *     val email by boxedHandle(EmailValidator) { "init@example.com" }
  * }
  *
- * vault action {
+ * store action {
  *     email.state mutate email.civilize("alice@example.com")
  * }
  * ```
@@ -65,10 +65,10 @@ fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxedHandle(validator: Valida
 
 /**
  * Civilize [primitive] through the handle's validator and atomically mutate
- * the underlying state inside an existing `vault action { … }` block:
+ * the underlying state inside an existing `store action { … }` block:
  *
  * ```kotlin
- * vault action {
+ * store action {
  *     email assign "alice@example.com"
  *     displayName mutate "Alice"
  * }
@@ -82,7 +82,7 @@ fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxedHandle(validator: Valida
  *
  * Implemented via Kotlin context parameters (`-Xcontext-parameters`).
  */
-context(vault: Store<*>)
+context(store: Store<*>)
 infix fun <P : Any, O : Boxed<P>> BoxedHandle<P, O>.assign(primitive: P) {
-    with(vault) { state mutate civilize(primitive) }
+    with(store) { state mutate civilize(primitive) }
 }

@@ -123,7 +123,7 @@ class EncryptingTransformerTest {
         assertNotEquals("rest-secret", persisted, "persisted value is ciphertext, not plaintext")
         assertTrue(persisted.isNotEmpty())
 
-        // Rebirth: a new vault attaching the same KV hydrates from ciphertext
+        // Rebirth: a new store attaching the same KV hydrates from ciphertext
         // (KvBridge.observe replays the stored String, EncryptingTransformer
         // does NOT decrypt during applyFromBridge — it just stores the value
         // raw, then `value` get applies decrypt). So the round trip works.

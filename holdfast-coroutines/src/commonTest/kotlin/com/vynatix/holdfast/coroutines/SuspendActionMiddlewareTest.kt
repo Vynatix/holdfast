@@ -208,7 +208,7 @@ class SuspendActionMiddlewareTest {
     @Test
     fun middleware_ordering_is_identical_across_action_and_suspendAction() = runBlocking {
         // Defensive regression test for issue 31: same middleware registration on the
-        // same vault must produce the same hook trace whether the user invokes the
+        // same store must produce the same hook trace whether the user invokes the
         // blocking `action { }` or the suspending `suspendAction { }` path. Earlier
         // 1.x had `action` using last-registered = outermost (B.started first) and
         // `suspendAction` using first-registered = outermost (A.started first), an
@@ -223,8 +223,8 @@ class SuspendActionMiddlewareTest {
         v action { syncLog.add("BODY") }
 
         val suspendLog = mutableListOf<String>()
-        // Build a second vault with the same registration so the syncLog→suspendLog
-        // comparison is symmetric (same vault would replay middleware state across
+        // Build a second store with the same registration so the syncLog→suspendLog
+        // comparison is symmetric (same store would replay middleware state across
         // calls; clean instance keeps the comparison apples-to-apples).
         val v2 = MwVault()
         v2.middlewares(

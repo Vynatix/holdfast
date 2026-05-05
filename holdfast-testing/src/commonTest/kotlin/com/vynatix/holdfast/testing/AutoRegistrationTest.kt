@@ -39,7 +39,7 @@ class AutoRegistrationTest {
     @Test
     fun readAutoRegistersAndReturnsBlockResult() = vaultTest {
         val v = AutoRegVault()
-        // First touch via read should auto-register the vault.
+        // First touch via read should auto-register the store.
         val combined = v.read { "${label.value}-${n.value}" }
         assertEquals("init-0", combined)
     }
@@ -197,15 +197,15 @@ class AutoRegistrationTest {
         assertNull(v.lastTransaction)
         assertNull(v.lastResult)
         // But the read still reflects the actual mutation — Capture.None disables
-        // recording, not the underlying vault.
+        // recording, not the underlying store.
         assertEquals(4, v.read { n.value })
     }
 
     @Test
     fun autoRegisteredVaultIsDisposedAtScopeExit() {
-        // Capture an auto-registered vault outside the vaultTest body — after
+        // Capture an auto-registered store outside the vaultTest body — after
         // teardown its handle must be detached: a fresh vaultTest body that
-        // touches the SAME vault instance should produce a fresh, empty handle
+        // touches the SAME store instance should produce a fresh, empty handle
         // (no leaked timeline carries over).
         val outerVault = AutoRegVault()
 

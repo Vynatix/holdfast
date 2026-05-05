@@ -60,7 +60,7 @@ inline fun <reified E : Throwable> TransactionResult<*>.shouldBeError(
  * The "rolled back" check distinguishes a clean savepoint rollback from a
  * commit-time [TransactionStatus.Failed] outcome — useful for asserting that
  * an exception thrown inside an action chose the rollback path rather than
- * leaving the transaction in the Failed state. (Top-level actions on a vault
+ * leaving the transaction in the Failed state. (Top-level actions on a store
  * that throw will normally end up in RolledBack via [Transaction.rollback];
  * Failed surfaces only from a commit-time error.)
  */

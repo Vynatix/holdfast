@@ -13,7 +13,7 @@ import com.vynatix.holdfast.bridge.Codec
  * primitive no longer validates (e.g. constraints tightened across versions).
  *
  * ```kotlin
- * vault {
+ * store {
  *     email bridge KvBridge(
  *         kvStore,
  *         "user.email",

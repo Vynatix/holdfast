@@ -351,19 +351,19 @@ class TimelineMatcherTest {
         assertContains(err.message.orEmpty(), "middleware<")
     }
 
-    // -------- KProperty1 predicates require vault context --------
+    // -------- KProperty1 predicates require store context --------
     //
     // The list-receiver overload uses TimelineMatcher<Nothing>, which makes
     // emitted/bridgePublished/bridgeObserved type-unreachable from user code
     // (the KProperty1<Nothing, State<*>> constraint can't be satisfied with
-    // any concrete vault property). The error message in
+    // any concrete store property). The error message in
     // [TimelineMatcher.resolveState] is therefore a defensive guard rather
     // than something user code can hit through the public surface — exercised
     // only by direct internal callers.
 
     // --------------------------------------------------------------------
-    // Integration: real vault + handle-receiver form
-    // Exercises emitted(prop) which requires vault to resolve KProperty1.
+    // Integration: real store + handle-receiver form
+    // Exercises emitted(prop) which requires store to resolve KProperty1.
     // --------------------------------------------------------------------
 
     @Test
@@ -481,7 +481,7 @@ class TimelineMatcherTest {
     @Test
     fun handleReceiverExposesSameVaultRefAcrossPredicates() = vaultTest {
         // Two emitted predicates against different states — both resolve via the
-        // handle's vault, so ordering of declaration doesn't break resolution.
+        // handle's store, so ordering of declaration doesn't break resolution.
         val ctr = track(TimelineCountVault())
         ctr.action {
             count mutate 1

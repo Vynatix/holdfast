@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 /**
  * Tests for `SuspendingKvStore.bridge(...)` — the fire-and-forget factory that
  * adapts a `SuspendingKvStore` to the sync `Bridge<T>` interface used by
- * `vault.action { }`. See issue 11.
+ * `store.action { }`. See issue 11.
  */
 private class BridgedVault : Store<BridgedVault>() {
     val s by state { "init" }

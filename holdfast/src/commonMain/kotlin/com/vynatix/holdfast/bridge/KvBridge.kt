@@ -17,10 +17,10 @@ import com.vynatix.holdfast.Disposable
  * Example for a Long balance:
  * ```
  * val kv = MultiplatformSettingsKvStore(settings)            // your real KvStore
- * vault { balanceCents bridge KvBridge(kv, "acc:1:balance", LongCodec) }
+ * store { balanceCents bridge KvBridge(kv, "acc:1:balance", LongCodec) }
  * ```
  *
- * To detach, set the bridge to null: `vault { balanceCents bridge null }`.
+ * To detach, set the bridge to null: `store { balanceCents bridge null }`.
  */
 class KvBridge<T : Any>(private val kv: KvStore, private val key: String, private val codec: Codec<T>) : Bridge<T> {
 

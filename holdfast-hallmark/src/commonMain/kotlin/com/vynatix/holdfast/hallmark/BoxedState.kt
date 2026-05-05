@@ -15,7 +15,7 @@ import com.vynatix.holdfast.Store
  *     val email by boxed(EmailValidator) { "init@example.com" }
  * }
  *
- * vault action {
+ * store action {
  *     email mutate (EmailValidator of "alice@example.com")
  * }
  * ```

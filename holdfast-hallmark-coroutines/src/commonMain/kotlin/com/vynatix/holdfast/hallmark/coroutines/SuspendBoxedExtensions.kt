@@ -17,11 +17,11 @@ import com.vynatix.holdfast.coroutines.suspendAction
  *
  * ```kotlin
  * suspend fun adoptUsername(name: String): TransactionResult<Unit> =
- *     vault.suspendValidateAndMutate(vault.username, UsernameValidator, name)
+ *     store.suspendValidateAndMutate(store.username, UsernameValidator, name)
  * ```
  *
  * This is the suspend-side counterpart to the sync pattern
- * `vault action { state mutate (validator of primitive) }`. The difference is
+ * `store action { state mutate (validator of primitive) }`. The difference is
  * that the validation step itself may suspend (e.g. unique-name lookup).
  */
 suspend fun <V : Store<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(

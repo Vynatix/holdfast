@@ -12,10 +12,10 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Suspend until a [StoreEvent] from any tracked vault matches [predicate], or
+ * Suspend until a [StoreEvent] from any tracked store matches [predicate], or
  * until [timeout] elapses.
  *
- * Subscribes to every tracked vault's recorder timeline as a single fan-in.
+ * Subscribes to every tracked store's recorder timeline as a single fan-in.
  * The subscription is **atomic with respect to past events**: at the moment of
  * subscribe, the recorder copies its current event buffer into a replay list
  * and registers the new subscriber under the same lock. So an event that

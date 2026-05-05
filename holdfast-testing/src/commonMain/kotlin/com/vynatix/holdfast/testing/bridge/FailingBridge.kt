@@ -5,7 +5,7 @@ import com.vynatix.holdfast.Disposable
 
 /**
  * Test [Bridge] that throws on attach ([observe]), publish, or both. Use to
- * verify that the vault and its surrounding code handle external-sync failures
+ * verify that the store and its surrounding code handle external-sync failures
  * — typically commit-time errors when a downstream system rejects the write.
  *
  * Usage:
@@ -29,7 +29,7 @@ import com.vynatix.holdfast.Disposable
  *
  * Note: the `MutableState.bridge` setter calls [observe] synchronously during
  * attach, so [FailureMode.Observe] / [Both] propagates out of the setter call
- * site (`vault { state bridge bridge }`). Wrap that line in `assertFailsWith`
+ * site (`store { state bridge bridge }`). Wrap that line in `assertFailsWith`
  * to assert on the attach-time failure.
  *
  * Store's commit path catches [publish] throws inside the transaction's

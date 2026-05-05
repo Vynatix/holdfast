@@ -3,6 +3,7 @@ package com.vynatix.holdfast.testing
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.testing.concurrency.parallel
 import com.vynatix.holdfast.testing.concurrency.transaction
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
@@ -83,10 +84,10 @@ class OpenTransactionTest {
     fun bodyThrowFlipsManufacturedTransactionToRolledBack() = vaultTest {
         val ctr = track(OpenTxnCounterVault())
         // Use a probe to capture the `transaction` reference even though the
-        // transaction(...) call propagates the throw. We use a vault-level
+        // transaction(...) call propagates the throw. We use a store-level
         // observer to confirm no commit happened.
         val seen = mutableListOf<Int>()
-        val sub = ctr.vault { count effect { seen.add(this) } }
+        val sub = ctr.store { count effect { seen.add(this) } }
         seen.clear()
 
         assertFailsWith<IllegalStateException> {
@@ -139,7 +140,7 @@ class OpenTransactionTest {
     fun observersDoNotFireOnRollback() = vaultTest {
         val ctr = track(OpenTxnCounterVault())
         val seen = mutableListOf<Int>()
-        val sub = ctr.vault { count effect { seen.add(this) } }
+        val sub = ctr.store { count effect { seen.add(this) } }
         seen.clear() // Drop the initial-fire emission.
 
         val open = transaction(on = ctr) { count mutate 5 }
@@ -153,7 +154,7 @@ class OpenTransactionTest {
     fun observersFireOnceOnCommit() = vaultTest {
         val ctr = track(OpenTxnCounterVault())
         val seen = mutableListOf<Int>()
-        val sub = ctr.vault { count effect { seen.add(this) } }
+        val sub = ctr.store { count effect { seen.add(this) } }
         seen.clear()
 
         val open = transaction(on = ctr) { count mutate 5 }
@@ -178,7 +179,7 @@ class OpenTransactionTest {
 
     @Test
     fun autoRollbackAtScopeExit() {
-        // Direct runTest + manual scope so we can inspect the vault AFTER
+        // Direct runTest + manual scope so we can inspect the store AFTER
         // tearDown. The standard vaultTest entry point doesn't give us a hook
         // to read state post-tearDown.
         val ctr = OpenTxnCounterVault()
@@ -194,7 +195,7 @@ class OpenTransactionTest {
                 scope.tearDown(bodyAlreadyFailed = false)
             }
         }
-        // After scope exit, vault state is unchanged.
+        // After scope exit, store state is unchanged.
         assertEquals(0, ctr.count.value)
         // Store has no lingering active transaction.
         assertEquals(null, ctr.activeTransaction)
@@ -251,7 +252,7 @@ class OpenTransactionTest {
     @Test
     fun peerActionWhileOpenNestsAsSavepoint() = vaultTest {
         // Acceptance criterion 5: a peer `action` issued while a transaction
-        // is open observes the vault's serialization rules. In v1 those rules
+        // is open observes the store's serialization rules. In v1 those rules
         // are the production nested-action contract — same thread or not, an
         // action that finds an active transaction nests as a savepoint and
         // its commit merges pending writes into the outer transaction. The
@@ -259,12 +260,12 @@ class OpenTransactionTest {
         // is deferred until the outer [OpenTransaction.commit] runs.
         val ctr = track(OpenTxnCounterVault())
         val seen = mutableListOf<Int>()
-        val sub = ctr.vault { count effect { seen.add(this) } }
+        val sub = ctr.store { count effect { seen.add(this) } }
         seen.clear()
 
         val open = transaction(on = ctr) { count mutate 1 }
         // Same-thread peer action — explicitly tests that mutations made via
-        // the peer's vault.action body merge into the open transaction's
+        // the peer's store.action body merge into the open transaction's
         // pending writes (savepoint behavior). Cross-thread peer action
         // would block on transactionLock during the brief commit-apply
         // critical section (see Privileged.commitOpenTransaction); since

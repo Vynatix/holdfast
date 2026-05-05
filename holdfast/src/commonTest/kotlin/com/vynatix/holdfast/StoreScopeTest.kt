@@ -22,8 +22,8 @@ class VaultScopeTest {
 
     @Test
     fun vault_scope_defaults_to_Vault_Companion_defaultScope() {
-        val vault = TestVault()
-        assertSame(Store.defaultScope, vault.scope)
+        val store = TestVault()
+        assertSame(Store.defaultScope, store.scope)
     }
 
     @Test
@@ -35,9 +35,9 @@ class VaultScopeTest {
 
     @Test
     fun vault_scope_property_returns_a_non_null_CoroutineScope() {
-        val vault = TestVault()
+        val store = TestVault()
         // Property type is CoroutineScope (non-nullable). Just exercise the read.
-        val scope: CoroutineScope = vault.scope
+        val scope: CoroutineScope = store.scope
         assertNotNull(scope)
     }
 

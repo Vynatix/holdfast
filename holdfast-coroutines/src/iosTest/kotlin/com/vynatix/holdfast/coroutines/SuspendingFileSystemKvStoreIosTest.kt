@@ -19,7 +19,7 @@ class SuspendingFileSystemKvStoreIosTest {
 
     @OptIn(ExperimentalUuidApi::class)
     private fun freshDirectory(): String {
-        val dir = "${NSTemporaryDirectory()}vault-coro-fs-ios-${Uuid.random()}"
+        val dir = "${NSTemporaryDirectory()}store-coro-fs-ios-${Uuid.random()}"
         NSFileManager.defaultManager.createDirectoryAtPath(
             dir,
             withIntermediateDirectories = true,

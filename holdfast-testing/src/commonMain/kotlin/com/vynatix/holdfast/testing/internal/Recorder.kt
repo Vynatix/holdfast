@@ -23,7 +23,7 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlin.time.Clock
 
 /**
- * Privileged middleware that captures the timeline for a single tracked vault.
+ * Privileged middleware that captures the timeline for a single tracked store.
  *
  * Hook strategy (chosen, with one synthetic event to fill an unobservable gap):
  *
@@ -35,9 +35,9 @@ import kotlin.time.Clock
  *     so `state.value` (read-your-own-writes overlay) returns the pending
  *     post-set value. To compute `oldValue` (the COMMITTED view, pre-action)
  *     we use [PrivilegedHooks.snapshotCommittedStateValues], which briefly
- *     toggles `vault.internalSetActiveTransaction(null)` so the
+ *     toggles `store.internalSetActiveTransaction(null)` so the
  *     read-your-own-writes overlay is bypassed and `state.value` returns
- *     `currentValue`. The middleware holds the vault's transaction lock for
+ *     `currentValue`. The middleware holds the store's transaction lock for
  *     the duration of the chain, so no peer can observe the toggle.
  *  3. **TransactionCommitted** + **MiddlewareCompleted (self)** — pushed at
  *     the tail of `onTransactionCompleted`. The actual `txn.commit()` call
@@ -49,7 +49,7 @@ import kotlin.time.Clock
  *     because no observable change happens between the two points.
  *  4. **TransactionErrored** + **MiddlewareErrored (self)** + **synthetic
  *     TransactionRolledBack** — pushed from `onTransactionError`. The
- *     middleware contract guarantees vault will re-throw and call
+ *     middleware contract guarantees store will re-throw and call
  *     `txn.rollback()` in the outer `runCatching`. We synthesise
  *     [TransactionRolledBack] here because we cannot observe the actual
  *     rollback boundary (it lives past the middleware return).
@@ -172,7 +172,7 @@ internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware
     /**
      * Drop every recorded event and clear bookkeeping. Called from the test
      * scope's tearDown so a leaked handle reference doesn't keep events alive.
-     * Does NOT detach this recorder from the vault's middleware list — that
+     * Does NOT detach this recorder from the store's middleware list — that
      * happens via [com.vynatix.holdfast.Holdfast.clearMiddleware] in the same
      * tearDown path.
      */
@@ -207,10 +207,10 @@ internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware
 
         // Snapshot of committed values — bypasses the active transaction's
         // read-your-own-writes overlay so we see the pre-action state. The
-        // middleware holds the vault's transactionLock, so the brief
+        // middleware holds the store's transactionLock, so the brief
         // internalSetActiveTransaction(null) toggle inside the helper is safe
         // from concurrent observation.
-        val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.vault)
+        val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store)
 
         // Iterate modifiedStates (owner-thread-only). For each, read the
         // post-set value via the public State.value getter — read-your-own-writes
@@ -232,7 +232,7 @@ internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware
         push(TransactionErrored(transaction = txn, cause = error, timestamp = now))
         push(MiddlewareErrored(middleware = this, transaction = txn, cause = error, timestamp = now))
 
-        // Synthesise rollback: vault will call `txn.rollback()` in the outer
+        // Synthesise rollback: store will call `txn.rollback()` in the outer
         // catch right after the middleware chain unwinds. We can't observe that
         // boundary, but the rollback IS guaranteed to happen for a body-throw —
         // status will move Active → RolledBack.

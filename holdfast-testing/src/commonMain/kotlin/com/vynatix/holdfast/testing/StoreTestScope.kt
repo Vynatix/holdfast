@@ -53,23 +53,23 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
     private val awaitings = AwaitingRegistry()
 
     /**
-     * Register [vault] in this scope and return its [StoreHandle]. Calling
+     * Register [store] in this scope and return its [StoreHandle]. Calling
      * `track` again with the same instance returns the previously created
      * handle — idempotent by reference identity, so [capture] on the second
      * call is ignored.
      *
      * On first registration the handle installs a privileged recorder
-     * middleware on [vault] (unless [capture] is [Capture.None]). The recorder
+     * middleware on [store] (unless [capture] is [Capture.None]). The recorder
      * captures every transaction lifecycle, emission, and middleware
      * self-event into [StoreHandle.timeline]; see [StoreHandle] for the typed
      * views built on top. The recorder is detached and its buffer cleared at
      * scope tearDown — see [tearDown].
      *
-     * Tests that rely on user middlewares should install them on the vault
+     * Tests that rely on user middlewares should install them on the store
      * BEFORE calling `track`; see [com.vynatix.holdfast.testing.internal.Recorder]
      * for the v1 wrap-order limit.
      */
-    override fun <V : Store<V>> track(vault: V, capture: Capture): StoreHandle<V> = registry.getOrCreate(vault, capture)
+    override fun <V : Store<V>> track(store: V, capture: Capture): StoreHandle<V> = registry.getOrCreate(store, capture)
 
     /**
      * Auto-registering reified-type overload of [StoreHandle.middlewareEventsOf].
@@ -93,7 +93,7 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
 
     /**
      * Internal helper used by the inline reified [middlewareEventsOf] overload.
-     * Splits "auto-register the vault and read its timeline" out of the inline
+     * Splits "auto-register the store and read its timeline" out of the inline
      * call site so the inline body can stay narrow (just the reified
      * filterIsInstance).
      *
@@ -101,11 +101,11 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
      * can satisfy [HandleRegistry.getOrCreate]'s `V : Store<V>` bound. The
      * `@Suppress("UNCHECKED_CAST")` cast on entry is sound because the
      * registry indexes by reference identity, not by type — the runtime
-     * vault instance is unchanged and the timeline read-out is type-erased
+     * store instance is unchanged and the timeline read-out is type-erased
      * to `List<StoreEvent>`.
      */
     @PublishedApi
-    internal fun autoTrackTimeline(vault: Store<*>): List<StoreEvent> = autoTrackTimelineTyped(vault)
+    internal fun autoTrackTimeline(store: Store<*>): List<StoreEvent> = autoTrackTimelineTyped(store)
 
     /**
      * See [autoTrackTimeline]; the unchecked cast bridges the `Store<*>`
@@ -114,8 +114,8 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
      * by `V`.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun <V : Store<V>> autoTrackTimelineTyped(vault: Store<*>): List<StoreEvent> {
-        val asSelf = vault as V
+    private fun <V : Store<V>> autoTrackTimelineTyped(store: Store<*>): List<StoreEvent> {
+        val asSelf = store as V
         return registry.getOrCreate(asSelf, Capture.All).timeline
     }
 
@@ -198,8 +198,8 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
     }
 
     private fun handleLabel(handle: StoreHandle<*>): String {
-        val cls = handle.vault::class.simpleName ?: "Store"
-        // Identity tag so two handles to the same vault class are distinguishable.
+        val cls = handle.store::class.simpleName ?: "Store"
+        // Identity tag so two handles to the same store class are distinguishable.
         return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
     }
 

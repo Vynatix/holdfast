@@ -192,7 +192,7 @@ class BridgeLifecycleTest {
         }
         jobs.awaitAll()
 
-        // Final state: vault is consistent; one final attach + mutate works.
+        // Final state: store is consistent; one final attach + mutate works.
         val final = RecordingBridge<Int>()
         v { count bridge final }
         v action { count mutate 999 }
@@ -339,12 +339,12 @@ class AsyncBridgeTest {
         v { count bridge bridge }
         bridge.published.clear()
 
-        // Outbound: vault → bridge. Each commit publishes once.
+        // Outbound: store → bridge. Each commit publishes once.
         v action { count mutate 1 }
         v action { count mutate 2 }
         v action { count mutate 3 }
 
-        // Inbound: bridge → vault, in a different order, via async delivery.
+        // Inbound: bridge → store, in a different order, via async delivery.
         bridge.deliverFromCoroutine(10)
         bridge.deliverFromCoroutine(20)
 

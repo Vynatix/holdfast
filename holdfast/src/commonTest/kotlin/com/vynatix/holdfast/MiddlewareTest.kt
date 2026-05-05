@@ -47,7 +47,7 @@ private class ContextCapturingMiddleware : Middleware<MiddlewareTestVault>() {
     var capturedVault: MiddlewareTestVault? = null
     var capturedTransaction: Transaction? = null
     override fun onTransactionStarted(context: MiddlewareContext<MiddlewareTestVault>) {
-        capturedVault = context.vault
+        capturedVault = context.store
         capturedTransaction = context.transaction
     }
 }
@@ -278,7 +278,7 @@ class MiddlewareConcurrentRegistrationTest {
         }
         jobs.awaitAll()
 
-        // The vault should still be usable: register a single fresh middleware and run an action.
+        // The store should still be usable: register a single fresh middleware and run an action.
         v.clearMiddleware()
         val finalEvents = mutableListOf<String>()
         v.middlewares(GlobalRecordingMiddleware("FINAL", finalEvents))
@@ -313,7 +313,7 @@ class MiddlewareConcurrentRegistrationTest {
         }
         (actorJobs + clearJobs).awaitAll()
 
-        // Final state: vault is consistent; final action runs without error
+        // Final state: store is consistent; final action runs without error
         v.clearMiddleware()
         v action { n mutate 0 }
         assertEquals(0, v.n.value)

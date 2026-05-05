@@ -19,8 +19,8 @@ import kotlin.test.assertTrue
  * Issue 17 — `suspendDerived(sources, compute)` for suspending derived state.
  *
  * Derive a `State<T>` from one or more sources via a suspending compute. Each
- * source change schedules `vault.scope.launch { compute() }`; the result is
- * staged via internal `suspendAction`. Cancellation of `vault.scope` cancels
+ * source change schedules `store.scope.launch { compute() }`; the result is
+ * staged via internal `suspendAction`. Cancellation of `store.scope` cancels
  * in-flight compute. Disposing the returned `Disposable` cancels the source
  * subscription and any outstanding job.
  *
@@ -101,7 +101,7 @@ class SuspendDerivedTest {
         v action { n mutate 7 }
         withTimeout(2_000) { started.await() }
 
-        // Cancel the vault scope. The in-flight launch must be cancelled.
+        // Cancel the store scope. The in-flight launch must be cancelled.
         scope.cancel()
 
         // The compute body must NOT reach completion.

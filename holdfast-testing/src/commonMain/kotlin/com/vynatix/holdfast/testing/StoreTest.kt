@@ -6,10 +6,10 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Entry point for the vault test DSL.
+ * Entry point for the store test DSL.
  *
  * Wraps [runTest] so the body executes on the virtual time scheduler and any
- * tracked vault state is cleaned up at the end:
+ * tracked store state is cleaned up at the end:
  * ```
  * @Test
  * fun readsInitialState() = vaultTest {

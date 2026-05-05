@@ -328,7 +328,7 @@ class ParallelActionTest {
         jobs.awaitAll()
 
         assertEquals(false, crashed.value, "no crash under concurrent remove/mutate/read")
-        // Final state is some int; just verify the vault still works
+        // Final state is some int; just verify the store still works
         v action { count mutate 0 }
         assertEquals(0, v.count.value)
     }
@@ -484,7 +484,7 @@ class SameThreadReentrancyTest {
     @Test
     fun recursiveActionFromInsideMiddlewareDoesNotDeadlock() {
         // Middleware that, in onTransactionStarted, invokes an action on a different
-        // vault. Reentrant on the OUTER vault's transactionLock isn't even tested —
+        // store. Reentrant on the OUTER store's transactionLock isn't even tested —
         // we want to verify a middleware can invoke its own work without crashing.
         val v1 = ReentrancyVault()
         val v2 = ReentrancyVault()
@@ -496,7 +496,7 @@ class SameThreadReentrancyTest {
 
         v1 action { count mutate 1 }
         assertEquals(1, v1.count.value)
-        assertEquals(99, v2.count.value, "middleware's nested action on different vault committed")
+        assertEquals(99, v2.count.value, "middleware's nested action on different store committed")
     }
 }
 
@@ -623,7 +623,7 @@ class StressTest {
             }
         }
         jobs.awaitAll()
-        // No exact assertion on final value (random mix), but vault must still work.
+        // No exact assertion on final value (random mix), but store must still work.
         v action { n mutate -1 }
         assertEquals(-1, v.n.value)
     }
@@ -673,7 +673,7 @@ class StressTest {
         }
         jobs.awaitAll()
 
-        // Each vault was hit by 4 workers × 250 ops = 1000 ops
+        // Each store was hit by 4 workers × 250 ops = 1000 ops
         vaults.forEach { v ->
             assertEquals(1000, v.n.value)
         }

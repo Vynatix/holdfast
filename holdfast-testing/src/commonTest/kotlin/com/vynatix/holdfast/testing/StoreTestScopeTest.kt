@@ -23,7 +23,7 @@ class VaultTestScopeTest {
     fun trackReturnsHandleWithVault() = vaultTest {
         val v = TinyVault()
         val h = track(v)
-        assertSame(v, h.vault)
+        assertSame(v, h.store)
     }
 
     @Test
@@ -40,8 +40,8 @@ class VaultTestScopeTest {
         val b = TinyVault()
         val ha = track(a)
         val hb = track(b)
-        assertSame(a, ha.vault)
-        assertSame(b, hb.vault)
+        assertSame(a, ha.store)
+        assertSame(b, hb.store)
         assertTrue(ha !== hb)
     }
 

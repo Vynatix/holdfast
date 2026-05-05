@@ -144,7 +144,7 @@ class StateMatcherTest {
         }.shouldBeSuccess()
 
         val expected = CountVault()
-        // Untracked vault — its action result is not policed by the scope-exit
+        // Untracked store — its action result is not policed by the scope-exit
         // guard, so we don't need to consume.
         expected action {
             count mutate 5

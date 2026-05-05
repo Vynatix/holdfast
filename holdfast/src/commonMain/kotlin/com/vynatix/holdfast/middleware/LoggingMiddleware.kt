@@ -14,7 +14,7 @@ import com.vynatix.holdfast.Store
  *
  * Example:
  * ```
- * vault.middlewares(LoggingMiddleware("CounterVault"))
+ * store.middlewares(LoggingMiddleware("CounterVault"))
  * ```
  */
 class LoggingMiddleware<V : Store<V>>(private val tag: String, private val log: (String) -> Unit = ::println) : Middleware<V>() {

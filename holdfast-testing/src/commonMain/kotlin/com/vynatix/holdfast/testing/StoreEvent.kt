@@ -61,7 +61,7 @@ data class TransactionCommitted(override val transaction: Transaction, override 
 /**
  * Emitted when the body throws and :holdfast rolls back the transaction. **In v1
  * the recorder synthesises this immediately after [TransactionErrored]** — the
- * middleware contract surfaces the error to the recorder before vault's outer
+ * middleware contract surfaces the error to the recorder before store's outer
  * `runCatching { txn.rollback() }`, but the rollback itself runs past the
  * middleware boundary, so the recorder can only infer (not observe) it.
  */

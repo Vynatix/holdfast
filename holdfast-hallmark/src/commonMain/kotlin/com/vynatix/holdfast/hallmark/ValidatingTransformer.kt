@@ -15,7 +15,7 @@ import com.vynatix.holdfast.Transformer
  * Why use this when [Validator.of] already throws? Defence in depth: a caller
  * that constructs a [Boxed] directly (bypassing the validator, e.g. via
  * `data class copy`) still has its invariant enforced when the value lands
- * in the vault.
+ * in the store.
  *
  * Wired automatically by [boxed]. Ship it standalone if you need a custom
  * `state(transformer = …) { … }` declaration.

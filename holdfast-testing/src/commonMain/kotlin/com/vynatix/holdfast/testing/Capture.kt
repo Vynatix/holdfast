@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing
 
 /**
- * Selects what a [StoreHandle] records about its tracked vault during a test.
+ * Selects what a [StoreHandle] records about its tracked store during a test.
  *
  * The chosen mode is preserved on the handle and drives the privileged
  * recorder middleware installed by [StoreTestScope.track]:
@@ -18,7 +18,7 @@ sealed interface Capture {
     /** Record every event the recorder fires for the lifetime of the test. */
     object All : Capture
 
-    /** Skip recording entirely — no recorder is installed on the vault. */
+    /** Skip recording entirely — no recorder is installed on the store. */
     object None : Capture
 
     /**

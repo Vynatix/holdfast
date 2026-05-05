@@ -18,7 +18,7 @@ private class FileVault : Store<FileVault>() {
  */
 class FileSystemKvStoreTest {
 
-    private fun newKvStore(suffix: String): FileSystemKvStore = FileSystemKvStore(tempRoot("vault-fs-$suffix-${randomDirSuffix()}"))
+    private fun newKvStore(suffix: String): FileSystemKvStore = FileSystemKvStore(tempRoot("store-fs-$suffix-${randomDirSuffix()}"))
 
     @Test fun putThenGetReturnsTheValue() {
         val kv = newKvStore("put-get")
@@ -66,7 +66,7 @@ class FileSystemKvStoreTest {
         v action { balance mutate 42 }
         assertEquals("42", kv.get("balance:1"))
 
-        // Simulated restart: fresh vault, same store, hydrate via attach.
+        // Simulated restart: fresh store, same store, hydrate via attach.
         val reborn = FileVault()
         reborn { balance bridge KvBridge(kv, "balance:1", LongCodec) }
         assertEquals(42L, reborn.balance.value)

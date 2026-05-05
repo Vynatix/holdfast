@@ -17,7 +17,7 @@ class SuspendingFileSystemKvStoreJvmTest {
 
     private fun freshDirectory(): String {
         val tmp = System.getProperty("java.io.tmpdir") ?: "/tmp"
-        val dir = File(tmp, "vault-coro-fs-jvm-${UUID.randomUUID()}")
+        val dir = File(tmp, "store-coro-fs-jvm-${UUID.randomUUID()}")
         dir.mkdirs()
         return dir.absolutePath
     }
