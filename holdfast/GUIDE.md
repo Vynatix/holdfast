@@ -75,7 +75,7 @@ extensions like `infix fun State<T>.mutate(T)` resolve against the concrete
 holdfast type.
 
 ```kotlin
-class CounterHoldfast : Store<CounterHoldfast>() {
+class CounterStore : Store<CounterStore>() {
     val count by state { 0 }
     val label by state { "initial" }
     val email by state(EmailNormalizer()) { "" }   // with transformer
@@ -126,13 +126,13 @@ holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
 
 ```kotlin
 // 1. Define a holdfast.
-class TodoHoldfast : Store<TodoHoldfast>() {
+class TodoStore : Store<TodoStore>() {
     val items by state { emptyList<String>() }
     val draft by state { "" }
 }
 
 // 2. Create an instance.
-val holdfast = TodoHoldfast()
+val holdfast = TodoStore()
 
 // 3. Subscribe.
 val sub = holdfast { items effect { println("items=$this") } }
@@ -725,7 +725,7 @@ class StateFlowBridge<T : Any>(initial: T) : Bridge<T> {
 }
 
 @Composable
-fun MyScreen(holdfast: TodoHoldfast) {
+fun MyScreen(holdfast: TodoStore) {
     val bridge = remember { StateFlowBridge(holdfast.items.value) }
     DisposableEffect(holdfast) {
         holdfast { items bridge bridge }
@@ -743,7 +743,7 @@ The library has no native `derive(other) { … }` operator. The two idioms:
 **Read-only derived (compute on demand):** define a holdfast function.
 
 ```kotlin
-class CartHoldfast : Store<CartHoldfast>() {
+class CartStore : Store<CartStore>() {
     val items by state { emptyList<Line>() }
     fun total(): Money = items.value.sumOf { it.price * it.qty }
 }
@@ -752,7 +752,7 @@ class CartHoldfast : Store<CartHoldfast>() {
 **Stored derived (compute in the action that updates the source):**
 
 ```kotlin
-class CartHoldfast : Store<CartHoldfast>() {
+class CartStore : Store<CartStore>() {
     val items by state { emptyList<Line>() }
     val total by state { Money.Zero }
     fun add(line: Line) = action {
@@ -916,7 +916,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun mutationFiresObserverOnce() {
-    val v = CounterHoldfast()
+    val v = CounterStore()
     val seen = mutableListOf<Int>()
     val sub = v { count effect { seen.add(this) } }
     seen.clear()
@@ -930,7 +930,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun rolledBackMutationsAreInvisible() {
-    val v = CounterHoldfast()
+    val v = CounterStore()
     val seen = mutableListOf<Int>()
     val sub = v { count effect { seen.add(this) } }
     seen.clear()
@@ -948,10 +948,10 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun bareMutateFiresMiddleware() {
-    val v = CounterHoldfast()
+    val v = CounterStore()
     var calls = 0
-    v.middlewares(object : Middleware<CounterHoldfast>() {
-        override fun onTransactionStarted(c: MiddlewareContext<CounterHoldfast>) { calls++ }
+    v.middlewares(object : Middleware<CounterStore>() {
+        override fun onTransactionStarted(c: MiddlewareContext<CounterStore>) { calls++ }
     })
     v { count mutate 42 }
     assertEquals(1, calls)
@@ -962,8 +962,8 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun foreignStateRejected() {
-    val a = CounterHoldfast()
-    val b = CounterHoldfast()
+    val a = CounterStore()
+    val b = CounterStore()
     val foreign = a.count
     val r = b action { foreign mutate 99 }
     assertIs<TransactionResult.Error>(r)
@@ -975,7 +975,7 @@ never T1's pending writes.
 
 ```kotlin
 @Test fun noLostUpdatesUnder8Threads() = runBlocking {
-    val v = CounterHoldfast()
+    val v = CounterStore()
     val workers = 8; val perWorker = 200
     coroutineScope {
         repeat(workers) {
@@ -1318,7 +1318,7 @@ tied to the surrounding Composable.
 
 **Encrypted-at-rest credential**:
 ```kotlin
-class CredsHoldfast : Store<CredsHoldfast>() {
+class CredsStore : Store<CredsStore>() {
     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
 }
 val kv = FileSystemKvStore("$home/.app/creds")
@@ -1541,7 +1541,7 @@ adopter-side.
 Two state factories:
 
 ```kotlin
-class UserHoldfast : Store<UserHoldfast>() {
+class UserStore : Store<UserStore>() {
     val email       by boxed(EmailValidator) { "init@example.com" }       // State<Email>
     val displayName by boxedHandle(NameValidator) { "init" }              // BoxedHandle<String, Name>
 }
@@ -1621,7 +1621,7 @@ import com.vynatix.holdfast.then
 
 val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
 
-class UserHoldfast : Store<UserHoldfast>() {
+class UserStore : Store<UserStore>() {
     val email by state(transformer = pipeline) { /* … */ }
 }
 ```

@@ -13,12 +13,12 @@ failed transactions never leak, and the type system enforces that a state
 class anchors itself to its own type.
 
 ```kotlin
-class CounterHoldfast : Store<CounterHoldfast>() {
+class CounterStore : Store<CounterStore>() {
     val count by state { 0 }
     val label by state { "init" }
 }
 
-val counter = CounterHoldfast()
+val counter = CounterStore()
 val sub = counter { count effect { println("count=$this") } }   // count=0
 
 val result = counter action {
