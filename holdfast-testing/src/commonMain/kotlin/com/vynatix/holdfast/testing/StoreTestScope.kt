@@ -2,7 +2,7 @@ package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.internal.AwaitingRegistry
 import com.vynatix.holdfast.testing.internal.BarrierRegistry
 import com.vynatix.holdfast.testing.internal.HandleRegistry
@@ -15,7 +15,7 @@ import kotlinx.coroutines.test.TestScope
 /**
  * Test scope produced by [vaultTest]. Wraps the underlying [TestScope] (so the
  * body has full access to the coroutine-test machinery — virtual time, the
- * background scope, the scheduler) and adds a per-test [HoldfastHandle] registry.
+ * background scope, the scheduler) and adds a per-test [StoreHandle] registry.
  *
  * Implementation note: `TestScope` is a sealed interface and cannot be
  * implemented directly outside its module, so the wrapper delegates
@@ -24,10 +24,10 @@ import kotlinx.coroutines.test.TestScope
  * [testScope] so extension helpers like `runCurrent()`, `advanceUntilIdle()`,
  * `advanceTimeBy()`, and `currentTime` can be invoked against it directly.
  *
- * Implements [HoldfastAutoRegistration] — the member-extension surface that lets
+ * Implements [StoreAutoRegistration] — the member-extension surface that lets
  * tests call `myVault.action { … }`, `myVault.read { … }`, `myVault.timeline`,
  * etc. directly inside a [vaultTest] block without an explicit [track] call.
- * See [HoldfastAutoRegistration] for the resolution model. The
+ * See [StoreAutoRegistration] for the resolution model. The
  * `inline reified middlewareEventsOf<M>()` overload is declared as a member
  * here (not in the interface) because reified type parameters require `inline`
  * and an `inline reified` interface member would inline through the abstract
@@ -37,9 +37,9 @@ import kotlinx.coroutines.test.TestScope
  * Constructed exclusively by [vaultTest]; never instantiated directly by user
  * code.
  */
-class HoldfastTestScope internal constructor(val testScope: TestScope) :
+class StoreTestScope internal constructor(val testScope: TestScope) :
     CoroutineScope by testScope,
-    HoldfastAutoRegistration {
+    StoreAutoRegistration {
 
     /** The virtual-time scheduler driving this test. */
     val testScheduler: TestCoroutineScheduler get() = testScope.testScheduler
@@ -53,7 +53,7 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
     private val awaitings = AwaitingRegistry()
 
     /**
-     * Register [vault] in this scope and return its [HoldfastHandle]. Calling
+     * Register [vault] in this scope and return its [StoreHandle]. Calling
      * `track` again with the same instance returns the previously created
      * handle — idempotent by reference identity, so [capture] on the second
      * call is ignored.
@@ -61,7 +61,7 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
      * On first registration the handle installs a privileged recorder
      * middleware on [vault] (unless [capture] is [Capture.None]). The recorder
      * captures every transaction lifecycle, emission, and middleware
-     * self-event into [HoldfastHandle.timeline]; see [HoldfastHandle] for the typed
+     * self-event into [StoreHandle.timeline]; see [StoreHandle] for the typed
      * views built on top. The recorder is detached and its buffer cleared at
      * scope tearDown — see [tearDown].
      *
@@ -69,25 +69,25 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
      * BEFORE calling `track`; see [com.vynatix.holdfast.testing.internal.Recorder]
      * for the v1 wrap-order limit.
      */
-    override fun <V : Holdfast<V>> track(vault: V, capture: Capture): HoldfastHandle<V> = registry.getOrCreate(vault, capture)
+    override fun <V : Store<V>> track(vault: V, capture: Capture): StoreHandle<V> = registry.getOrCreate(vault, capture)
 
     /**
-     * Auto-registering reified-type overload of [HoldfastHandle.middlewareEventsOf].
+     * Auto-registering reified-type overload of [StoreHandle.middlewareEventsOf].
      * Auto-registers `this` (via [autoTrackTimeline]) and filters the timeline
      * by [M].
      *
-     * The receiver is `Holdfast<*>` rather than `V : Holdfast<V>` so the call site
+     * The receiver is `Store<*>` rather than `V : Store<V>` so the call site
      * can specify only the reified type parameter — `v.middlewareEventsOf<M>()`
      * — without writing both type arguments. The non-reified work is delegated
      * to [autoTrackTimeline] so this `inline reified` member only carries the
      * `filterIsInstance<MiddlewareEvent>` and the `M` type-check, both of
      * which depend on the reified type parameter.
      *
-     * **v1 caveat** carries through from [HoldfastHandle.middlewareEventsOf]: only
+     * **v1 caveat** carries through from [StoreHandle.middlewareEventsOf]: only
      * events for the recorder itself are captured. User-class [M]s return an
      * empty list; the API is in place so v2 can populate it without ABI churn.
      */
-    inline fun <reified M : Middleware<*>> Holdfast<*>.middlewareEventsOf(): List<MiddlewareEvent> = autoTrackTimeline(this)
+    inline fun <reified M : Middleware<*>> Store<*>.middlewareEventsOf(): List<MiddlewareEvent> = autoTrackTimeline(this)
         .filterIsInstance<MiddlewareEvent>()
         .filter { it.middleware is M }
 
@@ -98,23 +98,23 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
      * filterIsInstance).
      *
      * The internal helper has its own recursively-bounded `V` parameter so it
-     * can satisfy [HandleRegistry.getOrCreate]'s `V : Holdfast<V>` bound. The
+     * can satisfy [HandleRegistry.getOrCreate]'s `V : Store<V>` bound. The
      * `@Suppress("UNCHECKED_CAST")` cast on entry is sound because the
      * registry indexes by reference identity, not by type — the runtime
      * vault instance is unchanged and the timeline read-out is type-erased
-     * to `List<HoldfastEvent>`.
+     * to `List<StoreEvent>`.
      */
     @PublishedApi
-    internal fun autoTrackTimeline(vault: Holdfast<*>): List<HoldfastEvent> = autoTrackTimelineTyped(vault)
+    internal fun autoTrackTimeline(vault: Store<*>): List<StoreEvent> = autoTrackTimelineTyped(vault)
 
     /**
-     * See [autoTrackTimeline]; the unchecked cast bridges the `Holdfast<*>`
+     * See [autoTrackTimeline]; the unchecked cast bridges the `Store<*>`
      * receiver to a fresh recursively-bounded `V` so [HandleRegistry.getOrCreate]
      * accepts it. Sound because the registry keys by reference identity, not
      * by `V`.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun <V : Holdfast<V>> autoTrackTimelineTyped(vault: Holdfast<*>): List<HoldfastEvent> {
+    private fun <V : Store<V>> autoTrackTimelineTyped(vault: Store<*>): List<StoreEvent> {
         val asSelf = vault as V
         return registry.getOrCreate(asSelf, Capture.All).timeline
     }
@@ -126,13 +126,13 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
     internal fun awaitingRegistry(): AwaitingRegistry = awaitings
 
     /**
-     * Snapshot of every tracked [HoldfastHandle] in this scope. Used by
+     * Snapshot of every tracked [StoreHandle] in this scope. Used by
      * [com.vynatix.holdfast.testing.concurrency.awaiting] to subscribe to every
      * recorder's timeline (and to read the post-timeout last-N-events tail
      * for the augmented error message). Returns the same list as the
      * registry's internal `allHandles()` — defensive copy, safe to iterate.
      */
-    internal fun allTrackedHandles(): List<HoldfastHandle<*>> = registry.allHandles()
+    internal fun allTrackedHandles(): List<StoreHandle<*>> = registry.allHandles()
 
     /**
      * Tear down this scope. Always cancels outstanding barriers, closes any
@@ -167,7 +167,7 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
         openTransactions.rollbackAll()
 
         val handles = registry.allHandles()
-        val unconsumed: List<Pair<HoldfastHandle<*>, TransactionResult.Error>> =
+        val unconsumed: List<Pair<StoreHandle<*>, TransactionResult.Error>> =
             handles.flatMap { handle -> handle.pendingErrors.map { handle to it } }
 
         for (handle in handles) {
@@ -197,8 +197,8 @@ class HoldfastTestScope internal constructor(val testScope: TestScope) :
         }
     }
 
-    private fun handleLabel(handle: HoldfastHandle<*>): String {
-        val cls = handle.vault::class.simpleName ?: "Holdfast"
+    private fun handleLabel(handle: StoreHandle<*>): String {
+        val cls = handle.vault::class.simpleName ?: "Store"
         // Identity tag so two handles to the same vault class are distinguishable.
         return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
     }

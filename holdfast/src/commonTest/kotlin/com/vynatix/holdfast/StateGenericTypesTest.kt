@@ -17,7 +17,7 @@ private sealed interface Status {
 
 private data class Wrapped<T>(val value: T?)
 
-private class GenericTypesVault : Holdfast<GenericTypesVault>() {
+private class GenericTypesVault : Store<GenericTypesVault>() {
     val text by state { "hello" }
     val profile by state { Profile("Alice", 30) }
     val list by state { listOf(1, 2, 3) }

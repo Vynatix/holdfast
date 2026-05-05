@@ -1,14 +1,14 @@
 package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.coroutines.delay
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 
-private class CountVault : Holdfast<CountVault>() {
+private class CountVault : Store<CountVault>() {
     val count by state { 0 }
 }
 

@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class DerivedVault : Holdfast<DerivedVault>() {
+private class DerivedVault : Store<DerivedVault>() {
     val items by state { emptyList<Int>() }
     val tax by state { 1.0 }
     val multiplier by state { 1 }

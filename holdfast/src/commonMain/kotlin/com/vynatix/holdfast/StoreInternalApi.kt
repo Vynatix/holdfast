@@ -17,4 +17,4 @@ package com.vynatix.holdfast
 )
 @Retention(AnnotationRetention.BINARY)
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.PROPERTY, AnnotationTarget.CONSTRUCTOR)
-annotation class HoldfastInternalApi
+annotation class StoreInternalApi

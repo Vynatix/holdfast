@@ -13,7 +13,7 @@ private class PrefixTransformer(private val prefix: String) : Transformer<String
     override fun get(value: String): String = value.removePrefix(prefix)
 }
 
-private class ChainedVault : Holdfast<ChainedVault>() {
+private class ChainedVault : Store<ChainedVault>() {
     val a by state(transformer = UpperCaseTransformer().then(PrefixTransformer("v:"))) { "init" }
 }
 

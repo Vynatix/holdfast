@@ -61,7 +61,7 @@ class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
         get() = synchronized(lock) { publishedList.lastOrNull() }
 
     /**
-     * Holdfast-driven inbound subscription. The vault's `MutableState.bridge`
+     * Store-driven inbound subscription. The vault's `MutableState.bridge`
      * setter calls this once on attach. We:
      *  1. Store [observer] as the inbound observer (the only reference; this
      *     bridge supports a single attach-target as bridges are 1:1 with

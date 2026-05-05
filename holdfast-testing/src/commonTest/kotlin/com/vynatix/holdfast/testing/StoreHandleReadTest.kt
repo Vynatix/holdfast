@@ -1,10 +1,10 @@
 package com.vynatix.holdfast.testing
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private class CounterVault : Holdfast<CounterVault>() {
+private class CounterVault : Store<CounterVault>() {
     val count by state { 42 }
     val label by state { "init" }
 }

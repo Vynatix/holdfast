@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.middleware
 
 import com.vynatix.holdfast.Middleware
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 
 /**
  * Drop-in middleware for invariant checks that should run AFTER the action body
@@ -20,7 +20,7 @@ import com.vynatix.holdfast.Holdfast
  * })
  * ```
  */
-class ValidationMiddleware<V : Holdfast<V>>(private val check: V.() -> Unit) : Middleware<V>() {
+class ValidationMiddleware<V : Store<V>>(private val check: V.() -> Unit) : Middleware<V>() {
 
     override fun onTransactionCompleted(context: MiddlewareContext<V>) {
         context.vault.check()

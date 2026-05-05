@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.Holdfast
-import com.vynatix.holdfast.HoldfastInternalApi
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.observerCount
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
  * onBufferOverflow=DROP_OLDEST)`: producer never blocks, latest value always
  * recoverable from the replay slot, intermediate values may be conflated.
  */
-private class FlowConflatedVault : Holdfast<FlowConflatedVault>() {
+private class FlowConflatedVault : Store<FlowConflatedVault>() {
     val n by state { 0 }
 }
 
@@ -70,7 +70,7 @@ class AsFlowLosslessConflatedTest {
         assertEquals(5, first)
     }
 
-    @OptIn(HoldfastInternalApi::class)
+    @OptIn(StoreInternalApi::class)
     @Test
     fun collector_cancellation_disposes_underlying_observer_subscription() = runBlocking {
         val v = FlowConflatedVault()

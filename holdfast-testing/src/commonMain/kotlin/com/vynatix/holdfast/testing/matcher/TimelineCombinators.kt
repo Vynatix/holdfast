@@ -1,8 +1,8 @@
 package com.vynatix.holdfast.testing.matcher
 
-import com.vynatix.holdfast.Holdfast
-import com.vynatix.holdfast.testing.HoldfastEvent
-import com.vynatix.holdfast.testing.HoldfastHandle
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.testing.StoreEvent
+import com.vynatix.holdfast.testing.StoreHandle
 
 // ============================================================================
 // Combinators (handle-receiver) — primary public surface for TimelineMatcher.
@@ -10,13 +10,13 @@ import com.vynatix.holdfast.testing.HoldfastHandle
 
 /**
  * Set-membership match: every predicate declared in [builder] must match at
- * least one event in this handle's [HoldfastHandle.timeline]. Order doesn't
+ * least one event in this handle's [StoreHandle.timeline]. Order doesn't
  * matter; events not covered by any predicate are ignored.
  *
  * Failure: [AssertionError] listing each unmatched predicate's
  * [EventPredicate.description] on its own line.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFire(builder: TimelineMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldFire(builder: TimelineMatcher<V>.() -> Unit) {
     timeline.runShouldFire(TimelineMatcher(vaultRef = vault).apply(builder))
 }
 
@@ -28,7 +28,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFire(builder: TimelineMatche
  * Failure: [AssertionError] naming the first predicate that did not match
  * after the previous predicate's matched index.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFireInOrder(builder: TimelineMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldFireInOrder(builder: TimelineMatcher<V>.() -> Unit) {
     timeline.runShouldFireInOrder(TimelineMatcher(vaultRef = vault).apply(builder))
 }
 
@@ -40,7 +40,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFireInOrder(builder: Timelin
  * Failure: [AssertionError] naming the first index where the predicate's match
  * disagreed with the actual event.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFireInExactOrder(builder: TimelineMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldFireInExactOrder(builder: TimelineMatcher<V>.() -> Unit) {
     timeline.runShouldFireInExactOrder(TimelineMatcher(vaultRef = vault).apply(builder))
 }
 
@@ -50,7 +50,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldFireInExactOrder(builder: Ti
  *
  * Failure: [AssertionError] listing each predicate-event pair that did match.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldNotFire(builder: TimelineMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldNotFire(builder: TimelineMatcher<V>.() -> Unit) {
     timeline.runShouldNotFire(TimelineMatcher(vaultRef = vault).apply(builder))
 }
 
@@ -59,25 +59,25 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldNotFire(builder: TimelineMat
 //
 // Predicates that need a vault context (e.g. `emitted(MyVault::count)`) throw
 // [IllegalStateException] when invoked via these overloads — use the
-// [HoldfastHandle]-receiver form for those.
+// [StoreHandle]-receiver form for those.
 // ============================================================================
 
 /** [shouldFire] for synthetic timelines. */
-infix fun List<HoldfastEvent>.shouldFire(builder: TimelineMatcher<Nothing>.() -> Unit) {
+infix fun List<StoreEvent>.shouldFire(builder: TimelineMatcher<Nothing>.() -> Unit) {
     runShouldFire(TimelineMatcher<Nothing>(vaultRef = null).apply(builder))
 }
 
 /** [shouldFireInOrder] for synthetic timelines. */
-infix fun List<HoldfastEvent>.shouldFireInOrder(builder: TimelineMatcher<Nothing>.() -> Unit) {
+infix fun List<StoreEvent>.shouldFireInOrder(builder: TimelineMatcher<Nothing>.() -> Unit) {
     runShouldFireInOrder(TimelineMatcher<Nothing>(vaultRef = null).apply(builder))
 }
 
 /** [shouldFireInExactOrder] for synthetic timelines. */
-infix fun List<HoldfastEvent>.shouldFireInExactOrder(builder: TimelineMatcher<Nothing>.() -> Unit) {
+infix fun List<StoreEvent>.shouldFireInExactOrder(builder: TimelineMatcher<Nothing>.() -> Unit) {
     runShouldFireInExactOrder(TimelineMatcher<Nothing>(vaultRef = null).apply(builder))
 }
 
 /** [shouldNotFire] for synthetic timelines. */
-infix fun List<HoldfastEvent>.shouldNotFire(builder: TimelineMatcher<Nothing>.() -> Unit) {
+infix fun List<StoreEvent>.shouldNotFire(builder: TimelineMatcher<Nothing>.() -> Unit) {
     runShouldNotFire(TimelineMatcher<Nothing>(vaultRef = null).apply(builder))
 }

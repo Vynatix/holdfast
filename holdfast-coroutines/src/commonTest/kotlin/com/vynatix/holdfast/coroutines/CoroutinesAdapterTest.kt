@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,7 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private class FlowVault : Holdfast<FlowVault>() {
+private class FlowVault : Store<FlowVault>() {
     val n by state { 0 }
     val s by state { "init" }
 }

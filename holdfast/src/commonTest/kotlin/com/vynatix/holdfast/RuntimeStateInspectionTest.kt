@@ -7,7 +7,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class InspectionVault : Holdfast<InspectionVault>() {
+private class InspectionVault : Store<InspectionVault>() {
     val a by state { 0 }
     val b by state { "init" }
 }

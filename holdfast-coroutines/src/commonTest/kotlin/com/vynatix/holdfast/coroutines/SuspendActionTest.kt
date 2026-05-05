@@ -2,7 +2,7 @@ package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class SuspendVault : Holdfast<SuspendVault>() {
+private class SuspendVault : Store<SuspendVault>() {
     val n by state { 0 }
     val s by state { "init" }
 }

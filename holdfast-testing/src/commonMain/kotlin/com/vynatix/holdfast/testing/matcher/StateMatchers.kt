@@ -1,9 +1,9 @@
 package com.vynatix.holdfast.testing.matcher
 
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.snapshot
-import com.vynatix.holdfast.testing.HoldfastHandle
+import com.vynatix.holdfast.testing.StoreHandle
 import kotlin.reflect.KProperty1
 
 /**
@@ -23,7 +23,7 @@ import kotlin.reflect.KProperty1
  * }
  * ```
  */
-class StateMatcher<V : Holdfast<V>> internal constructor(internal val vault: V) {
+class StateMatcher<V : Store<V>> internal constructor(internal val vault: V) {
 
     /**
      * Assertions captured by the builder, keyed by property reference. Each
@@ -55,7 +55,7 @@ class StateMatcher<V : Holdfast<V>> internal constructor(internal val vault: V) 
  *
  * Use [shouldMatchExactly] when every declared state must be asserted.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatch(builder: StateMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldMatch(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(vault).apply(builder)
     val mismatches = collectMismatches(sm)
     if (mismatches.isNotEmpty()) {
@@ -66,11 +66,11 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatch(builder: StateMatcher<
 /**
  * Strict state-matcher: same as [shouldMatch], but additionally requires every
  * state currently registered on the vault (i.e. every entry in
- * [Holdfast.properties]) to have an assertion in [builder]. States that are
+ * [Store.properties]) to have an assertion in [builder]. States that are
  * registered but not asserted produce an [AssertionError] listing them
  * alphabetically.
  *
- * KMP note: a Holdfast registers a state lazily, on the first delegate read of
+ * KMP note: a Store registers a state lazily, on the first delegate read of
  * its property. `shouldMatchExactly` checks `vault.properties.keys`, so a
  * declared-but-never-touched state is invisible to the matcher. In practice
  * this is benign — tests reach this matcher only after exercising the vault
@@ -78,7 +78,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatch(builder: StateMatcher<
  * in [builder] would fail to type-check anyway because `prop.get(vault)` would
  * register it.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(vault).apply(builder)
 
     val declaredStateNames = vault.properties.keys
@@ -102,7 +102,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchExactly(builder: StateM
  * each named state has the same current `value`.
  *
  * Why `value` (post-`transformer.get`) instead of the raw snapshot entries:
- * raw entries are an internal-only field on [com.vynatix.holdfast.HoldfastSnapshot]
+ * raw entries are an internal-only field on [com.vynatix.holdfast.StoreSnapshot]
  * (used by `restore` to round-trip without re-running the transformer). For a
  * test-level "do these vaults look the same?" check, comparing the user-visible
  * `value` is more useful — for symmetric transformers it is identical to the
@@ -113,7 +113,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchExactly(builder: StateM
  * Throws [AssertionError] on a state-name set mismatch or on any value
  * mismatch.
  */
-infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchSnapshotOf(other: V) {
+infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
     val mySnap = vault.snapshot()
     val otherSnap = other.snapshot()
 
@@ -142,7 +142,7 @@ infix fun <V : Holdfast<V>> HoldfastHandle<V>.shouldMatchSnapshotOf(other: V) {
  * `"<state-name>: expected=<X> actual=<Y>"` strings — one per mismatch. An
  * empty list means every assertion passed.
  */
-private fun <V : Holdfast<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
+private fun <V : Store<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
     val actualValue = prop.get(sm.vault).value
     if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
 }

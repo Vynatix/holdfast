@@ -14,7 +14,7 @@ import kotlin.time.TimeSource
  * not on slow CI. They protect against pathological perf cliffs (e.g., a lock that
  * starves under contention or a notification path that becomes O(n²)).
  */
-private class BudgetVault : Holdfast<BudgetVault>() {
+private class BudgetVault : Store<BudgetVault>() {
     val n by state { 0 }
 }
 

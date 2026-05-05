@@ -16,7 +16,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class StdLibVault : Holdfast<StdLibVault>() {
+private class StdLibVault : Store<StdLibVault>() {
     val n by state { 0 }
     val s by state { "init" }
     val balance by state { 0L }

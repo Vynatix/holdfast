@@ -21,9 +21,9 @@ import kotlin.test.assertTrue
  * Both styles must compile and route through the right pipeline:
  *   - `context(scope) { store.bridge(key, codec) }` → context-param overload, scope=scope
  *   - `store.bridge(key, codec)` outside any context block → default-param overload,
- *     falling back to `Holdfast.defaultScope`.
+ *     falling back to `Store.defaultScope`.
  *
- * The "outside context block, defaults to Holdfast.defaultScope" path is verified by the
+ * The "outside context block, defaults to Store.defaultScope" path is verified by the
  * existing [SuspendingKvBridgeTest] suite. Re-asserting it here under the dual-overload
  * setup is fragile because K2 implicit-receiver resolution inside `runBlocking { }` can
  * prefer the context-param overload. The structural guarantee — both overloads compile

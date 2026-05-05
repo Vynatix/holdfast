@@ -1,9 +1,9 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.EventfulHoldfast
+import com.vynatix.holdfast.EventfulStore
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -23,11 +23,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class AccountVault(initial: Long = 0) : Holdfast<AccountVault>() {
+private class AccountVault(initial: Long = 0) : Store<AccountVault>() {
     val balance by state { initial }
 }
 
-private class LedgerVault : Holdfast<LedgerVault>() {
+private class LedgerVault : Store<LedgerVault>() {
     val entries by state { emptyList<String>() }
 }
 
@@ -35,7 +35,7 @@ private sealed class TransferEvent {
     data class Posted(val amount: Long) : TransferEvent()
 }
 
-private class EventingAccountVault(initial: Long = 0) : EventfulHoldfast<EventingAccountVault, TransferEvent>() {
+private class EventingAccountVault(initial: Long = 0) : EventfulStore<EventingAccountVault, TransferEvent>() {
     val balance by state { initial }
 }
 

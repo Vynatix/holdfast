@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,7 +13,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private class DefaultsVault : Holdfast<DefaultsVault>() {
+private class DefaultsVault : Store<DefaultsVault>() {
     val count by state { 0 }
 }
 

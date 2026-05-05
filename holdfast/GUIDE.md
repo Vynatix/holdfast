@@ -14,7 +14,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 ## Table of Contents
 
 1. [Mental Model](#1-mental-model)
-2. [The Shape of a Holdfast](#2-the-shape-of-a-holdfast)
+2. [The Shape of a Store](#2-the-shape-of-a-store)
 3. [Quickstart](#3-quickstart)
 4. [The Seven Primitives](#4-the-seven-primitives)
 5. [Transaction Lifecycle (Workflow Diagram)](#5-transaction-lifecycle-workflow-diagram)
@@ -34,7 +34,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 
 ### 30-second pitch
 
-A `Holdfast` is a state container whose unit of consistency is a **transaction**.
+A `Store` is a state container whose unit of consistency is a **transaction**.
 You read state through `state` properties; you mutate inside `action { … }`;
 you subscribe with `effect`. Every transaction is **all-or-nothing** — if its
 body throws, no observer was ever told about the intermediate writes, no
@@ -67,15 +67,15 @@ visibility and atomicity come from a transaction boundary.
 
 ---
 
-## 2. The Shape of a Holdfast
+## 2. The Shape of a Store
 
-A holdfast subclass declares its state using delegated properties. The base
+A store subclass declares its state using delegated properties. The base
 class is generic in `Self` (the curiously-recurring-template pattern) so
 extensions like `infix fun State<T>.mutate(T)` resolve against the concrete
 holdfast type.
 
 ```kotlin
-class CounterHoldfast : Holdfast<CounterHoldfast>() {
+class CounterHoldfast : Store<CounterHoldfast>() {
     val count by state { 0 }
     val label by state { "initial" }
     val email by state(EmailNormalizer()) { "" }   // with transformer
@@ -85,7 +85,7 @@ class CounterHoldfast : Holdfast<CounterHoldfast>() {
 ### Type hierarchy at a glance
 
 ```
-Holdfast<Self>                         abstract base; holds states + middleware + active txn
+Store<Self>                         abstract base; holds states + middleware + active txn
  ├── state(transformer?, init)      registers a MutableState by property name
  ├── action { … }                   transactional batch
  ├── invoke { … }                   plain context block (just runs the lambda)
@@ -109,12 +109,12 @@ Disposable                          single dispose() method
 
 ```
 holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
-  Holdfast.kt          base class, action/mutate/effect/bridge/invoke, ownership check
+  Store.kt          base class, action/mutate/effect/bridge/invoke, ownership check
   MutableState.kt   per-state observers, bridge, transformer, applyCommitted
   Transaction.kt    pendingWrites, commit/rollback, status state machine
   Middleware.kt     three-hook interceptor with metadata bag
   Contract.kt       State, Bridge, Transformer, Initializer, StateDelegate, Disposable
-  HoldfastLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
+  StoreLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
   UUID.kt           v4 UUID generator (used for unnamed transactions)
   platform/
     Threading.kt    expect currentThreadId, threadYield
@@ -126,7 +126,7 @@ holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
 
 ```kotlin
 // 1. Define a holdfast.
-class TodoHoldfast : Holdfast<TodoHoldfast>() {
+class TodoHoldfast : Store<TodoHoldfast>() {
     val items by state { emptyList<String>() }
     val draft by state { "" }
 }
@@ -171,7 +171,7 @@ it; subsequent reads of the same property return the same `State` (delegate
 identity is preserved across reads).
 
 ```kotlin
-class Profile : Holdfast<Profile>() {
+class Profile : Store<Profile>() {
     val name by state { "anon" }                    // identity transformer
     val email by state(EmailNormalizer()) { "" }    // applies on set/get
     val tags by state { emptySet<String>() }        // any T : Any
@@ -219,7 +219,7 @@ holdfast action {           // T_outer
 
 ### 4.3 `mutate(value)` — Write
 
-`State<T>.mutate(T)` is an extension on `Holdfast<Self>`. It buffers the
+`State<T>.mutate(T)` is an extension on `Store<Self>`. It buffers the
 post-`transformer.set` value into the active transaction's `pendingWrites`.
 
 ```kotlin
@@ -287,13 +287,13 @@ observers, but does NOT call `publish` again — preventing publish loops.
 
 ### 4.6 `middlewares(...)` — Intercept
 
-`Holdfast.middlewares(vararg)` registers middleware that wrap every transaction.
+`Store.middlewares(vararg)` registers middleware that wrap every transaction.
 Each middleware sees `onTransactionStarted` before the body runs,
 `onTransactionCompleted` after the body returns successfully, and
 `onTransactionError` if the body throws.
 
 ```kotlin
-class Logger<V : Holdfast<V>> : Middleware<V>() {
+class Logger<V : Store<V>> : Middleware<V>() {
     override fun onTransactionStarted(c: MiddlewareContext<V>) =
         log("→ ${c.transaction.id}")
     override fun onTransactionCompleted(c: MiddlewareContext<V>) =
@@ -315,12 +315,12 @@ for cross-middleware communication.
 
 ### 4.7 `invoke { … }` — Context block
 
-`holdfast { … }` — the operator on `Holdfast` — runs `block(self)` with no locks
-and no transaction. It exists so holdfast-extension members like `effect` and
-`bridge` can be called with holdfast-as-receiver:
+`store { … }` — the operator on `Store` — runs `block(self)` with no locks
+and no transaction. It exists so store-extension members like `effect` and
+`bridge` can be called with store-as-receiver:
 
 ```kotlin
-val d = holdfast { count effect { … } }      // effect is an extension on Holdfast<Self>
+val d = holdfast { count effect { … } }      // effect is an extension on Store<Self>
 val v = holdfast { count.value }             // plain read
 ```
 
@@ -558,7 +558,7 @@ a separate state).
                                                               by the time effects
                                                               fire — your action
                                                               becomes top-level)
-   a middleware hook               read state                 context.holdfast.x.value
+   a middleware hook               read state                 context.store.x.value
    a middleware hook               write state                NOT recommended;
                                                               use action's body to
                                                               orchestrate writes
@@ -572,7 +572,7 @@ a separate state).
 
 | | `effect` | `bridge` | `Middleware` |
 |---|---|---|---|
-| Granularity | per-state | per-state | per-holdfast (all transactions) |
+| Granularity | per-state | per-state | per-store (all transactions) |
 | When it fires | per-commit, on changed states | outbound: per-commit / inbound: any time | start, complete, error of every txn |
 | Has access to the transaction | no | no | yes (in `MiddlewareContext`) |
 | Can mutate state | yes (via action) | yes (via observe→applyFromBridge) | yes (next() runs body, can wrap with logic) |
@@ -598,7 +598,7 @@ a separate state).
 | Pure? | yes — `set` and `get` are required pure | no — can `log`, `metrics.record`, etc. |
 | Fires per | every read (`get`) and every write (`set`) | every transaction (start/end/error) |
 | Can short-circuit? | no | yes — by throwing |
-| Sees other states? | no | yes — `context.holdfast` |
+| Sees other states? | no | yes — `context.store` |
 | Examples | `EmailNormalizer`, `Encryption`, `JsonCodec` | `Logger`, `Validator`, `MetricsTimer` |
 
 ### 8.4 `state` initial value vs `state` with transformer
@@ -621,7 +621,7 @@ control over edge values like a sentinel "not loaded" instance.
 ### 9.1 Logging every transaction
 
 ```kotlin
-class Logger<V : Holdfast<V>>(private val tag: String) : Middleware<V>() {
+class Logger<V : Store<V>>(private val tag: String) : Middleware<V>() {
     override fun onTransactionStarted(c: MiddlewareContext<V>) {
         c.metadata["start"] = Clock.System.now().toEpochMilliseconds()
         println("$tag → ${c.transaction.id}")
@@ -643,7 +643,7 @@ holdfast.middlewares(Logger("Counter"))
 class NonNegativeBalance : Middleware<AccountHoldfast>() {
     override fun onTransactionCompleted(c: MiddlewareContext<AccountHoldfast>) {
         // Pending writes already buffered; check against current view.
-        if (c.holdfast.balance.value < 0)
+        if (c.store.balance.value < 0)
             error("Balance cannot go negative")
     }
 }
@@ -656,7 +656,7 @@ balance never becomes visible.
 ### 9.3 Optimistic UI with manual rollback
 
 ```kotlin
-class Composer : Holdfast<Composer>() {
+class Composer : Store<Composer>() {
     val text by state { "" }
     val sending by state { false }
     val lastError by state<Throwable> { NoError }
@@ -743,7 +743,7 @@ The library has no native `derive(other) { … }` operator. The two idioms:
 **Read-only derived (compute on demand):** define a holdfast function.
 
 ```kotlin
-class CartHoldfast : Holdfast<CartHoldfast>() {
+class CartHoldfast : Store<CartHoldfast>() {
     val items by state { emptyList<Line>() }
     fun total(): Money = items.value.sumOf { it.price * it.qty }
 }
@@ -752,7 +752,7 @@ class CartHoldfast : Holdfast<CartHoldfast>() {
 **Stored derived (compute in the action that updates the source):**
 
 ```kotlin
-class CartHoldfast : Holdfast<CartHoldfast>() {
+class CartHoldfast : Store<CartHoldfast>() {
     val items by state { emptyList<Line>() }
     val total by state { Money.Zero }
     fun add(line: Line) = action {
@@ -902,7 +902,7 @@ never T1's pending writes.
 - Disposing an `effect` `Disposable` while the same observer is mid-fire
   on another thread. Dispose is idempotent and safe to call concurrently;
   the in-flight callback finishes uninterrupted.
-- A `Bridge<T>.observe` callback that calls back into the holdfast on a
+- A `Bridge<T>.observe` callback that calls back into the store on a
   different thread *during* `applyFromBridge`. Lock-order analysis: the
   callback runs while no holdfast locks are held (the bridge owns its own
   threading), so a re-entrant `mutate` from the callback acquires
@@ -1008,7 +1008,7 @@ never T1's pending writes.
 
 ## 13. API Reference
 
-### `Holdfast<Self>`
+### `Store<Self>`
 
 | Member | Signature | Description |
 |---|---|---|
@@ -1023,7 +1023,7 @@ never T1's pending writes.
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
 
-### Extensions on `State<T>` (member-extensions of `Holdfast<Self>`)
+### Extensions on `State<T>` (member-extensions of `Store<Self>`)
 
 | Member | Signature | Description |
 |---|---|---|
@@ -1084,9 +1084,9 @@ read. `shouldTransform` lets you skip both for sentinel values (e.g. an
 ### `Middleware<V>`
 
 ```kotlin
-open class Middleware<V : Holdfast<V>> {
+open class Middleware<V : Store<V>> {
     data class MiddlewareContext<V>(
-        val holdfast: V,
+        val store: V,
         val transaction: Transaction,
         val metadata: MutableMap<String, Any> = mutableMapOf(),
     )
@@ -1114,16 +1114,16 @@ enum class TransactionStatus { Active, Committed, RolledBack, Failed }
 Everything below ships in 1.1 on top of the 1.0 baseline above. Each
 capability is independently usable; pick the ones you need.
 
-### 14.1 `Holdfast.snapshot()` / `Holdfast.restore(snapshot)`
+### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
 ```kotlin
-class HoldfastSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
     val stateNames: Set<String>
     val size: Int
 }
 
-fun <V : Holdfast<V>> V.snapshot(): HoldfastSnapshot
-fun <V : Holdfast<V>> V.restore(snapshot: HoldfastSnapshot): TransactionResult<Unit>
+fun <V : Store<V>> V.snapshot(): StoreSnapshot
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>
 ```
 
 `snapshot` captures the raw stored value of every state that has been
@@ -1141,11 +1141,11 @@ Restore-time bridge publish: yes. Detach bridges first if the snapshot
 shouldn't echo back to your persistence layer. Restore of an unknown state
 name throws (caught by the wrapping action → `TransactionResult.Error`).
 
-### 14.2 `Holdfast.computed { }` / `Holdfast.derived(sources) { }`
+### 14.2 `Store.computed { }` / `Store.derived(sources) { }`
 
 ```kotlin
-fun <V : Holdfast<V>, T : Any> V.computed(compute: V.() -> T): State<T>
-fun <V : Holdfast<V>, T : Any> V.derived(
+fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T>
+fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable>
@@ -1155,25 +1155,25 @@ fun <V : Holdfast<V>, T : Any> V.derived(
   has no observer mechanism — every read of `value` re-runs `compute`.
 - **`derived`**: push-recomputed. Subscribes to each source via `effect`;
   on each source commit, runs `compute()` inside a fresh top-level action
-  on the same holdfast and stages the result in a backing `MutableState`.
+  on the same store and stages the result in a backing `MutableState`.
   The returned `State<T>` is a real observable state — use `effect` to
   subscribe.
 
-The recompute is deferred via `Holdfast.postCommit` (an internal queue) so
+The recompute is deferred via `Store.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
 Disposing the `Disposable` stops recomputation.
 
 ### 14.3 `atomic(vararg holdfasts) { body }`
 
 ```kotlin
-fun <R> atomic(vararg holdfasts: Holdfast<*>, body: () -> R): TransactionResult<R>
+fun <R> atomic(vararg stores: Store<*>, body: () -> R): TransactionResult<R>
 ```
 
 Brackets multiple holdfasts' transactions so they commit-or-rollback together.
 Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
-frame as savepoints of each holdfast's root. On body throw, every holdfast is
+frame as savepoints of each store's root. On body throw, every holdfast is
 rolled back; on body return, every holdfast commits in lock order with
-sequential observer fanout per-holdfast.
+sequential observer fanout per-store.
 
 ```kotlin
 val r = atomic(accountA, accountB) {
@@ -1182,7 +1182,7 @@ val r = atomic(accountA, accountB) {
 }
 ```
 
-Holdfasts are sorted by `Holdfast.lockOrderKey` (process-monotonic, set at
+Holdfasts are sorted by `Store.lockOrderKey` (process-monotonic, set at
 construction) before lock acquisition — deadlock-safe across any
 combination. Nested `atomic` is supported via reentrant locks.
 
@@ -1277,11 +1277,11 @@ fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T>
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
-suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
-Mutually exclusive with blocking `Holdfast.action` on the same holdfast via an
+Mutually exclusive with blocking `Store.action` on the same store via an
 internal coroutine `Mutex` installed lazily. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
@@ -1303,7 +1303,7 @@ calls fall outside the recognized owner.
 
 ```kotlin
 @Composable
-fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
+fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
@@ -1318,7 +1318,7 @@ tied to the surrounding Composable.
 
 **Encrypted-at-rest credential**:
 ```kotlin
-class CredsHoldfast : Holdfast<CredsHoldfast>() {
+class CredsHoldfast : Store<CredsHoldfast>() {
     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
 }
 val kv = FileSystemKvStore("$home/.app/creds")
@@ -1328,7 +1328,7 @@ holdfast { token bridge KvBridge(kv, "session", StringCodec) }
 
 **Cross-holdfast transfer with one-line atomicity**:
 ```kotlin
-fun AccountHoldfast.transferTo(other: AccountHoldfast, cents: Long) =
+fun AccountStore.transferTo(other: AccountHoldfast, cents: Long) =
     atomic(this, other) {
         action { balance update { it - cents } }
         other.action { balance update { it + cents } }
@@ -1344,7 +1344,7 @@ val sub = holdfast { total effect { uiTotal.value = this } }
 
 **Snapshot-and-restore for undo**:
 ```kotlin
-val undoStack = ArrayDeque<HoldfastSnapshot>()
+val undoStack = ArrayDeque<StoreSnapshot>()
 fun saveCheckpoint() { undoStack.addLast(holdfast.snapshot()) }
 fun undo() = undoStack.removeLastOrNull()?.let { holdfast.restore(it) }
 ```
@@ -1375,7 +1375,7 @@ canonical fix for the **primitive obsession** code smell.
 |---|---|
 | `com.vynatix:validation` | Core lib. No Holdfast dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
 | `com.vynatix:validation-coroutines` | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
-| `com.vynatix:holdfast-hallmark` | Holdfast adapter. `ValidatingTransformer`, `Holdfast.boxed { }` factory, `BoxedCodec`. |
+| `com.vynatix:holdfast-hallmark` | Holdfast adapter. `ValidatingTransformer`, `Store.boxed { }` factory, `BoxedCodec`. |
 
 #### Core surface (`com.vynatix.hallmark`)
 
@@ -1541,7 +1541,7 @@ adopter-side.
 Two state factories:
 
 ```kotlin
-class UserHoldfast : Holdfast<UserHoldfast>() {
+class UserHoldfast : Store<UserHoldfast>() {
     val email       by boxed(EmailValidator) { "init@example.com" }       // State<Email>
     val displayName by boxedHandle(NameValidator) { "init" }              // BoxedHandle<String, Name>
 }
@@ -1610,7 +1610,7 @@ suspend fun adoptUsername(name: String): TransactionResult<Unit> =
     holdfast.suspendValidateAndMutate(holdfast.username, UsernameValidator, name)
 ```
 
-Runs the suspend validator (which may do I/O), then mutates the Holdfast state
+Runs the suspend validator (which may do I/O), then mutates the Store state
 inside a `suspendAction { }`. Atomic: validation failure rolls back the
 entire transaction.
 
@@ -1621,7 +1621,7 @@ import com.vynatix.holdfast.then
 
 val pipeline = ValidatingTransformer(EmailValidator).then(EncryptingTransformer(cipher))
 
-class UserHoldfast : Holdfast<UserHoldfast>() {
+class UserHoldfast : Store<UserHoldfast>() {
     val email by state(transformer = pipeline) { /* … */ }
 }
 ```
@@ -1641,7 +1641,7 @@ surface. No runtime Konform dep.
 ## Appendix A — One-page cheatsheet
 
 ```kotlin
-class V : Holdfast<V>() {
+class V : Store<V>() {
     val x by state { 0 }
     val s by state(MyTransformer()) { "" }
     val token by state(EncryptingTransformer(cipher)) { "" }   // 1.1

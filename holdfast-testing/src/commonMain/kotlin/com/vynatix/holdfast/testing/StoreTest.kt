@@ -18,10 +18,10 @@ import kotlin.time.Duration.Companion.seconds
  * }
  * ```
  *
- * On scope exit, [HoldfastTestScope.tearDown] aggregates every [com.vynatix.holdfast.TransactionResult.Error]
+ * On scope exit, [StoreTestScope.tearDown] aggregates every [com.vynatix.holdfast.TransactionResult.Error]
  * that was returned from a tracked handle's `action`/`suspendAction` and not
  * consumed by a `shouldBe*` matcher (or
- * [HoldfastHandle.consumeAllPendingErrors]). If any are still pending and the
+ * [StoreHandle.consumeAllPendingErrors]). If any are still pending and the
  * body itself returned cleanly, the resulting [AssertionError] fails the
  * test. The check is suppressed when the body already threw so the
  * root-cause exception is what the runner reports.
@@ -29,8 +29,8 @@ import kotlin.time.Duration.Companion.seconds
  * The default [timeout] of 60 seconds matches `runTest`'s own default; pass a
  * larger value when exercising long virtual-time delays.
  */
-fun vaultTest(timeout: Duration = 60.seconds, body: suspend HoldfastTestScope.() -> Unit): TestResult = runTest(timeout = timeout) {
-    val scope = HoldfastTestScope(this)
+fun vaultTest(timeout: Duration = 60.seconds, body: suspend StoreTestScope.() -> Unit): TestResult = runTest(timeout = timeout) {
+    val scope = StoreTestScope(this)
     var bodyFailed = false
     try {
         scope.body()

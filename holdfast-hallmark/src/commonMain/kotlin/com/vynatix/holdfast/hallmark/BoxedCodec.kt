@@ -5,7 +5,7 @@ import com.vynatix.hallmark.Validator
 import com.vynatix.holdfast.bridge.Codec
 
 /**
- * Persists a [Boxed] [O] through any Holdfast [Codec] pipeline.
+ * Persists a [Boxed] [O] through any Store [Codec] pipeline.
  *
  * Encoding strips the wrapper and delegates to [primitiveCodec]; decoding
  * runs the primitive through [validator] to re-wrap. Throws

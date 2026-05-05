@@ -32,7 +32,7 @@ import com.vynatix.holdfast.Disposable
  * site (`vault { state bridge bridge }`). Wrap that line in `assertFailsWith`
  * to assert on the attach-time failure.
  *
- * Holdfast's commit path catches [publish] throws inside the transaction's
+ * Store's commit path catches [publish] throws inside the transaction's
  * commit-time error handling; the action's [com.vynatix.holdfast.TransactionResult]
  * surfaces the cause. Use [com.vynatix.holdfast.testing.matcher.shouldRollbackWith]
  * to assert.

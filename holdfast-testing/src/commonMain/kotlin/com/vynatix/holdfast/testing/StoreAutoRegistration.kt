@@ -4,18 +4,18 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.reflect.KProperty1
 
 /**
- * Member-extension surface that lets tests skip explicit [HoldfastTestScope.track]
+ * Member-extension surface that lets tests skip explicit [StoreTestScope.track]
  * and call action / read / timeline / emissions / etc. directly on a
- * [Holdfast] instance inside a [vaultTest] block:
+ * [Store] instance inside a [vaultTest] block:
  *
  * ```
  * @Test fun implicit() = vaultTest {
  *     val v = MyVault()
- *     v.action { count mutate 1 }                  // member of Holdfast, sees recorder if installed
+ *     v.action { count mutate 1 }                  // member of Store, sees recorder if installed
  *     assertEquals(1, v.read { count.value })      // extension — auto-registers on first touch
  * }
  * ```
@@ -24,17 +24,17 @@ import kotlin.reflect.KProperty1
  * Kotlin 2.3.21 supports `context(...)` receivers, but library guidance still
  * treats the syntax as in-flux for stable ABI. The KMP-portable choice is the
  * member-extension pattern: extension functions declared as members of an
- * interface (here [HoldfastAutoRegistration]) which [HoldfastTestScope] implements.
+ * interface (here [StoreAutoRegistration]) which [StoreTestScope] implements.
  *
  * On first invocation of any extension below, [track] is called on `this`.
- * [HoldfastTestScope]'s implementation of [track] is idempotent by reference
+ * [StoreTestScope]'s implementation of [track] is idempotent by reference
  * identity — see [com.vynatix.holdfast.testing.internal.HandleRegistry] — so a
  * mix of explicit `track(v)` and implicit `v.read { }` always resolves to the
- * same [HoldfastHandle]. Subsequent invocations route to the same handle, and
- * the handle is disposed at scope exit by [HoldfastTestScope.tearDown] regardless
+ * same [StoreHandle]. Subsequent invocations route to the same handle, and
+ * the handle is disposed at scope exit by [StoreTestScope.tearDown] regardless
  * of whether it was registered explicitly or via auto-registration.
  *
- * Each extension forwards directly to its [HoldfastHandle] counterpart. Behaviour
+ * Each extension forwards directly to its [StoreHandle] counterpart. Behaviour
  * is unchanged from the explicit form — pending-error tracking, recorder
  * lifecycle, [com.vynatix.holdfast.testing.internal.PendingErrorRegistry] mark
  * consumption, and [Capture] semantics all match the no-extension code path.
@@ -44,131 +44,131 @@ import kotlin.reflect.KProperty1
  * extension-call site so the registry's idempotent-by-identity rule attaches
  * the right [Capture] to the handle.
  *
- * **Important caveat — `v.action {}` does NOT auto-register**. [com.vynatix.holdfast.Holdfast]
+ * **Important caveat — `v.action {}` does NOT auto-register**. [com.vynatix.holdfast.Store]
  * declares `action` as a member infix function, and Kotlin's resolution rules
  * always prefer a class member over an extension of the same shape. The
  * auto-registration extension `V.action` declared here is therefore shadowed
- * by `Holdfast.action` whenever the call site is `v.action { ... }`. The
+ * by `Store.action` whenever the call site is `v.action { ... }`. The
  * extension is still kept in the API surface — it routes through
- * [HoldfastHandle.action] for explicit-receiver call paths and is the natural
+ * [StoreHandle.action] for explicit-receiver call paths and is the natural
  * spec-compliant declaration — but in practice the recorder fires for
  * `v.action {}` only when one of the **other** extensions has already
  * triggered auto-registration (or the user has called [track] explicitly).
- * The same caveat does NOT apply to [V.suspendAction]: `Holdfast` has no
+ * The same caveat does NOT apply to [V.suspendAction]: `Store` has no
  * matching member, so the member-extension wins.
  *
  * Practical pattern: trigger auto-registration once via any non-action
  * extension (`v.read { }`, `v.timeline`, etc.) BEFORE the first
  * `v.action { }`, OR call `track(v)` upfront. Once the recorder is installed,
- * subsequent `v.action {}` calls fire it through `Holdfast`'s middleware chain.
+ * subsequent `v.action {}` calls fire it through `Store`'s middleware chain.
  *
  * The single exception to "all extensions live in this interface" is
  * [middlewareEventsOf] with a reified type parameter — declared on
- * [HoldfastTestScope] itself, not here. Reified type parameters require `inline`,
+ * [StoreTestScope] itself, not here. Reified type parameters require `inline`,
  * and the inline-reified call ergonomically resolves cleaner when declared on
- * the implementing class with a star-projected receiver. See [HoldfastTestScope]
+ * the implementing class with a star-projected receiver. See [StoreTestScope]
  * for that declaration.
  */
-interface HoldfastAutoRegistration {
+interface StoreAutoRegistration {
 
     /**
      * Auto-registration's underlying registry call. Implemented by
-     * [HoldfastTestScope] using its [com.vynatix.holdfast.testing.internal.HandleRegistry].
+     * [StoreTestScope] using its [com.vynatix.holdfast.testing.internal.HandleRegistry].
      * Idempotent by reference identity — repeated calls with the same vault
      * return the same handle, ignoring a different [capture] on the second
      * call.
      */
-    fun <V : Holdfast<V>> track(vault: V, capture: Capture = Capture.All): HoldfastHandle<V>
+    fun <V : Store<V>> track(vault: V, capture: Capture = Capture.All): StoreHandle<V>
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.action]. Calls
+     * Auto-registering wrapper around [StoreHandle.action]. Calls
      * [track] on `this` first (idempotent), then forwards to the handle's
-     * [com.vynatix.holdfast.testing.HoldfastHandle.action]. Returns the
+     * [com.vynatix.holdfast.testing.StoreHandle.action]. Returns the
      * [TransactionResult] verbatim; pending-error tracking applies.
      *
-     * **Caveat**: This extension is shadowed by [com.vynatix.holdfast.Holdfast.action],
-     * the member infix function on `Holdfast`, whenever the call site is
+     * **Caveat**: This extension is shadowed by [com.vynatix.holdfast.Store.action],
+     * the member infix function on `Store`, whenever the call site is
      * `v.action { ... }`. The shadow rule is Kotlin's standard member-vs-
      * extension precedence and cannot be overridden. See the
-     * [HoldfastAutoRegistration] file-level KDoc for the practical pattern.
+     * [StoreAutoRegistration] file-level KDoc for the practical pattern.
      */
-    fun <V : Holdfast<V>, R> V.action(body: V.() -> R): TransactionResult<R> = track(this).action(body)
+    fun <V : Store<V>, R> V.action(body: V.() -> R): TransactionResult<R> = track(this).action(body)
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.suspendAction]. Calls
+     * Auto-registering wrapper around [StoreHandle.suspendAction]. Calls
      * [track] on `this` first (idempotent), then forwards to the handle's
-     * [com.vynatix.holdfast.testing.HoldfastHandle.suspendAction]. Returns the
+     * [com.vynatix.holdfast.testing.StoreHandle.suspendAction]. Returns the
      * [TransactionResult] verbatim; pending-error tracking applies.
      */
-    suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> = track(this).suspendAction(body)
+    suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> = track(this).suspendAction(body)
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.read]. Calls [track] on
+     * Auto-registering wrapper around [StoreHandle.read]. Calls [track] on
      * `this` first (idempotent), then forwards to the handle's
-     * [com.vynatix.holdfast.testing.HoldfastHandle.read]. Plain read assertion — no
+     * [com.vynatix.holdfast.testing.StoreHandle.read]. Plain read assertion — no
      * transaction is opened.
      */
-    fun <V : Holdfast<V>, R> V.read(block: V.() -> R): R = track(this).read(block)
+    fun <V : Store<V>, R> V.read(block: V.() -> R): R = track(this).read(block)
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.timeline]. Calls [track]
+     * Auto-registering wrapper around [StoreHandle.timeline]. Calls [track]
      * on `this` first; returns the recorder's defensive-copy snapshot in push
      * order.
      */
-    val <V : Holdfast<V>> V.timeline: List<HoldfastEvent>
+    val <V : Store<V>> V.timeline: List<StoreEvent>
         get() = track(this).timeline
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.transactions]. Calls
+     * Auto-registering wrapper around [StoreHandle.transactions]. Calls
      * [track] on `this` first; returns the timeline filtered to
      * [TransactionEvent]s.
      */
-    val <V : Holdfast<V>> V.transactions: List<TransactionEvent>
+    val <V : Store<V>> V.transactions: List<TransactionEvent>
         get() = track(this).transactions
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.emissions]. Calls
+     * Auto-registering wrapper around [StoreHandle.emissions]. Calls
      * [track] on `this` first; returns [EmissionEvent]s targeting the [State]
      * referenced by [prop].
      */
-    fun <V : Holdfast<V>> V.emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> = track(this).emissions(prop)
+    fun <V : Store<V>> V.emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> = track(this).emissions(prop)
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.bridgeEvents]. Calls
+     * Auto-registering wrapper around [StoreHandle.bridgeEvents]. Calls
      * [track] on `this` first; returns [BridgeEvent]s targeting the [State]
      * referenced by [prop]. Empty in v1 — Issue 12 owns the bridge
      * instrumentation; the typed view ships now so future matchers can target
      * it without churn.
      */
-    fun <V : Holdfast<V>> V.bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> = track(this).bridgeEvents(prop)
+    fun <V : Store<V>> V.bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> = track(this).bridgeEvents(prop)
 
     /**
      * Auto-registering wrapper around the instance-keyed
-     * [HoldfastHandle.middlewareEventsOf] overload. Calls [track] on `this`
+     * [StoreHandle.middlewareEventsOf] overload. Calls [track] on `this`
      * first; returns [MiddlewareEvent]s whose [MiddlewareEvent.middleware]
      * IS [instance] by referential equality.
      *
-     * The reified-type overload is on [HoldfastTestScope] itself rather than
+     * The reified-type overload is on [StoreTestScope] itself rather than
      * here — see the file-level KDoc for the rationale.
      */
-    fun <V : Holdfast<V>, M : Middleware<V>> V.middlewareEventsOf(instance: M): List<MiddlewareEvent> =
+    fun <V : Store<V>, M : Middleware<V>> V.middlewareEventsOf(instance: M): List<MiddlewareEvent> =
         track(this).middlewareEventsOf(instance)
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.lastTransaction]. Calls
+     * Auto-registering wrapper around [StoreHandle.lastTransaction]. Calls
      * [track] on `this` first; returns the most recent [Transaction] the
      * recorder observed in `onTransactionStarted`, or `null` when no action
      * has run yet (or [Capture.None] is in effect).
      */
-    val <V : Holdfast<V>> V.lastTransaction: Transaction?
+    val <V : Store<V>> V.lastTransaction: Transaction?
         get() = track(this).lastTransaction
 
     /**
-     * Auto-registering wrapper around [HoldfastHandle.lastResult]. Calls
+     * Auto-registering wrapper around [StoreHandle.lastResult]. Calls
      * [track] on `this` first; returns the most recent [TransactionResult]
-     * captured by [HoldfastHandle.action] / [HoldfastHandle.suspendAction], or
+     * captured by [StoreHandle.action] / [StoreHandle.suspendAction], or
      * `null` when no action has run yet.
      */
-    val <V : Holdfast<V>> V.lastResult: TransactionResult<*>?
+    val <V : Store<V>> V.lastResult: TransactionResult<*>?
         get() = track(this).lastResult
 }

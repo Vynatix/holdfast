@@ -59,7 +59,7 @@ class LatchedBridge<T : Any>(@Suppress("unused") private val initial: T) : Bridg
         get() = synchronized(lock) { publishedList.lastOrNull() }
 
     /**
-     * Holdfast-driven inbound subscription. Records [observer] but does NOT
+     * Store-driven inbound subscription. Records [observer] but does NOT
      * replay any initial value — load-on-attach is a per-bridge convention,
      * and a [LatchedBridge] is typically used to test publish semantics in
      * isolation, where an unexpected initial inbound delivery can muddle the

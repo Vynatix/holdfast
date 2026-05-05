@@ -1,10 +1,10 @@
 package com.vynatix.holdfast.compose
 
 import androidx.compose.runtime.Composable
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 
-private class ComposeBindingsVault : Holdfast<ComposeBindingsVault>() {
+private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
     val n by state { 0 }
     val s by state { "init" }
 }

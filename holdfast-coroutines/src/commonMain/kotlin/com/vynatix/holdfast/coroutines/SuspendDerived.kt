@@ -1,11 +1,11 @@
-@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.platform.runBlockingForInitialSeed
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
@@ -29,13 +29,13 @@ import kotlinx.coroutines.launch
  * change triggers a new launched compute. Multiple in-flight computes race;
  * the LAST [suspendAction] commit becomes the visible value. There is no
  * coalescing or in-flight cancellation between iterations — racy commits
- * serialize through the vault's [Holdfast.AsyncSerializer], and the standard
+ * serialize through the vault's [Store.AsyncSerializer], and the standard
  * staged-write semantics make the final committed value the visible one.
  * Callers who need strict latest-wins semantics with no intermediate flicker
  * should debounce upstream.
  *
  * **Cancellation**:
- *  - Cancelling [Holdfast.scope] cancels every in-flight compute (the launched
+ *  - Cancelling [Store.scope] cancels every in-flight compute (the launched
  *    coroutines are children of `vault.scope`); no stale results land because
  *    a `suspendAction` whose body is cancelled rolls back instead of committing.
  *  - Calling [Disposable.dispose] on the returned handle disposes the source
@@ -67,7 +67,7 @@ import kotlinx.coroutines.launch
  * }
  * ```
  */
-fun <V : Holdfast<V>, T : Any> V.suspendDerived(
+fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable> {

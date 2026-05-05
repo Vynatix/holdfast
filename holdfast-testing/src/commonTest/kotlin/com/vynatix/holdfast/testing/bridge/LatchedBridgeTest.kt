@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import com.vynatix.holdfast.testing.vaultTest
 import kotlinx.coroutines.async
@@ -12,7 +12,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
-private class LatchVault : Holdfast<LatchVault>() {
+private class LatchVault : Store<LatchVault>() {
     val payload by state { "init" }
 }
 

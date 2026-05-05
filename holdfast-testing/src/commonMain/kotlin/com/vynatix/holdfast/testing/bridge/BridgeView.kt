@@ -9,7 +9,7 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * through the bridge as if from the external system.
  *
  * Construct in three ways:
- *  - [com.vynatix.holdfast.testing.HoldfastHandle.bridge] — looks up the bridge
+ *  - [com.vynatix.holdfast.testing.StoreHandle.bridge] — looks up the bridge
  *    attached to a state on the tracked vault, returning a `BridgeView<*>`
  *    backed by the recorder's wrapper. Throws if no bridge is attached.
  *  - [BridgeView] (with a [RecordingBridge]) — wraps a test
@@ -31,7 +31,7 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * vault.read { theme.value } shouldBe "light"
  * ```
  *
- * Or, using [com.vynatix.holdfast.testing.HoldfastHandle.bridge]:
+ * Or, using [com.vynatix.holdfast.testing.StoreHandle.bridge]:
  * ```
  * val ctr = track(SettingsVault().also { v ->
  *     v { theme bridge RecordingBridge<String>("") }
@@ -108,14 +108,14 @@ class BridgeView<T : Any> internal constructor(private val source: Source<T>) {
 
 /**
  * Construct a [BridgeView] backed by [bridge]. Useful for tests that want to
- * assert on a [RecordingBridge] without going through [com.vynatix.holdfast.testing.HoldfastHandle.bridge].
+ * assert on a [RecordingBridge] without going through [com.vynatix.holdfast.testing.StoreHandle.bridge].
  */
 @Suppress("FunctionName")
 fun <T : Any> BridgeView(bridge: RecordingBridge<T>): BridgeView<T> = BridgeView(BridgeView.RecordingSource(bridge))
 
 /**
  * Construct a [BridgeView] backed by [bridge]. Useful for tests that want to
- * assert on a [LatchedBridge] without going through [com.vynatix.holdfast.testing.HoldfastHandle.bridge].
+ * assert on a [LatchedBridge] without going through [com.vynatix.holdfast.testing.StoreHandle.bridge].
  */
 @Suppress("FunctionName")
 fun <T : Any> BridgeView(bridge: LatchedBridge<T>): BridgeView<T> = BridgeView(BridgeView.LatchedSource(bridge))

@@ -9,12 +9,12 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-private class TxTestVault : Holdfast<TxTestVault>() {
+private class TxTestVault : Store<TxTestVault>() {
     val count by state { 0 }
     val label by state { "initial" }
 }
 
-private class FiveStateVault : Holdfast<FiveStateVault>() {
+private class FiveStateVault : Store<FiveStateVault>() {
     val a by state { 0 }
     val b by state { 0 }
     val c by state { 0 }
@@ -333,7 +333,7 @@ class TransactionStatusGuardsTest {
         val result = v action { count mutate 5 }
         assertIs<TransactionResult.Success<*>>(result)
 
-        // Holdfast.action already called commit(); second call hits the status guard.
+        // Store.action already called commit(); second call hits the status guard.
         runCatching { result.transaction.commit() }
 
         assertEquals(5, v.count.value)

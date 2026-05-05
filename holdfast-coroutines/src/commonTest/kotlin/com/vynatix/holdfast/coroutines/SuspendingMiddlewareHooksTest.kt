@@ -2,7 +2,7 @@ package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class HooksVault : Holdfast<HooksVault>() {
+private class HooksVault : Store<HooksVault>() {
     val n by state { 0 }
 }
 

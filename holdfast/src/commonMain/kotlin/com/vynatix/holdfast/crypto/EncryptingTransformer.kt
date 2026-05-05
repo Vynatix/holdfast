@@ -17,7 +17,7 @@ import com.vynatix.holdfast.Transformer
  *
  * Example:
  * ```
- * class CredentialsVault : Holdfast<CredentialsVault>() {
+ * class CredentialsVault : Store<CredentialsVault>() {
  *     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
  * }
  * vault action { token mutate "secret-jwt" }

@@ -2,7 +2,7 @@ package com.vynatix.holdfast.testing.matcher
 
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -11,7 +11,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class TinyVault : Holdfast<TinyVault>() {
+private class TinyVault : Store<TinyVault>() {
     val n by state { 0 }
 }
 

@@ -20,14 +20,14 @@ class VaultLockBasicsTest {
 
     @Test
     fun withLockReturnsBlockResult() {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val result = lock.withLock { 42 }
         assertEquals(42, result)
     }
 
     @Test
     fun withLockReleasesLockOnExceptionAndPropagatesException() {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val ex = assertFailsWith<RuntimeException> {
             lock.withLock { throw RuntimeException("boom") }
         }
@@ -39,7 +39,7 @@ class VaultLockBasicsTest {
 
     @Test
     fun acquireFromSameThreadIsReentrantAndIncrementsLockCount() {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val results = mutableListOf<Int>()
         lock.withLock {
             results.add(1)
@@ -58,7 +58,7 @@ class VaultLockBasicsTest {
 
     @Test
     fun nestedReentrantWithLockBlocksUnwindLockCountInOrder() {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val depth = mutableListOf<Int>()
         lock.withLock {
             depth.add(1)
@@ -88,7 +88,7 @@ class VaultLockErrorPathTest {
         val intruderCtx = newSingleThreadContext("vault-lock-intruder")
         try {
             val captured = runBlocking {
-                val lock = HoldfastLock()
+                val lock = StoreLock()
                 val acquired = CompletableDeferred<Unit>()
                 val canRelease = CompletableDeferred<Unit>()
                 val foreignReleaseError = atomic<Throwable?>(null)
@@ -126,7 +126,7 @@ class VaultLockErrorPathTest {
 
     @Test
     fun releaseWithoutPriorAcquireThrowsIllegalStateException() {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         assertFailsWith<IllegalStateException> { lock.release() }
     }
 }
@@ -145,7 +145,7 @@ class VaultLockContentionTest {
         val ownerCtx = newSingleThreadContext("vault-lock-contention-owner")
         try {
             runBlocking {
-                val lock = HoldfastLock()
+                val lock = StoreLock()
                 val acquireCount = atomic(0)
                 val firstAcquired = CompletableDeferred<Unit>()
                 val canFirstRelease = CompletableDeferred<Unit>()
@@ -189,7 +189,7 @@ class VaultLockContentionTest {
 
     @Test
     fun manyWaitersUnderHighContentionAllEventuallyAcquireWithoutPerpetualStarvation() = runBlocking {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val workers = 16
         val opsPerWorker = 50
         val totalOps = atomic(0)
@@ -214,7 +214,7 @@ class VaultLockContentionTest {
 
     @Test
     fun aGreedyReentrantHolderDoesNotBlockOtherWaitersAfterFinalRelease() = runBlocking {
-        val lock = HoldfastLock()
+        val lock = StoreLock()
         val acquired = atomic(0)
 
         val greedy = async(Dispatchers.Default) {

@@ -12,12 +12,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 
-private class NestedTwoStateVault : Holdfast<NestedTwoStateVault>() {
+private class NestedTwoStateVault : Store<NestedTwoStateVault>() {
     val state1 by state { "initial1" }
     val state2 by state { "initial2" }
 }
 
-private class NestedSingleStateVault : Holdfast<NestedSingleStateVault>() {
+private class NestedSingleStateVault : Store<NestedSingleStateVault>() {
     val n by state { 0 }
     val m by state { "init" }
 }
@@ -284,8 +284,8 @@ class SavepointReadYourOwnWritesTest {
                 state2 mutate "in-rolled-back-nested"
                 v.activeTransaction!!.rollback()
             }
-            // Action body returned; Holdfast.action's commit is no-op (status RolledBack).
-            // Holdfast.action returns Success(txn) with status RolledBack.
+            // Action body returned; Store.action's commit is no-op (status RolledBack).
+            // Store.action returns Success(txn) with status RolledBack.
             assertIs<TransactionResult.Success<*>>(nestedResult)
             assertEquals(
                 "initial2",
@@ -306,7 +306,7 @@ class SavepointReadYourOwnWritesTest {
                 val v = NestedTwoStateVault()
                 v action { state1 mutate "committed" }
 
-                // Holdfast.action's lambda is non-suspend; we coordinate via atomic flags
+                // Store.action's lambda is non-suspend; we coordinate via atomic flags
                 // and busy-wait so the lambda never tries to suspend.
                 val nestedReached = atomic(false)
                 val readerDone = atomic(false)

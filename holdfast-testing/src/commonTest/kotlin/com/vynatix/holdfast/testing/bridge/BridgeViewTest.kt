@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import com.vynatix.holdfast.testing.matcher.shouldHaveLastPublished
 import com.vynatix.holdfast.testing.matcher.shouldHavePublished
@@ -12,7 +12,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class TextVault : Holdfast<TextVault>() {
+private class TextVault : Store<TextVault>() {
     val text by state { "" }
 }
 

@@ -1,11 +1,11 @@
-@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -21,11 +21,11 @@ import kotlin.uuid.Uuid
  * Run [body] in a way that brackets multiple vaults' transactions so they
  * commit-or-rollback together — the suspending peer of [com.vynatix.holdfast.atomic].
  *
- * Locking: vaults are sorted by [Holdfast.lockOrderKey] before lock acquisition,
+ * Locking: vaults are sorted by [Store.lockOrderKey] before lock acquisition,
  * giving deadlock-safe global ordering across any combination of vaults. Each
- * vault's [Holdfast.AsyncSerializer] coroutine `Mutex` (the same one [suspendAction]
+ * vault's [Store.AsyncSerializer] coroutine `Mutex` (the same one [suspendAction]
  * uses) is acquired in lock order. Mutually exclusive with blocking
- * [Holdfast.action] and per-vault [suspendAction] on the same vault.
+ * [Store.action] and per-vault [suspendAction] on the same vault.
  *
  * Reentrancy: nested `suspendAtomic` calls within the same coroutine reuse
  * the outer call's locks. A nested call passing vaults already held by the
@@ -74,7 +74,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 suspend fun <R> suspendAtomic(
-    vararg vaults: Holdfast<*>,
+    vararg vaults: Store<*>,
     body: suspend () -> R,
 ): TransactionResult<R> {
     require(vaults.isNotEmpty()) { "suspendAtomic requires at least one vault" }
@@ -91,7 +91,7 @@ suspend fun <R> suspendAtomic(
     // Already-held vaults from an outer frame have their existing root
     // adopted as a savepoint receptacle; only newly-introduced vaults get a
     // fresh root and a freshly-acquired mutex.
-    val parentHeld: Set<Holdfast<*>> = parentFrame?.heldVaults ?: emptySet()
+    val parentHeld: Set<Store<*>> = parentFrame?.heldVaults ?: emptySet()
     val newlyHeld = sorted.filter { it !in parentHeld }
 
     val id = "suspendAtomic-${Uuid.random()}"
@@ -131,8 +131,8 @@ suspend fun <R> suspendAtomic(
 @OptIn(ExperimentalUuidApi::class)
 @Suppress("LongParameterList")
 private suspend fun <R> acquireAndRun(
-    sorted: List<Holdfast<*>>,
-    newlyHeldSet: Set<Holdfast<*>>,
+    sorted: List<Store<*>>,
+    newlyHeldSet: Set<Store<*>>,
     index: Int,
     rootsAcquired: MutableList<RootEntry>,
     ownerKey: Any,
@@ -314,7 +314,7 @@ private suspend fun <R> executeBody(
  * here) or adopted from an outer frame (lifecycle owned by the outer).
  */
 private class RootEntry(
-    val vault: Holdfast<*>,
+    val vault: Store<*>,
     val txn: Transaction,
     @Suppress("unused") val priorActive: Transaction?,
     @Suppress("unused") val priorOwner: Any?,
@@ -334,7 +334,7 @@ private class RootEntry(
  * `heldVaults` set needs no extra synchronization.
  */
 internal class SuspendAtomicFrame(val owner: Any) : AbstractCoroutineContextElement(Key) {
-    val heldVaults: MutableSet<Holdfast<*>> = mutableSetOf()
+    val heldVaults: MutableSet<Store<*>> = mutableSetOf()
 
     companion object Key : CoroutineContext.Key<SuspendAtomicFrame>
 }

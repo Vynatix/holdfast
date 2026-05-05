@@ -1,10 +1,10 @@
-@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Transaction
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.Mutex
  * the two suspending entry points so a suspendAtomic and a suspendAction on
  * the same vault block each other.
  */
-internal class MutexSerializer : Holdfast.AsyncSerializer {
+internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
 
     override fun blockingAcquire() {
@@ -36,14 +36,14 @@ internal class MutexSerializer : Holdfast.AsyncSerializer {
 }
 
 /**
- * Lazy installation of the [Holdfast.AsyncSerializer] hook on each vault. The
+ * Lazy installation of the [Store.AsyncSerializer] hook on each vault. The
  * hook is installed on first use and persists for the vault's lifetime — the
  * coroutine [Mutex] inside it serializes blocking action, [suspendAction], and
  * [suspendAtomic] for any vault that participates in any one of them.
  */
 private val installLock = object : SynchronizedObject() {}
 
-internal fun ensureSerializer(vault: Holdfast<*>): MutexSerializer {
+internal fun ensureSerializer(vault: Store<*>): MutexSerializer {
     val installed = vault.asyncSerializer as? MutexSerializer
     if (installed != null) return installed
     return synchronized(installLock) {

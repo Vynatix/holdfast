@@ -1,14 +1,14 @@
 package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Middleware
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class MultiVault : Holdfast<MultiVault>() {
+private class MultiVault : Store<MultiVault>() {
     val a by state { 0 }
     val b by state { "" }
     val c by state { listOf<Int>() }

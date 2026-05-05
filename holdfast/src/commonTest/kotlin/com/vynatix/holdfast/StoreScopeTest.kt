@@ -11,19 +11,19 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Issue 01 — Holdfast.scope + Holdfast.Companion.defaultScope settable-once.
+ * Issue 01 — Store.scope + Store.Companion.defaultScope settable-once.
  *
- * `Holdfast.defaultScope` is a process-singleton settable at most once per process. Tests
+ * `Store.defaultScope` is a process-singleton settable at most once per process. Tests
  * here are written to be order-independent: whichever test "first sets" defaultScope wins,
  * and every subsequent set throws regardless of order.
  */
 class VaultScopeTest {
-    private class TestVault : Holdfast<TestVault>()
+    private class TestVault : Store<TestVault>()
 
     @Test
     fun vault_scope_defaults_to_Vault_Companion_defaultScope() {
         val vault = TestVault()
-        assertSame(Holdfast.defaultScope, vault.scope)
+        assertSame(Store.defaultScope, vault.scope)
     }
 
     @Test
@@ -49,11 +49,11 @@ class VaultScopeTest {
         // First assignment may succeed (if no prior test set defaultScope) or throw
         // (if a prior test already set it). Either is contract-compliant — the contract
         // is "at most one successful assignment per process".
-        runCatching { Holdfast.defaultScope = a }
+        runCatching { Store.defaultScope = a }
 
         // The very next assignment MUST throw, no matter what.
         val ex = assertFailsWith<IllegalStateException> {
-            Holdfast.defaultScope = b
+            Store.defaultScope = b
         }
         assertTrue(
             ex.message?.contains("defaultScope") == true,

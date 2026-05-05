@@ -1,6 +1,6 @@
 # holdfast-coroutines
 
-`Flow` / `StateFlow` / suspend integration for the [Holdfast](../holdfast/) library.
+`Flow` / `StateFlow` / suspend integration for the [Store](../holdfast/) library.
 Pulls in `kotlinx-coroutines-core`; nothing else.
 
 ## Surface

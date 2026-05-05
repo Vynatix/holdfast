@@ -6,7 +6,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
 
 /**
@@ -31,7 +31,7 @@ import com.vynatix.holdfast.effect
  * ```
  */
 @Composable
-fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> =
+fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> =
     produceState(initialValue = state.value, state) {
         val disposable = state effect { value = this }
         awaitDispose { disposable.dispose() }
@@ -44,7 +44,7 @@ fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compo
  * the keys change.
  *
  * Use for non-state vault subscriptions you want bound to a Composable's
- * lifecycle — e.g. an [Holdfast.observeFrom] inbound binding.
+ * lifecycle — e.g. an [Store.observeFrom] inbound binding.
  *
  * ```
  * @Composable

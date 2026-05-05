@@ -8,11 +8,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-private class AccountVault(initial: Long = 0) : Holdfast<AccountVault>() {
+private class AccountVault(initial: Long = 0) : Store<AccountVault>() {
     val balance by state { initial }
 }
 
-private class LedgerVault : Holdfast<LedgerVault>() {
+private class LedgerVault : Store<LedgerVault>() {
     val entries by state { emptyList<String>() }
 }
 

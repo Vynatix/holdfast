@@ -10,7 +10,7 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlin.time.Clock
 
 /**
- * Privileged wrapper installed by [com.vynatix.holdfast.testing.HoldfastHandle] over
+ * Privileged wrapper installed by [com.vynatix.holdfast.testing.StoreHandle] over
  * each user-attached bridge on a tracked vault. Forwards every [observe] /
  * [publish] call to the wrapped [delegate] while pushing matching
  * [BridgePublished] / [BridgeObserved] events into the handle's [Recorder].
@@ -23,7 +23,7 @@ import kotlin.time.Clock
  *
  * Lifecycle:
  *  - The wrapper is constructed at handle install time
- *    ([com.vynatix.holdfast.testing.HoldfastHandle.init]); the previous bridge
+ *    ([com.vynatix.holdfast.testing.StoreHandle.init]); the previous bridge
  *    reference on the [com.vynatix.holdfast.MutableState] is replaced by `this`.
  *    Setting the new bridge re-runs the vault's attach path
  *    ([com.vynatix.holdfast.MutableState.bridge] setter), which disposes the old
@@ -33,7 +33,7 @@ import kotlin.time.Clock
  *    re-attach can produce one synthetic-looking observed value. Tests that
  *    need to ignore that should attach the bridge before tracking, or check
  *    `published.size > N` rather than exact equality.
- *  - At handle dispose ([com.vynatix.holdfast.testing.HoldfastHandle.disposeRecorderInternal])
+ *  - At handle dispose ([com.vynatix.holdfast.testing.StoreHandle.disposeRecorderInternal])
  *    the wrapper remains attached to the vault but no further events are
  *    pushed because the recorder's buffer has been cleared. The wrapper
  *    itself is benign — it forwards to the delegate normally.

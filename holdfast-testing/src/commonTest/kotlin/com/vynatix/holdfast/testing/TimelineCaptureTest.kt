@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -10,7 +10,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class TimelineCountVault : Holdfast<TimelineCountVault>() {
+private class TimelineCountVault : Store<TimelineCountVault>() {
     val count by state { 0 }
     val name by state { "init" }
 }

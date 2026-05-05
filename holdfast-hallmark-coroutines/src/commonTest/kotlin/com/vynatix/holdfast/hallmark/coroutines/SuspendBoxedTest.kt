@@ -7,7 +7,7 @@ import com.vynatix.hallmark.coroutines.SuspendBoxedValidator
 import com.vynatix.hallmark.coroutines.SuspendRule
 import com.vynatix.hallmark.coroutines.SuspendSpec
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.hallmark.boxed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
@@ -47,7 +47,7 @@ private class UniqueUsernameValidator(taken: Set<String>) : SuspendBoxedValidato
     )
 }
 
-private class UserVault : Holdfast<UserVault>() {
+private class UserVault : Store<UserVault>() {
     val username by boxed(UsernameLeafValidator) { "init" }
 }
 

@@ -9,16 +9,16 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 
 /**
- * Issue 02 — `Holdfast.bindToScope(scope)` rebindable per-vault scope binding.
+ * Issue 02 — `Store.bindToScope(scope)` rebindable per-vault scope binding.
  *
  * Resolution order per source doc §3.1 / Q3:
  *   per-call → per-vault override → bound (bindToScope) → process default.
  */
 class VaultBindToScopeTest {
-    private class PlainVault : Holdfast<PlainVault>()
+    private class PlainVault : Store<PlainVault>()
 
     /** Per-vault subclass override (resolution level 2) — must beat any bound scope. */
-    private class OverrideVault(private val s: CoroutineScope) : Holdfast<OverrideVault>() {
+    private class OverrideVault(private val s: CoroutineScope) : Store<OverrideVault>() {
         override val scope: CoroutineScope get() = s
     }
 
@@ -27,7 +27,7 @@ class VaultBindToScopeTest {
     @Test
     fun unbound_vault_returns_defaultScope() {
         val v = PlainVault()
-        assertSame(Holdfast.defaultScope, v.scope)
+        assertSame(Store.defaultScope, v.scope)
     }
 
     @Test
@@ -36,7 +36,7 @@ class VaultBindToScopeTest {
         val s = newScope("bound-1")
         v.bindToScope(s)
         assertSame(s, v.scope)
-        assertNotSame(Holdfast.defaultScope, v.scope)
+        assertNotSame(Store.defaultScope, v.scope)
     }
 
     @Test

@@ -1,12 +1,12 @@
-@file:OptIn(HoldfastInternalApi::class)
+@file:OptIn(StoreInternalApi::class)
 
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
-import com.vynatix.holdfast.HoldfastInternalApi
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.testing.Capture
 import com.vynatix.holdfast.testing.EmissionEvent
 import com.vynatix.holdfast.testing.MiddlewareCompleted
@@ -16,7 +16,7 @@ import com.vynatix.holdfast.testing.TransactionCommitted
 import com.vynatix.holdfast.testing.TransactionErrored
 import com.vynatix.holdfast.testing.TransactionRolledBack
 import com.vynatix.holdfast.testing.TransactionStarted
-import com.vynatix.holdfast.testing.HoldfastEvent
+import com.vynatix.holdfast.testing.StoreEvent
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.channels.SendChannel
@@ -45,7 +45,7 @@ import kotlin.time.Clock
  *     immediately after the middleware chain unwinds, but the recorder cannot
  *     see that boundary from within :holdfast's existing API. The event is
  *     recorded "about-to-commit" rather than "post-commit"; in practice the
- *     order in [com.vynatix.holdfast.testing.HoldfastHandle.timeline] is identical
+ *     order in [com.vynatix.holdfast.testing.StoreHandle.timeline] is identical
  *     because no observable change happens between the two points.
  *  4. **TransactionErrored** + **MiddlewareErrored (self)** + **synthetic
  *     TransactionRolledBack** — pushed from `onTransactionError`. The
@@ -64,7 +64,7 @@ import kotlin.time.Clock
  *  - **User-installed middlewares** are NOT wrapped (no public :holdfast hook
  *    exists for replacing entries in the middleware list, and `Middleware.invoke`
  *    is `final`). Their lifecycle events are therefore absent from the timeline.
- *    The recorder pushes self-events for itself so [com.vynatix.holdfast.testing.HoldfastHandle.middlewareEventsOf]
+ *    The recorder pushes self-events for itself so [com.vynatix.holdfast.testing.StoreHandle.middlewareEventsOf]
  *    is non-empty, but for any user-class M the typed view returns empty.
  *  - **suspendAction** does not run the middleware chain at all (see
  *    `:holdfast-coroutines.SuspendAction` — middlewares are documented as "NOT
@@ -76,20 +76,20 @@ import kotlin.time.Clock
  * buffer on the owner thread of the in-flight transaction, but reads (via
  * [snapshot]) can happen from any thread.
  */
-internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middleware<V>() {
+internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware<V>() {
 
     private val lock = SynchronizedObject()
-    private val events: MutableList<HoldfastEvent> = mutableListOf()
+    private val events: MutableList<StoreEvent> = mutableListOf()
 
     /**
-     * Live subscribers receiving every freshly-pushed [HoldfastEvent] via
+     * Live subscribers receiving every freshly-pushed [StoreEvent] via
      * [SendChannel.trySend]. Populated by [snapshotAndSubscribe] (used by the
      * `awaiting { ... }` primitive) and cleared via [unsubscribe]. Guarded by
      * the same [lock] as [events] so the replay-then-subscribe sequence in
      * [snapshotAndSubscribe] is atomic with respect to concurrent [push] calls
      * — no event can land between the snapshot copy and the subscribe.
      */
-    private val subscribers: MutableList<SendChannel<HoldfastEvent>> = mutableListOf()
+    private val subscribers: MutableList<SendChannel<StoreEvent>> = mutableListOf()
 
     /** Most recent transaction this recorder observed, regardless of outcome. */
     @kotlin.concurrent.Volatile
@@ -98,7 +98,7 @@ internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middlew
 
     /**
      * Most recent [TransactionResult] this recorder observed. Set by
-     * [recordResult], called from the [com.vynatix.holdfast.testing.HoldfastHandle]'s
+     * [recordResult], called from the [com.vynatix.holdfast.testing.StoreHandle]'s
      * action passthrough so the recorder sees the final result (post-commit
      * Success or post-rollback Error).
      */
@@ -107,7 +107,7 @@ internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middlew
     val lastResult: TransactionResult<*>? get() = _lastResult
 
     /** Defensive copy; safe to iterate after return. */
-    fun snapshot(): List<HoldfastEvent> = synchronized(lock) { events.toList() }
+    fun snapshot(): List<StoreEvent> = synchronized(lock) { events.toList() }
 
     /**
      * Append [event] to the buffer, applying [Capture]'s policy. [Capture.None]
@@ -124,7 +124,7 @@ internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middlew
      * already closed (e.g. an `awaiting` call is mid-cleanup) the failure is
      * silently swallowed by trySend.
      */
-    fun push(event: HoldfastEvent) {
+    fun push(event: StoreEvent) {
         if (capture is Capture.None) return
         synchronized(lock) {
             events.add(event)
@@ -147,7 +147,7 @@ internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middlew
      * a clean cut, with each event delivered exactly once via either the
      * replay list or the channel.
      */
-    fun snapshotAndSubscribe(channel: SendChannel<HoldfastEvent>, out: MutableList<HoldfastEvent>) {
+    fun snapshotAndSubscribe(channel: SendChannel<StoreEvent>, out: MutableList<StoreEvent>) {
         synchronized(lock) {
             out.addAll(events)
             subscribers.add(channel)
@@ -159,7 +159,7 @@ internal class Recorder<V : Holdfast<V>>(private val capture: Capture) : Middlew
      * that was never subscribed (a no-op then) and on one that is already
      * closed — the recorder does not own the channel's lifecycle.
      */
-    fun unsubscribe(channel: SendChannel<HoldfastEvent>) {
+    fun unsubscribe(channel: SendChannel<StoreEvent>) {
         synchronized(lock) {
             subscribers.removeAll { it === channel }
         }

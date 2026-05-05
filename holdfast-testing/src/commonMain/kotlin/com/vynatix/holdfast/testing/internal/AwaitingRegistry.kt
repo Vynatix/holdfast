@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.holdfast.testing.HoldfastEvent
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreEvent
+import com.vynatix.holdfast.testing.StoreTestScope
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.channels.Channel
@@ -9,7 +9,7 @@ import kotlinx.coroutines.channels.Channel
 /**
  * Backing list for live `awaiting { ... }` subscriber channels created via
  * [com.vynatix.holdfast.testing.concurrency.awaiting]. Held inside the
- * [HoldfastTestScope] so the lifetime mirrors the test body; [cancelAll] is
+ * [StoreTestScope] so the lifetime mirrors the test body; [cancelAll] is
  * called from `tearDown` to close every still-live subscriber so a forgotten
  * `awaiting` (one whose surrounding coroutine never resumed) is unblocked
  * with a [kotlinx.coroutines.channels.ClosedReceiveChannelException] rather
@@ -27,15 +27,15 @@ import kotlinx.coroutines.channels.Channel
  */
 internal class AwaitingRegistry {
     private val lock = SynchronizedObject()
-    private val channels: MutableList<Channel<HoldfastEvent>> = mutableListOf()
+    private val channels: MutableList<Channel<StoreEvent>> = mutableListOf()
 
-    fun add(channel: Channel<HoldfastEvent>) {
+    fun add(channel: Channel<StoreEvent>) {
         synchronized(lock) {
             channels.add(channel)
         }
     }
 
-    fun remove(channel: Channel<HoldfastEvent>) {
+    fun remove(channel: Channel<StoreEvent>) {
         synchronized(lock) {
             channels.removeAll { it === channel }
         }
@@ -50,7 +50,7 @@ internal class AwaitingRegistry {
      * `awaiting` body's `try/finally` then runs its own unsubscribe path.
      *
      * This runs BEFORE [com.vynatix.holdfast.testing.internal.Recorder.dispose]
-     * in [HoldfastTestScope.tearDown] so the recorder still has a valid view of
+     * in [StoreTestScope.tearDown] so the recorder still has a valid view of
      * its subscriber list at the moment we close — the unsubscribe call from
      * the awaiting body's finally block is then a clean no-op (or removes
      * the entry whose channel is already drained).
@@ -73,4 +73,4 @@ internal class AwaitingRegistry {
  * the [AwaitingRegistry] type can stay `internal`. Mirrors the
  * [registerBarrier] / [openTransactionsRegistry] shape.
  */
-internal fun HoldfastTestScope.awaitingsRegistry(): AwaitingRegistry = awaitingRegistry()
+internal fun StoreTestScope.awaitingsRegistry(): AwaitingRegistry = awaitingRegistry()

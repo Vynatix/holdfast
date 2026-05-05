@@ -5,7 +5,7 @@ import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Transaction
 
 /**
- * Single event recorded by a [HoldfastHandle]'s privileged recorder. Sealed root of
+ * Single event recorded by a [StoreHandle]'s privileged recorder. Sealed root of
  * the timeline element hierarchy — every concrete subclass carries a [timestamp]
  * (epoch milliseconds) so callers can reason about temporal ordering across
  * subsystems (transactions, middleware, bridges).
@@ -19,19 +19,19 @@ import com.vynatix.holdfast.Transaction
  *    instance. **In v1 only the recorder itself surfaces events here**; user
  *    middlewares installed via [com.vynatix.holdfast.Holdfast.middlewares] are not
  *    automatically wrapped (no public `:holdfast` API exists for that yet). The
- *    typed views ([HoldfastHandle.middlewareEventsOf]) will return an empty list
+ *    typed views ([StoreHandle.middlewareEventsOf]) will return an empty list
  *    for any user class until that gap is filled.
  *  - [BridgeEvent] — bridge publish/observe lifecycle. Bridges attached to
- *    a state **before** [HoldfastTestScope.track] are wrapped at install time and
+ *    a state **before** [StoreTestScope.track] are wrapped at install time and
  *    fire events through the recorder; bridges attached afterwards are not
  *    wrapped (no public `:holdfast` hook for late attachments yet). See
- *    [HoldfastHandle.bridgeEvents] for the typed view.
+ *    [StoreHandle.bridgeEvents] for the typed view.
  *
  * Events are immutable data classes; the timeline returned by
- * [HoldfastHandle.timeline] is a defensive copy, so callers can iterate and filter
+ * [StoreHandle.timeline] is a defensive copy, so callers can iterate and filter
  * without contention with the recorder.
  */
-sealed interface HoldfastEvent {
+sealed interface StoreEvent {
     /** Epoch milliseconds at which the event was pushed into the timeline. */
     val timestamp: Long
 }
@@ -43,7 +43,7 @@ sealed interface HoldfastEvent {
  * [TransactionCommitted] just before commit applies, [TransactionErrored] /
  * [TransactionRolledBack] when the body throws.
  */
-sealed interface TransactionEvent : HoldfastEvent {
+sealed interface TransactionEvent : StoreEvent {
     val transaction: Transaction
 }
 
@@ -84,14 +84,14 @@ data class TransactionErrored(override val transaction: Transaction, val cause: 
  * pending write (read via [State.value] on the owner thread inside the active
  * transaction, so read-your-own-writes returns the pending value).
  */
-data class EmissionEvent(val state: State<*>, val oldValue: Any?, val newValue: Any?, override val timestamp: Long) : HoldfastEvent
+data class EmissionEvent(val state: State<*>, val oldValue: Any?, val newValue: Any?, override val timestamp: Long) : StoreEvent
 
 /**
  * Lifecycle event carrying the [Middleware] instance that produced it. See
- * [HoldfastEvent] for the v1 limitation: only the recorder itself currently
+ * [StoreEvent] for the v1 limitation: only the recorder itself currently
  * surfaces events here.
  */
-sealed interface MiddlewareEvent : HoldfastEvent {
+sealed interface MiddlewareEvent : StoreEvent {
     val middleware: Middleware<*>
     val transaction: Transaction
 }
@@ -114,14 +114,14 @@ data class MiddlewareErrored(
 
 /**
  * Bridge lifecycle event carrying the [State] involved. Bridges attached to a
- * state **before** [HoldfastTestScope.track] are wrapped at install time
+ * state **before** [StoreTestScope.track] are wrapped at install time
  * ([com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper]) and produce
  * [BridgePublished] / [BridgeObserved] events through the recorder; bridges
  * attached after `track(v)` are not wrapped, so their interactions are invisible
  * to the timeline. The constraint is forced by `:holdfast` not exposing a hook for
  * late bridge attachments.
  */
-sealed interface BridgeEvent : HoldfastEvent {
+sealed interface BridgeEvent : StoreEvent {
     val state: State<*>
 }
 

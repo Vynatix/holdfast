@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreTestScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.seconds
  * @param block assertion or check to retry.
  */
 @Suppress("TooGenericExceptionCaught")
-suspend fun HoldfastTestScope.eventually(within: Duration = 1.seconds, every: Duration = 10.milliseconds, block: suspend () -> Unit) {
+suspend fun StoreTestScope.eventually(within: Duration = 1.seconds, every: Duration = 10.milliseconds, block: suspend () -> Unit) {
     var lastError: Throwable? = null
     val outcome = withTimeoutOrNull(within) {
         while (true) {

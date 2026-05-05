@@ -2,9 +2,9 @@ package com.vynatix.holdfast.testing.concurrency
 
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
-import com.vynatix.holdfast.testing.HoldfastHandle
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.testing.StoreHandle
+import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.openTransactionsRegistry
 import kotlinx.atomicfu.atomic
@@ -20,7 +20,7 @@ import kotlinx.atomicfu.atomic
  *
  * Auto-rollback safety net: every [OpenTransaction] created inside a
  * [com.vynatix.holdfast.testing.vaultTest] block is registered with the hosting
- * [com.vynatix.holdfast.testing.HoldfastTestScope]. If the body returns without
+ * [com.vynatix.holdfast.testing.StoreTestScope]. If the body returns without
  * having closed it, the scope's `tearDown` invokes [rollback] before clearing
  * the handle registry, so the vault is left in the same state as if no open
  * transaction had ever existed. This matches the
@@ -54,7 +54,7 @@ class OpenTransaction internal constructor(
      * `transaction { ... }` call.
      */
     val transaction: Transaction,
-    private val handle: HoldfastHandle<*>,
+    private val handle: StoreHandle<*>,
     private val onClose: (OpenTransaction) -> Unit,
 ) {
 
@@ -69,7 +69,7 @@ class OpenTransaction internal constructor(
     /**
      * Apply the pending writes staged in [transaction] to the vault, fire
      * observers and bridges in the same single-fanout boundary that a
-     * production [Holdfast.action] commit produces.
+     * production [Store.action] commit produces.
      *
      * Returns:
      *  - [TransactionResult.Success] with `Unit` value when commit succeeds.
@@ -186,7 +186,7 @@ class OpenTransaction internal constructor(
  * ```
  */
 @Suppress("RedundantSuspendModifier")
-suspend fun <V : Holdfast<V>> HoldfastTestScope.transaction(on: HoldfastHandle<V>, body: V.() -> Unit): OpenTransaction {
+suspend fun <V : Store<V>> StoreTestScope.transaction(on: StoreHandle<V>, body: V.() -> Unit): OpenTransaction {
     val txn = PrivilegedHooks.openTransaction(on.vault, body)
     val open = OpenTransaction(
         transaction = txn,

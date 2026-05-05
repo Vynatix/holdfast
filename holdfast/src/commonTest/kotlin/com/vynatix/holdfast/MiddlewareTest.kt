@@ -13,7 +13,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class MiddlewareTestVault : Holdfast<MiddlewareTestVault>() {
+private class MiddlewareTestVault : Store<MiddlewareTestVault>() {
     val n by state { 0 }
     val m by state { "init" }
 }

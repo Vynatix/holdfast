@@ -12,26 +12,26 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class StateTestVault : Holdfast<StateTestVault>() {
+private class StateTestVault : Store<StateTestVault>() {
     val count by state { 0 }
     val label by state { "initial" }
 }
 
-private class StateOwnerA : Holdfast<StateOwnerA>() {
+private class StateOwnerA : Store<StateOwnerA>() {
     val a by state { 0 }
 }
 
-private class StateOwnerB : Holdfast<StateOwnerB>() {
+private class StateOwnerB : Store<StateOwnerB>() {
     val b by state { 0 }
 }
 
-private class MixedTypeStateVault : Holdfast<MixedTypeStateVault>() {
+private class MixedTypeStateVault : Store<MixedTypeStateVault>() {
     val intState by state { 1 }
     val stringState by state { "two" }
     val listState by state { listOf(3, 4) }
 }
 
-private class TwoZeroVault : Holdfast<TwoZeroVault>() {
+private class TwoZeroVault : Store<TwoZeroVault>() {
     val a by state { 0 }
     val b by state { 0 }
 }

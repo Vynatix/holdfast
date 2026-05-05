@@ -6,7 +6,7 @@ import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.suspendAction
 import com.vynatix.holdfast.testing.bridge.BridgeView
 import com.vynatix.holdfast.testing.bridge.LatchedBridge
@@ -19,7 +19,7 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlin.reflect.KProperty1
 
 /**
- * Test-scope handle to a tracked [Holdfast]. Returned by [HoldfastTestScope.track]; the
+ * Test-scope handle to a tracked [Store]. Returned by [StoreTestScope.track]; the
  * registry keeps it alive for the duration of the test so subsequent `track`
  * calls with the same vault instance return the same handle.
  *
@@ -35,13 +35,13 @@ import kotlin.reflect.KProperty1
  *
  * When [captureMode] is anything other than [Capture.None], the handle owns a
  * privileged recorder middleware installed on the tracked vault. The recorder
- * pushes [HoldfastEvent]s into [timeline] for every transaction lifecycle, with
+ * pushes [StoreEvent]s into [timeline] for every transaction lifecycle, with
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
  * known limits (commit-time errors after the body returns, user middlewares
  * not auto-wrapped, suspendAction not running middleware in 1.1).
  */
-class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val captureMode: Capture) {
+class StoreHandle<V : Store<V>> internal constructor(val vault: V, val captureMode: Capture) {
 
     private val handleLock = SynchronizedObject()
     private val pendingErrorList: MutableList<TransactionResult.Error> = mutableListOf()
@@ -57,7 +57,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
      * Per-state map from the live [State] reference (key by identity) to the
      * [RecordingBridgeWrapper] that wraps any user-attached bridge on that
      * state. Populated at handle install time (this `init` block) for every
-     * state currently in [Holdfast.properties] that has a bridge attached.
+     * state currently in [Store.properties] that has a bridge attached.
      *
      * **v1 limitation**: bridges attached AFTER `track(v)` are NOT
      * auto-wrapped — :holdfast has no public hook for late attachment. The
@@ -72,7 +72,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
 
     init {
         // Install the recorder as the FIRST middleware (innermost in the chain).
-        // The fold-right wrapping in `Holdfast.runMiddlewareChain` makes earlier-listed
+        // The fold-right wrapping in `Store.runMiddlewareChain` makes earlier-listed
         // middlewares innermost, so the recorder's `onTransactionStarted` fires
         // closest to the body and its `onTransactionCompleted` fires closest to
         // commit time. This puts emission events at the natural boundary between
@@ -82,7 +82,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
         // Wrap every currently-attached bridge so the recorder sees publish /
         // observe events on the timeline. We iterate vault.properties, cast
         // each State to MutableState (the only concrete State implementation
-        // produced by Holdfast.state — the cast is sound for any state created
+        // produced by Store.state — the cast is sound for any state created
         // by the vault DSL). Setting state.bridge re-runs the attach path,
         // which disposes the old inbound subscription and calls our wrapper's
         // observe — the wrap is therefore visible to production code as a
@@ -124,7 +124,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
      * a defensive copy taken under the recorder's lock — safe to iterate
      * without contention with concurrent actions.
      */
-    val timeline: List<HoldfastEvent>
+    val timeline: List<StoreEvent>
         get() = recorder?.snapshot().orEmpty()
 
     /**
@@ -259,7 +259,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
     fun <R> read(block: V.() -> R): R = block(vault)
 
     /**
-     * Run [body] inside a blocking [Holdfast.action] on the tracked vault. Returns
+     * Run [body] inside a blocking [Store.action] on the tracked vault. Returns
      * the [TransactionResult] verbatim — production-faithful, no transformation
      * or implicit assertion. If the result is an [TransactionResult.Error], it
      * is recorded for the scope-exit unconsumed-error guard; assert on it via a
@@ -331,7 +331,7 @@ class HoldfastHandle<V : Holdfast<V>> internal constructor(val vault: V, val cap
 
     /**
      * Detach the recorder middleware from the tracked vault and drop every
-     * recorded event. Called from [HoldfastTestScope.tearDown] in a fixed order
+     * recorded event. Called from [StoreTestScope.tearDown] in a fixed order
      * (after barriers cancel, before the handle registry clears) so no
      * post-teardown action accidentally records events.
      *

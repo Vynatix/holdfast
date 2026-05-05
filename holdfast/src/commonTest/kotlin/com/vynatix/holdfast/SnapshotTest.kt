@@ -9,13 +9,13 @@ import kotlin.test.assertTrue
 
 private val SEED = "snap-test-seed".encodeToByteArray()
 
-private class SnapshotVault : Holdfast<SnapshotVault>() {
+private class SnapshotVault : Store<SnapshotVault>() {
     val n by state { 0 }
     val s by state { "init" }
     val items by state { emptyList<String>() }
 }
 
-private class CryptoVault : Holdfast<CryptoVault>() {
+private class CryptoVault : Store<CryptoVault>() {
     val token by state(EncryptingTransformer(XorCipher(SEED))) { "" }
     val plain by state { "p" }
 }
@@ -106,7 +106,7 @@ class SnapshotRestoreTest {
 
     @Test fun restoreOfUnknownStateNameRollsBack() {
         val v = SnapshotVault()
-        val foreign = HoldfastSnapshot(mapOf("not-here" to 42))
+        val foreign = StoreSnapshot(mapOf("not-here" to 42))
         val r = v.restore(foreign)
         assertIs<TransactionResult.Error>(r)
         assertEquals(0, v.n.value, "no states changed; transaction rolled back")

@@ -8,7 +8,7 @@ import com.vynatix.hallmark.HallmarkException
 import com.vynatix.hallmark.rules.MinLengthRule
 import com.vynatix.hallmark.rules.NonBlankRule
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -22,7 +22,7 @@ private object UserEmailValidator : BoxedValidator<String, UserEmail>() {
     )
 }
 
-private class UserVault : Holdfast<UserVault>() {
+private class UserVault : Store<UserVault>() {
     val email by boxed(UserEmailValidator) { "init@example.com" }
     val displayName by state { "init" }
 }

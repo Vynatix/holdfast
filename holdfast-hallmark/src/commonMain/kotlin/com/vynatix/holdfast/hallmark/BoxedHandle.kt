@@ -4,21 +4,21 @@ import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.Validator
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.StateDelegate
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.reflect.KProperty
 
 /**
- * Bundles a Holdfast [State] with the [Validator] that gates it. Returned by
+ * Bundles a Store [State] with the [Validator] that gates it. Returned by
  * [boxedHandle].
  *
  * Inside a `vault action { ... }` block the handle exposes:
- *  - [state] — the underlying Holdfast state, used as the receiver for `mutate`.
+ *  - [state] — the underlying Store state, used as the receiver for `mutate`.
  *  - [validator] — the static validator, used to civilize raw primitives.
  *  - [civilize] — convenience: civilize a primitive into the wrapped form.
  *
  * Usage:
  * ```kotlin
- * class UserVault : Holdfast<UserVault>() {
+ * class UserVault : Store<UserVault>() {
  *     val email by boxedHandle(EmailValidator) { "init@example.com" }
  * }
  *
@@ -57,7 +57,7 @@ class BoxedHandleDelegate<P : Any, O : Boxed<P>> internal constructor(
  *
  * If you don't need the bundled validator at the call site, prefer [boxed].
  */
-fun <V : Holdfast<V>, P : Any, O : Boxed<P>> Holdfast<V>.boxedHandle(validator: Validator<P, O>, initial: () -> P): BoxedHandleDelegate<P, O> =
+fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxedHandle(validator: Validator<P, O>, initial: () -> P): BoxedHandleDelegate<P, O> =
     BoxedHandleDelegate(
         backing = state(transformer = ValidatingTransformer(validator)) { validator of initial() },
         validator = validator,
@@ -77,12 +77,12 @@ fun <V : Holdfast<V>, P : Any, O : Boxed<P>> Holdfast<V>.boxedHandle(validator: 
  * Reads as the natural one-liner one would expect for boundary-validated
  * state. Throws `HallmarkException` (and rolls back the transaction) if
  * the primitive fails validation. Requires the enclosing scope to provide
- * a [Holdfast] context — i.e. you must be inside an `action { }` block, not
+ * a [Store] context — i.e. you must be inside an `action { }` block, not
  * at top level.
  *
  * Implemented via Kotlin context parameters (`-Xcontext-parameters`).
  */
-context(vault: Holdfast<*>)
+context(vault: Store<*>)
 infix fun <P : Any, O : Boxed<P>> BoxedHandle<P, O>.assign(primitive: P) {
     with(vault) { state mutate civilize(primitive) }
 }

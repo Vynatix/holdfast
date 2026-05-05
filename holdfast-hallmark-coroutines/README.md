@@ -26,7 +26,7 @@ class UsernameValidator(taken: Set<String>) : SuspendBoxedValidator<String, User
     )
 }
 
-class UserHoldfast : Holdfast<UserHoldfast>() {
+class UserHoldfast : Store<UserHoldfast>() {
     val username by boxed(/* sync leaf */ UsernameFormatValidator) { "init" }
 }
 

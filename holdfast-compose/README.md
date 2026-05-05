@@ -1,6 +1,6 @@
 # holdfast-compose
 
-Compose Multiplatform runtime adapter for the [Holdfast](../holdfast/) library.
+Compose Multiplatform runtime adapter for the [Store](../holdfast/) library.
 Brings only `compose.runtime` (no Material, no Foundation), so it's safe to
 depend on from any UI module that uses Compose.
 
@@ -8,7 +8,7 @@ depend on from any UI module that uses Compose.
 
 ```kotlin
 @Composable
-fun <V : Holdfast<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
+fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
 fun rememberDisposable(make: () -> Disposable): Disposable

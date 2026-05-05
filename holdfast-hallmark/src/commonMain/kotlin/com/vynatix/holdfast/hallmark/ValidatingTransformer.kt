@@ -7,7 +7,7 @@ import com.vynatix.hallmark.Validator
 import com.vynatix.holdfast.Transformer
 
 /**
- * A Holdfast [Transformer] that re-validates a [Boxed]'s primitive against its
+ * A Store [Transformer] that re-validates a [Boxed]'s primitive against its
  * [Validator] on every write. A failed validation throws [HallmarkException]
  * inside the transformer's `set`, which propagates to the enclosing
  * `action { … }` and rolls every state mutation in the transaction back.

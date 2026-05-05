@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.concurrency.AwaitingTimeoutException
 import com.vynatix.holdfast.testing.concurrency.awaiting
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
@@ -14,7 +14,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
-private class AwaitingCounterVault : Holdfast<AwaitingCounterVault>() {
+private class AwaitingCounterVault : Store<AwaitingCounterVault>() {
     val count by state { 0 }
 }
 

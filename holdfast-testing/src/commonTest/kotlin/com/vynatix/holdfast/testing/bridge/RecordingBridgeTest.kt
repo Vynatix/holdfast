@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.bridge
 
 import com.vynatix.holdfast.Disposable
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.BridgeObserved
 import com.vynatix.holdfast.testing.BridgePublished
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
@@ -12,7 +12,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class ThemeVault : Holdfast<ThemeVault>() {
+private class ThemeVault : Store<ThemeVault>() {
     val theme by state { "light" }
 }
 

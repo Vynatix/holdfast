@@ -1,11 +1,11 @@
-@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -23,10 +23,10 @@ import kotlin.uuid.Uuid
  * Mutations stage in the transaction's pending writes; on success they apply
  * via [com.vynatix.holdfast.MutableState.applyCommitted] and observers/bridges
  * fire then. On throw, pending writes are dropped — same semantics as the
- * blocking [Holdfast.action].
+ * blocking [Store.action].
  *
  * Concurrency contract for 1.1:
- *  - **Mutually exclusive with blocking [Holdfast.action]** on the same vault: a
+ *  - **Mutually exclusive with blocking [Store.action]** on the same vault: a
  *    blocking `action` will block until the in-flight `suspendAction` completes,
  *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
  *    lazily on first use.
@@ -36,7 +36,7 @@ import kotlin.uuid.Uuid
  *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
  *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
  *    in concentric-ring order — last-registered middleware is outermost (its
- *    `onTransactionStarted` fires first), matching `Holdfast.middlewares`'s
+ *    `onTransactionStarted` fires first), matching `Store.middlewares`'s
  *    contract and the sync `action` path. `onTransactionCompleted` (success)
  *    or `onTransactionError` (throw / cancellation) unwind in chain order
  *    (innermost-first), so the outermost middleware sees `completed`/`error`
@@ -56,7 +56,7 @@ import kotlin.uuid.Uuid
  * ```
  */
 @OptIn(ExperimentalUuidApi::class)
-suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
     val serializer = ensureSerializer(this)
     val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
 
@@ -86,7 +86,7 @@ suspend fun <V : Holdfast<V>, R> V.suspendAction(body: suspend V.() -> R): Trans
         }
 
         // Concentric outermost-first: iterate REVERSED so the LAST-registered
-        // middleware fires `started` first — matching `Holdfast.middlewares`'s contract
+        // middleware fires `started` first — matching `Store.middlewares`'s contract
         // and the sync `action` path's fold-derived nesting (issue 31). Each
         // invocation is run-caught so one middleware's failure does not abort others.
         // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue

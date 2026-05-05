@@ -2,7 +2,7 @@ package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeError
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import kotlinx.coroutines.delay
@@ -13,7 +13,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class AutoRegVault : Holdfast<AutoRegVault>() {
+private class AutoRegVault : Store<AutoRegVault>() {
     val n by state { 0 }
     val label by state { "init" }
 }
@@ -22,9 +22,9 @@ private class AutoRegVault : Holdfast<AutoRegVault>() {
 private class AutoRegNoopMiddleware : Middleware<AutoRegVault>()
 
 /**
- * Self-tests for the [HoldfastAutoRegistration] member-extension surface that
- * lets tests skip explicit [HoldfastTestScope.track] and call action / read /
- * timeline / etc. directly on a [Holdfast] instance.
+ * Self-tests for the [StoreAutoRegistration] member-extension surface that
+ * lets tests skip explicit [StoreTestScope.track] and call action / read /
+ * timeline / etc. directly on a [Store] instance.
  */
 class AutoRegistrationTest {
 
@@ -48,9 +48,9 @@ class AutoRegistrationTest {
     fun timelineReflectsAutoRegisteredAction() = vaultTest {
         val v = AutoRegVault()
         // Trigger auto-registration FIRST via a non-conflicting extension so
-        // the recorder is in place when v.action runs. Holdfast.action is a
+        // the recorder is in place when v.action runs. Store.action is a
         // member function and shadows the V.action extension — the extension
-        // never auto-registers; see HoldfastAutoRegistration's file KDoc.
+        // never auto-registers; see StoreAutoRegistration's file KDoc.
         v.read { } // installs the recorder via auto-registration
         v.action { n mutate 5 }.shouldBeSuccess()
 
@@ -106,7 +106,7 @@ class AutoRegistrationTest {
         v.action { n mutate 1 }.shouldBeSuccess()
 
         // The recorder pushes self-events for itself, so the typed view for any
-        // user class is empty in v1 (see HoldfastEvent KDoc).
+        // user class is empty in v1 (see StoreEvent KDoc).
         assertEquals(0, v.middlewareEventsOf<AutoRegNoopMiddleware>().size)
     }
 
@@ -119,7 +119,7 @@ class AutoRegistrationTest {
         v.action { n mutate 1 }.shouldBeSuccess()
 
         // The instance overload returns empty for user-installed middlewares —
-        // matches the v1 caveat documented on HoldfastHandle.middlewareEventsOf.
+        // matches the v1 caveat documented on StoreHandle.middlewareEventsOf.
         assertEquals(0, v.middlewareEventsOf(m).size)
     }
 
@@ -158,8 +158,8 @@ class AutoRegistrationTest {
         val explicit = track(v)
         assertNull(explicit.lastTransaction, "no action ran yet")
 
-        // Holdfast.action goes through the middleware chain (recorder is installed),
-        // so events are captured even though Holdfast.action shadows the extension.
+        // Store.action goes through the middleware chain (recorder is installed),
+        // so events are captured even though Store.action shadows the extension.
         v.action { n mutate 5 }.shouldBeSuccess()
 
         // The explicit handle should reflect the action.
@@ -227,9 +227,9 @@ class AutoRegistrationTest {
     @Test
     fun suspendActionErrorIsRecordedInPendingErrorsViaAutoRegistration() = vaultTest {
         val v = AutoRegVault()
-        // suspendAction routes through the member-extension (Holdfast has no
+        // suspendAction routes through the member-extension (Store has no
         // matching member, so the extension wins), which calls
-        // HoldfastHandle.suspendAction — feeding the per-handle pendingErrors list
+        // StoreHandle.suspendAction — feeding the per-handle pendingErrors list
         // and the lastResult slot. The shouldBeError matcher consumes the
         // pending mark so the scope-exit guard doesn't fire.
         val ise = IllegalStateException("boom")
@@ -240,8 +240,8 @@ class AutoRegistrationTest {
     @Test
     fun lastResultIsAvailableViaAutoRegistrationWhenRouteIsExplicit() = vaultTest {
         val v = AutoRegVault()
-        // Use the explicit handle for the action so HoldfastHandle.action records
-        // the result — Holdfast.action (the member, the shadowing function) does
+        // Use the explicit handle for the action so StoreHandle.action records
+        // the result — Store.action (the member, the shadowing function) does
         // not feed the handle's lastResult slot. The auto-reg view of
         // lastResult routes through the SAME handle, so it sees the same
         // result.

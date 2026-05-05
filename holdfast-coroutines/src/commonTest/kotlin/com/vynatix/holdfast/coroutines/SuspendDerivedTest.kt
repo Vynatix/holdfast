@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Disposable
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -30,7 +30,7 @@ import kotlin.test.assertTrue
  * of `suspendAction`. Tests below assert eventual convergence to the
  * latest-source-driven result.
  */
-private class SuspendDerivedVault(scope: CoroutineScope) : Holdfast<SuspendDerivedVault>() {
+private class SuspendDerivedVault(scope: CoroutineScope) : Store<SuspendDerivedVault>() {
     val n by state { 0 }
     val factor by state { 1 }
     init {

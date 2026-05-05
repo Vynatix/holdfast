@@ -46,32 +46,32 @@ described here.
 
 ### Added
 
-- **`Holdfast.scope: CoroutineScope`** with three-tier resolution: per-call
-  parameter → per-holdfast `override val scope` → process-default
-  `Holdfast.defaultScope`. The settable-once `Holdfast.defaultScope` lazily backs
+- **`Store.scope: CoroutineScope`** with three-tier resolution: per-call
+  parameter → per-store `override val scope` → process-default
+  `Store.defaultScope`. The settable-once `Store.defaultScope` lazily backs
   off to a process `SupervisorJob + Dispatchers.Default` if never assigned.
-  App-init pattern: `Holdfast.defaultScope = appScope` once at startup.
-- **`Holdfast.bindToScope(scope)`** — replaces the bound scope reference for
+  App-init pattern: `Store.defaultScope = appScope` once at startup.
+- **`Store.bindToScope(scope)`** — replaces the bound scope reference for
   one holdfast. Optional. Calling on an already-bound vault rebinds.
-- **`Holdfast.dispose()`** — terminal lifecycle. Idempotent. Clears states,
+- **`Store.dispose()`** — terminal lifecycle. Idempotent. Clears states,
   detaches bridges, clears observers, terminates events `SharedFlow`. Does
   NOT cancel the bound scope (caller owns its lifecycle). Subsequent calls
   to scope-using or transactional APIs throw `IllegalStateException`.
 - **`Eventful<E>` interface** (`val events: SharedFlow<E>` + `fun emit(event)`)
-  and **`EventfulHoldfast<Self, E>`** base class. Events stage into the active
+  and **`EventfulStore<Self, E>`** base class. Events stage into the active
   transaction's `pendingEvents` and emit during commit, AFTER state observer
   fanout and bridge publish. Lossless-by-default: `replay = 0`,
   `extraBufferCapacity = 16`, `BufferOverflow.SUSPEND`. Off-action `emit`
   throws `IllegalStateException`.
 - **`EventfulSupport<E>`** — delegate helper for vaults that already extend
-  another base and cannot extend `EventfulHoldfast`. Same staging machinery
+  another base and cannot extend `EventfulStore`. Same staging machinery
   exposed as a delegate field.
 - **`@VaultInternalApi MutableState.applyCommittedRaw(value)`** — splits
   observer fanout out of the bridge-publish path so `:holdfast-coroutines`
   can interpose `SuspendingBridge.publishAwaited` between observers and
   bridges during the `suspendAction` commit phase.
 - **`@VaultInternalApi Transaction.stagePendingEvent(channel, event)`** —
-  the per-transaction event buffer used by `EventfulHoldfast.emit`. Discarded
+  the per-transaction event buffer used by `EventfulStore.emit`. Discarded
   on rollback; merged into parent on nested commit.
 
 ### Removed
@@ -155,7 +155,7 @@ module (`:holdfast-hallmark-coroutines`).
 ### Added — `:holdfast-hallmark-coroutines` (new module)
 
 - New companion artifact `com.vynatix:holdfast-hallmark-coroutines`.
-- **`Holdfast<V>.suspendValidateAndMutate(state, suspendValidator, primitive)`** —
+- **`Store<V>.suspendValidateAndMutate(state, suspendValidator, primitive)`** —
   primary entry. Runs the suspend validator (which may do I/O), then mutates
   the Vault state inside a `suspendAction { }`. Atomic: validation failure
   rolls back the entire transaction.
@@ -259,7 +259,7 @@ Vault adapter; tiny — just a transformer + state factory + codec.
   `Transformer<O>` that re-validates on every write. Defence-in-depth against
   constructor-bypass writes (e.g. `data class copy`). A failure throws
   `HallmarkException` and rolls the transaction back.
-- **`Holdfast.boxed(validator) { initial }`** — state factory extension; sugar
+- **`Store.boxed(validator) { initial }`** — state factory extension; sugar
   for `state(transformer = ValidatingTransformer(v)) { v of initial() }`.
   Eliminates duplicate validator references at state declaration sites.
 - **`BoxedCodec<P : Any, O : Boxed<P>>(primitiveCodec, validator)`** —
@@ -317,28 +317,28 @@ code should not.
 
 ### Added — Core (`com.vynatix.holdfast`)
 
-- **`Holdfast.snapshot()` / `Holdfast.restore(snapshot)`** — capture the raw stored
-  value of every registered state into a `HoldfastSnapshot`; restore writes them
+- **`Store.snapshot()` / `Store.restore(snapshot)`** — capture the raw stored
+  value of every registered state into a `StoreSnapshot`; restore writes them
   back inside a single top-level `action`. Implemented via a new internal
   `Transaction.stagePendingRaw(state, rawValue)` that bypasses
   `transformer.set`, so asymmetric transformers (e.g. encryption, JSON
   codecs) round-trip losslessly. Restore of an unknown state name throws
   (caught by the wrapping action → `TransactionResult.Error`).
-- **`Holdfast.computed { }`** — read-time derived state. Cheap, stateless, NOT
+- **`Store.computed { }`** — read-time derived state. Cheap, stateless, NOT
   observable; every read of `value` re-runs `compute`.
-- **`Holdfast.derived(vararg sources, compute): Pair<State<T>, Disposable>`** —
+- **`Store.derived(vararg sources, compute): Pair<State<T>, Disposable>`** —
   push-recomputed derived state. Subscribes to each source via `effect`; on
   each source commit, runs `compute` inside a fresh top-level action and
   stages the result into a backing `MutableState`. Returns the derived state
   plus a `Disposable` for explicit teardown.
-- **`atomic(vararg vaults: Holdfast<*>, body): TransactionResult<R>`** — top-
+- **`atomic(vararg vaults: Store<*>, body): TransactionResult<R>`** — top-
   level cross-vault transaction primitive. Each `Vault` gains a stable
   `lockOrderKey: Long` (process-monotonic, set at construction); `atomic`
   sorts vaults by this key and acquires each `transactionLock` in global
   order — deadlock-safe across any combination. Inner `v.action {}` joins
   the atomic frame as a savepoint of `v`'s root via the existing
   parent-chain machinery.
-- **`Holdfast.postCommit(task)`** — internal post-commit deferred-task queue,
+- **`Store.postCommit(task)`** — internal post-commit deferred-task queue,
   drained at top-level action exit. Used by `derived` to defer a recompute
   past the parent's commit fanout (avoids re-entering `pendingWrites` mid-
   iteration). Foundation for future userland post-commit hooks.
@@ -362,8 +362,8 @@ code should not.
 
 - **`suspend fun V.suspendAction(body: suspend V.() -> R): TransactionResult<R>`** —
   async-aware transactional body. Backed by `kotlinx.coroutines.sync.Mutex`
-  installed lazily via the new `Holdfast.AsyncSerializer` hook. Mutually
-  exclusive with blocking `Holdfast.action` on the same vault — blocking
+  installed lazily via the new `Store.AsyncSerializer` hook. Mutually
+  exclusive with blocking `Store.action` on the same vault — blocking
   callers `tryLock`-spin via `threadYield()`. Cancellation rolls back the
   body; commit phase wraps in `withContext(NonCancellable)` so observer
   / bridge fanout completes cleanly even if the surrounding scope cancels
@@ -377,19 +377,19 @@ code should not.
   hooks. The annotation is `RequiresOptIn(level = ERROR)`; companion modules
   (`vault-coroutines`) `@file:OptIn(VaultInternalApi::class)` to reach the
   necessary internals. Application code should never opt in.
-- **`Holdfast.AsyncSerializer`** interface + `Holdfast.asyncSerializer` slot —
+- **`Store.AsyncSerializer`** interface + `Store.asyncSerializer` slot —
   external-mutex extension point for `:holdfast-coroutines.suspendAction`.
   When non-null, blocking `action` brackets each call with the serializer's
   `blockingAcquire` / `blockingRelease`.
-- **`Holdfast.suspendingOwner`** — recognized by `mutate`'s ownership check so
+- **`Store.suspendingOwner`** — recognized by `mutate`'s ownership check so
   cross-thread coroutine-resume points inside a suspending body are still
   treated as in-transaction.
 - **`Transaction.createForExternal(id, ownerThreadId)`** — public-but-opt-in
   factory used by `suspendAction` to manufacture a top-level transaction
   outside the blocking lock.
-- **`Holdfast.runUnderLock(block)`** — public-but-opt-in lock-holder used by
+- **`Store.runUnderLock(block)`** — public-but-opt-in lock-holder used by
   `atomic(...)`.
-- **`Holdfast.lockOrderKey: Long`** — public-but-opt-in process-monotonic
+- **`Store.lockOrderKey: Long`** — public-but-opt-in process-monotonic
   ordering key; primary use is `atomic`'s sorted lock acquisition.
 
 ### Added — Packaging
@@ -493,9 +493,9 @@ will appear as diffs in `vault/api/*.api`.
 - `state(distinct = true)` — opt-in same-value dedup for observers and bridges.
 - `Transaction.modifiedStates: Set<State<*>>` — owner-thread-only read view of
   pending-write keys, for audit middleware and userland undo.
-- `@VaultActionDsl` `@DslMarker` on `Holdfast<Self>` — prevents accidental
+- `@VaultActionDsl` `@DslMarker` on `Store<Self>` — prevents accidental
   outer-receiver access in nested DSLs.
-- `Holdfast.uncaughtObserverHandler: ((Throwable) -> Unit)?` — opt-in surfacing
+- `Store.uncaughtObserverHandler: ((Throwable) -> Unit)?` — opt-in surfacing
   of commit-fire observer exceptions (default null preserves silent-swallow).
 
 ### Added — Standard library (`com.vynatix.holdfast.middleware`, `com.vynatix.holdfast.bridge`)
@@ -514,7 +514,7 @@ will appear as diffs in `vault/api/*.api`.
   `@Composable rememberDisposable { … }`.
 
 ### Changed (BREAKING)
-- `Holdfast.action` is now generic in the body's return type. `TransactionResult`
+- `Store.action` is now generic in the body's return type. `TransactionResult`
   is a `sealed interface TransactionResult<out R>`:
   - `Success<R>(transaction, value: R)`
   - `Error(exception, transaction): TransactionResult<Nothing>`
@@ -527,7 +527,7 @@ will appear as diffs in `vault/api/*.api`.
 - `infix State<T>.bridge(b)` now accepts `Bridge<T>?` (null detaches). Existing
   non-null callers compile unchanged.
 - `Transaction.endTime` is now `Long?` (epoch millis) instead of `String?`.
-- `Holdfast.middlewares(...)` documentation corrected: the LAST argument is the
+- `Store.middlewares(...)` documentation corrected: the LAST argument is the
   outermost middleware. Place logging/audit middleware last so `onTransactionError`
   sees inner middlewares' failures.
 - The `UUID` and `Timestamp` classes are removed in favor of `kotlin.uuid.Uuid`
@@ -552,8 +552,8 @@ will appear as diffs in `vault/api/*.api`.
 
 ### Deferred to 0.2.0 *(all shipped — see entry above)*
 - ~~Cross-vault atomic actions~~ → shipped as `atomic(vararg vaults) { … }`.
-- ~~Snapshot / restore~~ → shipped as `Holdfast.snapshot()` / `Holdfast.restore()`.
-- ~~Derived state~~ → shipped as `Holdfast.computed { }` and `Holdfast.derived(...) { }`.
+- ~~Snapshot / restore~~ → shipped as `Store.snapshot()` / `Store.restore()`.
+- ~~Derived state~~ → shipped as `Store.computed { }` and `Store.derived(...) { }`.
 - ~~Suspending action~~ → shipped as `:holdfast-coroutines.suspendAction { }`.
 - ~~File-based bridge~~ → shipped as `FileSystemKvStore` over the existing
   `KvBridge`.

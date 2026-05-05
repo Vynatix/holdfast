@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlin.time.Clock
 
 /**
- * One unit of atomicity in a [Holdfast]. A transaction holds:
+ * One unit of atomicity in a [Store]. A transaction holds:
  *  - an [id] (the action's class simple name, falling back to a random UUID),
  *  - a [parent] reference forming the savepoint chain (null for top-level),
  *  - a buffer of pending writes ([pendingWrites]), thread-confined to [ownerThreadId],
@@ -26,13 +26,13 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
          * spurious transactions; companion modules that need to construct
          * one (because they implement their own action variant) opt in here.
          */
-        @HoldfastInternalApi
+        @StoreInternalApi
         fun createForExternal(id: String, ownerThreadId: Long): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
     }
 
-    private val statusLock = HoldfastLock()
-    private val endTimeLock = HoldfastLock()
-    private val pendingLock = HoldfastLock()
+    private val statusLock = StoreLock()
+    private val endTimeLock = StoreLock()
+    private val pendingLock = StoreLock()
 
     @kotlin.concurrent.Volatile
     private var _status = TransactionStatus.Active
@@ -77,7 +77,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
 
     /**
      * Stage a [rawValue] directly as a pending write, bypassing [MutableState.beforeSet].
-     * Used by [Holdfast.restore] to round-trip raw stored values (ciphertext,
+     * Used by [Store.restore] to round-trip raw stored values (ciphertext,
      * post-`transformer.set` form) without re-running the transformer.
      *
      * For symmetric transformers this is equivalent to a normal mutate; for
@@ -99,7 +99,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * AsyncSerializer holds the lock). Concurrent stages from non-owner threads
      * are undefined — same contract as [pendingWrites].
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun stagePendingEvent(channel: MutableSharedFlow<*>, event: Any) {
         pendingLock.withLock {
             pendingEvents += channel to event
@@ -147,7 +147,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * bridges fire.
      */
     fun commit() {
-        @OptIn(HoldfastInternalApi::class)
+        @OptIn(StoreInternalApi::class)
         commitDispatching { state, value ->
             @Suppress("UNCHECKED_CAST")
             (state as MutableState<Any>).applyCommitted(value)
@@ -169,7 +169,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * pending write, in iteration order. Throwing from it propagates as
      * [TransactionException] just like the sync path.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit) {
         commitDispatching(applyTopLevel, drainEvents = null)
     }
@@ -192,7 +192,7 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * and then suspendingly emit the events so back-pressure is honored. The
      * snapshot list is owned by the caller and reflects insertion order.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit, drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
@@ -321,7 +321,7 @@ enum class TransactionStatus {
 class TransactionException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * The outcome of a [Holdfast.action]. Either [Success] (the body returned without
+ * The outcome of a [Store.action]. Either [Success] (the body returned without
  * throwing and the commit succeeded — carrying the body's computed `value`) or
  * [Error] (the body or commit threw, the transaction is RolledBack).
  *

@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.IntCodec
 import com.vynatix.holdfast.bridge.StringCodec
 import com.vynatix.holdfast.effect
@@ -38,7 +38,7 @@ import kotlin.test.assertTrue
  *
  * Caller picks the action type to pick the persistence guarantee.
  */
-private class TwoFieldVault : Holdfast<TwoFieldVault>() {
+private class TwoFieldVault : Store<TwoFieldVault>() {
     val s by state { "init" }
     val n by state { 0 }
 }
@@ -233,7 +233,7 @@ class SuspendingBridgePublishAwaitedTest {
  * match: if `applyCommittedRaw` returns false (deduped), the (state, value)
  * pair must NOT be enqueued for the bridge publish phase.
  */
-private class DistinctVault : Holdfast<DistinctVault>() {
+private class DistinctVault : Store<DistinctVault>() {
     val s by state(distinct = true) { "init" }
 }
 

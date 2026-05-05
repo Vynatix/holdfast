@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +15,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private class CtxFlowVault : Holdfast<CtxFlowVault>() {
+private class CtxFlowVault : Store<CtxFlowVault>() {
     val count by state { 0 }
 }
 

@@ -1,9 +1,9 @@
 package com.vynatix.holdfast
 
 /**
- * Captured raw state of every registered property of a [Holdfast] at the moment
- * [Holdfast.snapshot] was called. Stored values are RAW — post-`transformer.set`
- * — so that [Holdfast.restore] can round-trip without re-running the transformer.
+ * Captured raw state of every registered property of a [Store] at the moment
+ * [Store.snapshot] was called. Stored values are RAW — post-`transformer.set`
+ * — so that [Store.restore] can round-trip without re-running the transformer.
  *
  * Snapshots are NOT typed against any particular vault instance. Restoring a
  * snapshot from one vault into a different vault is permitted as long as the
@@ -15,7 +15,7 @@ package com.vynatix.holdfast
  * ciphertext / post-`set` form, and restore writes that form back without
  * re-encrypting.
  */
-class HoldfastSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
     /** Names of every state captured in this snapshot. */
     val stateNames: Set<String> get() = rawValues.keys
 
@@ -33,14 +33,14 @@ class HoldfastSnapshot internal constructor(internal val rawValues: Map<String, 
  * The returned snapshot is detached from the vault — mutations after `snapshot()`
  * do not affect previously-captured snapshots.
  */
-fun <V : Holdfast<V>> V.snapshot(): HoldfastSnapshot {
+fun <V : Store<V>> V.snapshot(): StoreSnapshot {
     val raw = mutableMapOf<String, Any>()
     properties.forEach { (name, state) ->
         @Suppress("UNCHECKED_CAST")
         val ms = state as MutableState<Any>
         raw[name] = ms.rawCurrentValue
     }
-    return HoldfastSnapshot(raw.toMap())
+    return StoreSnapshot(raw.toMap())
 }
 
 /**
@@ -57,7 +57,7 @@ fun <V : Holdfast<V>> V.snapshot(): HoldfastSnapshot {
  * value via their `publish` (commit-time bridge fanout). To avoid this,
  * detach bridges before calling restore.
  */
-fun <V : Holdfast<V>> V.restore(snapshot: HoldfastSnapshot): TransactionResult<Unit> = action {
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> = action {
     val txn = activeTransaction
         ?: error("restore must run inside an action — this should never happen since restore wraps in action")
     snapshot.rawValues.forEach { (name, rawValue) ->

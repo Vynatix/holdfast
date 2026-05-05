@@ -1,12 +1,12 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.testing.HoldfastHandle
+import com.vynatix.holdfast.testing.StoreHandle
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
 /**
- * Process-wide map from a [TransactionResult.Error] to the [HoldfastHandle] that
+ * Process-wide map from a [TransactionResult.Error] to the [StoreHandle] that
  * produced it. Used by the result matchers (`shouldBeError`, `shouldBeSuccess`,
  * `shouldRollbackWith`) to clear the corresponding handle's pending-error mark
  * when a result is asserted on, without threading the handle through every
@@ -20,16 +20,16 @@ import kotlinx.atomicfu.locks.synchronized
  * blocks running in the same process. Two concurrent test scopes do not collide
  * because each [TransactionResult.Error] instance is unique by identity, so a
  * matcher call from scope A finds and clears only scope A's entry. The
- * [com.vynatix.holdfast.testing.HoldfastTestScope.tearDown] hook calls [unregisterAll]
+ * [com.vynatix.holdfast.testing.StoreTestScope.tearDown] hook calls [unregisterAll]
  * for every handle in its registry, so leaked entries from a prematurely
  * aborted test do not accumulate indefinitely.
  */
 @PublishedApi
 internal object PendingErrorRegistry : SynchronizedObject() {
-    private val errorToHandle: MutableMap<TransactionResult.Error, HoldfastHandle<*>> = mutableMapOf()
+    private val errorToHandle: MutableMap<TransactionResult.Error, StoreHandle<*>> = mutableMapOf()
 
     /** Record [error] as produced by [handle]. Idempotent for the same key. */
-    fun register(error: TransactionResult.Error, handle: HoldfastHandle<*>) {
+    fun register(error: TransactionResult.Error, handle: StoreHandle<*>) {
         synchronized(this) {
             errorToHandle[error] = handle
         }
@@ -52,7 +52,7 @@ internal object PendingErrorRegistry : SynchronizedObject() {
     }
 
     /** Drop every mapping that points to [handle]. Called from scope tearDown. */
-    fun unregisterAll(handle: HoldfastHandle<*>) {
+    fun unregisterAll(handle: StoreHandle<*>) {
         synchronized(this) {
             errorToHandle.entries.removeAll { it.value === handle }
         }

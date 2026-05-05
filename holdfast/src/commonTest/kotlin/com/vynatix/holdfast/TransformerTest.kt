@@ -41,12 +41,12 @@ private class CountingTransformer : Transformer<Int> {
     }
 }
 
-private class AsymmetricTransformerVault : Holdfast<AsymmetricTransformerVault>() {
+private class AsymmetricTransformerVault : Store<AsymmetricTransformerVault>() {
     val n by state(IncrementOnGetTransformer()) { 0 }
     val s by state(CaseFlippingTransformer()) { "hello" }
 }
 
-private class CountingTransformerVault(val transformer: CountingTransformer) : Holdfast<CountingTransformerVault>() {
+private class CountingTransformerVault(val transformer: CountingTransformer) : Store<CountingTransformerVault>() {
     val n by state(transformer) { 0 }
 }
 
@@ -203,7 +203,7 @@ private class ConditionalTransformer : Transformer<Int> {
     }
 }
 
-private class ConditionalTransformerVault(val transformer: ConditionalTransformer) : Holdfast<ConditionalTransformerVault>() {
+private class ConditionalTransformerVault(val transformer: ConditionalTransformer) : Store<ConditionalTransformerVault>() {
     val n by state(transformer) { 7 }
 }
 
@@ -212,7 +212,7 @@ private class ThrowingSetTransformer : Transformer<Int> {
     override fun get(value: Int): Int = value
 }
 
-private class ThrowingSetVault : Holdfast<ThrowingSetVault>() {
+private class ThrowingSetVault : Store<ThrowingSetVault>() {
     val n by state(ThrowingSetTransformer()) { 0 }
 }
 
@@ -221,11 +221,11 @@ private class ThrowingGetTransformer : Transformer<Int> {
     override fun get(value: Int): Int = throw RuntimeException("get refused")
 }
 
-private class ThrowingGetVault : Holdfast<ThrowingGetVault>() {
+private class ThrowingGetVault : Store<ThrowingGetVault>() {
     val n by state(ThrowingGetTransformer()) { 0 }
 }
 
-private class NullTransformerVault : Holdfast<NullTransformerVault>() {
+private class NullTransformerVault : Store<NullTransformerVault>() {
     val n by state(transformer = null) { 0 }
 }
 
@@ -241,7 +241,7 @@ private class TimingTransformer : Transformer<Int> {
     }
 }
 
-private class TimingTransformerVault(val transformer: TimingTransformer) : Holdfast<TimingTransformerVault>() {
+private class TimingTransformerVault(val transformer: TimingTransformer) : Store<TimingTransformerVault>() {
     val n by state(transformer) { 0 }
 }
 

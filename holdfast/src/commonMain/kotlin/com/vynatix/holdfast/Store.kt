@@ -1,4 +1,4 @@
-@file:OptIn(HoldfastInternalApi::class)
+@file:OptIn(StoreInternalApi::class)
 
 package com.vynatix.holdfast
 
@@ -12,7 +12,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Process-monotonic counter used to assign each [Holdfast] a stable [Holdfast.lockOrderKey]
+ * Process-monotonic counter used to assign each [Store] a stable [Store.lockOrderKey]
  * at construction. Used by `atomic(...)` to acquire multi-vault locks in a
  * deadlock-safe global order.
  */
@@ -21,7 +21,7 @@ private val vaultLockOrderKeyGen = atomic(0L)
 /**
  * Base class for transactional state containers.
  *
- * A Holdfast holds a set of named [State] properties created via [state]. Mutations are
+ * A Store holds a set of named [State] properties created via [state]. Mutations are
  * grouped into transactional [action] blocks: changes buffer, observe the
  * read-your-own-writes view on the action's owner thread, and only become visible
  * to observers and bridges on a successful commit. A throwing action body discards
@@ -38,21 +38,21 @@ private val vaultLockOrderKeyGen = atomic(0L)
  *
  * Typical subclass:
  * ```
- * class CounterVault : Holdfast<CounterVault>() {
+ * class CounterVault : Store<CounterVault>() {
  *     val count by state { 0 }
  *     val label by state { "init" }
  * }
  * ```
  */
-@HoldfastActionDsl
-@Suppress("TooManyFunctions") // The Holdfast DSL is intentionally broad; each member is a single primitive.
-abstract class Holdfast<Self : Holdfast<Self>> {
+@StoreActionDsl
+@Suppress("TooManyFunctions") // The Store DSL is intentionally broad; each member is a single primitive.
+abstract class Store<Self : Store<Self>> {
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
      * sorts its vault arguments by this key before acquiring locks, giving
      * deadlock-safe global ordering across any combination of vaults.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
 
     /**
@@ -78,7 +78,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      *     beats any [bindToScope] call.
      *  3. **Bound** — the scope passed to the most recent [bindToScope] call on this
      *     vault instance, if any. Rebindable.
-     *  4. **Global** — falls back to [Holdfast.Companion.defaultScope].
+     *  4. **Global** — falls back to [Store.Companion.defaultScope].
      */
     open val scope: CoroutineScope
         get() = boundScope ?: defaultScope
@@ -126,11 +126,11 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      *  - Every state-mutation API throws `IllegalStateException("vault disposed")`.
      *  - Every state-registry read API throws.
      *  - All registered observers are dropped; all bridges are detached.
-     *  - The [Holdfast.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
+     *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
      *
-     * Subclasses with additional resources (e.g. `EventfulHoldfast`'s events SharedFlow)
+     * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
      */
     fun dispose() {
@@ -157,14 +157,14 @@ abstract class Holdfast<Self : Holdfast<Self>> {
         // Drop middleware so a stray reference to a disposed vault can't keep
         // captured state alive.
         middlewareLock.withLock { middlewareList.clear() }
-        // Subclass hook: EventfulHoldfast uses this to reset its events SharedFlow.
+        // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
         runCatching { onDispose() }
     }
 
     /**
      * Subclass hook invoked once, AFTER the base `dispose()` has cleared all states,
      * observers, bridges, and middleware. Override to release subclass-owned resources
-     * (e.g. `EventfulHoldfast` resets its events SharedFlow). Default no-op.
+     * (e.g. `EventfulStore` resets its events SharedFlow). Default no-op.
      *
      * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
      * leave the vault half-disposed.
@@ -175,15 +175,15 @@ abstract class Holdfast<Self : Holdfast<Self>> {
         if (disposedFlag.value) error("vault disposed")
     }
 
-    private val transactionLock = HoldfastLock()
-    private val propertiesLock = HoldfastLock()
-    private val middlewareLock = HoldfastLock()
+    private val transactionLock = StoreLock()
+    private val propertiesLock = StoreLock()
+    private val middlewareLock = StoreLock()
 
     @kotlin.concurrent.Volatile
     private var _activeTransaction: Transaction? = null
 
     /**
-     * The transaction currently being built on this Holdfast, if any. Direct volatile
+     * The transaction currently being built on this Store, if any. Direct volatile
      * read — cross-thread observers see the most recent set without acquiring a lock.
      * `null` between actions; non-null only on the action's owner thread for the
      * duration of the action body.
@@ -230,7 +230,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * blocking [action] call so that concurrent suspending callers see a serial
      * stream of actions.
      *
-     * Marked `@HoldfastInternalApi` because it's an extension point for companion
+     * Marked `@StoreInternalApi` because it's an extension point for companion
      * modules, not a user-facing knob. If null (the default), `action` runs
      * unwrapped — the legacy fast path.
      */
@@ -239,7 +239,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
         fun blockingRelease()
     }
 
-    @HoldfastInternalApi
+    @StoreInternalApi
     @kotlin.concurrent.Volatile
     var asyncSerializer: AsyncSerializer? = null
 
@@ -250,7 +250,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * dispatch. The [AsyncSerializer] guarantees no other action runs concurrently,
      * so the relaxed ownership check is sound.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     @kotlin.concurrent.Volatile
     var suspendingOwner: Any? = null
 
@@ -271,11 +271,11 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
      * instead of re-entering the parent's commit. Also reachable by companion
      * modules (`:holdfast-coroutines.suspendDerived`) that need the same deferral
-     * contract; marked `@HoldfastInternalApi` because the deferral is an
+     * contract; marked `@StoreInternalApi` because the deferral is an
      * implementation detail of the derived-recompute machinery, not a
      * user-facing knob.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun postCommit(task: () -> Unit) {
         if (_activeTransaction != null) {
             postCommitTasks.add(task)
@@ -424,7 +424,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      *    contract.
      */
     fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T> {
-        val owningVault: Holdfast<*> = this
+        val owningVault: Store<*> = this
         return StateDelegate { _, property ->
             checkNotDisposed()
             propertiesLock.withLock {
@@ -447,10 +447,10 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * collide with user-declared property names (since Kotlin identifiers
      * can't start with `__`). Also reachable by companion modules
      * (`:holdfast-coroutines.suspendDerived`) for the suspending-derived backing
-     * state; marked `@HoldfastInternalApi` because the synthesized name scheme
+     * state; marked `@StoreInternalApi` because the synthesized name scheme
      * is an implementation detail.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun <T : Any> registerInternalState(
         name: String,
         initial: T,
@@ -553,8 +553,8 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
         @Suppress("UNCHECKED_CAST")
-        val ms = (this as? MutableState<T>) ?: error("State must be created by this Holdfast instance")
-        if (ms.owningVault !== this@Holdfast) error("State must be created by this Holdfast instance")
+        val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
+        if (ms.owningVault !== this@Store) error("State must be created by this Store instance")
         return ms
     }
 
@@ -621,7 +621,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * transaction directly without going through the blocking lock — the caller
      * is responsible for serialization (via [asyncSerializer]).
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun internalSetActiveTransaction(txn: Transaction?) {
         _activeTransaction = txn
     }
@@ -631,12 +631,12 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * tasks queued during the suspending action — same semantics as the
      * blocking action's tail drain.
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun internalDrainPostCommitTasks() {
         drainPostCommitTasks()
     }
 
-    @HoldfastInternalApi
+    @StoreInternalApi
     @Suppress("UNCHECKED_CAST")
     val selfForExternal: Self get() = self
 
@@ -650,7 +650,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * `started` (LAST-registered = outermost fires first), forward chain
      * order on `completed`/`error` (innermost first; outermost last).
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun snapshotMiddleware(): List<Middleware<Self>> = middlewareLock.withLock {
         middlewareList.toList()
     }
@@ -661,7 +661,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
      * same thread already holds the lock (e.g., nested `atomic` calls overlap
      * on a vault).
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
 
     companion object {
@@ -677,7 +677,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
         private val customDefaultScope = atomic<CoroutineScope?>(null)
 
         /**
-         * Process-global default scope used by every [Holdfast] that has neither a
+         * Process-global default scope used by every [Store] that has neither a
          * per-vault override nor a per-call scope argument. Settable at most once
          * per process via CAS — the first non-null assignment wins; subsequent
          * assignments throw [IllegalStateException].
@@ -685,7 +685,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
          * Typical app-init pattern:
          * ```
          * val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-         * Holdfast.defaultScope = appScope
+         * Store.defaultScope = appScope
          * ```
          *
          * Reads before any explicit assignment return a lazy
@@ -697,7 +697,7 @@ abstract class Holdfast<Self : Holdfast<Self>> {
             get() = customDefaultScope.value ?: processScope
             set(value) {
                 check(customDefaultScope.compareAndSet(null, value)) {
-                    "Holdfast.defaultScope is settable-once; it has already been assigned."
+                    "Store.defaultScope is settable-once; it has already been assigned."
                 }
             }
     }

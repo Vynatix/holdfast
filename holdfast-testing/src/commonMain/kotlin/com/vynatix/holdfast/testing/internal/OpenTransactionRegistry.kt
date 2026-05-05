@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.concurrency.OpenTransaction
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -8,7 +8,7 @@ import kotlinx.atomicfu.locks.synchronized
 /**
  * Backing list for [OpenTransaction]s created via
  * [com.vynatix.holdfast.testing.concurrency.transaction]. Held inside the
- * [HoldfastTestScope] so the lifetime mirrors the test body; [rollbackAll] is
+ * [StoreTestScope] so the lifetime mirrors the test body; [rollbackAll] is
  * called from `tearDown` to discard any leaked open transactions before the
  * scope's other resources are released.
  *
@@ -39,7 +39,7 @@ internal class OpenTransactionRegistry {
      * [OpenTransaction.rollback]), and clear the list.
      *
      * Uses [OpenTransaction.rollbackSilentlyForTearDown] — a non-suspend
-     * variant — because [HoldfastTestScope.tearDown] is non-suspend. The
+     * variant — because [StoreTestScope.tearDown] is non-suspend. The
      * v1 implementation does no suspending work, so the synchronous variant
      * is faithful to the suspending API.
      */
@@ -63,4 +63,4 @@ internal class OpenTransactionRegistry {
  * [OpenTransaction]'s constructor can stay `internal` without leaking. Mirrors
  * the [registerBarrier] shape.
  */
-internal fun HoldfastTestScope.openTransactionsRegistry(): OpenTransactionRegistry = openTransactionRegistry()
+internal fun StoreTestScope.openTransactionsRegistry(): OpenTransactionRegistry = openTransactionRegistry()

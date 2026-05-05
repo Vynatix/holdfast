@@ -18,9 +18,9 @@ import kotlin.test.assertEquals
  *   - `context(scope) { store.suspendingBridge(key, codec) }` → context-param overload,
  *     scope=scope
  *   - `store.suspendingBridge(key, codec)` outside any context block → default-param
- *     overload, falling back to `Holdfast.defaultScope`.
+ *     overload, falling back to `Store.defaultScope`.
  *
- * The "outside context block, defaults to Holdfast.defaultScope" path is verified by the
+ * The "outside context block, defaults to Store.defaultScope" path is verified by the
  * existing [SuspendingBridgePublishAwaitedTest] suite. Re-asserting it here under the
  * dual-overload setup is fragile because K2 implicit-receiver resolution inside
  * `runBlocking { }` can prefer the context-param overload. The structural guarantee —

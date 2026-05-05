@@ -5,7 +5,7 @@ import com.vynatix.holdfast.platform.threadYield
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
-class HoldfastLock : SynchronizedObject() {
+class StoreLock : SynchronizedObject() {
     @kotlin.concurrent.Volatile
     private var locked = false
     private var lockCount = 0

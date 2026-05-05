@@ -3,7 +3,7 @@ package com.vynatix.holdfast.hallmark
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.Validator
 import com.vynatix.holdfast.StateDelegate
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 
 /**
  * Declare a state property whose value is a [Boxed] [O] validated by the
@@ -11,7 +11,7 @@ import com.vynatix.holdfast.Holdfast
  * { v of initial() }` — eliminates the duplicate validator reference.
  *
  * ```kotlin
- * class UserVault : Holdfast<UserVault>() {
+ * class UserVault : Store<UserVault>() {
  *     val email by boxed(EmailValidator) { "init@example.com" }
  * }
  *
@@ -26,8 +26,8 @@ import com.vynatix.holdfast.Holdfast
  *
  * Note: an `assign` infix that writes a raw primitive directly
  * (`email assign "..."`) was deferred to a future release — it would require
- * either Holdfast context-receiver support or a Holdfast-core change to expose the
+ * either Store context-receiver support or a Store-core change to expose the
  * mutator from outside `action { }` scope.
  */
-fun <V : Holdfast<V>, P : Any, O : Boxed<P>> Holdfast<V>.boxed(validator: Validator<P, O>, initial: () -> P): StateDelegate<O> =
+fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxed(validator: Validator<P, O>, initial: () -> P): StateDelegate<O> =
     state(transformer = ValidatingTransformer(validator)) { validator of initial() }

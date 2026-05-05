@@ -12,7 +12,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Issue 03 — `Holdfast.dispose()` terminal teardown.
+ * Issue 03 — `Store.dispose()` terminal teardown.
  *
  * Contract:
  * - After dispose, every state-mutation entrypoint throws `IllegalStateException`
@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
  * - Does NOT cancel any scope bound via `bindToScope`.
  */
 class VaultDisposeTest {
-    private class CountVault : Holdfast<CountVault>() {
+    private class CountVault : Store<CountVault>() {
         val n by state { 0 }
     }
 

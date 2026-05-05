@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class ApiVault : Holdfast<ApiVault>() {
+private class ApiVault : Store<ApiVault>() {
     val n by state { 0 }
     val s by state { "init" }
     val items by state { emptyList<String>() }

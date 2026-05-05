@@ -24,7 +24,7 @@ private sealed class FixtureEvent {
     data class Custom(val n: Int) : FixtureEvent()
 }
 
-private class FixtureEventfulVault : EventfulHoldfast<FixtureEventfulVault, FixtureEvent>() {
+private class FixtureEventfulVault : EventfulStore<FixtureEventfulVault, FixtureEvent>() {
     val s by state { "init" }
     val n by state { 0 }
 }

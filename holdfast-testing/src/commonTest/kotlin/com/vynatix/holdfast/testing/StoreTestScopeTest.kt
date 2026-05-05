@@ -1,12 +1,12 @@
 package com.vynatix.holdfast.testing
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class TinyVault : Holdfast<TinyVault>() {
+private class TinyVault : Store<TinyVault>() {
     val n by state { 0 }
 }
 

@@ -2,7 +2,7 @@
 
 package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.KvBridge
 import com.vynatix.holdfast.bridge.LongCodec
 import com.vynatix.holdfast.bridge.StringCodec
@@ -16,7 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class SettingsVault : Holdfast<SettingsVault>() {
+private class SettingsVault : Store<SettingsVault>() {
     val theme by state { "light" }
     val balance by state { 0L }
 }

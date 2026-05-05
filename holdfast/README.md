@@ -4,10 +4,10 @@
 
 A *holdfast* is the part of a kelp that anchors it to the seabed against the
 tides. This library does the analogous thing for application state: a
-`Holdfast<Self : Holdfast<Self>>` is a state container whose unit of consistency
+`Store<Self : Store<Self>>` is a state container whose unit of consistency
 is a **transaction**. Mutations buffer, observers see only committed values,
 failed transactions never leak, and the type system enforces that a state class
-anchors itself to its own type via the recursive `Holdfast<Self>` pattern.
+anchors itself to its own type via the recursive `Store<Self>` pattern.
 
 No Compose dependency in core. No coroutines dependency in core. Runs on
 Android, iOS, JVM, and wasmJs.
@@ -15,12 +15,12 @@ Android, iOS, JVM, and wasmJs.
 ## Quick start
 
 ```kotlin
-class CounterHoldfast : Holdfast<CounterHoldfast>() {
+class CounterStore : Store<CounterStore>() {
     val count by state { 0 }
     val label by state { "init" }
 }
 
-val counter = CounterHoldfast()
+val counter = CounterStore()
 
 // Subscribe.
 val sub = counter { count effect { println("count=$this") } }   // count=0
@@ -47,11 +47,11 @@ sub.dispose()
 
 ## Mental model
 
-A `Holdfast<Self>` is a **state container with transactional commit semantics**:
+A `Store<Self>` is a **state container with transactional commit semantics**:
 
 1. **States** (`val count by state { 0 }`) are typed cells that observers can
    subscribe to.
-2. **Transactions** (`action { … }` or `transaction(on = holdfast) { … }`) are
+2. **Transactions** (`action { … }` or `transaction(on = store) { … }`) are
    atomic units of mutation. Inside the body, writes are buffered; only on
    successful body completion do they commit and observers fire. A throw inside
    the body rolls back every write atomically — observers never see the
@@ -63,9 +63,9 @@ A `Holdfast<Self>` is a **state container with transactional commit semantics**:
    sources, file system) — committed writes flow out; external changes flow in
    via `observeFrom`.
 
-The recursive type `Holdfast<Self : Holdfast<Self>>` exists so that the inside
+The recursive type `Store<Self : Store<Self>>` exists so that the inside
 of a transaction has access to *your* state class's properties without casting.
-Inside `counter action { count update { … } }`, `count` is your `CounterHoldfast`'s
+Inside `counter action { count update { … } }`, `count` is your `CounterStore`'s
 property, fully typed.
 
 ## Major capabilities
@@ -76,16 +76,16 @@ property, fully typed.
 - **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`.
 - **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, or your own.
 - **Transformers** — normalize on write / project on read, including the asymmetric case where `set` and `get` produce different shapes.
-- **Cross-holdfast state ownership** — foreign-holdfast states are rejected at compile time of the call (runtime ownership check at O(1)).
-- **`Holdfast.snapshot()` / `Holdfast.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
-- **`Holdfast.computed { } / Holdfast.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
-- **`atomic(vararg holdfasts) { }`** — cross-holdfast transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every holdfast.
+- **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
+- **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
+- **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
+- **`atomic(vararg stores) { }`** — cross-holdfast transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store.
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
 
 ### `:holdfast-coroutines` extension
 
-- **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same holdfast via an internal coroutine `Mutex`.
+- **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same store via an internal coroutine `Mutex`.
 - **`Flow` / `StateFlow` / `first` / `awaitValue`** adapters for state observation in coroutine code.
 
 ### `:holdfast-compose` extension
@@ -95,14 +95,14 @@ property, fully typed.
 
 ### `:holdfast-testing` extension
 
-- **`holdfastTest { }`** scope with auto-tracking, `HoldfastHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
+- **`holdfastTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
 
 ### `:holdfast-hallmark` + `:holdfast-hallmark-coroutines`
 
 Bridge to the [Hallmark](https://github.com/vynatix/hallmark) refinement-types
-library — `ValidatingTransformer` for write-validating state, `Holdfast.boxed { }`
+library — `ValidatingTransformer` for write-validating state, `Store.boxed { }`
 state factory pairing a state cell with a `BoxedValidator`, `BoxedCodec` for
-validated values in `KvBridge` persistence, and `Holdfast.suspendValidateAndMutate`
+validated values in `KvBridge` persistence, and `Store.suspendValidateAndMutate`
 for async-validation flows. Hallmark itself is a separate library; use the
 bridge only when you want validated values living in transactional state.
 
@@ -125,7 +125,7 @@ and `com.vynatix.holdfast.crypto`:
 
 ## Concurrency model
 
-- All holdfast writes serialize through a per-holdfast reentrant lock.
+- All holdfast writes serialize through a per-store reentrant lock.
 - Transactions are thread-confined: only the action's owner thread sees pending
   writes. Cross-thread reads see committed values.
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
@@ -144,8 +144,8 @@ and `com.vynatix.holdfast.crypto`:
 | `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }`. |
 | `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
 | `com.vynatix:holdfast-testing` | Test scope, handle, timeline, matchers. |
-| `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Holdfast.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
-| `com.vynatix:holdfast-hallmark-coroutines` | Suspend-side Hallmark bridge — `Holdfast.suspendValidateAndMutate`. |
+| `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
+| `com.vynatix:holdfast-hallmark-coroutines` | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. |
 
 ## Positioning
 

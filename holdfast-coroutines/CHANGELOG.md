@@ -14,7 +14,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 ### Added
 
 - **`State<T>.effect`** — top-level `State<T>` extension, replacing the
-  `Holdfast<Self>` member-extension shipped in 1.x. Both prior call sites
+  `Store<Self>` member-extension shipped in 1.x. Both prior call sites
   collapse to `state effect { ... }` without the implicit-cast leak.
 - **`State<T>.asStateFlow(scope, started)`** — single hot StateFlow API.
   `started` defaults to `SharingStarted.WhileSubscribed()`; pass
@@ -32,7 +32,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   `suspend fun publishAwaited(value)` is the contract; the default
   `Bridge.publish(value)` launches a fire-and-forget coroutine on the
   bridge's scope.
-- **`SuspendingKvStore.bridge(key, codec, scope = Holdfast.defaultScope)`**
+- **`SuspendingKvStore.bridge(key, codec, scope = Store.defaultScope)`**
   (fire-and-forget) and **`SuspendingKvStore.suspendingBridge(...)`**
   (await-completion) factory functions, plus K2 context-parameter overloads
   for both. The two factories share the same store, key, and codec — caller
@@ -43,9 +43,9 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   impl on Android + JVM + iOS using `withContext(Dispatchers.IO)` for
   file ops.
 - **`suspendAtomic(vararg vaults, body)`** — multi-holdfast async transaction.
-  Vaults sorted by `Holdfast.lockOrderKey`; each vault's `AsyncSerializer.Mutex`
+  Vaults sorted by `Store.lockOrderKey`; each vault's `AsyncSerializer.Mutex`
   acquired in lock order via `withLock`. Mutually exclusive with blocking
-  `atomic` and per-holdfast `action` / `suspendAction` on the same vault.
+  `atomic` and per-store `action` / `suspendAction` on the same vault.
   Commit phase wrapped in `withContext(NonCancellable)`; partial-commit
   cannot happen.
 - **`suspendDerived(vararg sources, compute)`** — push-recomputed derived
@@ -59,7 +59,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
   Migration: `state.asEagerStateFlow().also { it.dispose() }` →
   `state.asStateFlow(started = SharingStarted.Eagerly)`. Disposal is now
   handled by scope cancellation.
-- **`Holdfast<Self>.effect` member-extension**. Replaced by the top-level
+- **`Store<Self>.effect` member-extension**. Replaced by the top-level
   `State<T>.effect` extension; the `vault { state effect { ... } }`
   call-site form continues to compile.
 
@@ -109,7 +109,7 @@ See [MIGRATING.md](../MIGRATING.md) for the per-call-site rewrite cheatsheet.
 - **Sync `vault.action { }` inside a `suspendAtomic` body deadlocks.** The
   design spec called for both `action` and `suspendAction` inside the body
   to become savepoints. Reality: kotlinx `Mutex` is not owner-reentrant,
-  so sync `action` (which acquires the per-holdfast `transactionLock`,
+  so sync `action` (which acquires the per-store `transactionLock`,
   separate from `AsyncSerializer.Mutex`) deadlocks when nested inside
   `suspendAtomic` for the same vault. Practical guidance documented in
   KDoc and [MIGRATING.md](../MIGRATING.md): inside a `suspendAtomic` body

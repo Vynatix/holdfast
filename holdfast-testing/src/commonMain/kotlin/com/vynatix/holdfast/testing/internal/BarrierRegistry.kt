@@ -1,10 +1,10 @@
 package com.vynatix.holdfast.testing.internal
 
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.concurrency.Barrier
 
 /**
- * Backing list for barriers created via [HoldfastTestScope.barrier]. Held inside
+ * Backing list for barriers created via [StoreTestScope.barrier]. Held inside
  * the scope so its lifetime mirrors the test body; [cancelAll] is called from
  * `tearDown` to resume any leaked waiters with a cancellation.
  */
@@ -26,6 +26,6 @@ internal class BarrierRegistry {
  * scope's `internal` registry. Co-located here so the seam is obvious and so
  * [Barrier]'s constructor can stay `internal` without leaking.
  */
-internal fun HoldfastTestScope.registerBarrier(barrier: Barrier) {
+internal fun StoreTestScope.registerBarrier(barrier: Barrier) {
     barrierRegistry().add(barrier)
 }

@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.bridge
 
 import com.vynatix.holdfast.TransactionException
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeError
 import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
@@ -10,7 +10,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class CounterVault : Holdfast<CounterVault>() {
+private class CounterVault : Store<CounterVault>() {
     val count by state { 0 }
 }
 

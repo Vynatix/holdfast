@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.coroutines
 
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.IntCodec
 import com.vynatix.holdfast.bridge.StringCodec
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
  * adapts a `SuspendingKvStore` to the sync `Bridge<T>` interface used by
  * `vault.action { }`. See issue 11.
  */
-private class BridgedVault : Holdfast<BridgedVault>() {
+private class BridgedVault : Store<BridgedVault>() {
     val s by state { "init" }
     val n by state { 0 }
 }

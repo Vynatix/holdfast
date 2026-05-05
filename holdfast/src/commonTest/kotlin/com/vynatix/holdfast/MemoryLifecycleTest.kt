@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private class LifecycleVault : Holdfast<LifecycleVault>() {
+private class LifecycleVault : Store<LifecycleVault>() {
     val a by state { 0 }
     val b by state { "init" }
 }

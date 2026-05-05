@@ -5,7 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private class EffectTestVault : Holdfast<EffectTestVault>() {
+private class EffectTestVault : Store<EffectTestVault>() {
     val count by state { 0 }
     val label by state { "init" }
 }

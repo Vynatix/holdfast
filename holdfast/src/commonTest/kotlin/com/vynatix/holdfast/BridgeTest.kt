@@ -11,12 +11,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class BridgeTestVault : Holdfast<BridgeTestVault>() {
+private class BridgeTestVault : Store<BridgeTestVault>() {
     val count by state { 0 }
     val text by state { "init" }
 }
 
-private class TransformingBridgeVault : Holdfast<TransformingBridgeVault>() {
+private class TransformingBridgeVault : Store<TransformingBridgeVault>() {
     val n by state(IntDoublerTransformer()) { 0 }
 }
 

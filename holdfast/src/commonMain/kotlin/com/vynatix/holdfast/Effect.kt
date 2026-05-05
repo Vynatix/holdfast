@@ -22,7 +22,7 @@ package com.vynatix.holdfast
  * d.dispose()
  * ```
  */
-@OptIn(HoldfastInternalApi::class)
+@OptIn(StoreInternalApi::class)
 infix fun <T : Any> State<T>.effect(handler: T.() -> Unit): Disposable {
     @Suppress("UNCHECKED_CAST")
     val mutable = (this as? MutableState<T>) ?: error("effect is only defined for State produced by vault.state { ... }")

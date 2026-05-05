@@ -12,4 +12,4 @@ package com.vynatix.holdfast
  */
 @DslMarker
 @Target(AnnotationTarget.CLASS, AnnotationTarget.TYPE)
-annotation class HoldfastActionDsl
+annotation class StoreActionDsl

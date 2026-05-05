@@ -4,7 +4,7 @@ import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.coroutines.SuspendValidator
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.suspendAction
 
 /**
@@ -24,7 +24,7 @@ import com.vynatix.holdfast.coroutines.suspendAction
  * `vault action { state mutate (validator of primitive) }`. The difference is
  * that the validation step itself may suspend (e.g. unique-name lookup).
  */
-suspend fun <V : Holdfast<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(
+suspend fun <V : Store<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(
     state: State<O>,
     suspendValidator: SuspendValidator<P, O>,
     primitive: P,

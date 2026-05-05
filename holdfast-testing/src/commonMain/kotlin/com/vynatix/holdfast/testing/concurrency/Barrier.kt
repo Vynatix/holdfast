@@ -1,6 +1,6 @@
 package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.internal.registerBarrier
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CancellationException
@@ -17,11 +17,11 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Lifetime is bounded by [timeout]: if the barrier has not triggered before the
  * deadline, every suspended waiter is cancelled with
- * [TimeoutCancellationException]. The hosting [HoldfastTestScope] additionally
+ * [TimeoutCancellationException]. The hosting [StoreTestScope] additionally
  * cancels any non-triggered barrier when the test body returns, so a forgotten
  * `arrive()` never leaks past the test.
  *
- * Construct via [HoldfastTestScope.barrier]; the constructor is `internal` so the
+ * Construct via [StoreTestScope.barrier]; the constructor is `internal` so the
  * scope can register barriers for cleanup.
  *
  * Calling [arrive] more times than [parties] is a programming error and fails
@@ -81,7 +81,7 @@ class Barrier internal constructor(private val parties: Int, private val timeout
  * @param parties number of [Barrier.arrive] calls required to trigger.
  * @param timeout maximum total wait per call to [Barrier.arrive] / [Barrier.await].
  */
-fun HoldfastTestScope.barrier(parties: Int, timeout: Duration = 5.seconds): Barrier {
+fun StoreTestScope.barrier(parties: Int, timeout: Duration = 5.seconds): Barrier {
     val b = Barrier(parties, timeout)
     registerBarrier(b)
     return b

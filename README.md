@@ -7,13 +7,13 @@
 
 A *holdfast* is the part of a kelp that anchors it to the seabed against the
 tides. This library does the analogous thing for application state: a
-`Holdfast<Self : Holdfast<Self>>` is a state container whose unit of consistency
+`Store<Self : Store<Self>>` is a state container whose unit of consistency
 is a **transaction** — mutations buffer, observers see only committed values,
 failed transactions never leak, and the type system enforces that a state
 class anchors itself to its own type.
 
 ```kotlin
-class CounterHoldfast : Holdfast<CounterHoldfast>() {
+class CounterHoldfast : Store<CounterHoldfast>() {
     val count by state { 0 }
     val label by state { "init" }
 }
@@ -45,9 +45,9 @@ counter action {
 | [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-holdfast `atomic`, encryption transformer, file-system store. |
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
-| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `holdfastTest { }`, `HoldfastHandle`, timeline matchers. |
-| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Holdfast.boxed { }` state factory, `BoxedCodec`. |
-| [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Holdfast.suspendValidateAndMutate`. |
+| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `holdfastTest { }`, `StoreHandle`, timeline matchers. |
+| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`. |
+| [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. |
 
 ## Install
 

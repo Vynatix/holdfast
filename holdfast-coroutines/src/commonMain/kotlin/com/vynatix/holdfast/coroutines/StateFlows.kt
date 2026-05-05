@@ -1,4 +1,4 @@
-@file:OptIn(com.vynatix.holdfast.HoldfastInternalApi::class)
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
@@ -58,7 +58,7 @@ fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
 }
 
 /**
- * Package-internal accessor: resolves the [CoroutineScope] of the [Holdfast] that
+ * Package-internal accessor: resolves the [CoroutineScope] of the [Store] that
  * owns this [State]. The cast to [MutableState] stays here — never in any public
  * signature. Throws if the [State] was not produced by `vault.state { … }`.
  *
@@ -78,8 +78,8 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
  * cancels, the underlying observer is disposed.
  *
  * `scope` defaults to the owning vault's [com.vynatix.holdfast.Holdfast.scope] (resolved
- * via the chain documented on `Holdfast.scope` — per-vault override / bound scope /
- * `Holdfast.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
+ * via the chain documented on `Store.scope` — per-vault override / bound scope /
+ * `Store.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
  * call site `state.asStateFlow(myScope, started)` continues to compile.
  *
  * `started` defaults to [SharingStarted.WhileSubscribed] so the upstream

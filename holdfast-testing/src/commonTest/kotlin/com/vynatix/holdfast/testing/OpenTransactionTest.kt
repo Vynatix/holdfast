@@ -2,7 +2,7 @@ package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Holdfast
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.concurrency.parallel
 import com.vynatix.holdfast.testing.concurrency.transaction
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
@@ -14,7 +14,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private class OpenTxnCounterVault : Holdfast<OpenTxnCounterVault>() {
+private class OpenTxnCounterVault : Store<OpenTxnCounterVault>() {
     val count by state { 0 }
     val label by state { "init" }
 }
@@ -71,7 +71,7 @@ class OpenTransactionTest {
             transaction(on = ctr) { throw ise }
         }
         assertSame(ise, thrown)
-        // Holdfast should be in a clean state — committed value unchanged, no
+        // Store should be in a clean state — committed value unchanged, no
         // active transaction left dangling. The next action must succeed
         // without nesting under a phantom open transaction.
         assertEquals(0, ctr.read { count.value })
@@ -183,7 +183,7 @@ class OpenTransactionTest {
         // to read state post-tearDown.
         val ctr = OpenTxnCounterVault()
         runTest {
-            val scope = HoldfastTestScope(this)
+            val scope = StoreTestScope(this)
             try {
                 with(scope) {
                     val handle = track(ctr)
@@ -196,7 +196,7 @@ class OpenTransactionTest {
         }
         // After scope exit, vault state is unchanged.
         assertEquals(0, ctr.count.value)
-        // Holdfast has no lingering active transaction.
+        // Store has no lingering active transaction.
         assertEquals(null, ctr.activeTransaction)
     }
 
@@ -288,7 +288,7 @@ class OpenTransactionTest {
         // must be safely re-entrant.
         val ctr = OpenTxnCounterVault()
         runTest {
-            val scope = HoldfastTestScope(this)
+            val scope = StoreTestScope(this)
             try {
                 with(scope) {
                     val handle = track(ctr)

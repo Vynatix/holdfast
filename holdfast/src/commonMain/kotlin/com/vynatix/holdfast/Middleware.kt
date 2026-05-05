@@ -1,7 +1,7 @@
 package com.vynatix.holdfast
 
 /**
- * Cross-cutting interceptor that wraps every transaction on a [Holdfast]. Subclass and
+ * Cross-cutting interceptor that wraps every transaction on a [Store]. Subclass and
  * override the hooks of interest:
  *  - [onTransactionStarted] runs before the action body. Throwing here aborts the
  *    transaction.
@@ -14,17 +14,17 @@ package com.vynatix.holdfast
  *
  * Multiple middlewares form a chain. The LAST-registered middleware is outermost:
  * its `started` fires first, its `completed`/`error` fires last. Earlier-registered
- * middlewares are inner. Same ordering on both [Holdfast.action] and
+ * middlewares are inner. Same ordering on both [Store.action] and
  * `:holdfast-coroutines.suspendAction`. The shared [MiddlewareContext.metadata] map
  * carries per-transaction values across the same middleware's hooks (e.g. a start
  * time stashed in `started`, read in `completed`).
  */
-open class Middleware<T : Holdfast<T>> {
+open class Middleware<T : Store<T>> {
     /**
      * Mutable context passed to each hook. The [metadata] map is per-transaction —
      * a fresh empty map is created for each invocation of [invoke].
      */
-    data class MiddlewareContext<T : Holdfast<T>>(
+    data class MiddlewareContext<T : Store<T>>(
         val vault: T,
         val transaction: Transaction,
         val metadata: MutableMap<String, Any> = mutableMapOf(),
@@ -62,20 +62,20 @@ open class Middleware<T : Holdfast<T>> {
      * isolation. Not part of the stable public API; sync `action` continues
      * to use [invoke].
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun invokeOnTransactionStarted(context: MiddlewareContext<T>) = onTransactionStarted(context)
 
     /**
      * Internal hook for `:holdfast-coroutines.suspendAction`. Invokes the
      * [onTransactionCompleted] hook directly. See [invokeOnTransactionStarted].
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun invokeOnTransactionCompleted(context: MiddlewareContext<T>) = onTransactionCompleted(context)
 
     /**
      * Internal hook for `:holdfast-coroutines.suspendAction`. Invokes the
      * [onTransactionError] hook directly. See [invokeOnTransactionStarted].
      */
-    @HoldfastInternalApi
+    @StoreInternalApi
     fun invokeOnTransactionError(context: MiddlewareContext<T>, error: Throwable) = onTransactionError(context, error)
 }

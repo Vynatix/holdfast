@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.concurrency
 
-import com.vynatix.holdfast.testing.HoldfastEvent
-import com.vynatix.holdfast.testing.HoldfastTestScope
+import com.vynatix.holdfast.testing.StoreEvent
+import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.internal.awaitingsRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -12,7 +12,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Suspend until a [HoldfastEvent] from any tracked vault matches [predicate], or
+ * Suspend until a [StoreEvent] from any tracked vault matches [predicate], or
  * until [timeout] elapses.
  *
  * Subscribes to every tracked vault's recorder timeline as a single fan-in.
@@ -44,7 +44,7 @@ import kotlin.time.Duration.Companion.seconds
  * ```
  *
  * Cleanup: every `awaiting` call registers its subscriber channel with the
- * hosting [HoldfastTestScope]. If the test body returns while a coroutine is
+ * hosting [StoreTestScope]. If the test body returns while a coroutine is
  * suspended in `awaiting`, the scope's `tearDown` closes the channel — the
  * suspended `receive()` resumes with a [ClosedReceiveChannelException] and
  * the awaiting body's `try/finally` runs the unsubscribe path. So a forgotten
@@ -65,9 +65,9 @@ import kotlin.time.Duration.Companion.seconds
  *   First `true` return wins; this function returns the matched event.
  * @return the first event for which [predicate] returned `true`.
  */
-suspend fun HoldfastTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (HoldfastEvent) -> Boolean): HoldfastEvent {
-    val channel = Channel<HoldfastEvent>(Channel.UNLIMITED)
-    val replays = mutableListOf<HoldfastEvent>()
+suspend fun StoreTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (StoreEvent) -> Boolean): StoreEvent {
+    val channel = Channel<StoreEvent>(Channel.UNLIMITED)
+    val replays = mutableListOf<StoreEvent>()
 
     // Snapshot timelines AND subscribe atomically — per-recorder, the snapshot
     // and subscribe both run under the recorder's buffer lock, so no event can
@@ -114,7 +114,7 @@ suspend fun HoldfastTestScope.awaiting(timeout: Duration = 1.seconds, predicate:
     }
 }
 
-private fun buildTimeoutMessage(timeout: Duration, handles: List<com.vynatix.holdfast.testing.HoldfastHandle<*>>): String {
+private fun buildTimeoutMessage(timeout: Duration, handles: List<com.vynatix.holdfast.testing.StoreHandle<*>>): String {
     val recent = handles.flatMap { it.timeline }.takeLast(RECENT_TAIL_COUNT)
     return "awaiting: no event matched within ${timeout.inWholeMilliseconds}ms " +
         "(saw ${recent.size} events: $recent)"
