@@ -176,7 +176,7 @@ modules.
 ## Documentation
 
 - **[GUIDE.md](GUIDE.md)** — long-form tutorial: mental model, decision charts, feature differentiation tables, technique cookbook, and API reference.
-- **[BankingDemo.kt](src/commonTest/kotlin/com/vynatix/holdfast/demo/BankingDemo.kt)** — single-file end-to-end demo exercising every public API across a banking domain. Reads as a tutorial; runs as a test.
+- **[vynatix/banking-demo](https://github.com/vynatix/banking-demo)** — companion sample repo: a banking-domain narrative demo exercising every public API of Holdfast and Hallmark across a runnable JVM `main()` plus 186 feature-coverage tests. Best place to see the libraries in action.
 - **[CHANGELOG.md](CHANGELOG.md)** — release history (with internal pre-rename design archive preserved).
 
 ## Stability
