@@ -19,15 +19,15 @@ public final class com/vynatix/holdfast/coroutines/StateFlowsKt {
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendActionKt {
-	public static final fun suspendAction (Lcom/vynatix/holdfast/Holdfast;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendAtomicKt {
-	public static final fun suspendAtomic ([Lcom/vynatix/holdfast/Holdfast;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun suspendAtomic ([Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendDerivedKt {
-	public static final fun suspendDerived (Lcom/vynatix/holdfast/Holdfast;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function2;)Lkotlin/Pair;
+	public static final fun suspendDerived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function2;)Lkotlin/Pair;
 }
 
 public abstract interface class com/vynatix/holdfast/coroutines/SuspendingBridge : com/vynatix/holdfast/Bridge {

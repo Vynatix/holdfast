@@ -1,5 +1,5 @@
 public final class com/vynatix/holdfast/AtomicKt {
-	public static final fun atomic ([Lcom/vynatix/holdfast/Holdfast;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun atomic ([Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public abstract interface class com/vynatix/holdfast/Bridge : com/vynatix/holdfast/Observable, com/vynatix/holdfast/Publisher {
@@ -10,8 +10,8 @@ public final class com/vynatix/holdfast/ContractKt {
 }
 
 public final class com/vynatix/holdfast/DerivedKt {
-	public static final fun computed (Lcom/vynatix/holdfast/Holdfast;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/State;
-	public static final fun derived (Lcom/vynatix/holdfast/Holdfast;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
+	public static final fun computed (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/State;
+	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
 }
 
 public abstract interface class com/vynatix/holdfast/Disposable {
@@ -27,16 +27,7 @@ public abstract interface class com/vynatix/holdfast/Eventful {
 	public abstract fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
 }
 
-public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/Eventful {
-	public fun <init> ()V
-	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
-	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun bindVault (Lcom/vynatix/holdfast/Holdfast;)V
-	public fun emit (Ljava/lang/Object;)V
-	public fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
-}
-
-public abstract class com/vynatix/holdfast/EventfulHoldfast : com/vynatix/holdfast/Holdfast, com/vynatix/holdfast/Eventful {
+public abstract class com/vynatix/holdfast/EventfulStore : com/vynatix/holdfast/Store, com/vynatix/holdfast/Eventful {
 	public fun <init> ()V
 	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
 	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -45,12 +36,21 @@ public abstract class com/vynatix/holdfast/EventfulHoldfast : com/vynatix/holdfa
 	protected fun onDispose ()V
 }
 
+public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/Eventful {
+	public fun <init> ()V
+	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
+	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun bindVault (Lcom/vynatix/holdfast/Store;)V
+	public fun emit (Ljava/lang/Object;)V
+	public fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+}
+
 public abstract interface class com/vynatix/holdfast/Initializer : kotlin/jvm/functions/Function0 {
 }
 
 public class com/vynatix/holdfast/Middleware {
 	public fun <init> ()V
-	public final fun invoke (Lcom/vynatix/holdfast/Holdfast;Lkotlin/jvm/functions/Function0;)V
+	public final fun invoke (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function0;)V
 	public final fun invokeOnTransactionCompleted (Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
 	public final fun invokeOnTransactionError (Lcom/vynatix/holdfast/Middleware$MiddlewareContext;Ljava/lang/Throwable;)V
 	public final fun invokeOnTransactionStarted (Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
@@ -60,28 +60,28 @@ public class com/vynatix/holdfast/Middleware {
 }
 
 public final class com/vynatix/holdfast/Middleware$MiddlewareContext {
-	public fun <init> (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;)V
-	public synthetic fun <init> (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1 ()Lcom/vynatix/holdfast/Holdfast;
+	public fun <init> (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;)V
+	public synthetic fun <init> (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/vynatix/holdfast/Store;
 	public final fun component2 ()Lcom/vynatix/holdfast/Transaction;
 	public final fun component3 ()Ljava/util/Map;
-	public final fun copy (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;)Lcom/vynatix/holdfast/Middleware$MiddlewareContext;
-	public static synthetic fun copy$default (Lcom/vynatix/holdfast/Middleware$MiddlewareContext;Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;ILjava/lang/Object;)Lcom/vynatix/holdfast/Middleware$MiddlewareContext;
+	public final fun copy (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;)Lcom/vynatix/holdfast/Middleware$MiddlewareContext;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/Middleware$MiddlewareContext;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transaction;Ljava/util/Map;ILjava/lang/Object;)Lcom/vynatix/holdfast/Middleware$MiddlewareContext;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getMetadata ()Ljava/util/Map;
+	public final fun getStore ()Lcom/vynatix/holdfast/Store;
 	public final fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
-	public final fun getVault ()Lcom/vynatix/holdfast/Holdfast;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/vynatix/holdfast/MutableState : com/vynatix/holdfast/State {
-	public fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Holdfast;Z)V
-	public synthetic fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Holdfast;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Store;Z)V
+	public synthetic fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Store;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun applyCommittedRaw (Ljava/lang/Object;)Z
 	public final fun getBridge ()Lcom/vynatix/holdfast/Bridge;
 	public final fun getObserverCount ()I
-	public final fun getOwningVault ()Lcom/vynatix/holdfast/Holdfast;
+	public final fun getOwningVault ()Lcom/vynatix/holdfast/Store;
 	public fun getValue ()Ljava/lang/Object;
 	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 	public final fun setBridge (Lcom/vynatix/holdfast/Bridge;)V
@@ -100,8 +100,8 @@ public abstract interface class com/vynatix/holdfast/Publisher {
 }
 
 public final class com/vynatix/holdfast/SnapshotKt {
-	public static final fun restore (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/HoldfastSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
-	public static final fun snapshot (Lcom/vynatix/holdfast/Holdfast;)Lcom/vynatix/holdfast/HoldfastSnapshot;
+	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;
 }
 
 public abstract interface class com/vynatix/holdfast/State {
@@ -110,6 +110,75 @@ public abstract interface class com/vynatix/holdfast/State {
 
 public abstract interface class com/vynatix/holdfast/StateDelegate {
 	public abstract fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/State;
+}
+
+public abstract class com/vynatix/holdfast/Store {
+	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
+	public fun <init> ()V
+	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
+	public final fun bridge (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Bridge;)V
+	public final fun clearMiddleware ()V
+	public final fun clearStates ()V
+	public final fun dispose ()V
+	public final fun getActiveTransaction ()Lcom/vynatix/holdfast/Transaction;
+	public final fun getAsyncSerializer ()Lcom/vynatix/holdfast/Store$AsyncSerializer;
+	public final fun getLockOrderKey ()J
+	public final fun getProperties ()Ljava/util/Map;
+	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;
+	public final fun getSelfForExternal ()Lcom/vynatix/holdfast/Store;
+	public final fun getState (Ljava/lang/String;)Lcom/vynatix/holdfast/State;
+	public final fun getSuspendingOwner ()Ljava/lang/Object;
+	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
+	public final fun hasState (Ljava/lang/String;)Z
+	public final fun internalDrainPostCommitTasks ()V
+	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
+	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun isDisposed ()Z
+	public final fun middlewares ([Lcom/vynatix/holdfast/Middleware;)V
+	public final fun mutate (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)V
+	public final fun observeFrom (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Observable;)Lcom/vynatix/holdfast/Disposable;
+	protected fun onDispose ()V
+	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
+	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
+	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
+	public final fun removeState (Ljava/lang/String;)V
+	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public final fun setAsyncSerializer (Lcom/vynatix/holdfast/Store$AsyncSerializer;)V
+	public final fun setSuspendingOwner (Ljava/lang/Object;)V
+	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
+	public final fun snapshotMiddleware ()Ljava/util/List;
+	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
+	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
+	public final fun update (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)V
+}
+
+public abstract interface class com/vynatix/holdfast/Store$AsyncSerializer {
+	public abstract fun blockingAcquire ()V
+	public abstract fun blockingRelease ()V
+}
+
+public final class com/vynatix/holdfast/Store$Companion {
+	public final fun getDefaultScope ()Lkotlinx/coroutines/CoroutineScope;
+	public final fun setDefaultScope (Lkotlinx/coroutines/CoroutineScope;)V
+}
+
+public abstract interface annotation class com/vynatix/holdfast/StoreActionDsl : java/lang/annotation/Annotation {
+}
+
+public abstract interface annotation class com/vynatix/holdfast/StoreInternalApi : java/lang/annotation/Annotation {
+}
+
+public final class com/vynatix/holdfast/StoreLock {
+	public fun <init> ()V
+	public final fun acquire ()V
+	public final fun release ()V
+	public final fun withLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/holdfast/StoreSnapshot {
+	public final fun getSize ()I
+	public final fun getStateNames ()Ljava/util/Set;
 }
 
 public final class com/vynatix/holdfast/Transaction {
@@ -181,75 +250,6 @@ public abstract interface class com/vynatix/holdfast/Transformer {
 
 public final class com/vynatix/holdfast/Transformer$DefaultImpls {
 	public static fun shouldTransform (Lcom/vynatix/holdfast/Transformer;Ljava/lang/Object;)Z
-}
-
-public abstract class com/vynatix/holdfast/Holdfast {
-	public static final field Companion Lcom/vynatix/holdfast/Holdfast$Companion;
-	public fun <init> ()V
-	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
-	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
-	public final fun bridge (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Bridge;)V
-	public final fun clearMiddleware ()V
-	public final fun clearStates ()V
-	public final fun dispose ()V
-	public final fun getActiveTransaction ()Lcom/vynatix/holdfast/Transaction;
-	public final fun getAsyncSerializer ()Lcom/vynatix/holdfast/Holdfast$AsyncSerializer;
-	public final fun getLockOrderKey ()J
-	public final fun getProperties ()Ljava/util/Map;
-	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;
-	public final fun getSelfForExternal ()Lcom/vynatix/holdfast/Holdfast;
-	public final fun getState (Ljava/lang/String;)Lcom/vynatix/holdfast/State;
-	public final fun getSuspendingOwner ()Ljava/lang/Object;
-	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
-	public final fun hasState (Ljava/lang/String;)Z
-	public final fun internalDrainPostCommitTasks ()V
-	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
-	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
-	public final fun isDisposed ()Z
-	public final fun middlewares ([Lcom/vynatix/holdfast/Middleware;)V
-	public final fun mutate (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)V
-	public final fun observeFrom (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Observable;)Lcom/vynatix/holdfast/Disposable;
-	protected fun onDispose ()V
-	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
-	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
-	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Holdfast;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
-	public final fun removeState (Ljava/lang/String;)V
-	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
-	public final fun setAsyncSerializer (Lcom/vynatix/holdfast/Holdfast$AsyncSerializer;)V
-	public final fun setSuspendingOwner (Ljava/lang/Object;)V
-	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
-	public final fun snapshotMiddleware ()Ljava/util/List;
-	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
-	public static synthetic fun state$default (Lcom/vynatix/holdfast/Holdfast;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
-	public final fun update (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)V
-}
-
-public abstract interface class com/vynatix/holdfast/Holdfast$AsyncSerializer {
-	public abstract fun blockingAcquire ()V
-	public abstract fun blockingRelease ()V
-}
-
-public final class com/vynatix/holdfast/Holdfast$Companion {
-	public final fun getDefaultScope ()Lkotlinx/coroutines/CoroutineScope;
-	public final fun setDefaultScope (Lkotlinx/coroutines/CoroutineScope;)V
-}
-
-public abstract interface annotation class com/vynatix/holdfast/HoldfastActionDsl : java/lang/annotation/Annotation {
-}
-
-public abstract interface annotation class com/vynatix/holdfast/HoldfastInternalApi : java/lang/annotation/Annotation {
-}
-
-public final class com/vynatix/holdfast/HoldfastLock {
-	public fun <init> ()V
-	public final fun acquire ()V
-	public final fun release ()V
-	public final fun withLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
-}
-
-public final class com/vynatix/holdfast/HoldfastSnapshot {
-	public final fun getSize ()I
-	public final fun getStateNames ()Ljava/util/Set;
 }
 
 public final class com/vynatix/holdfast/bridge/BooleanCodec : com/vynatix/holdfast/bridge/Codec {
