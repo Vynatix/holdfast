@@ -62,15 +62,16 @@ kotlin {
 // `newSingleThreadContext`, neither of which exists on wasmJs; coverage runs
 // on android/jvm/ios via `:check`. Disable wasmJs test compilation/execution
 // so the suite compiles cleanly.
-val wasmJsTestTasks = setOf(
-    "compileTestKotlinWasmJs",
-    "compileTestDevelopmentExecutableKotlinWasmJs",
-    "compileTestProductionExecutableKotlinWasmJs",
-    "wasmJsTest",
-    "wasmJsBrowserTest",
-    "wasmJsBrowserDevelopmentTest",
-    "wasmJsBrowserProductionTest",
-)
+val wasmJsTestTasks =
+    setOf(
+        "compileTestKotlinWasmJs",
+        "compileTestDevelopmentExecutableKotlinWasmJs",
+        "compileTestProductionExecutableKotlinWasmJs",
+        "wasmJsTest",
+        "wasmJsBrowserTest",
+        "wasmJsBrowserDevelopmentTest",
+        "wasmJsBrowserProductionTest",
+    )
 tasks.matching { it.name in wasmJsTestTasks }.configureEach {
     enabled = false
 }
