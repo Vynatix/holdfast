@@ -15,6 +15,7 @@ Targets: Android, JVM, iosArm64 + iosSimulatorArm64, wasmJs (wasmJs only on `:ho
 ./gradlew :holdfast:jvmTest --tests "com.vynatix.holdfast.TransactionTest"   # one class
 ./gradlew :holdfast:jvmTest --tests "*.TransactionTest.someMethod"           # one method
 ./gradlew detekt ktlintCheck         # static analysis; format with: ./gradlew ktlintFormat
+./gradlew :<module>:detektBaseline   # re-pin detekt baseline after deliberate cleanups
 ./gradlew apiDump                    # after ANY public-API change; commit <module>/api/* dumps
 ./gradlew :holdfast:dokkaGenerate    # docs (Dokka V2 — `dokkaHtml` no longer exists)
 ./gradlew publishToMavenLocal -Pholdfast.version=0.1.0
@@ -22,7 +23,9 @@ Targets: Android, JVM, iosArm64 + iosSimulatorArm64, wasmJs (wasmJs only on `:ho
 
 Per-target test tasks: `jvmTest`, `testAndroidHostTest` (AGP-KMP host-test naming — not `testDebugUnitTest`), `iosSimulatorArm64Test` (macOS host only). wasmJs test tasks are force-disabled on `:holdfast`/`:holdfast-coroutines` (tests use `runBlocking`/`newSingleThreadContext`, absent on wasm) and never run in CI.
 
-CI (`.github/workflows/ci.yml`, push/PR to main) runs per module: `jvmTest` + `testAndroidHostTest` + `apiCheck` + detekt/ktlint on ubuntu, `iosSimulatorArm64Test` + `jvmTest` on macos-15. **Known broken as written (verify before trusting/copying):** ci.yml calls `:M:dokkaHtml`, which is ambiguous under Dokka V2 (should be `dokkaGenerate`); publish.yml calls `publishAndReleaseToMavenCentral` (vanniktech plugin — not applied anywhere; the build's own task is `publishAllPublicationsToSonatypeRepository`).
+Lint gotchas: detekt findings are baselined per module (`<module>/detekt-baseline.xml`) — rules stay active for new code. Files using K2 `context(name: Type)` syntax are excluded from ktlint (it can't parse them): `BoxedHandle.kt`, `StateFlows.kt`, `SuspendingBridge.kt`; new context-parameter files need the same per-module `ktlint { filter { exclude(...) } }` treatment. Overload-resolution trap: inside any coroutine body the implicit `CoroutineScope` receiver satisfies `context(scope)` overloads (e.g. `asStateFlow`), beating default-param overloads — pin call sites outside a scope receiver when you need store-scope defaults.
+
+CI (`.github/workflows/ci.yml`, push/PR to main) runs per module: `jvmTest` + `testAndroidHostTest` + `apiCheck` + `dokkaGenerate` + detekt/ktlint on ubuntu, `iosSimulatorArm64Test` + `jvmTest` on macos-15. **Known broken as written (verify before trusting/copying):** publish.yml calls `publishAndReleaseToMavenCentral` (vanniktech plugin — not applied anywhere; the build's own task is `publishAllPublicationsToSonatypeRepository`).
 
 The Hallmark deps (`com.vynatix:hallmark*:0.1.0`) resolve via `mavenLocal()` — if resolution fails, build/publish the sibling [hallmark repo](https://github.com/vynatix/hallmark) to `~/.m2` first.
 

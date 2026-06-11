@@ -47,6 +47,6 @@ fun StatusListener(holdfast: AccountHoldfast, channel: Observable<AccountStatus>
 ```
 ./gradlew :holdfast-compose:allTests
 ./gradlew :holdfast-compose:apiCheck
-./gradlew :holdfast-compose:dokkaHtml
+./gradlew :holdfast-compose:dokkaGenerate
 ./gradlew :holdfast-compose:publishToMavenLocal
 ```

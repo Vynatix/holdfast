@@ -54,6 +54,6 @@ suspend fun waitForReady(holdfast: AccountHoldfast) {
 ```
 ./gradlew :holdfast-coroutines:allTests
 ./gradlew :holdfast-coroutines:apiCheck
-./gradlew :holdfast-coroutines:dokkaHtml
+./gradlew :holdfast-coroutines:dokkaGenerate
 ./gradlew :holdfast-coroutines:publishToMavenLocal
 ```

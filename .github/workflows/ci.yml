@@ -34,6 +34,19 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # com.vynatix:hallmark is not yet on Maven Central; build it into mavenLocal.
+      - name: Checkout Hallmark (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: Vynatix/hallmark
+          ref: 79282128cda270ade50a717978712fa21f02da75
+          path: hallmark-dep
+          persist-credentials: false
+
+      - name: Publish Hallmark to mavenLocal
+        run: ./gradlew publishToMavenLocal
+        working-directory: hallmark-dep
+
       - name: Build and test (JVM + Android)
         run: |
           ./gradlew \
@@ -48,12 +61,12 @@ jobs:
       - name: API check and Dokka
         run: |
           ./gradlew \
-            :holdfast:apiCheck :holdfast:dokkaHtml \
-            :holdfast-coroutines:apiCheck :holdfast-coroutines:dokkaHtml \
-            :holdfast-compose:apiCheck :holdfast-compose:dokkaHtml \
-            :holdfast-testing:apiCheck :holdfast-testing:dokkaHtml \
-            :holdfast-hallmark:apiCheck :holdfast-hallmark:dokkaHtml \
-            :holdfast-hallmark-coroutines:apiCheck :holdfast-hallmark-coroutines:dokkaHtml \
+            :holdfast:apiCheck :holdfast:dokkaGenerate \
+            :holdfast-coroutines:apiCheck :holdfast-coroutines:dokkaGenerate \
+            :holdfast-compose:apiCheck :holdfast-compose:dokkaGenerate \
+            :holdfast-testing:apiCheck :holdfast-testing:dokkaGenerate \
+            :holdfast-hallmark:apiCheck :holdfast-hallmark:dokkaGenerate \
+            :holdfast-hallmark-coroutines:apiCheck :holdfast-hallmark-coroutines:dokkaGenerate \
             --stacktrace
 
       - name: Lint and static analysis
@@ -83,6 +96,19 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      # com.vynatix:hallmark is not yet on Maven Central; build it into mavenLocal.
+      - name: Checkout Hallmark (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: Vynatix/hallmark
+          ref: 79282128cda270ade50a717978712fa21f02da75
+          path: hallmark-dep
+          persist-credentials: false
+
+      - name: Publish Hallmark to mavenLocal
+        run: ./gradlew publishToMavenLocal
+        working-directory: hallmark-dep
 
       - name: iOS sim arm64 and JVM tests
         run: |

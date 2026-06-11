@@ -190,7 +190,7 @@ should pin to an exact version. SemVer guarantees apply once 1.0 is declared.
 ./gradlew :holdfast:allTests              # tests on Android JVM + iOS sim + JVM + wasmJs
 ./gradlew :holdfast:detekt :holdfast:ktlintCheck
 ./gradlew :holdfast:apiCheck              # ABI binary-compat check
-./gradlew :holdfast:dokkaHtml             # API doc site at build/dokka/html
+./gradlew :holdfast:dokkaGenerate         # API doc site at build/dokka/html
 ./gradlew :holdfast:publishToMavenLocal   # publish to ~/.m2 for local consumption
 
 # Companion modules
