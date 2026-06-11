@@ -1,8 +1,8 @@
 package com.vynatix.holdfast.middleware
 
 import com.vynatix.holdfast.Middleware
-import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionStatus
 import kotlin.time.Clock
 
 /**
@@ -23,9 +23,9 @@ import kotlin.time.Clock
  * })
  * ```
  */
-class TimingMiddleware<V : Store<V>>(private val onResult: (id: String, status: TransactionStatus, elapsedMs: Long) -> Unit) :
-    Middleware<V>() {
-
+class TimingMiddleware<V : Store<V>>(
+    private val onResult: (id: String, status: TransactionStatus, elapsedMs: Long) -> Unit,
+) : Middleware<V>() {
     override fun onTransactionStarted(context: MiddlewareContext<V>) {
         context.metadata[KEY_START_MS] = Clock.System.now().toEpochMilliseconds()
     }
@@ -34,11 +34,17 @@ class TimingMiddleware<V : Store<V>>(private val onResult: (id: String, status: 
         report(context, TransactionStatus.Committed)
     }
 
-    override fun onTransactionError(context: MiddlewareContext<V>, error: Throwable) {
+    override fun onTransactionError(
+        context: MiddlewareContext<V>,
+        error: Throwable,
+    ) {
         report(context, TransactionStatus.RolledBack)
     }
 
-    private fun report(context: MiddlewareContext<V>, status: TransactionStatus) {
+    private fun report(
+        context: MiddlewareContext<V>,
+        status: TransactionStatus,
+    ) {
         val start = context.metadata[KEY_START_MS] as? Long ?: return
         val elapsed = Clock.System.now().toEpochMilliseconds() - start
         onResult(context.transaction.id, status, elapsed)

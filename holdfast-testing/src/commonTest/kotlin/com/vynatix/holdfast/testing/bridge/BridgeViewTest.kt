@@ -17,7 +17,6 @@ private class TextVault : Store<TextVault>() {
 }
 
 class BridgeViewTest {
-
     @Test
     fun bridgeViewOverRecordingBridgeReadsPublished() {
         val bridge = RecordingBridge<String>(initial = "init")
@@ -74,45 +73,50 @@ class BridgeViewTest {
     }
 
     @Test
-    fun handleBridgeLookupReturnsViewForAttachedBridge() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "init")
-        val ctr = track(
-            TextVault().also { v ->
-                v { text bridge bridge }
-            },
-        )
-        ctr.action { text mutate "hello" }.shouldBeSuccess()
+    fun handleBridgeLookupReturnsViewForAttachedBridge() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "init")
+            val ctr =
+                track(
+                    TextVault().also { v ->
+                        v { text bridge bridge }
+                    },
+                )
+            ctr.action { text mutate "hello" }.shouldBeSuccess()
 
-        val view = ctr.bridge(TextVault::text)
-        assertEquals(listOf("hello"), view.published)
-        assertEquals("hello", view.lastPublished)
-    }
-
-    @Test
-    fun handleBridgeLookupThrowsWhenNoBridgeAttached() = vaultTest {
-        val ctr = track(TextVault())
-        val ex = assertFailsWith<IllegalStateException> { ctr.bridge(TextVault::text) }
-        // Error message identifies the missing bridge by property name.
-        assertTrue(
-            ex.message.orEmpty().contains("text"),
-            "expected error message to mention property 'text', got: ${ex.message}",
-        )
-    }
+            val view = ctr.bridge(TextVault::text)
+            assertEquals(listOf("hello"), view.published)
+            assertEquals("hello", view.lastPublished)
+        }
 
     @Test
-    fun handleBridgeLookupReceivingPushesIntoState() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "")
-        val ctr = track(
-            TextVault().also { v ->
-                v { text bridge bridge }
-            },
-        )
+    fun handleBridgeLookupThrowsWhenNoBridgeAttached() =
+        vaultTest {
+            val ctr = track(TextVault())
+            val ex = assertFailsWith<IllegalStateException> { ctr.bridge(TextVault::text) }
+            // Error message identifies the missing bridge by property name.
+            assertTrue(
+                ex.message.orEmpty().contains("text"),
+                "expected error message to mention property 'text', got: ${ex.message}",
+            )
+        }
 
-        @Suppress("UNCHECKED_CAST")
-        val view = ctr.bridge(TextVault::text) as BridgeView<String>
-        view receiving "external"
-        assertEquals("external", ctr.read { text.value })
-    }
+    @Test
+    fun handleBridgeLookupReceivingPushesIntoState() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "")
+            val ctr =
+                track(
+                    TextVault().also { v ->
+                        v { text bridge bridge }
+                    },
+                )
+
+            @Suppress("UNCHECKED_CAST")
+            val view = ctr.bridge(TextVault::text) as BridgeView<String>
+            view receiving "external"
+            assertEquals("external", ctr.read { text.value })
+        }
 
     @Test
     fun bridgeMatchersDelegateToView() {

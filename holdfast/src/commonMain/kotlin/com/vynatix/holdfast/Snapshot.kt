@@ -15,7 +15,9 @@ package com.vynatix.holdfast
  * ciphertext / post-`set` form, and restore writes that form back without
  * re-encrypting.
  */
-class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class StoreSnapshot internal constructor(
+    internal val rawValues: Map<String, Any>,
+) {
     /** Names of every state captured in this snapshot. */
     val stateNames: Set<String> get() = rawValues.keys
 
@@ -57,16 +59,20 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
  * value via their `publish` (commit-time bridge fanout). To avoid this,
  * detach bridges before calling restore.
  */
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> = action {
-    val txn = activeTransaction
-        ?: error("restore must run inside an action — this should never happen since restore wraps in action")
-    snapshot.rawValues.forEach { (name, rawValue) ->
-        val state = getState(name)
-            ?: error("snapshot contains state '$name' not registered on this store")
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
+    action {
+        val txn =
+            activeTransaction
+                ?: error("restore must run inside an action — this should never happen since restore wraps in action")
+        snapshot.rawValues.forEach { (name, rawValue) ->
+            val state =
+                getState(name)
+                    ?: error("snapshot contains state '$name' not registered on this store")
 
-        @Suppress("UNCHECKED_CAST")
-        val ms = state as? MutableState<Any>
-            ?: error("snapshot state '$name' is not a MutableState")
-        txn.stagePendingRaw(ms, rawValue)
+            @Suppress("UNCHECKED_CAST")
+            val ms =
+                state as? MutableState<Any>
+                    ?: error("snapshot state '$name' is not a MutableState")
+            txn.stagePendingRaw(ms, rawValue)
+        }
     }
-}

@@ -2,9 +2,9 @@ package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Store
 import kotlin.reflect.KProperty1
 
 /**
@@ -70,7 +70,6 @@ import kotlin.reflect.KProperty1
  * for that declaration.
  */
 interface StoreAutoRegistration {
-
     /**
      * Auto-registration's underlying registry call. Implemented by
      * [StoreTestScope] using its [com.vynatix.holdfast.testing.internal.HandleRegistry].
@@ -78,7 +77,10 @@ interface StoreAutoRegistration {
      * return the same handle, ignoring a different [capture] on the second
      * call.
      */
-    fun <V : Store<V>> track(store: V, capture: Capture = Capture.All): StoreHandle<V>
+    fun <V : Store<V>> track(
+        store: V,
+        capture: Capture = Capture.All,
+    ): StoreHandle<V>
 
     /**
      * Auto-registering wrapper around [StoreHandle.action]. Calls

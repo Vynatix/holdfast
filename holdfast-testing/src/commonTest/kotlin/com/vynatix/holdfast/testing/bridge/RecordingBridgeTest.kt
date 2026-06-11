@@ -17,7 +17,6 @@ private class ThemeVault : Store<ThemeVault>() {
 }
 
 class RecordingBridgeTest {
-
     @Test
     fun publishedListInitiallyEmptyAndLastNull() {
         val bridge = RecordingBridge<String>(initial = "light")
@@ -78,77 +77,86 @@ class RecordingBridgeTest {
     }
 
     @Test
-    fun integrationWithVaultPublishesOnCommit() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "light")
-        val ctr = track(
-            ThemeVault().also { v ->
-                v { theme bridge bridge }
-            },
-        )
-        ctr.action { theme mutate "dark" }.shouldBeSuccess()
+    fun integrationWithVaultPublishesOnCommit() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "light")
+            val ctr =
+                track(
+                    ThemeVault().also { v ->
+                        v { theme bridge bridge }
+                    },
+                )
+            ctr.action { theme mutate "dark" }.shouldBeSuccess()
 
-        // The bridge sees the post-commit publish.
-        assertEquals("dark", bridge.lastPublished)
-    }
-
-    @Test
-    fun integrationWithVaultEmitsBridgePublishedEvent() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "light")
-        val ctr = track(
-            ThemeVault().also { v ->
-                v { theme bridge bridge }
-            },
-        )
-        ctr.action { theme mutate "dark" }.shouldBeSuccess()
-
-        // The recorder wrapped the bridge at install time and pushed
-        // BridgePublished into the timeline.
-        val published = ctr.timeline.filterIsInstance<BridgePublished>()
-        assertEquals(1, published.size, "expected 1 BridgePublished, got ${ctr.timeline}")
-        assertEquals("dark", published.single().value)
-    }
+            // The bridge sees the post-commit publish.
+            assertEquals("dark", bridge.lastPublished)
+        }
 
     @Test
-    fun integrationWithVaultEmitsBridgeObservedOnReAttach() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "light")
-        val v = ThemeVault().also { v -> v { theme bridge bridge } }
-        // The wrapping by track() re-attaches the bridge, which replays
-        // 'light' through the observer — that re-attach produces a
-        // BridgeObserved event.
-        val ctr = track(v)
-        val observed = ctr.timeline.filterIsInstance<BridgeObserved>()
-        assertEquals(1, observed.size, "expected 1 BridgeObserved replay, got ${ctr.timeline}")
-        assertEquals("light", observed.single().value)
-    }
+    fun integrationWithVaultEmitsBridgePublishedEvent() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "light")
+            val ctr =
+                track(
+                    ThemeVault().also { v ->
+                        v { theme bridge bridge }
+                    },
+                )
+            ctr.action { theme mutate "dark" }.shouldBeSuccess()
+
+            // The recorder wrapped the bridge at install time and pushed
+            // BridgePublished into the timeline.
+            val published = ctr.timeline.filterIsInstance<BridgePublished>()
+            assertEquals(1, published.size, "expected 1 BridgePublished, got ${ctr.timeline}")
+            assertEquals("dark", published.single().value)
+        }
 
     @Test
-    fun simulateInboundUpdatesStateOnAttachedVault() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "light")
-        val ctr = track(
-            ThemeVault().also { v ->
-                v { theme bridge bridge }
-            },
-        )
-
-        // Inbound update through the bridge changes state.
-        bridge.simulateInbound("dark")
-        assertEquals("dark", ctr.read { theme.value })
-    }
+    fun integrationWithVaultEmitsBridgeObservedOnReAttach() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "light")
+            val v = ThemeVault().also { v -> v { theme bridge bridge } }
+            // The wrapping by track() re-attaches the bridge, which replays
+            // 'light' through the observer — that re-attach produces a
+            // BridgeObserved event.
+            val ctr = track(v)
+            val observed = ctr.timeline.filterIsInstance<BridgeObserved>()
+            assertEquals(1, observed.size, "expected 1 BridgeObserved replay, got ${ctr.timeline}")
+            assertEquals("light", observed.single().value)
+        }
 
     @Test
-    fun bridgeViewLookupReturnsCorrectBridge() = vaultTest {
-        val bridge = RecordingBridge<String>(initial = "light")
-        val ctr = track(
-            ThemeVault().also { v ->
-                v { theme bridge bridge }
-            },
-        )
+    fun simulateInboundUpdatesStateOnAttachedVault() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "light")
+            val ctr =
+                track(
+                    ThemeVault().also { v ->
+                        v { theme bridge bridge }
+                    },
+                )
 
-        ctr.action { theme mutate "dark" }.shouldBeSuccess()
-        val view: BridgeView<*> = ctr.bridge(ThemeVault::theme)
-        // The published list comes from the wrapper, which intercepted the
-        // single commit-time publish.
-        assertEquals(listOf("dark"), view.published)
-        assertSame("dark", view.lastPublished)
-    }
+            // Inbound update through the bridge changes state.
+            bridge.simulateInbound("dark")
+            assertEquals("dark", ctr.read { theme.value })
+        }
+
+    @Test
+    fun bridgeViewLookupReturnsCorrectBridge() =
+        vaultTest {
+            val bridge = RecordingBridge<String>(initial = "light")
+            val ctr =
+                track(
+                    ThemeVault().also { v ->
+                        v { theme bridge bridge }
+                    },
+                )
+
+            ctr.action { theme mutate "dark" }.shouldBeSuccess()
+            val view: BridgeView<*> = ctr.bridge(ThemeVault::theme)
+            // The published list comes from the wrapper, which intercepted the
+            // single commit-time publish.
+            assertEquals(listOf("dark"), view.published)
+            assertSame("dark", view.lastPublished)
+        }
 }

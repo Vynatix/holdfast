@@ -29,15 +29,19 @@ import kotlin.time.Duration.Companion.seconds
  * The default [timeout] of 60 seconds matches `runTest`'s own default; pass a
  * larger value when exercising long virtual-time delays.
  */
-fun vaultTest(timeout: Duration = 60.seconds, body: suspend StoreTestScope.() -> Unit): TestResult = runTest(timeout = timeout) {
-    val scope = StoreTestScope(this)
-    var bodyFailed = false
-    try {
-        scope.body()
-    } catch (t: Throwable) {
-        bodyFailed = true
-        throw t
-    } finally {
-        scope.tearDown(bodyFailed)
+fun vaultTest(
+    timeout: Duration = 60.seconds,
+    body: suspend StoreTestScope.() -> Unit,
+): TestResult =
+    runTest(timeout = timeout) {
+        val scope = StoreTestScope(this)
+        var bodyFailed = false
+        try {
+            scope.body()
+        } catch (t: Throwable) {
+            bodyFailed = true
+            throw t
+        } finally {
+            scope.tearDown(bodyFailed)
+        }
     }
-}

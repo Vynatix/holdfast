@@ -17,7 +17,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 
 class VaultLockBasicsTest {
-
     @Test
     fun withLockReturnsBlockResult() {
         val lock = StoreLock()
@@ -28,9 +27,10 @@ class VaultLockBasicsTest {
     @Test
     fun withLockReleasesLockOnExceptionAndPropagatesException() {
         val lock = StoreLock()
-        val ex = assertFailsWith<RuntimeException> {
-            lock.withLock { throw RuntimeException("boom") }
-        }
+        val ex =
+            assertFailsWith<RuntimeException> {
+                lock.withLock { throw RuntimeException("boom") }
+            }
         assertEquals("boom", ex.message)
         // Lock was released — re-acquire succeeds
         val after = lock.withLock { "ok" }
@@ -76,7 +76,6 @@ class VaultLockBasicsTest {
 }
 
 class VaultLockErrorPathTest {
-
     /**
      * Cross-thread lock test: `newSingleThreadContext` pins owner and intruder to
      * dedicated threads so coroutine suspension doesn't shuffle the lock owner thread.
@@ -87,34 +86,37 @@ class VaultLockErrorPathTest {
         val ownerCtx = newSingleThreadContext("store-lock-owner")
         val intruderCtx = newSingleThreadContext("store-lock-intruder")
         try {
-            val captured = runBlocking {
-                val lock = StoreLock()
-                val acquired = CompletableDeferred<Unit>()
-                val canRelease = CompletableDeferred<Unit>()
-                val foreignReleaseError = atomic<Throwable?>(null)
+            val captured =
+                runBlocking {
+                    val lock = StoreLock()
+                    val acquired = CompletableDeferred<Unit>()
+                    val canRelease = CompletableDeferred<Unit>()
+                    val foreignReleaseError = atomic<Throwable?>(null)
 
-                val owner = async(ownerCtx) {
-                    lock.acquire()
-                    acquired.complete(Unit)
-                    canRelease.await()
-                    lock.release()
+                    val owner =
+                        async(ownerCtx) {
+                            lock.acquire()
+                            acquired.complete(Unit)
+                            canRelease.await()
+                            lock.release()
+                        }
+                    acquired.await()
+
+                    val intruder =
+                        async(intruderCtx) {
+                            try {
+                                lock.release()
+                            } catch (e: Throwable) {
+                                foreignReleaseError.value = e
+                            }
+                        }
+                    intruder.await()
+
+                    canRelease.complete(Unit)
+                    owner.await()
+
+                    foreignReleaseError.value
                 }
-                acquired.await()
-
-                val intruder = async(intruderCtx) {
-                    try {
-                        lock.release()
-                    } catch (e: Throwable) {
-                        foreignReleaseError.value = e
-                    }
-                }
-                intruder.await()
-
-                canRelease.complete(Unit)
-                owner.await()
-
-                foreignReleaseError.value
-            }
 
             assertNotNull(captured, "release from non-owner thread must throw")
             assertIs<IllegalStateException>(captured)
@@ -132,7 +134,6 @@ class VaultLockErrorPathTest {
 }
 
 class VaultLockContentionTest {
-
     /**
      * Owner pinned to a single dedicated thread; waiters use `Dispatchers.Default`
      * so they're scheduled on different threads. Without a dedicated owner context,
@@ -150,22 +151,24 @@ class VaultLockContentionTest {
                 val firstAcquired = CompletableDeferred<Unit>()
                 val canFirstRelease = CompletableDeferred<Unit>()
 
-                val first = async(ownerCtx) {
-                    lock.withLock {
-                        firstAcquired.complete(Unit)
-                        canFirstRelease.await()
+                val first =
+                    async(ownerCtx) {
+                        lock.withLock {
+                            firstAcquired.complete(Unit)
+                            canFirstRelease.await()
+                        }
                     }
-                }
                 firstAcquired.await()
 
                 val waiterCount = 4
-                val waiters = List(waiterCount) {
-                    async(Dispatchers.Default) {
-                        lock.withLock {
-                            acquireCount.incrementAndGet()
+                val waiters =
+                    List(waiterCount) {
+                        async(Dispatchers.Default) {
+                            lock.withLock {
+                                acquireCount.incrementAndGet()
+                            }
                         }
                     }
-                }
 
                 // Give waiters a chance to start spinning on the lock.
                 delay(150)
@@ -188,58 +191,64 @@ class VaultLockContentionTest {
     }
 
     @Test
-    fun manyWaitersUnderHighContentionAllEventuallyAcquireWithoutPerpetualStarvation() = runBlocking {
-        val lock = StoreLock()
-        val workers = 16
-        val opsPerWorker = 50
-        val totalOps = atomic(0)
+    fun manyWaitersUnderHighContentionAllEventuallyAcquireWithoutPerpetualStarvation() =
+        runBlocking {
+            val lock = StoreLock()
+            val workers = 16
+            val opsPerWorker = 50
+            val totalOps = atomic(0)
 
-        val finished = withTimeoutOrNull(30_000) {
-            val jobs = List(workers) {
-                async(Dispatchers.Default) {
-                    repeat(opsPerWorker) {
-                        lock.withLock {
-                            totalOps.incrementAndGet()
+            val finished =
+                withTimeoutOrNull(30_000) {
+                    val jobs =
+                        List(workers) {
+                            async(Dispatchers.Default) {
+                                repeat(opsPerWorker) {
+                                    lock.withLock {
+                                        totalOps.incrementAndGet()
+                                    }
+                                }
+                            }
                         }
-                    }
+                    jobs.awaitAll()
+                    totalOps.value
                 }
-            }
-            jobs.awaitAll()
-            totalOps.value
-        }
 
-        assertNotNull(finished, "all $workers x $opsPerWorker acquisitions must complete within 30s")
-        assertEquals(workers * opsPerWorker, finished)
-    }
+            assertNotNull(finished, "all $workers x $opsPerWorker acquisitions must complete within 30s")
+            assertEquals(workers * opsPerWorker, finished)
+        }
 
     @Test
-    fun aGreedyReentrantHolderDoesNotBlockOtherWaitersAfterFinalRelease() = runBlocking {
-        val lock = StoreLock()
-        val acquired = atomic(0)
+    fun aGreedyReentrantHolderDoesNotBlockOtherWaitersAfterFinalRelease() =
+        runBlocking {
+            val lock = StoreLock()
+            val acquired = atomic(0)
 
-        val greedy = async(Dispatchers.Default) {
-            lock.withLock {
-                lock.withLock {
+            val greedy =
+                async(Dispatchers.Default) {
                     lock.withLock {
                         lock.withLock {
-                            // four nested levels, all on one coroutine/thread
+                            lock.withLock {
+                                lock.withLock {
+                                    // four nested levels, all on one coroutine/thread
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        val waiters = List(4) {
-            async(Dispatchers.Default) {
-                lock.withLock {
-                    acquired.incrementAndGet()
+            val waiters =
+                List(4) {
+                    async(Dispatchers.Default) {
+                        lock.withLock {
+                            acquired.incrementAndGet()
+                        }
+                    }
                 }
-            }
+
+            greedy.await()
+            waiters.awaitAll()
+
+            assertEquals(4, acquired.value, "all 4 waiters must acquire after greedy holder finished")
         }
-
-        greedy.await()
-        waiters.awaitAll()
-
-        assertEquals(4, acquired.value, "all 4 waiters must acquire after greedy holder finished")
-    }
 }

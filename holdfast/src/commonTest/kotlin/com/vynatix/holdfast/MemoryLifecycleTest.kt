@@ -14,7 +14,9 @@ private class LifecycleVault : Store<LifecycleVault>() {
 
 private class LifecycleBridge : Bridge<Int> {
     val publishCount = atomic(0)
+
     override fun observe(observer: (Int) -> Unit): Disposable = Disposable { /* noop */ }
+
     override fun publish(value: Int): Boolean {
         publishCount.incrementAndGet()
         return true
@@ -29,19 +31,21 @@ private class LifecycleBridge : Bridge<Int> {
 private class TwoWayBridge : Bridge<Int> {
     private val callbacks = mutableListOf<(Int) -> Unit>()
     val publishCount = atomic(0)
+
     override fun observe(observer: (Int) -> Unit): Disposable {
         callbacks.add(observer)
         return Disposable { callbacks.remove(observer) }
     }
+
     override fun publish(value: Int): Boolean {
         publishCount.incrementAndGet()
         return true
     }
+
     fun deliver(value: Int) = callbacks.toList().forEach { it(value) }
 }
 
 class MemoryLifecycleTest {
-
     @Test
     fun disposingObserverRemovesItFromTheStatesObserverSet() {
         val v = LifecycleVault()

@@ -23,8 +23,9 @@ import kotlin.reflect.KProperty1
  * }
  * ```
  */
-class StateMatcher<V : Store<V>> internal constructor(internal val store: V) {
-
+class StateMatcher<V : Store<V>> internal constructor(
+    internal val store: V,
+) {
     /**
      * Assertions captured by the builder, keyed by property reference. Each
      * value is the user-supplied expected `T` for the [State] returned by
@@ -82,7 +83,10 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
     val sm = StateMatcher(store).apply(builder)
 
     val declaredStateNames = store.properties.keys
-    val assertedStateNames = sm.expected.keys.map { it.name }.toSet()
+    val assertedStateNames =
+        sm.expected.keys
+            .map { it.name }
+            .toSet()
     val unasserted = declaredStateNames - assertedStateNames
     if (unasserted.isNotEmpty()) {
         throw AssertionError(
@@ -120,18 +124,20 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
     if (mySnap.stateNames != otherSnap.stateNames) {
         val onlyMine = (mySnap.stateNames - otherSnap.stateNames).sorted()
         val onlyOther = (otherSnap.stateNames - mySnap.stateNames).sorted()
-        val parts = buildList {
-            if (onlyMine.isNotEmpty()) add("only in this: ${onlyMine.joinToString()}")
-            if (onlyOther.isNotEmpty()) add("only in other: ${onlyOther.joinToString()}")
-        }
+        val parts =
+            buildList {
+                if (onlyMine.isNotEmpty()) add("only in this: ${onlyMine.joinToString()}")
+                if (onlyOther.isNotEmpty()) add("only in other: ${onlyOther.joinToString()}")
+            }
         throw AssertionError("Snapshot state-name mismatch — ${parts.joinToString("; ")}")
     }
 
-    val mismatches = mySnap.stateNames.sorted().mapNotNull { name ->
-        val mine = store.getState(name)?.value
-        val theirs = other.getState(name)?.value
-        if (mine == theirs) null else "$name: this=$mine other=$theirs"
-    }
+    val mismatches =
+        mySnap.stateNames.sorted().mapNotNull { name ->
+            val mine = store.getState(name)?.value
+            val theirs = other.getState(name)?.value
+            if (mine == theirs) null else "$name: this=$mine other=$theirs"
+        }
     if (mismatches.isNotEmpty()) {
         throw AssertionError("Snapshot mismatch:\n${mismatches.joinToString("\n")}")
     }
@@ -142,7 +148,8 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
  * `"<state-name>: expected=<X> actual=<Y>"` strings — one per mismatch. An
  * empty list means every assertion passed.
  */
-private fun <V : Store<V>> collectMismatches(sm: StateMatcher<V>): List<String> = sm.expected.mapNotNull { (prop, expectedValue) ->
-    val actualValue = prop.get(sm.store).value
-    if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
-}
+private fun <V : Store<V>> collectMismatches(sm: StateMatcher<V>): List<String> =
+    sm.expected.mapNotNull { (prop, expectedValue) ->
+        val actualValue = prop.get(sm.store).value
+        if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
+    }

@@ -22,8 +22,11 @@ import com.vynatix.holdfast.Disposable
  *
  * To detach, set the bridge to null: `store { balanceCents bridge null }`.
  */
-class KvBridge<T : Any>(private val kv: KvStore, private val key: String, private val codec: Codec<T>) : Bridge<T> {
-
+class KvBridge<T : Any>(
+    private val kv: KvStore,
+    private val key: String,
+    private val codec: Codec<T>,
+) : Bridge<T> {
     override fun observe(observer: (T) -> Unit): Disposable {
         // Replay the persisted value once on attach (load-on-attach).
         kv.get(key)?.let { encoded ->

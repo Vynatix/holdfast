@@ -12,8 +12,9 @@ package com.vynatix.holdfast
  */
 @RequiresOptIn(
     level = RequiresOptIn.Level.ERROR,
-    message = "This symbol is internal to the Holdfast library. Companion modules must @OptIn; " +
-        "application code should not.",
+    message =
+        "This symbol is internal to the Holdfast library. Companion modules must @OptIn; " +
+            "application code should not.",
 )
 @Retention(AnnotationRetention.BINARY)
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.PROPERTY, AnnotationTarget.CONSTRUCTOR)

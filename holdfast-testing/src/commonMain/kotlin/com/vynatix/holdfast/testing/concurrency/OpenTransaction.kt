@@ -1,8 +1,8 @@
 package com.vynatix.holdfast.testing.concurrency
 
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.StoreHandle
 import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
@@ -57,7 +57,6 @@ class OpenTransaction internal constructor(
     private val handle: StoreHandle<*>,
     private val onClose: (OpenTransaction) -> Unit,
 ) {
-
     private val closedFlag = atomic(false)
 
     /**
@@ -186,13 +185,17 @@ class OpenTransaction internal constructor(
  * ```
  */
 @Suppress("RedundantSuspendModifier")
-suspend fun <V : Store<V>> StoreTestScope.transaction(on: StoreHandle<V>, body: V.() -> Unit): OpenTransaction {
+suspend fun <V : Store<V>> StoreTestScope.transaction(
+    on: StoreHandle<V>,
+    body: V.() -> Unit,
+): OpenTransaction {
     val txn = PrivilegedHooks.openTransaction(on.store, body)
-    val open = OpenTransaction(
-        transaction = txn,
-        handle = on,
-        onClose = { tx -> openTransactionsRegistry().remove(tx) },
-    )
+    val open =
+        OpenTransaction(
+            transaction = txn,
+            handle = on,
+            onClose = { tx -> openTransactionsRegistry().remove(tx) },
+        )
     openTransactionsRegistry().add(open)
     return open
 }

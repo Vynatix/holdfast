@@ -3,9 +3,9 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.platform.currentThreadId
 
 /**
@@ -28,7 +28,6 @@ import com.vynatix.holdfast.platform.currentThreadId
  *    `transactionLock` rather than across the entire open-period.
  */
 internal object PrivilegedHooks {
-
     /**
      * Read every state currently registered on [store] mapped to its committed
      * post-`transformer.get` value, bypassing the active transaction's
@@ -118,11 +117,15 @@ internal object PrivilegedHooks {
      *   leaking the open transaction past the test scope's `tearDown` triggers
      *   the auto-rollback path.
      */
-    fun <V : Store<V>> openTransaction(store: V, body: V.() -> Unit): Transaction {
-        val txn = Transaction.createForExternal(
-            id = body::class.simpleName ?: "open-transaction",
-            ownerThreadId = currentThreadId(),
-        )
+    fun <V : Store<V>> openTransaction(
+        store: V,
+        body: V.() -> Unit,
+    ): Transaction {
+        val txn =
+            Transaction.createForExternal(
+                id = body::class.simpleName ?: "open-transaction",
+                ownerThreadId = currentThreadId(),
+            )
         store.runUnderLock {
             check(store.activeTransaction == null) {
                 "Cannot open a transaction on a store that already has an active transaction; " +
@@ -159,7 +162,10 @@ internal object PrivilegedHooks {
      * or any state's `applyCommitted` throwing). The caller wraps this in
      * `try/catch` to translate to [com.vynatix.holdfast.TransactionResult.Error].
      */
-    fun commitOpenTransaction(store: Store<*>, transaction: Transaction) {
+    fun commitOpenTransaction(
+        store: Store<*>,
+        transaction: Transaction,
+    ) {
         store.runUnderLock {
             try {
                 transaction.commit()
@@ -182,7 +188,10 @@ internal object PrivilegedHooks {
      * swallows rollback exceptions to keep teardown robust under partially
      * failed tests.
      */
-    fun rollbackOpenTransaction(store: Store<*>, transaction: Transaction) {
+    fun rollbackOpenTransaction(
+        store: Store<*>,
+        transaction: Transaction,
+    ) {
         store.runUnderLock {
             runCatching { transaction.rollback() }
             if (store.activeTransaction === transaction) {

@@ -45,7 +45,10 @@ interface State<T : Any> {
  * every access — delegate identity is preserved.
  */
 fun interface StateDelegate<T : Any> {
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): State<T>
+    operator fun getValue(
+        thisRef: Any?,
+        property: KProperty<*>,
+    ): State<T>
 }
 
 /**
@@ -87,19 +90,20 @@ interface Transformer<T : Any> {
  * If either transformer's [shouldTransform] returns false on the inbound
  * value, the composed transformer skips that side accordingly.
  */
-fun <T : Any> Transformer<T>.then(other: Transformer<T>): Transformer<T> = object : Transformer<T> {
-    override fun set(value: T): T {
-        val first = if (this@then.shouldTransform(value)) this@then.set(value) else value
-        return if (other.shouldTransform(first)) other.set(first) else first
-    }
+fun <T : Any> Transformer<T>.then(other: Transformer<T>): Transformer<T> =
+    object : Transformer<T> {
+        override fun set(value: T): T {
+            val first = if (this@then.shouldTransform(value)) this@then.set(value) else value
+            return if (other.shouldTransform(first)) other.set(first) else first
+        }
 
-    override fun get(value: T): T {
-        val first = if (other.shouldTransform(value)) other.get(value) else value
-        return if (this@then.shouldTransform(first)) this@then.get(first) else first
-    }
+        override fun get(value: T): T {
+            val first = if (other.shouldTransform(value)) other.get(value) else value
+            return if (this@then.shouldTransform(first)) this@then.get(first) else first
+        }
 
-    override fun shouldTransform(value: T): Boolean = this@then.shouldTransform(value) || other.shouldTransform(value)
-}
+        override fun shouldTransform(value: T): Boolean = this@then.shouldTransform(value) || other.shouldTransform(value)
+    }
 
 /**
  * A handle to release something — an effect subscription, an inbound bridge

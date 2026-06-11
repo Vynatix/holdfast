@@ -30,23 +30,24 @@ import kotlin.test.assertTrue
  * and the contextual one routes through `ctxScope` — is fully covered below.
  */
 class BridgeFactoryContextParamTest {
-
-    @Test fun underContextBlock_resolvesToContextOverload() = runBlocking {
-        val ctxScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ctxbridge"))
-        try {
-            val store: SuspendingKvStore = InMemorySuspendingKvStore()
-            val br: Bridge<String> = context(ctxScope) {
-                store.bridge(key = "k", codec = StringCodec)
+    @Test fun underContextBlock_resolvesToContextOverload() =
+        runBlocking {
+            val ctxScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ctxbridge"))
+            try {
+                val store: SuspendingKvStore = InMemorySuspendingKvStore()
+                val br: Bridge<String> =
+                    context(ctxScope) {
+                        store.bridge(key = "k", codec = StringCodec)
+                    }
+                // Just exercise the API — proves both overloads compile and the context one resolves.
+                assertTrue(br.publish("hello"))
+                // Wait for fire-and-forget save to land.
+                withTimeout(2_000L) {
+                    while (store.get("k") == null) delay(10)
+                }
+                assertEquals("hello", store.get("k"))
+            } finally {
+                ctxScope.cancel()
             }
-            // Just exercise the API — proves both overloads compile and the context one resolves.
-            assertTrue(br.publish("hello"))
-            // Wait for fire-and-forget save to land.
-            withTimeout(2_000L) {
-                while (store.get("k") == null) delay(10)
-            }
-            assertEquals("hello", store.get("k"))
-        } finally {
-            ctxScope.cancel()
         }
-    }
 }

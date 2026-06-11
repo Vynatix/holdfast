@@ -29,23 +29,28 @@ import kotlin.time.Duration.Companion.seconds
  * @param block assertion or check to retry.
  */
 @Suppress("TooGenericExceptionCaught")
-suspend fun StoreTestScope.eventually(within: Duration = 1.seconds, every: Duration = 10.milliseconds, block: suspend () -> Unit) {
+suspend fun StoreTestScope.eventually(
+    within: Duration = 1.seconds,
+    every: Duration = 10.milliseconds,
+    block: suspend () -> Unit,
+) {
     var lastError: Throwable? = null
-    val outcome = withTimeoutOrNull(within) {
-        while (true) {
-            try {
-                block()
-                return@withTimeoutOrNull Unit
-            } catch (c: CancellationException) {
-                throw c
-            } catch (t: Throwable) {
-                lastError = t
-                delay(every)
+    val outcome =
+        withTimeoutOrNull(within) {
+            while (true) {
+                try {
+                    block()
+                    return@withTimeoutOrNull Unit
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    lastError = t
+                    delay(every)
+                }
             }
+            @Suppress("UNREACHABLE_CODE")
+            Unit
         }
-        @Suppress("UNREACHABLE_CODE")
-        Unit
-    }
     if (outcome == null) {
         val tailMessage = lastError?.message ?: "<no exception>"
         throw AssertionError(

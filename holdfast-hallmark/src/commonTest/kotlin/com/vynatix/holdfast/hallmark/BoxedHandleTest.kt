@@ -2,24 +2,27 @@ package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.BoxedValidator
+import com.vynatix.hallmark.HallmarkException
 import com.vynatix.hallmark.Spec
 import com.vynatix.hallmark.SpecMode
-import com.vynatix.hallmark.HallmarkException
 import com.vynatix.hallmark.rules.MinLengthRule
 import com.vynatix.hallmark.rules.NonBlankRule
-import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-private data class HandleEmail(override val value: String) : Boxed<String>
+private data class HandleEmail(
+    override val value: String,
+) : Boxed<String>
 
 private object HandleEmailValidator : BoxedValidator<String, HandleEmail>() {
-    override val specs = listOf(
-        Spec(listOf(NonBlankRule(), MinLengthRule(3)), SpecMode.ALL) { HandleEmail(it) },
-    )
+    override val specs =
+        listOf(
+            Spec(listOf(NonBlankRule(), MinLengthRule(3)), SpecMode.ALL) { HandleEmail(it) },
+        )
 }
 
 private class HandleVault : Store<HandleVault>() {
@@ -39,9 +42,10 @@ class BoxedHandleTest {
     @Test
     fun civilizeAndMutateRoundTripsValue() {
         val v = HandleVault()
-        val r = v action {
-            email.state mutate email.civilize("alice@example.com")
-        }
+        val r =
+            v action {
+                email.state mutate email.civilize("alice@example.com")
+            }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals("alice@example.com", v.email.state.value.value)
     }
@@ -50,10 +54,11 @@ class BoxedHandleTest {
     fun civilizeRejectsInvalidPrimitive() {
         val v = HandleVault()
         // civilize itself throws — caller can choose to do their own try/catch
-        val r = v action {
-            // Wrap in try since civilize throws even before mutate is called.
-            email.state mutate email.civilize("ab") // too short
-        }
+        val r =
+            v action {
+                // Wrap in try since civilize throws even before mutate is called.
+                email.state mutate email.civilize("ab") // too short
+            }
         assertIs<TransactionResult.Error>(r)
         assertTrue(r.exception is HallmarkException)
         // Initial value preserved
@@ -63,9 +68,10 @@ class BoxedHandleTest {
     @Test
     fun assignInfixCivilizesAndMutatesInsideAction() {
         val v = HandleVault()
-        val r = v action {
-            email assign "alice@example.com"
-        }
+        val r =
+            v action {
+                email assign "alice@example.com"
+            }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals("alice@example.com", v.email.state.value.value)
     }
@@ -73,9 +79,10 @@ class BoxedHandleTest {
     @Test
     fun assignInfixRollsBackOnInvalidPrimitive() {
         val v = HandleVault()
-        val r = v action {
-            email assign "ab" // too short — civilize throws HallmarkException
-        }
+        val r =
+            v action {
+                email assign "ab" // too short — civilize throws HallmarkException
+            }
         assertIs<TransactionResult.Error>(r)
         assertTrue(r.exception is HallmarkException)
         assertEquals("init@example.com", v.email.state.value.value)

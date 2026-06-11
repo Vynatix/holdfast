@@ -7,7 +7,6 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 class PerformanceMatcherTest {
-
     @Test
     fun syncFastBlockPasses() {
         { /* near-zero */ } shouldCompleteWithin 100.milliseconds
@@ -21,16 +20,18 @@ class PerformanceMatcherTest {
     }
 
     @Test
-    fun suspendFastBlockPasses() = runTest {
-        suspend { /* near-zero */ } shouldCompleteWithin 100.milliseconds
-    }
+    fun suspendFastBlockPasses() =
+        runTest {
+            suspend { /* near-zero */ } shouldCompleteWithin 100.milliseconds
+        }
 
     @Test
-    fun suspendSlowBlockFails() = runTest {
-        assertFailsWith<AssertionError> {
-            suspend { burnCpu(BURN_MS) } shouldCompleteWithin 1.milliseconds
+    fun suspendSlowBlockFails() =
+        runTest {
+            assertFailsWith<AssertionError> {
+                suspend { burnCpu(BURN_MS) } shouldCompleteWithin 1.milliseconds
+            }
         }
-    }
 
     private fun burnCpu(ms: Long) {
         // Busy-wait. Do NOT use Thread.sleep (JVM-only). Don't use delay (virtual under runTest).

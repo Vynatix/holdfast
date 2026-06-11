@@ -26,7 +26,9 @@ sealed interface Capture {
      * truncates from the front so the stored window is the tail of the
      * timeline.
      */
-    data class RingBuffer(val size: Int) : Capture {
+    data class RingBuffer(
+        val size: Int,
+    ) : Capture {
         init {
             require(size > 0) { "RingBuffer size must be > 0, was $size" }
         }

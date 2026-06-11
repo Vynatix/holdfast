@@ -39,8 +39,9 @@ import kotlinx.atomicfu.locks.synchronized
  *   pre-seed the state with a "previously persisted" value the same way a real
  *   bridge would on startup.
  */
-class RecordingBridge<T : Any>(private val initial: T) : Bridge<T> {
-
+class RecordingBridge<T : Any>(
+    private val initial: T,
+) : Bridge<T> {
     private val lock = SynchronizedObject()
     private val publishedList: MutableList<T> = mutableListOf()
     private var inboundObserver: ((T) -> Unit)? = null

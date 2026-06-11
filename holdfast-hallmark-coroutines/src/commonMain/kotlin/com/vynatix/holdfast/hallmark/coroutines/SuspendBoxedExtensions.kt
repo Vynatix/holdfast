@@ -3,8 +3,8 @@ package com.vynatix.holdfast.hallmark.coroutines
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.coroutines.SuspendValidator
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.coroutines.suspendAction
 
 /**
@@ -28,6 +28,7 @@ suspend fun <V : Store<V>, P : Any, O : Boxed<P>> V.suspendValidateAndMutate(
     state: State<O>,
     suspendValidator: SuspendValidator<P, O>,
     primitive: P,
-): TransactionResult<Unit> = suspendAction {
-    state mutate suspendValidator.of(primitive)
-}
+): TransactionResult<Unit> =
+    suspendAction {
+        state mutate suspendValidator.of(primitive)
+    }

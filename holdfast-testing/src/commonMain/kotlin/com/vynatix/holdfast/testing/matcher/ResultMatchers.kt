@@ -75,25 +75,30 @@ infix fun TransactionResult<*>.shouldRollbackWith(exceptionType: KClass<out Thro
  * rollback with [exceptionType], or `null` if everything matches. Pulled out
  * so [shouldRollbackWith] has only one `throw` site.
  */
-private fun checkRollback(result: TransactionResult<*>, exceptionType: KClass<out Throwable>): AssertionError? = when {
-    result !is TransactionResult.Error -> AssertionError(
-        "Expected TransactionResult.Error rolled back with ${exceptionType.simpleName}, but got Success: $result",
-    )
-    result.transaction.status != TransactionStatus.RolledBack -> {
-        val type = result.exception::class.simpleName ?: "Throwable"
-        val message = result.exception.message.orEmpty()
-        AssertionError(
-            "Expected transaction.status == RolledBack, but was ${result.transaction.status} " +
-                "(error was $type \"$message\")",
-        )
+private fun checkRollback(
+    result: TransactionResult<*>,
+    exceptionType: KClass<out Throwable>,
+): AssertionError? =
+    when {
+        result !is TransactionResult.Error ->
+            AssertionError(
+                "Expected TransactionResult.Error rolled back with ${exceptionType.simpleName}, but got Success: $result",
+            )
+        result.transaction.status != TransactionStatus.RolledBack -> {
+            val type = result.exception::class.simpleName ?: "Throwable"
+            val message = result.exception.message.orEmpty()
+            AssertionError(
+                "Expected transaction.status == RolledBack, but was ${result.transaction.status} " +
+                    "(error was $type \"$message\")",
+            )
+        }
+        !exceptionType.isInstance(result.exception) -> {
+            val actual = result.exception::class.simpleName ?: "Throwable"
+            val expected = exceptionType.simpleName ?: "Throwable"
+            val message = result.exception.message.orEmpty()
+            AssertionError(
+                "Expected rollback caused by $expected, but exception was $actual: \"$message\"",
+            )
+        }
+        else -> null
     }
-    !exceptionType.isInstance(result.exception) -> {
-        val actual = result.exception::class.simpleName ?: "Throwable"
-        val expected = exceptionType.simpleName ?: "Throwable"
-        val message = result.exception.message.orEmpty()
-        AssertionError(
-            "Expected rollback caused by $expected, but exception was $actual: \"$message\"",
-        )
-    }
-    else -> null
-}

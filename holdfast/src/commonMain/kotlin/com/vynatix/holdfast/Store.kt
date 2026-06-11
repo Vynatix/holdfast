@@ -148,11 +148,12 @@ abstract class Store<Self : Store<Self>> {
         // Snapshot the property map under its lock, then call shutdownSilently outside
         // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
         // locks, and we don't want to invert ordering.
-        val toShutdown = propertiesLock.withLock {
-            val snap = _properties.values.toList()
-            _properties.clear()
-            snap
-        }
+        val toShutdown =
+            propertiesLock.withLock {
+                val snap = _properties.values.toList()
+                _properties.clear()
+                snap
+            }
         toShutdown.forEach { runCatching { it.shutdownSilently() } }
         // Drop middleware so a stray reference to a disposed store can't keep
         // captured state alive.
@@ -236,6 +237,7 @@ abstract class Store<Self : Store<Self>> {
      */
     interface AsyncSerializer {
         fun blockingAcquire()
+
         fun blockingRelease()
     }
 
@@ -364,45 +366,49 @@ abstract class Store<Self : Store<Self>> {
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> = transactionLock.withLock {
-        val parent = _activeTransaction
-        val txn = Transaction(
-            id = body::class.simpleName ?: Uuid.random().toString(),
-            parent = parent,
-            ownerThreadId = currentThreadId(),
-        )
+    private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
+        transactionLock.withLock {
+            val parent = _activeTransaction
+            val txn =
+                Transaction(
+                    id = body::class.simpleName ?: Uuid.random().toString(),
+                    parent = parent,
+                    ownerThreadId = currentThreadId(),
+                )
 
-        _activeTransaction = txn
-        // Box for capturing the body's return value so we can pipe it into Success.
-        // Holds null before the body runs; holds (result) after.
-        val box = arrayOfNulls<Any?>(1)
-        val outcome: TransactionResult<R> = try {
-            runMiddlewareChain { box[0] = body(self) }
-            try {
-                txn.commit()
-                @Suppress("UNCHECKED_CAST")
-                TransactionResult.Success(txn, box[0] as R)
-            } catch (e: Throwable) {
-                TransactionResult.Error(e, txn)
-            }
-        } catch (e: Throwable) {
-            runCatching { txn.rollback() }
-            TransactionResult.Error(e, txn)
-        } finally {
-            _activeTransaction = parent
+            _activeTransaction = txn
+            // Box for capturing the body's return value so we can pipe it into Success.
+            // Holds null before the body runs; holds (result) after.
+            val box = arrayOfNulls<Any?>(1)
+            val outcome: TransactionResult<R> =
+                try {
+                    runMiddlewareChain { box[0] = body(self) }
+                    try {
+                        txn.commit()
+                        @Suppress("UNCHECKED_CAST")
+                        TransactionResult.Success(txn, box[0] as R)
+                    } catch (e: Throwable) {
+                        TransactionResult.Error(e, txn)
+                    }
+                } catch (e: Throwable) {
+                    runCatching { txn.rollback() }
+                    TransactionResult.Error(e, txn)
+                } finally {
+                    _activeTransaction = parent
+                }
+            // Drain post-commit tasks only at top-level exit — nested actions inherit
+            // the parent's deferred queue and let it drain at the outermost boundary.
+            if (parent == null) drainPostCommitTasks()
+            outcome
         }
-        // Drain post-commit tasks only at top-level exit — nested actions inherit
-        // the parent's deferred queue and let it drain at the outermost boundary.
-        if (parent == null) drainPostCommitTasks()
-        outcome
-    }
 
     private fun runMiddlewareChain(block: () -> Unit) {
         middlewareLock.withLock {
             val currentMiddleware = middlewareList.toList()
-            currentMiddleware.fold(block) { acc, middleware ->
-                { middleware(self, acc) }
-            }.invoke()
+            currentMiddleware
+                .fold(block) { acc, middleware ->
+                    { middleware(self, acc) }
+                }.invoke()
         }
     }
 
@@ -423,7 +429,11 @@ abstract class Store<Self : Store<Self>> {
      *    false — every commit fires observers, matching the library's original
      *    contract.
      */
-    fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T> {
+    fun <T : Any> state(
+        transformer: Transformer<T>? = null,
+        distinct: Boolean = false,
+        initialize: Initializer<T>,
+    ): StateDelegate<T> {
         val owningVault: Store<*> = this
         return StateDelegate { _, property ->
             checkNotDisposed()
@@ -456,17 +466,18 @@ abstract class Store<Self : Store<Self>> {
         initial: T,
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
-    ): MutableState<T> = propertiesLock.withLock {
-        val existing = _properties[name]
-        if (existing != null) {
-            @Suppress("UNCHECKED_CAST")
-            existing as MutableState<T>
-        } else {
-            MutableState(initial, transformer, this, distinct).also {
-                _properties[name] = it
+    ): MutableState<T> =
+        propertiesLock.withLock {
+            val existing = _properties[name]
+            if (existing != null) {
+                @Suppress("UNCHECKED_CAST")
+                existing as MutableState<T>
+            } else {
+                MutableState(initial, transformer, this, distinct).also {
+                    _properties[name] = it
+                }
             }
         }
-    }
 
     /**
      * Attach (or detach, when null) a [Bridge] for two-way external sync.
@@ -609,7 +620,10 @@ abstract class Store<Self : Store<Self>> {
         }
     }
 
-    private fun checkNoPendingWrites(state: MutableState<*>, name: String) {
+    private fun checkNoPendingWrites(
+        state: MutableState<*>,
+        name: String,
+    ) {
         val txn = _activeTransaction ?: return
         if (state in txn.pendingWrites) {
             error("Cannot remove state '$name' with pending writes in an active transaction; commit or rollback first")
@@ -651,9 +665,10 @@ abstract class Store<Self : Store<Self>> {
      * order on `completed`/`error` (innermost first; outermost last).
      */
     @StoreInternalApi
-    fun snapshotMiddleware(): List<Middleware<Self>> = middlewareLock.withLock {
-        middlewareList.toList()
-    }
+    fun snapshotMiddleware(): List<Middleware<Self>> =
+        middlewareLock.withLock {
+            middlewareList.toList()
+        }
 
     /**
      * Internal hook for `atomic(...)`. Runs [block] under this store's

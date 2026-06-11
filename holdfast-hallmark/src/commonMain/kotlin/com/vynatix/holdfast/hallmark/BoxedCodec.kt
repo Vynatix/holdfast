@@ -22,7 +22,10 @@ import com.vynatix.holdfast.bridge.Codec
  * }
  * ```
  */
-class BoxedCodec<P : Any, O : Boxed<P>>(private val primitiveCodec: Codec<P>, private val validator: Validator<P, O>) : Codec<O> {
+class BoxedCodec<P : Any, O : Boxed<P>>(
+    private val primitiveCodec: Codec<P>,
+    private val validator: Validator<P, O>,
+) : Codec<O> {
     override fun encode(value: O): String = primitiveCodec.encode(value.value)
 
     override fun decode(string: String): O = validator of primitiveCodec.decode(string)

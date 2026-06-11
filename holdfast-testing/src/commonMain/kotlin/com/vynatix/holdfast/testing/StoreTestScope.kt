@@ -1,8 +1,8 @@
 package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Middleware
-import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.testing.internal.AwaitingRegistry
 import com.vynatix.holdfast.testing.internal.BarrierRegistry
 import com.vynatix.holdfast.testing.internal.HandleRegistry
@@ -37,10 +37,10 @@ import kotlinx.coroutines.test.TestScope
  * Constructed exclusively by [vaultTest]; never instantiated directly by user
  * code.
  */
-class StoreTestScope internal constructor(val testScope: TestScope) :
-    CoroutineScope by testScope,
+class StoreTestScope internal constructor(
+    val testScope: TestScope,
+) : CoroutineScope by testScope,
     StoreAutoRegistration {
-
     /** The virtual-time scheduler driving this test. */
     val testScheduler: TestCoroutineScheduler get() = testScope.testScheduler
 
@@ -69,7 +69,10 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
      * BEFORE calling `track`; see [com.vynatix.holdfast.testing.internal.Recorder]
      * for the v1 wrap-order limit.
      */
-    override fun <V : Store<V>> track(store: V, capture: Capture): StoreHandle<V> = registry.getOrCreate(store, capture)
+    override fun <V : Store<V>> track(
+        store: V,
+        capture: Capture,
+    ): StoreHandle<V> = registry.getOrCreate(store, capture)
 
     /**
      * Auto-registering reified-type overload of [StoreHandle.middlewareEventsOf].
@@ -87,9 +90,10 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
      * events for the recorder itself are captured. User-class [M]s return an
      * empty list; the API is in place so v2 can populate it without ABI churn.
      */
-    inline fun <reified M : Middleware<*>> Store<*>.middlewareEventsOf(): List<MiddlewareEvent> = autoTrackTimeline(this)
-        .filterIsInstance<MiddlewareEvent>()
-        .filter { it.middleware is M }
+    inline fun <reified M : Middleware<*>> Store<*>.middlewareEventsOf(): List<MiddlewareEvent> =
+        autoTrackTimeline(this)
+            .filterIsInstance<MiddlewareEvent>()
+            .filter { it.middleware is M }
 
     /**
      * Internal helper used by the inline reified [middlewareEventsOf] overload.
@@ -181,18 +185,19 @@ class StoreTestScope internal constructor(val testScope: TestScope) :
         registry.clear()
 
         if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
-            val msg = buildString {
-                appendLine("vaultTest body finished with ${unconsumed.size} unconsumed TransactionResult.Error value(s):")
-                unconsumed.forEachIndexed { index, (handle, err) ->
-                    val type = err.exception::class.simpleName ?: "Throwable"
-                    val message = err.exception.message.orEmpty()
-                    val handleTag = handleLabel(handle)
-                    val txnId = err.transaction.id
-                    appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
+            val msg =
+                buildString {
+                    appendLine("vaultTest body finished with ${unconsumed.size} unconsumed TransactionResult.Error value(s):")
+                    unconsumed.forEachIndexed { index, (handle, err) ->
+                        val type = err.exception::class.simpleName ?: "Throwable"
+                        val message = err.exception.message.orEmpty()
+                        val handleTag = handleLabel(handle)
+                        val txnId = err.transaction.id
+                        appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
+                    }
+                    appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
+                    append("or use handle.consumeAllPendingErrors() to opt out.")
                 }
-                appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
-                append("or use handle.consumeAllPendingErrors() to opt out.")
-            }
             throw AssertionError(msg)
         }
     }

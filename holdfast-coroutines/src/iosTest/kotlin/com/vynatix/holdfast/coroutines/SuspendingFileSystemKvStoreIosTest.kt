@@ -16,7 +16,6 @@ import kotlin.uuid.Uuid
  * directory.
  */
 class SuspendingFileSystemKvStoreIosTest {
-
     @OptIn(ExperimentalUuidApi::class)
     private fun freshDirectory(): String {
         val dir = "${NSTemporaryDirectory()}store-coro-fs-ios-${Uuid.random()}"
@@ -30,16 +29,17 @@ class SuspendingFileSystemKvStoreIosTest {
     }
 
     @Test
-    fun persistsAcrossRestartOnIosSimulator() = runTest {
-        val dir = freshDirectory()
-        val first = SuspendingFileSystemKvStore(dir)
-        repeat(ENTRY_COUNT) { i -> first.put("key-$i", "value-$i") }
+    fun persistsAcrossRestartOnIosSimulator() =
+        runTest {
+            val dir = freshDirectory()
+            val first = SuspendingFileSystemKvStore(dir)
+            repeat(ENTRY_COUNT) { i -> first.put("key-$i", "value-$i") }
 
-        val reborn = SuspendingFileSystemKvStore(dir)
-        repeat(ENTRY_COUNT) { i ->
-            assertEquals("value-$i", reborn.get("key-$i"))
+            val reborn = SuspendingFileSystemKvStore(dir)
+            repeat(ENTRY_COUNT) { i ->
+                assertEquals("value-$i", reborn.get("key-$i"))
+            }
         }
-    }
 
     private companion object {
         const val ENTRY_COUNT = 100

@@ -13,7 +13,6 @@ private class ApiVault : Store<ApiVault>() {
 }
 
 class UpdateExtensionTest {
-
     @Test
     fun updateAppliesBlockToCurrentValueAndCommits() {
         val v = ApiVault()
@@ -53,15 +52,15 @@ class UpdateExtensionTest {
 }
 
 class ObserveFromExtensionTest {
-
     @Test
     fun observeFromAttachesAnInboundOnlyObservableAndAppliesValuesToState() {
         val v = ApiVault()
         val callbacks = mutableListOf<(Int) -> Unit>()
-        val obs = Observable<Int> { observer ->
-            callbacks.add(observer)
-            Disposable { callbacks.remove(observer) }
-        }
+        val obs =
+            Observable<Int> { observer ->
+                callbacks.add(observer)
+                Disposable { callbacks.remove(observer) }
+            }
         val handle = v { n observeFrom obs }
         // Push from external source.
         callbacks.toList().forEach { it(42) }
@@ -80,10 +79,11 @@ class ObserveFromExtensionTest {
         seen.clear()
 
         val callbacks = mutableListOf<(Int) -> Unit>()
-        val obs = Observable<Int> { observer ->
-            callbacks.add(observer)
-            Disposable { callbacks.remove(observer) }
-        }
+        val obs =
+            Observable<Int> { observer ->
+                callbacks.add(observer)
+                Disposable { callbacks.remove(observer) }
+            }
         v { n observeFrom obs }
         callbacks.toList().forEach { it(7) }
         assertEquals(listOf(7), seen, "state observer fired for inbound bridge update")
@@ -92,14 +92,14 @@ class ObserveFromExtensionTest {
 }
 
 class ActionGenericReturnValueTest {
-
     @Test
     fun actionReturnsValueComputedByBody() {
         val v = ApiVault()
-        val r = v action {
-            n mutate 10
-            n.value * 2 // body's return value
-        }
+        val r =
+            v action {
+                n mutate 10
+                n.value * 2 // body's return value
+            }
         assertIs<TransactionResult.Success<Int>>(r)
         assertEquals(20, r.value, "TransactionResult.Success.value carries the body's computed return")
     }
@@ -107,10 +107,11 @@ class ActionGenericReturnValueTest {
     @Test
     fun actionReturningStringValueIsCarriedThroughSuccess() {
         val v = ApiVault()
-        val r = v action {
-            s mutate "hello"
-            "computed: ${s.value}"
-        }
+        val r =
+            v action {
+                s mutate "hello"
+                "computed: ${s.value}"
+            }
         assertIs<TransactionResult.Success<String>>(r)
         assertEquals("computed: hello", r.value)
     }
@@ -126,11 +127,16 @@ class ActionGenericReturnValueTest {
     @Test
     fun actionReturningDataClassPipesItOut() {
         val v = ApiVault()
-        data class Receipt(val id: String, val balance: Int)
-        val r = v action {
-            n mutate 100
-            Receipt(id = "r1", balance = n.value)
-        }
+
+        data class Receipt(
+            val id: String,
+            val balance: Int,
+        )
+        val r =
+            v action {
+                n mutate 100
+                Receipt(id = "r1", balance = n.value)
+            }
         assertIs<TransactionResult.Success<Receipt>>(r)
         assertEquals(Receipt("r1", 100), r.value)
     }
@@ -138,17 +144,17 @@ class ActionGenericReturnValueTest {
     @Test
     fun erroringActionReturnsErrorEvenWithGenericReturnType() {
         val v = ApiVault()
-        val r: TransactionResult<Int> = v action {
-            n mutate 1
-            error("rolled back")
-        }
+        val r: TransactionResult<Int> =
+            v action {
+                n mutate 1
+                error("rolled back")
+            }
         assertIs<TransactionResult.Error>(r)
         assertEquals("rolled back", r.exception.message)
     }
 }
 
 class StateDistinctOptInTest {
-
     @Test
     fun distinctStateDoesNotFireObserverOnSameValueCommit() {
         val v = ApiVault()
@@ -183,7 +189,6 @@ class StateDistinctOptInTest {
 }
 
 class TransactionModifiedStatesTest {
-
     @Test
     fun modifiedStatesReflectsPendingWriteKeysOnOwnerThread() {
         val v = ApiVault()

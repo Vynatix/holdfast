@@ -13,7 +13,6 @@ private class InspectionVault : Store<InspectionVault>() {
 }
 
 class RuntimeStateInspectionTest {
-
     @Test
     fun getStateByNameReturnsRegisteredStateInstance() {
         val v = InspectionVault()

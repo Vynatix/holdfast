@@ -15,7 +15,10 @@ import com.vynatix.holdfast.testing.StoreHandle
 internal class HandleRegistry {
     private val entries: MutableList<Entry<*>> = mutableListOf()
 
-    fun <V : Store<V>> getOrCreate(store: V, capture: Capture): StoreHandle<V> {
+    fun <V : Store<V>> getOrCreate(
+        store: V,
+        capture: Capture,
+    ): StoreHandle<V> {
         val existing = entries.firstOrNull { it.store === store }
         if (existing != null) {
             @Suppress("UNCHECKED_CAST")
@@ -37,5 +40,8 @@ internal class HandleRegistry {
         entries.clear()
     }
 
-    private class Entry<V : Store<V>>(val store: V, val handle: StoreHandle<V>)
+    private class Entry<V : Store<V>>(
+        val store: V,
+        val handle: StoreHandle<V>,
+    )
 }

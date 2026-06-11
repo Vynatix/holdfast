@@ -82,9 +82,10 @@ internal fun List<StoreEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher
  */
 internal fun List<StoreEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
     if (matcher.predicates.isEmpty()) return
-    val matched: List<Pair<EventPredicate, StoreEvent>> = matcher.predicates.flatMap { p ->
-        filter { e -> p.matches(e) }.map { e -> p to e }
-    }
+    val matched: List<Pair<EventPredicate, StoreEvent>> =
+        matcher.predicates.flatMap { p ->
+            filter { e -> p.matches(e) }.map { e -> p to e }
+        }
     if (matched.isNotEmpty()) {
         throw AssertionError(buildShouldNotFireMessage(matched))
     }
@@ -94,7 +95,10 @@ internal fun List<StoreEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
 // Helpers
 // --------------------------------------------------------------------------
 
-private fun List<StoreEvent>.matchExactRunAt(anchor: Int, matcher: TimelineMatcher<*>): AssertionError? {
+private fun List<StoreEvent>.matchExactRunAt(
+    anchor: Int,
+    matcher: TimelineMatcher<*>,
+): AssertionError? {
     matcher.predicates.forEachIndexed { i, p ->
         val targetIdx = anchor + i
         val failure = exactRunFailureAt(targetIdx, i, p)
@@ -103,38 +107,47 @@ private fun List<StoreEvent>.matchExactRunAt(anchor: Int, matcher: TimelineMatch
     return null
 }
 
-private fun List<StoreEvent>.exactRunFailureAt(targetIdx: Int, predicateIdx: Int, p: EventPredicate): AssertionError? = when {
-    targetIdx >= size -> AssertionError(
-        "shouldFireInExactOrder: ran out of events at predicate $predicateIdx (${p.description}) — " +
-            "expected event at index $targetIdx but timeline size is $size",
-    )
-    !p.matches(this[targetIdx]) -> AssertionError(
-        "shouldFireInExactOrder: at index $targetIdx, expected ${p.description} " +
-            "but got ${this[targetIdx]::class.simpleName}",
-    )
-    else -> null
-}
-
-private fun buildShouldFireMessage(unsatisfied: List<EventPredicate>): String = buildString {
-    append("shouldFire: ")
-    append(unsatisfied.size)
-    append(" predicate(s) did not match any event:")
-    unsatisfied.forEach { p ->
-        append('\n')
-        append("  - ")
-        append(p.description)
+private fun List<StoreEvent>.exactRunFailureAt(
+    targetIdx: Int,
+    predicateIdx: Int,
+    p: EventPredicate,
+): AssertionError? =
+    when {
+        targetIdx >= size ->
+            AssertionError(
+                "shouldFireInExactOrder: ran out of events at predicate $predicateIdx (${p.description}) — " +
+                    "expected event at index $targetIdx but timeline size is $size",
+            )
+        !p.matches(this[targetIdx]) ->
+            AssertionError(
+                "shouldFireInExactOrder: at index $targetIdx, expected ${p.description} " +
+                    "but got ${this[targetIdx]::class.simpleName}",
+            )
+        else -> null
     }
-}
 
-private fun buildShouldNotFireMessage(matched: List<Pair<EventPredicate, StoreEvent>>): String = buildString {
-    append("shouldNotFire: ")
-    append(matched.size)
-    append(" predicate(s) unexpectedly matched:")
-    matched.forEach { (p, e) ->
-        append('\n')
-        append("  - ")
-        append(p.description)
-        append(" matched ")
-        append(e::class.simpleName)
+private fun buildShouldFireMessage(unsatisfied: List<EventPredicate>): String =
+    buildString {
+        append("shouldFire: ")
+        append(unsatisfied.size)
+        append(" predicate(s) did not match any event:")
+        unsatisfied.forEach { p ->
+            append('\n')
+            append("  - ")
+            append(p.description)
+        }
     }
-}
+
+private fun buildShouldNotFireMessage(matched: List<Pair<EventPredicate, StoreEvent>>): String =
+    buildString {
+        append("shouldNotFire: ")
+        append(matched.size)
+        append(" predicate(s) unexpectedly matched:")
+        matched.forEach { (p, e) ->
+            append('\n')
+            append("  - ")
+            append(p.description)
+            append(" matched ")
+            append(e::class.simpleName)
+        }
+    }

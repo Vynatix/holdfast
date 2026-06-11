@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.bridge
 
-import com.vynatix.holdfast.TransactionException
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionException
 import com.vynatix.holdfast.testing.matcher.shouldBeError
 import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
@@ -15,7 +15,6 @@ private class CounterVault : Store<CounterVault>() {
 }
 
 class FailingBridgeTest {
-
     @Test
     fun publishModeAttachSucceedsButPublishThrows() {
         val cause = IllegalStateException("publish boom")
@@ -60,24 +59,26 @@ class FailingBridgeTest {
     }
 
     @Test
-    fun integrationPublishFailureSurfacesAsTransactionError() = vaultTest {
-        val cause = IllegalStateException("kv unreachable")
-        val bridge = FailingBridge<Int>(initial = 0, failOn = FailingBridge.FailureMode.Publish, cause = cause)
+    fun integrationPublishFailureSurfacesAsTransactionError() =
+        vaultTest {
+            val cause = IllegalStateException("kv unreachable")
+            val bridge = FailingBridge<Int>(initial = 0, failOn = FailingBridge.FailureMode.Publish, cause = cause)
 
-        val ctr = track(
-            CounterVault().also { v ->
-                v { count bridge bridge }
-            },
-        )
+            val ctr =
+                track(
+                    CounterVault().also { v ->
+                        v { count bridge bridge }
+                    },
+                )
 
-        // The bridge throws during commit-phase publish; store wraps the
-        // throw in TransactionException ("Commit failed") and surfaces it as
-        // a TransactionResult.Error. The transaction status is Failed (not
-        // RolledBack — it's a commit-time error, past the body-throw rollback
-        // path), so we use shouldBeError rather than shouldRollbackWith.
-        val result = ctr.action { count mutate 1 }
-        val err = result.shouldBeError<TransactionException>()
-        // The original publish failure is the cause of the wrapping exception.
-        assertSame(cause, err.exception.cause)
-    }
+            // The bridge throws during commit-phase publish; store wraps the
+            // throw in TransactionException ("Commit failed") and surfaces it as
+            // a TransactionResult.Error. The transaction status is Failed (not
+            // RolledBack — it's a commit-time error, past the body-throw rollback
+            // path), so we use shouldBeError rather than shouldRollbackWith.
+            val result = ctr.action { count mutate 1 }
+            val err = result.shouldBeError<TransactionException>()
+            // The original publish failure is the cause of the wrapping exception.
+            assertSame(cause, err.exception.cause)
+        }
 }

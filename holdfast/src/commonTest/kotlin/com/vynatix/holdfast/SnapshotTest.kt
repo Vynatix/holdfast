@@ -21,7 +21,6 @@ private class CryptoVault : Store<CryptoVault>() {
 }
 
 class SnapshotCaptureTest {
-
     @Test fun snapshotContainsCurrentRawValues() {
         val v = SnapshotVault()
         v action {
@@ -53,7 +52,6 @@ class SnapshotCaptureTest {
 }
 
 class SnapshotRestoreTest {
-
     @Test fun restoreAppliesAllValuesAtomically() {
         val v = SnapshotVault()
         v action {

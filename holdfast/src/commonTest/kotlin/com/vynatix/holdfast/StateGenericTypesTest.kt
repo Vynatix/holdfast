@@ -7,15 +7,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-private data class Profile(val name: String, val age: Int)
+private data class Profile(
+    val name: String,
+    val age: Int,
+)
 
 private sealed interface Status {
     data object Active : Status
+
     data object Inactive : Status
-    data class Suspended(val reason: String) : Status
+
+    data class Suspended(
+        val reason: String,
+    ) : Status
 }
 
-private data class Wrapped<T>(val value: T?)
+private data class Wrapped<T>(
+    val value: T?,
+)
 
 private class GenericTypesVault : Store<GenericTypesVault>() {
     val text by state { "hello" }
@@ -29,7 +38,6 @@ private class GenericTypesVault : Store<GenericTypesVault>() {
 }
 
 class StateGenericTypesTest {
-
     @Test
     fun stateOfStringPreservesValueIdentityAndContent() {
         val v = GenericTypesVault()

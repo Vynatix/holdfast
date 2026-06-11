@@ -4,9 +4,9 @@ import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.suspendAction
 import com.vynatix.holdfast.testing.bridge.BridgeView
 import com.vynatix.holdfast.testing.bridge.LatchedBridge
@@ -41,8 +41,10 @@ import kotlin.reflect.KProperty1
  * known limits (commit-time errors after the body returns, user middlewares
  * not auto-wrapped, suspendAction not running middleware in 1.1).
  */
-class StoreHandle<V : Store<V>> internal constructor(val store: V, val captureMode: Capture) {
-
+class StoreHandle<V : Store<V>> internal constructor(
+    val store: V,
+    val captureMode: Capture,
+) {
     private val handleLock = SynchronizedObject()
     private val pendingErrorList: MutableList<TransactionResult.Error> = mutableListOf()
 
@@ -97,10 +99,11 @@ class StoreHandle<V : Store<V>> internal constructor(val store: V, val captureMo
         // calls land here via HandleRegistry.getOrCreate returning the same
         // handle, so this init runs only once per store — but defensive in
         // case future entry points cycle here).
-        val wrappable = store.properties.values
-            .mapNotNull { state -> (state as? MutableState<Any>)?.let { state to it } }
-            .mapNotNull { (state, mutable) -> mutable.bridge?.let { Triple(state, mutable, it) } }
-            .filter { (_, _, attached) -> attached !is RecordingBridgeWrapper<*> }
+        val wrappable =
+            store.properties.values
+                .mapNotNull { state -> (state as? MutableState<Any>)?.let { state to it } }
+                .mapNotNull { (state, mutable) -> mutable.bridge?.let { Triple(state, mutable, it) } }
+                .filter { (_, _, attached) -> attached !is RecordingBridgeWrapper<*> }
         for ((state, mutable, attached) in wrappable) {
             val wrapper = RecordingBridgeWrapper(state = state, delegate = attached, recorder = recorder)
             bridgeWrappers[state] = wrapper
@@ -206,25 +209,29 @@ class StoreHandle<V : Store<V>> internal constructor(val store: V, val captureMo
         // attached after track(v). Probe the MutableState.bridge directly and
         // try to construct a view from a known test-bridge type.
         @Suppress("UNCHECKED_CAST")
-        val mutable = (state as? MutableState<Any>)
-            ?: error("bridge(${prop.name}): state was not created by this store — cannot inspect its bridge")
-        val attached = mutable.bridge ?: error(
-            "bridge(${prop.name}): no bridge attached. Attach via `state bridge bridge` before calling.",
-        )
+        val mutable =
+            (state as? MutableState<Any>)
+                ?: error("bridge(${prop.name}): state was not created by this store — cannot inspect its bridge")
+        val attached =
+            mutable.bridge ?: error(
+                "bridge(${prop.name}): no bridge attached. Attach via `state bridge bridge` before calling.",
+            )
         return adaptBridge(attached)
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun adaptBridge(attached: Bridge<*>): BridgeView<*> = when (attached) {
-        is RecordingBridge<*> -> BridgeView(BridgeView.RecordingSource(attached as RecordingBridge<Any>))
-        is LatchedBridge<*> -> BridgeView(BridgeView.LatchedSource(attached as LatchedBridge<Any>))
-        is RecordingBridgeWrapper<*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper<Any>))
-        else -> error(
-            "bridge(...): underlying bridge is a ${attached::class.simpleName} which does not " +
-                "support introspection. Attach it BEFORE track(v) so the recorder can wrap it, " +
-                "or use a RecordingBridge / LatchedBridge in tests.",
-        )
-    }
+    private fun adaptBridge(attached: Bridge<*>): BridgeView<*> =
+        when (attached) {
+            is RecordingBridge<*> -> BridgeView(BridgeView.RecordingSource(attached as RecordingBridge<Any>))
+            is LatchedBridge<*> -> BridgeView(BridgeView.LatchedSource(attached as LatchedBridge<Any>))
+            is RecordingBridgeWrapper<*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper<Any>))
+            else ->
+                error(
+                    "bridge(...): underlying bridge is a ${attached::class.simpleName} which does not " +
+                        "support introspection. Attach it BEFORE track(v) so the recorder can wrap it, " +
+                        "or use a RecordingBridge / LatchedBridge in tests.",
+                )
+        }
 
     /**
      * Filter of [timeline] for [MiddlewareEvent]s whose [MiddlewareEvent.middleware]
@@ -238,18 +245,20 @@ class StoreHandle<V : Store<V>> internal constructor(val store: V, val captureMo
      * any user-class [M] this view returns an empty list. The API is in place
      * so v2 can populate it without ABI churn.
      */
-    inline fun <reified M : Middleware<V>> middlewareEventsOf(): List<MiddlewareEvent> = timeline
-        .filterIsInstance<MiddlewareEvent>()
-        .filter { it.middleware is M }
+    inline fun <reified M : Middleware<V>> middlewareEventsOf(): List<MiddlewareEvent> =
+        timeline
+            .filterIsInstance<MiddlewareEvent>()
+            .filter { it.middleware is M }
 
     /**
      * Filter of [timeline] for [MiddlewareEvent]s whose [MiddlewareEvent.middleware]
      * IS [instance] (referential equality). See [middlewareEventsOf] for the v1
      * caveat — for any non-recorder instance this returns empty.
      */
-    fun <M : Middleware<V>> middlewareEventsOf(instance: M): List<MiddlewareEvent> = timeline
-        .filterIsInstance<MiddlewareEvent>()
-        .filter { it.middleware === instance }
+    fun <M : Middleware<V>> middlewareEventsOf(instance: M): List<MiddlewareEvent> =
+        timeline
+            .filterIsInstance<MiddlewareEvent>()
+            .filter { it.middleware === instance }
 
     /**
      * Run [block] with the tracked store as receiver and return its value. The

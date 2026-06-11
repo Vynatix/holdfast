@@ -29,7 +29,10 @@ import com.vynatix.holdfast.Transformer
  * Combine with [com.vynatix.holdfast.bridge.KvBridge] for at-rest encryption: the
  * persisted bytes are ciphertext.
  */
-class EncryptingTransformer(private val cipher: Cipher) : Transformer<String> {
+class EncryptingTransformer(
+    private val cipher: Cipher,
+) : Transformer<String> {
     override fun set(value: String): String = cipher.encrypt(value)
+
     override fun get(value: String): String = cipher.decrypt(value)
 }

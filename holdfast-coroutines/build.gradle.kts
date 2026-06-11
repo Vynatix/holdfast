@@ -63,18 +63,28 @@ kotlin {
     }
 }
 
+// ktlint 1.7.x does not yet parse Kotlin 2.2+ `context(name: Type)` parameters.
+// Exclude files that use the syntax until ktlint catches up (same as :holdfast-hallmark).
+ktlint {
+    filter {
+        exclude("**/StateFlows.kt")
+        exclude("**/SuspendingBridge.kt")
+    }
+}
+
 // Tests use `runBlocking`, which doesn't exist on wasmJs; coverage runs on
 // android/jvm/ios. Main code compiles cleanly for wasmJs so :shared/wasmJs
 // can resolve this module.
-val wasmJsTestTasks = setOf(
-    "compileTestKotlinWasmJs",
-    "compileTestDevelopmentExecutableKotlinWasmJs",
-    "compileTestProductionExecutableKotlinWasmJs",
-    "wasmJsTest",
-    "wasmJsBrowserTest",
-    "wasmJsBrowserDevelopmentTest",
-    "wasmJsBrowserProductionTest",
-)
+val wasmJsTestTasks =
+    setOf(
+        "compileTestKotlinWasmJs",
+        "compileTestDevelopmentExecutableKotlinWasmJs",
+        "compileTestProductionExecutableKotlinWasmJs",
+        "wasmJsTest",
+        "wasmJsBrowserTest",
+        "wasmJsBrowserDevelopmentTest",
+        "wasmJsBrowserProductionTest",
+    )
 tasks.matching { it.name in wasmJsTestTasks }.configureEach {
     enabled = false
 }

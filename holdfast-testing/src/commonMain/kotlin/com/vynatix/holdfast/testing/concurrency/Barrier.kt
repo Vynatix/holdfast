@@ -28,7 +28,10 @@ import kotlin.time.Duration.Companion.seconds
  * the offending coroutine with [IllegalStateException]. The barrier itself is
  * not reset and remains in its final triggered state.
  */
-class Barrier internal constructor(private val parties: Int, private val timeout: Duration) {
+class Barrier internal constructor(
+    private val parties: Int,
+    private val timeout: Duration,
+) {
     init {
         require(parties > 0) { "parties must be > 0, was $parties" }
     }
@@ -81,7 +84,10 @@ class Barrier internal constructor(private val parties: Int, private val timeout
  * @param parties number of [Barrier.arrive] calls required to trigger.
  * @param timeout maximum total wait per call to [Barrier.arrive] / [Barrier.await].
  */
-fun StoreTestScope.barrier(parties: Int, timeout: Duration = 5.seconds): Barrier {
+fun StoreTestScope.barrier(
+    parties: Int,
+    timeout: Duration = 5.seconds,
+): Barrier {
     val b = Barrier(parties, timeout)
     registerBarrier(b)
     return b

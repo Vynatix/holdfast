@@ -2,10 +2,10 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -169,13 +169,14 @@ private suspend fun <R> acquireAndRun(
             val root = Transaction.createForExternal(id, ownerThreadId)
             v.internalSetActiveTransaction(root)
             v.suspendingOwner = ownerKey
-            rootsAcquired += RootEntry(
-                store = v,
-                txn = root,
-                priorActive = priorActive,
-                priorOwner = priorOwner,
-                wasNewlyAcquired = true,
-            )
+            rootsAcquired +=
+                RootEntry(
+                    store = v,
+                    txn = root,
+                    priorActive = priorActive,
+                    priorOwner = priorOwner,
+                    wasNewlyAcquired = true,
+                )
             try {
                 acquireAndRun(
                     sorted = sorted,
@@ -203,18 +204,20 @@ private suspend fun <R> acquireAndRun(
         // Adopted from outer frame: do not acquire the mutex, do not change
         // activeTransaction. Mutates inside the body stage into the outer's
         // root via the existing activeTransaction reference (savepoint reuse).
-        val adoptedRoot = v.activeTransaction
-            ?: error(
-                "Internal: suspendAtomic frame claims to hold store ${v::class.simpleName}, " +
-                    "but its activeTransaction is null. Did the outer frame abort without unwinding?",
+        val adoptedRoot =
+            v.activeTransaction
+                ?: error(
+                    "Internal: suspendAtomic frame claims to hold store ${v::class.simpleName}, " +
+                        "but its activeTransaction is null. Did the outer frame abort without unwinding?",
+                )
+        rootsAcquired +=
+            RootEntry(
+                store = v,
+                txn = adoptedRoot,
+                priorActive = adoptedRoot,
+                priorOwner = v.suspendingOwner,
+                wasNewlyAcquired = false,
             )
-        rootsAcquired += RootEntry(
-            store = v,
-            txn = adoptedRoot,
-            priorActive = adoptedRoot,
-            priorOwner = v.suspendingOwner,
-            wasNewlyAcquired = false,
-        )
         acquireAndRun(
             sorted = sorted,
             newlyHeldSet = newlyHeldSet,
@@ -244,37 +247,39 @@ private suspend fun <R> executeBody(
     // for the TransactionResult's `transaction` handle — gives the user a
     // stable terminal-state reference. If everything was adopted (a trivial
     // nested case with no new vaults), fall back to the last adopted root.
-    val resultTxn: Transaction = roots.lastOrNull { it.wasNewlyAcquired }?.txn
-        ?: roots.last().txn
+    val resultTxn: Transaction =
+        roots.lastOrNull { it.wasNewlyAcquired }?.txn
+            ?: roots.last().txn
 
-    val value: R = try {
-        body()
-    } catch (ce: CancellationException) {
-        withContext(NonCancellable) {
-            // Reverse lock-order rollback so vaults un-stage in the inverse
-            // of how they were locked. Adopted entries are skipped — their
-            // rollback is the outer frame's job.
-            for (i in roots.indices.reversed()) {
-                val entry = roots[i]
-                if (entry.wasNewlyAcquired) {
-                    runCatching { entry.txn.rollback() }
-                    entry.store.internalDrainPostCommitTasks()
+    val value: R =
+        try {
+            body()
+        } catch (ce: CancellationException) {
+            withContext(NonCancellable) {
+                // Reverse lock-order rollback so vaults un-stage in the inverse
+                // of how they were locked. Adopted entries are skipped — their
+                // rollback is the outer frame's job.
+                for (i in roots.indices.reversed()) {
+                    val entry = roots[i]
+                    if (entry.wasNewlyAcquired) {
+                        runCatching { entry.txn.rollback() }
+                        entry.store.internalDrainPostCommitTasks()
+                    }
                 }
             }
-        }
-        throw ce
-    } catch (e: Throwable) {
-        withContext(NonCancellable) {
-            for (i in roots.indices.reversed()) {
-                val entry = roots[i]
-                if (entry.wasNewlyAcquired) {
-                    runCatching { entry.txn.rollback() }
-                    entry.store.internalDrainPostCommitTasks()
+            throw ce
+        } catch (e: Throwable) {
+            withContext(NonCancellable) {
+                for (i in roots.indices.reversed()) {
+                    val entry = roots[i]
+                    if (entry.wasNewlyAcquired) {
+                        runCatching { entry.txn.rollback() }
+                        entry.store.internalDrainPostCommitTasks()
+                    }
                 }
             }
+            return TransactionResult.Error(e, resultTxn)
         }
-        return TransactionResult.Error(e, resultTxn)
-    }
 
     // Body returned. Commit each newly-acquired store's root in lock order
     // under NonCancellable. Per-store sequential observer / bridge / event
@@ -333,7 +338,9 @@ private class RootEntry(
  * suspendAtomic call in this coroutine progresses at a time, so the
  * `heldVaults` set needs no extra synchronization.
  */
-internal class SuspendAtomicFrame(val owner: Any) : AbstractCoroutineContextElement(Key) {
+internal class SuspendAtomicFrame(
+    val owner: Any,
+) : AbstractCoroutineContextElement(Key) {
     val heldVaults: MutableSet<Store<*>> = mutableSetOf()
 
     companion object Key : CoroutineContext.Key<SuspendAtomicFrame>

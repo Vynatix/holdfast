@@ -44,11 +44,12 @@ internal class OpenTransactionRegistry {
      * is faithful to the suspending API.
      */
     fun rollbackAll() {
-        val snapshot = synchronized(lock) {
-            val copy = openTransactions.toList()
-            openTransactions.clear()
-            copy
-        }
+        val snapshot =
+            synchronized(lock) {
+                val copy = openTransactions.toList()
+                openTransactions.clear()
+                copy
+            }
         for (open in snapshot) {
             if (!open.isClosed) {
                 runCatching { open.rollbackSilentlyForTearDown() }

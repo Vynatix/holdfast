@@ -17,8 +17,11 @@ import kotlin.time.Clock
  * Both [commit] and [rollback] are idempotent on a non-Active transaction
  * (no-op).
  */
-class Transaction internal constructor(val id: String, internal val parent: Transaction?, internal val ownerThreadId: Long) {
-
+class Transaction internal constructor(
+    val id: String,
+    internal val parent: Transaction?,
+    internal val ownerThreadId: Long,
+) {
     companion object {
         /**
          * Public-but-opt-in factory for `:holdfast-coroutines.suspendAction`. The
@@ -27,7 +30,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
          * one (because they implement their own action variant) opt in here.
          */
         @StoreInternalApi
-        fun createForExternal(id: String, ownerThreadId: Long): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
+        fun createForExternal(
+            id: String,
+            ownerThreadId: Long,
+        ): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
     }
 
     private val statusLock = StoreLock()
@@ -85,7 +91,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * the difference is critical — restoring already-encrypted ciphertext via
      * `mutate` would re-encrypt it.
      */
-    internal fun stagePendingRaw(state: MutableState<*>, rawValue: Any) {
+    internal fun stagePendingRaw(
+        state: MutableState<*>,
+        rawValue: Any,
+    ) {
         pendingWrites[state] = rawValue
     }
 
@@ -100,7 +109,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * are undefined — same contract as [pendingWrites].
      */
     @StoreInternalApi
-    fun stagePendingEvent(channel: MutableSharedFlow<*>, event: Any) {
+    fun stagePendingEvent(
+        channel: MutableSharedFlow<*>,
+        event: Any,
+    ) {
         pendingLock.withLock {
             pendingEvents += channel to event
         }
@@ -114,7 +126,11 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      */
     val modifiedStates: Set<State<*>>
         get() {
-            check(ownerThreadId == com.vynatix.holdfast.platform.currentThreadId()) {
+            check(
+                ownerThreadId ==
+                    com.vynatix.holdfast.platform
+                        .currentThreadId(),
+            ) {
                 "modifiedStates may only be read on the transaction's owner thread"
             }
             return pendingLock.withLock { pendingWrites.keys.toSet() }
@@ -193,7 +209,10 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
      * snapshot list is owned by the caller and reflects insertion order.
      */
     @StoreInternalApi
-    fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit, drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?) {
+    fun commitDispatching(
+        applyTopLevel: (MutableState<*>, Any) -> Unit,
+        drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?,
+    ) {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
 
@@ -297,16 +316,22 @@ class Transaction internal constructor(val id: String, internal val parent: Tran
         }
     }
 
-    private fun isValidStatusTransition(from: TransactionStatus, to: TransactionStatus): Boolean = when (from) {
-        TransactionStatus.Active -> to in setOf(
-            TransactionStatus.Committed,
-            TransactionStatus.RolledBack,
-            TransactionStatus.Failed,
-        )
-        TransactionStatus.Committed -> false
-        TransactionStatus.RolledBack -> false
-        TransactionStatus.Failed -> false
-    }
+    private fun isValidStatusTransition(
+        from: TransactionStatus,
+        to: TransactionStatus,
+    ): Boolean =
+        when (from) {
+            TransactionStatus.Active ->
+                to in
+                    setOf(
+                        TransactionStatus.Committed,
+                        TransactionStatus.RolledBack,
+                        TransactionStatus.Failed,
+                    )
+            TransactionStatus.Committed -> false
+            TransactionStatus.RolledBack -> false
+            TransactionStatus.Failed -> false
+        }
 }
 
 /** Lifecycle status of a [Transaction]. Active is the only non-terminal state. */
@@ -318,7 +343,10 @@ enum class TransactionStatus {
 }
 
 /** Thrown by [Transaction] when commit/rollback fail or status transitions are invalid. */
-class TransactionException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class TransactionException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
 
 /**
  * The outcome of a [Store.action]. Either [Success] (the body returned without
@@ -331,6 +359,13 @@ class TransactionException(message: String, cause: Throwable? = null) : Exceptio
  * `TransactionResult<Nothing>`, making it the bottom type that fits any `R`.
  */
 sealed interface TransactionResult<out R> {
-    data class Success<R>(val transaction: Transaction, val value: R) : TransactionResult<R>
-    data class Error(val exception: Throwable, val transaction: Transaction) : TransactionResult<Nothing>
+    data class Success<R>(
+        val transaction: Transaction,
+        val value: R,
+    ) : TransactionResult<R>
+
+    data class Error(
+        val exception: Throwable,
+        val transaction: Transaction,
+    ) : TransactionResult<Nothing>
 }

@@ -13,8 +13,14 @@ package com.vynatix.holdfast.bridge
  */
 interface KvStore {
     fun get(key: String): String?
-    fun put(key: String, value: String)
+
+    fun put(
+        key: String,
+        value: String,
+    )
+
     fun remove(key: String)
+
     fun snapshot(): Map<String, String>
 }
 
@@ -25,12 +31,19 @@ interface KvStore {
  */
 class InMemoryKvStore : KvStore {
     private val map = mutableMapOf<String, String>()
+
     override fun get(key: String): String? = map[key]
-    override fun put(key: String, value: String) {
+
+    override fun put(
+        key: String,
+        value: String,
+    ) {
         map[key] = value
     }
+
     override fun remove(key: String) {
         map.remove(key)
     }
+
     override fun snapshot(): Map<String, String> = map.toMap()
 }

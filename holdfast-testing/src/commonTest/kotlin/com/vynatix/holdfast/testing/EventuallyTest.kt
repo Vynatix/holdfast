@@ -9,35 +9,38 @@ import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
 
 class EventuallyTest {
-
     @Test
-    fun succeedsWhenAssertionEventuallyPasses() = vaultTest {
-        var attempts = 0
-        eventually(within = 500.milliseconds, every = 10.milliseconds) {
-            attempts++
-            assertTrue(attempts >= 5, "still warming up: $attempts")
-        }
-        assertTrue(attempts >= 5)
-    }
-
-    @Test
-    fun failsAfterTimeoutWithLastErrorMessage() = vaultTest {
-        val err = assertFailsWith<AssertionError> {
-            eventually(within = 50.milliseconds, every = 5.milliseconds) {
-                fail("never passes")
+    fun succeedsWhenAssertionEventuallyPasses() =
+        vaultTest {
+            var attempts = 0
+            eventually(within = 500.milliseconds, every = 10.milliseconds) {
+                attempts++
+                assertTrue(attempts >= 5, "still warming up: $attempts")
             }
+            assertTrue(attempts >= 5)
         }
-        val msg = err.message.orEmpty()
-        assertTrue(msg.startsWith("eventually: gave up after 50ms"), "unexpected: $msg")
-        assertTrue(msg.contains("never passes"), "missing inner cause: $msg")
-    }
 
     @Test
-    fun returnsImmediatelyOnFirstSuccess() = vaultTest {
-        var attempts = 0
-        eventually(within = 1000.milliseconds, every = 100.milliseconds) {
-            attempts++
+    fun failsAfterTimeoutWithLastErrorMessage() =
+        vaultTest {
+            val err =
+                assertFailsWith<AssertionError> {
+                    eventually(within = 50.milliseconds, every = 5.milliseconds) {
+                        fail("never passes")
+                    }
+                }
+            val msg = err.message.orEmpty()
+            assertTrue(msg.startsWith("eventually: gave up after 50ms"), "unexpected: $msg")
+            assertTrue(msg.contains("never passes"), "missing inner cause: $msg")
         }
-        assertEquals(1, attempts)
-    }
+
+    @Test
+    fun returnsImmediatelyOnFirstSuccess() =
+        vaultTest {
+            var attempts = 0
+            eventually(within = 1000.milliseconds, every = 100.milliseconds) {
+                attempts++
+            }
+            assertEquals(1, attempts)
+        }
 }

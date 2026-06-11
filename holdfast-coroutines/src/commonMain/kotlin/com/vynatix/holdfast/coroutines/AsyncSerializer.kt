@@ -3,8 +3,8 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.MutableState
-import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.Transaction
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,7 +22,8 @@ internal class MutexSerializer : Store.AsyncSerializer {
 
     override fun blockingAcquire() {
         while (!mutex.tryLock(SPIN_OWNER)) {
-            com.vynatix.holdfast.platform.threadYield()
+            com.vynatix.holdfast.platform
+                .threadYield()
         }
     }
 

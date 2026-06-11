@@ -17,7 +17,6 @@ private class FileVault : Store<FileVault>() {
  * tests run in parallel.
  */
 class FileSystemKvStoreTest {
-
     private fun newKvStore(suffix: String): FileSystemKvStore = FileSystemKvStore(tempRoot("store-fs-$suffix-${randomDirSuffix()}"))
 
     @Test fun putThenGetReturnsTheValue() {

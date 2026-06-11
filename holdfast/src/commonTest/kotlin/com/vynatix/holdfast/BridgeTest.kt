@@ -22,6 +22,7 @@ private class TransformingBridgeVault : Store<TransformingBridgeVault>() {
 
 private class IntDoublerTransformer : Transformer<Int> {
     override fun set(value: Int): Int = value * 2
+
     override fun get(value: Int): Int = value
 }
 
@@ -46,23 +47,31 @@ private class RecordingBridge<T : Any> : Bridge<T> {
     }
 }
 
-private class ThrowingPublishBridge<T : Any>(private val message: String = "publish refused") : Bridge<T> {
+private class ThrowingPublishBridge<T : Any>(
+    private val message: String = "publish refused",
+) : Bridge<T> {
     val callCount = atomic(0)
+
     override fun observe(observer: (T) -> Unit): Disposable = Disposable { /* noop */ }
+
     override fun publish(value: T): Boolean {
         callCount.incrementAndGet()
         throw RuntimeException(message)
     }
 }
 
-private class ReplayingBridge<T : Any>(private val initial: T) : Bridge<T> {
+private class ReplayingBridge<T : Any>(
+    private val initial: T,
+) : Bridge<T> {
     val initialDelivered = atomic(0)
+
     override fun observe(observer: (T) -> Unit): Disposable {
         // Many bridges replay the current value to new subscribers.
         observer(initial)
         initialDelivered.incrementAndGet()
         return Disposable { /* noop */ }
     }
+
     override fun publish(value: T): Boolean = true
 }
 
@@ -88,7 +97,6 @@ private class AsyncBridge<T : Any> : Bridge<T> {
 }
 
 class BridgeRollbackIsolationTest {
-
     @Test
     fun rolledBackTransactionDoesNotPublishToAttachedBridge() {
         val v = BridgeTestVault()
@@ -112,7 +120,6 @@ class BridgeRollbackIsolationTest {
 }
 
 class BridgeLifecycleTest {
-
     @Test
     fun attachingBridgeRunsItsObserveImmediatelyAndConnectsListener() {
         val v = BridgeTestVault()
@@ -177,31 +184,32 @@ class BridgeLifecycleTest {
     }
 
     @Test
-    fun bridgeAttachmentIsThreadSafeUnderConcurrentSetCalls() = runBlocking {
-        val v = BridgeTestVault()
-        val workers = 8
-        val opsPerWorker = 50
+    fun bridgeAttachmentIsThreadSafeUnderConcurrentSetCalls() =
+        runBlocking {
+            val v = BridgeTestVault()
+            val workers = 8
+            val opsPerWorker = 50
 
-        val jobs = List(workers) {
-            async(Dispatchers.Default) {
-                repeat(opsPerWorker) {
-                    val bridge = RecordingBridge<Int>()
-                    v { count bridge bridge }
+            val jobs =
+                List(workers) {
+                    async(Dispatchers.Default) {
+                        repeat(opsPerWorker) {
+                            val bridge = RecordingBridge<Int>()
+                            v { count bridge bridge }
+                        }
+                    }
                 }
-            }
-        }
-        jobs.awaitAll()
+            jobs.awaitAll()
 
-        // Final state: store is consistent; one final attach + mutate works.
-        val final = RecordingBridge<Int>()
-        v { count bridge final }
-        v action { count mutate 999 }
-        assertEquals(listOf(999), final.published)
-    }
+            // Final state: store is consistent; one final attach + mutate works.
+            val final = RecordingBridge<Int>()
+            v { count bridge final }
+            v action { count mutate 999 }
+            assertEquals(listOf(999), final.published)
+        }
 }
 
 class BridgeFlowTest {
-
     @Test
     fun incomingBridgeValueAppliesToStateAndFiresObserversWithoutRePublishing() {
         val v = BridgeTestVault()
@@ -269,7 +277,6 @@ class BridgeFlowTest {
 }
 
 class BridgeErrorPathTest {
-
     @Test
     fun bridgePublishThrowingDoesNotCorruptStateOrLeakActiveTransaction() {
         val v = BridgeTestVault()
@@ -299,56 +306,58 @@ class BridgeErrorPathTest {
 }
 
 class AsyncBridgeTest {
+    @Test
+    fun bridgeDeliveringIncomingValuesViaCoroutineUpdatesStateAndFiresObservers() =
+        runBlocking {
+            val v = BridgeTestVault()
+            val bridge = AsyncBridge<Int>()
+            v { count bridge bridge }
+
+            val seen = mutableListOf<Int>()
+            val d = v { count effect { seen.add(this) } }
+            seen.clear()
+
+            bridge.deliverFromCoroutine(99)
+            assertEquals(99, v.count.value)
+            assertEquals(listOf(99), seen, "effect must fire for the async-delivered value")
+            d.dispose()
+        }
 
     @Test
-    fun bridgeDeliveringIncomingValuesViaCoroutineUpdatesStateAndFiresObservers() = runBlocking {
-        val v = BridgeTestVault()
-        val bridge = AsyncBridge<Int>()
-        v { count bridge bridge }
+    fun bridgePublishingFromAsyncContextIntoStatePropagatesValue() =
+        runBlocking {
+            val v = BridgeTestVault()
+            val bridge = AsyncBridge<Int>()
+            v { count bridge bridge }
+            bridge.published.clear()
 
-        val seen = mutableListOf<Int>()
-        val d = v { count effect { seen.add(this) } }
-        seen.clear()
+            // Mutate from an off-main coroutine; commit fires bridge.publish.
+            async(Dispatchers.Default) {
+                v action { count mutate 33 }
+            }.await()
 
-        bridge.deliverFromCoroutine(99)
-        assertEquals(99, v.count.value)
-        assertEquals(listOf(99), seen, "effect must fire for the async-delivered value")
-        d.dispose()
-    }
-
-    @Test
-    fun bridgePublishingFromAsyncContextIntoStatePropagatesValue() = runBlocking {
-        val v = BridgeTestVault()
-        val bridge = AsyncBridge<Int>()
-        v { count bridge bridge }
-        bridge.published.clear()
-
-        // Mutate from an off-main coroutine; commit fires bridge.publish.
-        async(Dispatchers.Default) {
-            v action { count mutate 33 }
-        }.await()
-
-        assertEquals(33, v.count.value)
-        assertEquals(listOf(33), bridge.published)
-    }
+            assertEquals(33, v.count.value)
+            assertEquals(listOf(33), bridge.published)
+        }
 
     @Test
-    fun bridgeRoundTrippingViaAsyncEventLoopPreservesValueIdentityAndOrder() = runBlocking {
-        val v = BridgeTestVault()
-        val bridge = AsyncBridge<Int>()
-        v { count bridge bridge }
-        bridge.published.clear()
+    fun bridgeRoundTrippingViaAsyncEventLoopPreservesValueIdentityAndOrder() =
+        runBlocking {
+            val v = BridgeTestVault()
+            val bridge = AsyncBridge<Int>()
+            v { count bridge bridge }
+            bridge.published.clear()
 
-        // Outbound: store → bridge. Each commit publishes once.
-        v action { count mutate 1 }
-        v action { count mutate 2 }
-        v action { count mutate 3 }
+            // Outbound: store → bridge. Each commit publishes once.
+            v action { count mutate 1 }
+            v action { count mutate 2 }
+            v action { count mutate 3 }
 
-        // Inbound: bridge → store, in a different order, via async delivery.
-        bridge.deliverFromCoroutine(10)
-        bridge.deliverFromCoroutine(20)
+            // Inbound: bridge → store, in a different order, via async delivery.
+            bridge.deliverFromCoroutine(10)
+            bridge.deliverFromCoroutine(20)
 
-        assertEquals(listOf(1, 2, 3), bridge.published, "outbound publish order preserved")
-        assertEquals(20, v.count.value, "latest async-delivered value is current")
-    }
+            assertEquals(listOf(1, 2, 3), bridge.published, "outbound publish order preserved")
+            assertEquals(20, v.count.value, "latest async-delivered value is current")
+        }
 }

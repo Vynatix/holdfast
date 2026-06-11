@@ -20,7 +20,9 @@ import com.vynatix.holdfast.Transformer
  * Wired automatically by [boxed]. Ship it standalone if you need a custom
  * `state(transformer = …) { … }` declaration.
  */
-class ValidatingTransformer<P : Any, O : Boxed<P>>(private val validator: Validator<P, O>) : Transformer<O> {
+class ValidatingTransformer<P : Any, O : Boxed<P>>(
+    private val validator: Validator<P, O>,
+) : Transformer<O> {
     override fun set(value: O): O {
         val result = validator.validate(value.value)
         if (result is HallmarkResult.Failure) {

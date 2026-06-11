@@ -20,7 +20,6 @@ private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
  * consuming module (`:shared`).
  */
 class ComposeBindingsCompileTest {
-
     @Test
     fun apiSurfaceCompiles() {
         // The presence of the Composable references below is the assertion:

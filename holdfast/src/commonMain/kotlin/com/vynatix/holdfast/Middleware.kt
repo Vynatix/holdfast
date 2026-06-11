@@ -30,7 +30,10 @@ open class Middleware<T : Store<T>> {
         val metadata: MutableMap<String, Any> = mutableMapOf(),
     )
 
-    private fun execute(context: MiddlewareContext<T>, next: () -> Unit) {
+    private fun execute(
+        context: MiddlewareContext<T>,
+        next: () -> Unit,
+    ) {
         try {
             onTransactionStarted(context)
             next()
@@ -41,18 +44,28 @@ open class Middleware<T : Store<T>> {
         }
     }
 
-    operator fun invoke(store: T, next: () -> Unit) {
-        val context = MiddlewareContext(
-            store = store,
-            transaction = store.activeTransaction
-                ?: throw TransactionException("No active transaction for middleware to wrap"),
-        )
+    operator fun invoke(
+        store: T,
+        next: () -> Unit,
+    ) {
+        val context =
+            MiddlewareContext(
+                store = store,
+                transaction =
+                    store.activeTransaction
+                        ?: throw TransactionException("No active transaction for middleware to wrap"),
+            )
         execute(context, next)
     }
 
     protected open fun onTransactionStarted(context: MiddlewareContext<T>) {}
+
     protected open fun onTransactionCompleted(context: MiddlewareContext<T>) {}
-    protected open fun onTransactionError(context: MiddlewareContext<T>, error: Throwable) {
+
+    protected open fun onTransactionError(
+        context: MiddlewareContext<T>,
+        error: Throwable,
+    ) {
     }
 
     /**
@@ -77,5 +90,8 @@ open class Middleware<T : Store<T>> {
      * [onTransactionError] hook directly. See [invokeOnTransactionStarted].
      */
     @StoreInternalApi
-    fun invokeOnTransactionError(context: MiddlewareContext<T>, error: Throwable) = onTransactionError(context, error)
+    fun invokeOnTransactionError(
+        context: MiddlewareContext<T>,
+        error: Throwable,
+    ) = onTransactionError(context, error)
 }

@@ -54,38 +54,43 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  * disposable.dispose()
  * ```
  */
-fun <V : Store<V>, T : Any> V.derived(vararg sources: State<*>, compute: V.() -> T): Pair<State<T>, Disposable> {
+fun <V : Store<V>, T : Any> V.derived(
+    vararg sources: State<*>,
+    compute: V.() -> T,
+): Pair<State<T>, Disposable> {
     val self = this
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"
     val backingState: MutableState<T> = self.registerInternalState(name, initial)
 
     val initialFireFlags = BooleanArray(sources.size)
-    val subs = sources.mapIndexed { idx, src ->
-        @Suppress("UNCHECKED_CAST")
-        (src as MutableState<Any>).observe {
-            // Skip the initial-fire callback so we don't double-recompute.
-            if (!initialFireFlags[idx]) {
-                initialFireFlags[idx] = true
-                return@observe
-            }
-            // Defer the recompute past the parent's commit fanout. Running the
-            // recompute action inline would re-enter the parent's pendingWrites
-            // (savepoint merge), but the parent is mid-iteration. postCommit
-            // queues the recompute to run as a fresh top-level action immediately
-            // after the parent's iteration completes.
-            self.postCommit {
-                self action {
-                    @Suppress("UNCHECKED_CAST")
-                    (backingState as State<T>) mutate self.compute()
+    val subs =
+        sources.mapIndexed { idx, src ->
+            @Suppress("UNCHECKED_CAST")
+            (src as MutableState<Any>).observe {
+                // Skip the initial-fire callback so we don't double-recompute.
+                if (!initialFireFlags[idx]) {
+                    initialFireFlags[idx] = true
+                    return@observe
+                }
+                // Defer the recompute past the parent's commit fanout. Running the
+                // recompute action inline would re-enter the parent's pendingWrites
+                // (savepoint merge), but the parent is mid-iteration. postCommit
+                // queues the recompute to run as a fresh top-level action immediately
+                // after the parent's iteration completes.
+                self.postCommit {
+                    self action {
+                        @Suppress("UNCHECKED_CAST")
+                        (backingState as State<T>) mutate self.compute()
+                    }
                 }
             }
         }
-    }
 
-    val composite = Disposable {
-        subs.forEach { it.dispose() }
-    }
+    val composite =
+        Disposable {
+            subs.forEach { it.dispose() }
+        }
     return backingState to composite
 }
 

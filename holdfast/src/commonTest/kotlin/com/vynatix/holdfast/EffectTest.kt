@@ -11,7 +11,6 @@ private class EffectTestVault : Store<EffectTestVault>() {
 }
 
 class EffectSubscribeTest {
-
     @Test
     fun effectReceivesCurrentValueOnSubscribe() {
         val v = EffectTestVault()
@@ -95,7 +94,6 @@ class EffectSubscribeTest {
 }
 
 class EffectNotificationTest {
-
     @Test
     fun effectReceivesEachCommittedValueAfterMutation() {
         val v = EffectTestVault()
@@ -141,11 +139,12 @@ class EffectNotificationTest {
         // isn't wrapped in observe()), but it throws on every later notification.
         // notifyObservers() catches Exception around each observer's call.
         val d1 = v { count effect { good1.add(this) } }
-        val d2 = v {
-            count effect {
-                if (throwerCalls.incrementAndGet() > 1) error("subscriber-2 throws")
+        val d2 =
+            v {
+                count effect {
+                    if (throwerCalls.incrementAndGet() > 1) error("subscriber-2 throws")
+                }
             }
-        }
         val d3 = v { count effect { good2.add(this) } }
         good1.clear()
         good2.clear()
@@ -181,12 +180,13 @@ class EffectNotificationTest {
         val v = EffectTestVault()
         val seen = mutableListOf<Int>()
         var disposable: Disposable? = null
-        disposable = v {
-            count effect {
-                seen.add(this)
-                if (this == 1) disposable?.dispose()
+        disposable =
+            v {
+                count effect {
+                    seen.add(this)
+                    if (this == 1) disposable?.dispose()
+                }
             }
-        }
         // Initial 0 received. Disposable now non-null.
         v action { count mutate 1 } // Subscriber adds 1 then disposes self.
         v action { count mutate 2 } // Subscriber should NOT see 2.
@@ -200,15 +200,16 @@ class EffectNotificationTest {
         val inner = mutableListOf<Int>()
         val registered = atomic(false)
 
-        val outerD = v {
-            count effect {
-                outer.add(this)
-                if (this == 1 && !registered.getAndSet(true)) {
-                    // Register a new observer during current notification.
-                    v { count effect { inner.add(this) } }
+        val outerD =
+            v {
+                count effect {
+                    outer.add(this)
+                    if (this == 1 && !registered.getAndSet(true)) {
+                        // Register a new observer during current notification.
+                        v { count effect { inner.add(this) } }
+                    }
                 }
             }
-        }
 
         v action { count mutate 1 } // outer fires with 1, registers inner. inner gets initial=1.
         v action { count mutate 2 } // both outer and inner fire with 2.
@@ -230,14 +231,15 @@ class EffectNotificationTest {
         val d2 = v2 { count effect { v2Seen.add(this) } }
         v2Seen.clear()
 
-        val d1 = v1 {
-            count effect {
-                if (this == 5) {
-                    // Different store → different transactionLock; no nesting hazard.
-                    v2 action { count mutate 100 }
+        val d1 =
+            v1 {
+                count effect {
+                    if (this == 5) {
+                        // Different store → different transactionLock; no nesting hazard.
+                        v2 action { count mutate 100 }
+                    }
                 }
             }
-        }
 
         v1 action { count mutate 5 }
 
@@ -250,7 +252,6 @@ class EffectNotificationTest {
 }
 
 class EffectTopLevelExtensionTest {
-
     @Test
     fun topLevelEffectFiresOnCommitOutsideVaultBlock() {
         val v = EffectTestVault()
@@ -286,7 +287,6 @@ class EffectTopLevelExtensionTest {
 }
 
 class EffectTransactionIsolationTest {
-
     @Test
     fun effectsDoNotReceiveValuesFromInProgressTransaction() {
         val v = EffectTestVault()
@@ -331,18 +331,18 @@ class EffectTransactionIsolationTest {
 }
 
 class EffectInteractionTest {
-
     @Test
     fun subscriberCanReadStateValueDuringCallbackAndSeeCommittedValue() {
         val v = EffectTestVault()
         val readBacks = mutableListOf<Int>()
-        val d = v {
-            count effect {
-                // Inside the post-commit notification, state.value should reflect the
-                // just-committed value (which equals `this`).
-                readBacks.add(v.count.value)
+        val d =
+            v {
+                count effect {
+                    // Inside the post-commit notification, state.value should reflect the
+                    // just-committed value (which equals `this`).
+                    readBacks.add(v.count.value)
+                }
             }
-        }
         v action { count mutate 7 }
 
         assertEquals(listOf(0, 7), readBacks, "state.value during callback matches notification value")
@@ -353,11 +353,12 @@ class EffectInteractionTest {
     fun subscriberCanReadDifferentStateValueDuringCallback() {
         val v = EffectTestVault()
         val labelReads = mutableListOf<String>()
-        val d = v {
-            count effect {
-                labelReads.add(v.label.value)
+        val d =
+            v {
+                count effect {
+                    labelReads.add(v.label.value)
+                }
             }
-        }
         v action {
             count mutate 1
             label mutate "updated"

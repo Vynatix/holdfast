@@ -23,16 +23,16 @@ private class NestedSingleStateVault : Store<NestedSingleStateVault>() {
 }
 
 class NestedActionSavepointTest {
-
     @Test
     fun outerActionFailureRollsBackMutationsMadeAfterNestedAction() {
         val v = NestedTwoStateVault()
 
-        val result = v action {
-            v action { state1 mutate "inner-only" }
-            state2 mutate "outer-mutation-after-inner"
-            error("outer fails")
-        }
+        val result =
+            v action {
+                v action { state1 mutate "inner-only" }
+                state2 mutate "outer-mutation-after-inner"
+                error("outer fails")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(
@@ -46,12 +46,13 @@ class NestedActionSavepointTest {
     fun outerActionFailureRollsBackMutationsBeforeAndAfterNestedAction() {
         val v = NestedTwoStateVault()
 
-        val result = v action {
-            state1 mutate "outer-before-inner"
-            v action { state2 mutate "inner" }
-            state1 mutate "outer-after-inner"
-            error("outer fails")
-        }
+        val result =
+            v action {
+                state1 mutate "outer-before-inner"
+                v action { state2 mutate "inner" }
+                state1 mutate "outer-after-inner"
+                error("outer fails")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(
@@ -70,10 +71,11 @@ class NestedActionSavepointTest {
     fun nestedActionMutationsAreDiscardedWhenOuterActionFails() {
         val v = NestedSingleStateVault()
 
-        val result = v action {
-            v action { n mutate 99 }
-            error("outer fails")
-        }
+        val result =
+            v action {
+                v action { n mutate 99 }
+                error("outer fails")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(
@@ -88,16 +90,18 @@ class NestedActionSavepointTest {
         val v = NestedTwoStateVault()
         val capturedNested = atomic<TransactionResult.Error?>(null)
 
-        val outer = v action {
-            state1 mutate "outer1"
-            val nested = v action {
-                state2 mutate "nested1"
-                error("nested fails")
+        val outer =
+            v action {
+                state1 mutate "outer1"
+                val nested =
+                    v action {
+                        state2 mutate "nested1"
+                        error("nested fails")
+                    }
+                if (nested is TransactionResult.Error) capturedNested.value = nested
+                // Outer continues; the nested's exception was caught by the nested action's
+                // `try { … } catch (e: Throwable)`. To propagate, outer must re-throw explicitly.
             }
-            if (nested is TransactionResult.Error) capturedNested.value = nested
-            // Outer continues; the nested's exception was caught by the nested action's
-            // `try { … } catch (e: Throwable)`. To propagate, outer must re-throw explicitly.
-        }
 
         assertIs<TransactionResult.Success<*>>(
             outer,
@@ -113,16 +117,18 @@ class NestedActionSavepointTest {
     @Test
     fun nestedActionFailureCanPropagateToOuterIfOuterReThrows() {
         val v = NestedTwoStateVault()
-        val outer = v action {
-            state1 mutate "outer1"
-            val nested = v action {
-                state2 mutate "nested1"
-                error("nested fails")
+        val outer =
+            v action {
+                state1 mutate "outer1"
+                val nested =
+                    v action {
+                        state2 mutate "nested1"
+                        error("nested fails")
+                    }
+                // Outer explicitly opts in to propagation.
+                if (nested is TransactionResult.Error) throw nested.exception
+                state1 mutate "never-reached"
             }
-            // Outer explicitly opts in to propagation.
-            if (nested is TransactionResult.Error) throw nested.exception
-            state1 mutate "never-reached"
-        }
         assertIs<TransactionResult.Error>(outer)
         assertEquals("nested fails", outer.exception.message)
         assertEquals("initial1", v.state1.value, "outer's mutations rolled back when re-thrown")
@@ -132,15 +138,17 @@ class NestedActionSavepointTest {
     @Test
     fun nestedActionThatFailsDoesNotPolluteOuterTransactionWhenOuterDoesNotPropagate() {
         val v = NestedTwoStateVault()
-        val result = v action {
-            state1 mutate "outer1"
-            v action { state2 mutate "good" } // commits, merged
-            val nested2 = v action {
-                state2 mutate "bad"
-                error("nested-2 fails")
-            } // discards nested-2 pending
-            assertIs<TransactionResult.Error>(nested2)
-        }
+        val result =
+            v action {
+                state1 mutate "outer1"
+                v action { state2 mutate "good" } // commits, merged
+                val nested2 =
+                    v action {
+                        state2 mutate "bad"
+                        error("nested-2 fails")
+                    } // discards nested-2 pending
+                assertIs<TransactionResult.Error>(nested2)
+            }
         assertIs<TransactionResult.Success<*>>(result)
         assertEquals("outer1", v.state1.value)
         assertEquals(
@@ -172,16 +180,17 @@ class NestedActionSavepointTest {
     @Test
     fun threeLevelNestingRollsBackAllOnRootFailure() {
         val v = NestedTwoStateVault()
-        val result = v action {
-            state1 mutate "level-1"
+        val result =
             v action {
-                state1 mutate "level-2"
+                state1 mutate "level-1"
                 v action {
-                    state1 mutate "level-3"
+                    state1 mutate "level-2"
+                    v action {
+                        state1 mutate "level-3"
+                    }
                 }
+                error("root fails")
             }
-            error("root fails")
-        }
         assertIs<TransactionResult.Error>(result)
         assertEquals(
             "initial1",
@@ -231,7 +240,6 @@ class NestedActionSavepointTest {
 }
 
 class SavepointReadYourOwnWritesTest {
-
     @Test
     fun nestedActionReadsOwnPendingWriteAfterMutate() {
         val v = NestedTwoStateVault()
@@ -280,10 +288,11 @@ class SavepointReadYourOwnWritesTest {
     fun nestedActionThatManuallyRollsBackHidesItsPendingFromOuter() {
         val v = NestedTwoStateVault()
         v action {
-            val nestedResult = v action {
-                state2 mutate "in-rolled-back-nested"
-                v.activeTransaction!!.rollback()
-            }
+            val nestedResult =
+                v action {
+                    state2 mutate "in-rolled-back-nested"
+                    v.activeTransaction!!.rollback()
+                }
             // Action body returned; Store.action's commit is no-op (status RolledBack).
             // Store.action returns Success(txn) with status RolledBack.
             assertIs<TransactionResult.Success<*>>(nestedResult)
@@ -302,37 +311,40 @@ class SavepointReadYourOwnWritesTest {
         val ownerCtx = newSingleThreadContext("nested-owner")
         val readerCtx = newSingleThreadContext("nested-reader")
         try {
-            val captured = runBlocking {
-                val v = NestedTwoStateVault()
-                v action { state1 mutate "committed" }
+            val captured =
+                runBlocking {
+                    val v = NestedTwoStateVault()
+                    v action { state1 mutate "committed" }
 
-                // Store.action's lambda is non-suspend; we coordinate via atomic flags
-                // and busy-wait so the lambda never tries to suspend.
-                val nestedReached = atomic(false)
-                val readerDone = atomic(false)
-                val seen = atomic<String?>(null)
+                    // Store.action's lambda is non-suspend; we coordinate via atomic flags
+                    // and busy-wait so the lambda never tries to suspend.
+                    val nestedReached = atomic(false)
+                    val readerDone = atomic(false)
+                    val seen = atomic<String?>(null)
 
-                val owner = async(ownerCtx) {
-                    v action {
-                        state1 mutate "outer-pending"
-                        v action {
-                            state1 mutate "nested-pending"
-                            nestedReached.value = true
-                            while (!readerDone.value) { /* spin */ }
+                    val owner =
+                        async(ownerCtx) {
+                            v action {
+                                state1 mutate "outer-pending"
+                                v action {
+                                    state1 mutate "nested-pending"
+                                    nestedReached.value = true
+                                    while (!readerDone.value) { /* spin */ }
+                                }
+                            }
                         }
-                    }
-                }
 
-                val reader = async(readerCtx) {
-                    while (!nestedReached.value) { /* spin */ }
-                    seen.value = v.state1.value
-                    readerDone.value = true
-                }
+                    val reader =
+                        async(readerCtx) {
+                            while (!nestedReached.value) { /* spin */ }
+                            seen.value = v.state1.value
+                            readerDone.value = true
+                        }
 
-                owner.await()
-                reader.await()
-                seen.value
-            }
+                    owner.await()
+                    reader.await()
+                    seen.value
+                }
 
             assertEquals(
                 "committed",
@@ -347,23 +359,24 @@ class SavepointReadYourOwnWritesTest {
 }
 
 class ActionInsideEffectTest {
-
     @Test
     fun effectThatTriggersNestedActionDoesNotBreakOuterTransactionRecording() {
         val v = NestedSingleStateVault()
-        val d = v {
-            n effect {
-                if (this == 1) {
-                    v action { m mutate "nested-from-effect" }
+        val d =
+            v {
+                n effect {
+                    if (this == 1) {
+                        v action { m mutate "nested-from-effect" }
+                    }
                 }
             }
-        }
 
-        val result = v action {
-            n mutate 1
-            m mutate "outer-after-nested"
-            error("rollback")
-        }
+        val result =
+            v action {
+                n mutate 1
+                m mutate "outer-after-nested"
+                error("rollback")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(

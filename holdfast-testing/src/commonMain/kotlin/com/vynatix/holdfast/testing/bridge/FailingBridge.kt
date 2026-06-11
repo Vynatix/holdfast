@@ -37,9 +37,11 @@ import com.vynatix.holdfast.Disposable
  * surfaces the cause. Use [com.vynatix.holdfast.testing.matcher.shouldRollbackWith]
  * to assert.
  */
-class FailingBridge<T : Any>(private val initial: T, val failOn: FailureMode, val cause: Throwable = RuntimeException("FailingBridge")) :
-    Bridge<T> {
-
+class FailingBridge<T : Any>(
+    private val initial: T,
+    val failOn: FailureMode,
+    val cause: Throwable = RuntimeException("FailingBridge"),
+) : Bridge<T> {
     /**
      * Selects which methods of [FailingBridge] throw [cause].
      *

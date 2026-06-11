@@ -14,7 +14,12 @@ package com.vynatix.holdfast.coroutines
  */
 interface SuspendingKvStore {
     suspend fun get(key: String): String?
-    suspend fun put(key: String, value: String)
+
+    suspend fun put(
+        key: String,
+        value: String,
+    )
+
     suspend fun remove(key: String)
 
     /**

@@ -23,7 +23,6 @@ private class StdLibVault : Store<StdLibVault>() {
 }
 
 class LoggingMiddlewareTest {
-
     @Test
     fun loggingMiddlewareEmitsTwoLinesPerSuccessfulTransaction() {
         val v = StdLibVault()
@@ -65,7 +64,6 @@ class LoggingMiddlewareTest {
 }
 
 class TimingMiddlewareTest {
-
     @Test
     fun timingMiddlewareReportsElapsedMsForSuccessfulTransaction() {
         val v = StdLibVault()
@@ -93,7 +91,6 @@ class TimingMiddlewareTest {
 }
 
 class ValidationMiddlewareTest {
-
     @Test
     fun validationMiddlewareRollsBackWhenCheckThrows() {
         val v = StdLibVault()
@@ -123,7 +120,6 @@ class ValidationMiddlewareTest {
 }
 
 class CodecTest {
-
     @Test fun stringCodecRoundTripsLosslessly() {
         val s = "hello, world!"
         assertEquals(s, StringCodec.decode(StringCodec.encode(s)))
@@ -146,7 +142,6 @@ class CodecTest {
 }
 
 class InMemoryKvStoreTest {
-
     @Test fun putThenGetReturnsTheValue() {
         val kv = InMemoryKvStore()
         kv.put("k", "v")
@@ -176,7 +171,6 @@ class InMemoryKvStoreTest {
 }
 
 class KvBridgeTest {
-
     @Test
     fun kvBridgePersistsValueOnCommit() {
         val v = StdLibVault()
@@ -215,10 +209,11 @@ class KvBridgeTest {
         val v = StdLibVault()
         val kv = InMemoryKvStore()
         v { balance bridge KvBridge(kv, "k", LongCodec) }
-        val r = v action {
-            balance mutate 999
-            error("rollback")
-        }
+        val r =
+            v action {
+                balance mutate 999
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(r)
         assertNull(kv.get("k"), "no commit → no publish")
     }
@@ -259,7 +254,6 @@ class KvBridgeTest {
 }
 
 class StandardLibIntegrationTest {
-
     @Test
     fun loggingPlusTimingPlusValidationCoexistOnSameVault() {
         val v = StdLibVault()

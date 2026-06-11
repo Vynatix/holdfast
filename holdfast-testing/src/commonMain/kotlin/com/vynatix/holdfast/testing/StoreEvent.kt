@@ -48,7 +48,10 @@ sealed interface TransactionEvent : StoreEvent {
 }
 
 /** Emitted before the action body runs (from the recorder's `onTransactionStarted`). */
-data class TransactionStarted(override val transaction: Transaction, override val timestamp: Long) : TransactionEvent
+data class TransactionStarted(
+    override val transaction: Transaction,
+    override val timestamp: Long,
+) : TransactionEvent
 
 /**
  * Emitted just before [Transaction.commit] applies the pending writes — i.e.
@@ -56,7 +59,10 @@ data class TransactionStarted(override val transaction: Transaction, override va
  * cleanly. The actual write-apply / observer fanout happens immediately after
  * this event but is fired by :holdfast's own commit path, not by the recorder.
  */
-data class TransactionCommitted(override val transaction: Transaction, override val timestamp: Long) : TransactionEvent
+data class TransactionCommitted(
+    override val transaction: Transaction,
+    override val timestamp: Long,
+) : TransactionEvent
 
 /**
  * Emitted when the body throws and :holdfast rolls back the transaction. **In v1
@@ -65,13 +71,20 @@ data class TransactionCommitted(override val transaction: Transaction, override 
  * `runCatching { txn.rollback() }`, but the rollback itself runs past the
  * middleware boundary, so the recorder can only infer (not observe) it.
  */
-data class TransactionRolledBack(override val transaction: Transaction, override val timestamp: Long) : TransactionEvent
+data class TransactionRolledBack(
+    override val transaction: Transaction,
+    override val timestamp: Long,
+) : TransactionEvent
 
 /**
  * Emitted from the recorder's `onTransactionError` hook when the body throws.
  * Carries the exception that propagated out of the body.
  */
-data class TransactionErrored(override val transaction: Transaction, val cause: Throwable, override val timestamp: Long) : TransactionEvent
+data class TransactionErrored(
+    override val transaction: Transaction,
+    val cause: Throwable,
+    override val timestamp: Long,
+) : TransactionEvent
 
 /**
  * Emitted at commit time for each state present in [Transaction.modifiedStates].
@@ -84,7 +97,12 @@ data class TransactionErrored(override val transaction: Transaction, val cause: 
  * pending write (read via [State.value] on the owner thread inside the active
  * transaction, so read-your-own-writes returns the pending value).
  */
-data class EmissionEvent(val state: State<*>, val oldValue: Any?, val newValue: Any?, override val timestamp: Long) : StoreEvent
+data class EmissionEvent(
+    val state: State<*>,
+    val oldValue: Any?,
+    val newValue: Any?,
+    override val timestamp: Long,
+) : StoreEvent
 
 /**
  * Lifecycle event carrying the [Middleware] instance that produced it. See
@@ -96,8 +114,11 @@ sealed interface MiddlewareEvent : StoreEvent {
     val transaction: Transaction
 }
 
-data class MiddlewareStarted(override val middleware: Middleware<*>, override val transaction: Transaction, override val timestamp: Long) :
-    MiddlewareEvent
+data class MiddlewareStarted(
+    override val middleware: Middleware<*>,
+    override val transaction: Transaction,
+    override val timestamp: Long,
+) : MiddlewareEvent
 
 data class MiddlewareCompleted(
     override val middleware: Middleware<*>,
@@ -125,6 +146,14 @@ sealed interface BridgeEvent : StoreEvent {
     val state: State<*>
 }
 
-data class BridgePublished(override val state: State<*>, val value: Any?, override val timestamp: Long) : BridgeEvent
+data class BridgePublished(
+    override val state: State<*>,
+    val value: Any?,
+    override val timestamp: Long,
+) : BridgeEvent
 
-data class BridgeObserved(override val state: State<*>, val value: Any?, override val timestamp: Long) : BridgeEvent
+data class BridgeObserved(
+    override val state: State<*>,
+    val value: Any?,
+    override val timestamp: Long,
+) : BridgeEvent

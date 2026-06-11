@@ -3,20 +3,20 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Middleware
-import com.vynatix.holdfast.TransactionResult
-import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.testing.Capture
 import com.vynatix.holdfast.testing.EmissionEvent
 import com.vynatix.holdfast.testing.MiddlewareCompleted
 import com.vynatix.holdfast.testing.MiddlewareErrored
 import com.vynatix.holdfast.testing.MiddlewareStarted
+import com.vynatix.holdfast.testing.StoreEvent
 import com.vynatix.holdfast.testing.TransactionCommitted
 import com.vynatix.holdfast.testing.TransactionErrored
 import com.vynatix.holdfast.testing.TransactionRolledBack
 import com.vynatix.holdfast.testing.TransactionStarted
-import com.vynatix.holdfast.testing.StoreEvent
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.channels.SendChannel
@@ -76,8 +76,9 @@ import kotlin.time.Clock
  * buffer on the owner thread of the in-flight transaction, but reads (via
  * [snapshot]) can happen from any thread.
  */
-internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware<V>() {
-
+internal class Recorder<V : Store<V>>(
+    private val capture: Capture,
+) : Middleware<V>() {
     private val lock = SynchronizedObject()
     private val events: MutableList<StoreEvent> = mutableListOf()
 
@@ -147,7 +148,10 @@ internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware
      * a clean cut, with each event delivered exactly once via either the
      * replay list or the channel.
      */
-    fun snapshotAndSubscribe(channel: SendChannel<StoreEvent>, out: MutableList<StoreEvent>) {
+    fun snapshotAndSubscribe(
+        channel: SendChannel<StoreEvent>,
+        out: MutableList<StoreEvent>,
+    ) {
         synchronized(lock) {
             out.addAll(events)
             subscribers.add(channel)
@@ -224,7 +228,10 @@ internal class Recorder<V : Store<V>>(private val capture: Capture) : Middleware
         push(MiddlewareCompleted(middleware = this, transaction = txn, timestamp = now))
     }
 
-    override fun onTransactionError(context: MiddlewareContext<V>, error: Throwable) {
+    override fun onTransactionError(
+        context: MiddlewareContext<V>,
+        error: Throwable,
+    ) {
         val txn = context.transaction
         if (capture is Capture.None) return
 

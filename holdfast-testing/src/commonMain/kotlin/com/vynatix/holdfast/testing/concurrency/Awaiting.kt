@@ -65,7 +65,10 @@ import kotlin.time.Duration.Companion.seconds
  *   First `true` return wins; this function returns the matched event.
  * @return the first event for which [predicate] returned `true`.
  */
-suspend fun StoreTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (StoreEvent) -> Boolean): StoreEvent {
+suspend fun StoreTestScope.awaiting(
+    timeout: Duration = 1.seconds,
+    predicate: (StoreEvent) -> Boolean,
+): StoreEvent {
     val channel = Channel<StoreEvent>(Channel.UNLIMITED)
     val replays = mutableListOf<StoreEvent>()
 
@@ -90,18 +93,19 @@ suspend fun StoreTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (S
         // (scope teardown) the receive throws ClosedReceiveChannelException
         // which is caught and surfaced as the same timeout error so the
         // caller sees a uniform failure mode.
-        val match = withTimeoutOrNull(timeout) {
-            try {
-                while (true) {
-                    val event = channel.receive()
-                    if (predicate(event)) return@withTimeoutOrNull event
+        val match =
+            withTimeoutOrNull(timeout) {
+                try {
+                    while (true) {
+                        val event = channel.receive()
+                        if (predicate(event)) return@withTimeoutOrNull event
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    null
+                } catch (_: ClosedReceiveChannelException) {
+                    null
                 }
-                @Suppress("UNREACHABLE_CODE")
-                null
-            } catch (_: ClosedReceiveChannelException) {
-                null
             }
-        }
         if (match != null) return match
 
         throw AwaitingTimeoutException(buildTimeoutMessage(timeout, allTrackedHandles()))
@@ -114,7 +118,10 @@ suspend fun StoreTestScope.awaiting(timeout: Duration = 1.seconds, predicate: (S
     }
 }
 
-private fun buildTimeoutMessage(timeout: Duration, handles: List<com.vynatix.holdfast.testing.StoreHandle<*>>): String {
+private fun buildTimeoutMessage(
+    timeout: Duration,
+    handles: List<com.vynatix.holdfast.testing.StoreHandle<*>>,
+): String {
     val recent = handles.flatMap { it.timeline }.takeLast(RECENT_TAIL_COUNT)
     return "awaiting: no event matched within ${timeout.inWholeMilliseconds}ms " +
         "(saw ${recent.size} events: $recent)"
@@ -135,4 +142,6 @@ private const val RECENT_TAIL_COUNT = 5
  * [AwaitingTimeoutException] is the closest reachable equivalent within the
  * structured-concurrency hierarchy.
  */
-class AwaitingTimeoutException internal constructor(message: String) : CancellationException(message)
+class AwaitingTimeoutException internal constructor(
+    message: String,
+) : CancellationException(message)

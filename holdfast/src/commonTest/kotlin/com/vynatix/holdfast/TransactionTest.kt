@@ -23,7 +23,6 @@ private class FiveStateVault : Store<FiveStateVault>() {
 }
 
 class ActionLifecycleTest {
-
     @Test
     fun successfulActionReturnsSuccessWithCommittedTransaction() {
         val v = TxTestVault()
@@ -35,10 +34,11 @@ class ActionLifecycleTest {
     @Test
     fun failingActionReturnsErrorWithRolledBackTransactionAndOriginalCause() {
         val v = TxTestVault()
-        val result = v action {
-            count mutate 1
-            error("boom")
-        }
+        val result =
+            v action {
+                count mutate 1
+                error("boom")
+            }
         assertIs<TransactionResult.Error>(result)
         assertEquals(TransactionStatus.RolledBack, result.transaction.status)
         assertEquals("boom", result.exception.message)
@@ -49,11 +49,12 @@ class ActionLifecycleTest {
         val v = TxTestVault()
         v action { count mutate 5 }
 
-        val result = v action {
-            count mutate 99
-            label mutate "should-revert"
-            error("intentional")
-        }
+        val result =
+            v action {
+                count mutate 99
+                label mutate "should-revert"
+                error("intentional")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(5, v.count.value, "count must roll back to its pre-action value (5)")
@@ -71,14 +72,15 @@ class ActionLifecycleTest {
     @Test
     fun actionThatCatchesItsOwnExceptionReturnsSuccess() {
         val v = TxTestVault()
-        val result = v action {
-            try {
-                count mutate 5
-                error("intentional but caught")
-            } catch (_: Throwable) {
-                count mutate 10
+        val result =
+            v action {
+                try {
+                    count mutate 5
+                    error("intentional but caught")
+                } catch (_: Throwable) {
+                    count mutate 10
+                }
             }
-        }
         assertIs<TransactionResult.Success<*>>(result)
         assertEquals(
             10,
@@ -101,10 +103,11 @@ class ActionLifecycleTest {
     @Test
     fun actionThatThrowsErrorSubclassRollsBackLikeException() {
         val v = TxTestVault()
-        val result = v action {
-            count mutate 5
-            throw AssertionError("simulated Error subclass")
-        }
+        val result =
+            v action {
+                count mutate 5
+                throw AssertionError("simulated Error subclass")
+            }
         assertIs<TransactionResult.Error>(result)
         assertIs<AssertionError>(result.exception)
         assertEquals(
@@ -127,17 +130,17 @@ class ActionLifecycleTest {
     @Test
     fun transactionEndTimeIsSetAfterRollback() {
         val v = TxTestVault()
-        val result = v action {
-            count mutate 1
-            error("rollback")
-        }
+        val result =
+            v action {
+                count mutate 1
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(result)
         assertNotNull(result.transaction.endTime, "endTime must be populated after rollback")
     }
 }
 
 class MultiMutationInActionTest {
-
     @Test
     fun successfulActionWithRepeatedMutationsAppliesLastWriteWins() {
         val v = TxTestVault()
@@ -174,14 +177,15 @@ class MultiMutationInActionTest {
         val v = FiveStateVault()
 
         // Failing action: all five mutations roll back together.
-        val rollback = v action {
-            a mutate 1
-            b mutate 2
-            c mutate 3
-            d mutate 4
-            e mutate 5
-            error("rollback")
-        }
+        val rollback =
+            v action {
+                a mutate 1
+                b mutate 2
+                c mutate 3
+                d mutate 4
+                e mutate 5
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(rollback)
         assertEquals(0, v.a.value)
         assertEquals(0, v.b.value)
@@ -206,16 +210,17 @@ class MultiMutationInActionTest {
 }
 
 class MutateOutsideActionTest {
-
     @Test
     fun mutateOutsideActionWrapsInImplicitTransactionAndFiresMiddleware() {
         val v = TxTestVault()
         var middlewareInvocations = 0
-        v.middlewares(object : Middleware<TxTestVault>() {
-            override fun onTransactionStarted(context: MiddlewareContext<TxTestVault>) {
-                middlewareInvocations++
-            }
-        })
+        v.middlewares(
+            object : Middleware<TxTestVault>() {
+                override fun onTransactionStarted(context: MiddlewareContext<TxTestVault>) {
+                    middlewareInvocations++
+                }
+            },
+        )
 
         v { count mutate 42 }
 
@@ -250,17 +255,17 @@ class MutateOutsideActionTest {
     }
 
     @Test
-    fun mutateOutsideActionFromOffOwnerThreadAlsoWraps() = runBlocking {
-        val v = TxTestVault()
-        async(Dispatchers.Default) {
-            v { count mutate 7 }
-        }.await()
-        assertEquals(7, v.count.value)
-    }
+    fun mutateOutsideActionFromOffOwnerThreadAlsoWraps() =
+        runBlocking {
+            val v = TxTestVault()
+            async(Dispatchers.Default) {
+                v { count mutate 7 }
+            }.await()
+            assertEquals(7, v.count.value)
+        }
 }
 
 class TransactionStatusGuardsTest {
-
     @Test
     fun rollbackCalledOnAlreadyCommittedTransactionIsNoOp() {
         val v = TxTestVault()
@@ -285,10 +290,11 @@ class TransactionStatusGuardsTest {
     @Test
     fun commitCalledOnAlreadyRolledBackTransactionIsNoOp() {
         val v = TxTestVault()
-        val result = v action {
-            count mutate 5
-            error("rollback")
-        }
+        val result =
+            v action {
+                count mutate 5
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(result)
         assertEquals(TransactionStatus.RolledBack, result.transaction.status)
 
@@ -310,10 +316,11 @@ class TransactionStatusGuardsTest {
         val d = v { count effect { seen.add(this) } }
         seen.clear()
 
-        val result = v action {
-            count mutate 99
-            error("force rollback")
-        }
+        val result =
+            v action {
+                count mutate 99
+                error("force rollback")
+            }
         assertIs<TransactionResult.Error>(result)
         val sizeAfterFirstRollback = seen.size
         runCatching { result.transaction.rollback() }
@@ -343,12 +350,13 @@ class TransactionStatusGuardsTest {
     @Test
     fun mutateOnAlreadyCommittedTransactionThrowsIllegalStateException() {
         val v = TxTestVault()
-        val result = v action {
-            val txn = v.activeTransaction!!
-            count mutate 1
-            txn.commit() // status -> Committed (early manual commit)
-            count mutate 2 // expected to throw
-        }
+        val result =
+            v action {
+                val txn = v.activeTransaction!!
+                count mutate 1
+                txn.commit() // status -> Committed (early manual commit)
+                count mutate 2 // expected to throw
+            }
         assertIs<TransactionResult.Error>(result)
         assertIs<IllegalStateException>(result.exception)
         assertTrue(
@@ -360,12 +368,13 @@ class TransactionStatusGuardsTest {
     @Test
     fun mutateOnAlreadyRolledBackTransactionThrowsIllegalStateException() {
         val v = TxTestVault()
-        val result = v action {
-            val txn = v.activeTransaction!!
-            count mutate 1
-            txn.rollback() // status -> RolledBack
-            count mutate 2 // expected to throw
-        }
+        val result =
+            v action {
+                val txn = v.activeTransaction!!
+                count mutate 1
+                txn.rollback() // status -> RolledBack
+                count mutate 2 // expected to throw
+            }
         assertIs<TransactionResult.Error>(result)
         assertIs<IllegalStateException>(result.exception)
         assertTrue(

@@ -75,14 +75,15 @@ class MutableState<T : Any>(
      * uncommitted pending writes.
      */
     override val value: T
-        get() = stateLock.withLock {
-            val txn = owningVault.activeTransaction
-            if (txn != null && txn.ownerThreadId == currentThreadId()) {
-                val pending = txn.findPendingValue(this)
-                if (pending != null) return@withLock afterGet(pending)
+        get() =
+            stateLock.withLock {
+                val txn = owningVault.activeTransaction
+                if (txn != null && txn.ownerThreadId == currentThreadId()) {
+                    val pending = txn.findPendingValue(this)
+                    if (pending != null) return@withLock afterGet(pending)
+                }
+                afterGet(currentValue)
             }
-            afterGet(currentValue)
-        }
 
     private fun afterGet(rawValue: T): T = transformer?.takeIf { it.shouldTransform(rawValue) }?.get(rawValue) ?: rawValue
 
@@ -121,11 +122,12 @@ class MutableState<T : Any>(
      */
     @StoreInternalApi
     fun applyCommittedRaw(processedValue: T): Boolean {
-        val unchanged = stateLock.withLock {
-            val same = distinct && currentValue == processedValue
-            if (!same) currentValue = processedValue
-            same
-        }
+        val unchanged =
+            stateLock.withLock {
+                val same = distinct && currentValue == processedValue
+                if (!same) currentValue = processedValue
+                same
+            }
         if (unchanged) return false
         notifyObservers(afterGet(processedValue))
         return true
@@ -188,19 +190,20 @@ class MutableState<T : Any>(
      * must use [effect].
      */
     @StoreInternalApi
-    fun observe(observer: (T) -> Unit): Disposable = observersLock.withLock {
-        observers.add(observer)
-        // Initial callback uses the same view as the value getter — post-transformer.get —
-        // so an observer never sees a value the getter wouldn't return for the same state.
-        val current = stateLock.withLock { afterGet(currentValue) }
-        observer(current)
+    fun observe(observer: (T) -> Unit): Disposable =
+        observersLock.withLock {
+            observers.add(observer)
+            // Initial callback uses the same view as the value getter — post-transformer.get —
+            // so an observer never sees a value the getter wouldn't return for the same state.
+            val current = stateLock.withLock { afterGet(currentValue) }
+            observer(current)
 
-        return Disposable {
-            observersLock.withLock {
-                observers.remove(observer)
+            return Disposable {
+                observersLock.withLock {
+                    observers.remove(observer)
+                }
             }
         }
-    }
 
     /**
      * Two-way bridge to an external system. Setting attaches:
@@ -215,16 +218,18 @@ class MutableState<T : Any>(
      */
     var bridge: Bridge<T>?
         get() = bridgeLock.withLock { currentBridge }
-        set(value) = bridgeLock.withLock {
-            // Dispose the previous inbound observer registration so the previous
-            // bridge does not keep driving applyFromBridge after replacement/null.
-            currentBridgeSubscription?.dispose()
-            currentBridgeSubscription = null
-            currentBridge = value
-            currentBridgeSubscription = value?.observe { receivedValue ->
-                applyFromBridge(receivedValue)
+        set(value) =
+            bridgeLock.withLock {
+                // Dispose the previous inbound observer registration so the previous
+                // bridge does not keep driving applyFromBridge after replacement/null.
+                currentBridgeSubscription?.dispose()
+                currentBridgeSubscription = null
+                currentBridge = value
+                currentBridgeSubscription =
+                    value?.observe { receivedValue ->
+                        applyFromBridge(receivedValue)
+                    }
             }
-        }
 
     /**
      * Internal entrypoint used by `Store.removeState`/`clearStates` to release

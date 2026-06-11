@@ -17,9 +17,17 @@ package com.vynatix.holdfast.bridge
  * store { balance bridge KvBridge(kv, "balance", LongCodec) }
  * ```
  */
-expect class FileSystemKvStore(rootPath: String) : KvStore {
+expect class FileSystemKvStore(
+    rootPath: String,
+) : KvStore {
     override fun get(key: String): String?
-    override fun put(key: String, value: String)
+
+    override fun put(
+        key: String,
+        value: String,
+    )
+
     override fun remove(key: String)
+
     override fun snapshot(): Map<String, String>
 }

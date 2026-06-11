@@ -28,20 +28,21 @@ import kotlin.test.assertEquals
  * covered below.
  */
 class SuspendingBridgeFactoryContextParamTest {
-
-    @Test fun underContextBlock_resolvesToContextOverload() = runBlocking {
-        val ctxScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ctxsuspbridge"))
-        try {
-            val store: SuspendingKvStore = InMemorySuspendingKvStore()
-            val br: SuspendingBridge<String> = context(ctxScope) {
-                store.suspendingBridge(key = "k", codec = StringCodec)
+    @Test fun underContextBlock_resolvesToContextOverload() =
+        runBlocking {
+            val ctxScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ctxsuspbridge"))
+            try {
+                val store: SuspendingKvStore = InMemorySuspendingKvStore()
+                val br: SuspendingBridge<String> =
+                    context(ctxScope) {
+                        store.suspendingBridge(key = "k", codec = StringCodec)
+                    }
+                // Exercise the await-completion path — proves both overloads compile and the
+                // context one resolves; publishAwaited blocks until the store accepts the value.
+                br.publishAwaited("hello")
+                assertEquals("hello", store.get("k"))
+            } finally {
+                ctxScope.cancel()
             }
-            // Exercise the await-completion path — proves both overloads compile and the
-            // context one resolves; publishAwaited blocks until the store accepts the value.
-            br.publishAwaited("hello")
-            assertEquals("hello", store.get("k"))
-        } finally {
-            ctxScope.cancel()
         }
-    }
 }

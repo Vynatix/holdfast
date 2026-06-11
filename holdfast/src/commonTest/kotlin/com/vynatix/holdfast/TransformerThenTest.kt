@@ -5,11 +5,15 @@ import kotlin.test.assertEquals
 
 private class UpperCaseTransformer : Transformer<String> {
     override fun set(value: String): String = value.uppercase()
+
     override fun get(value: String): String = value.lowercase()
 }
 
-private class PrefixTransformer(private val prefix: String) : Transformer<String> {
+private class PrefixTransformer(
+    private val prefix: String,
+) : Transformer<String> {
     override fun set(value: String): String = "$prefix$value"
+
     override fun get(value: String): String = value.removePrefix(prefix)
 }
 
@@ -39,15 +43,20 @@ class TransformerThenTest {
 
     @Test
     fun chainedShouldTransformIsLogicalOr() {
-        val never = object : Transformer<String> {
-            override fun set(value: String): String = error("must not be called")
-            override fun get(value: String): String = error("must not be called")
-            override fun shouldTransform(value: String): Boolean = false
-        }
-        val always = object : Transformer<String> {
-            override fun set(value: String): String = "$value!"
-            override fun get(value: String): String = value.removeSuffix("!")
-        }
+        val never =
+            object : Transformer<String> {
+                override fun set(value: String): String = error("must not be called")
+
+                override fun get(value: String): String = error("must not be called")
+
+                override fun shouldTransform(value: String): Boolean = false
+            }
+        val always =
+            object : Transformer<String> {
+                override fun set(value: String): String = "$value!"
+
+                override fun get(value: String): String = value.removeSuffix("!")
+            }
         val combo = never.then(always)
         assertEquals(true, combo.shouldTransform("anything"))
         // never's shouldTransform returns false, so it's skipped on set; always still applies.

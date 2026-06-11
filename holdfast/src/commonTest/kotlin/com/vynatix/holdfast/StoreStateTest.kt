@@ -37,7 +37,6 @@ private class TwoZeroVault : Store<TwoZeroVault>() {
 }
 
 class StateBasicsTest {
-
     @Test
     fun initialStateValueMatchesInitializer() {
         val v = StateTestVault()
@@ -67,7 +66,6 @@ class StateBasicsTest {
 }
 
 class StateDeclarationTest {
-
     @Test
     fun statePropertyNameDeterminesInternalKey() {
         val v = StateTestVault()
@@ -136,7 +134,6 @@ class StateDeclarationTest {
 }
 
 class VaultInstanceIsolationTest {
-
     @Test
     fun separateVaultInstancesHaveIndependentState() {
         val a = StateTestVault()
@@ -159,16 +156,16 @@ class VaultInstanceIsolationTest {
 }
 
 class CrossVaultMutationTest {
-
     @Test
     fun mutatingStateOwnedByDifferentVaultIsRejected() {
         val vaultA = StateOwnerA()
         val vaultB = StateOwnerB()
         val foreignState = vaultA.a
 
-        val result = vaultB action {
-            foreignState mutate 99
-        }
+        val result =
+            vaultB action {
+                foreignState mutate 99
+            }
 
         if (result is TransactionResult.Success) {
             assertEquals(
@@ -214,24 +211,26 @@ class CrossVaultMutationTest {
     }
 
     @Test
-    fun parallelActionsOnDifferentVaultsRunIndependently() = runBlocking {
-        val vA = StateOwnerA()
-        val vB = StateOwnerB()
-        val opsPerVault = 500
+    fun parallelActionsOnDifferentVaultsRunIndependently() =
+        runBlocking {
+            val vA = StateOwnerA()
+            val vB = StateOwnerB()
+            val opsPerVault = 500
 
-        val jobs = listOf(
-            async(Dispatchers.Default) {
-                repeat(opsPerVault) { vA action { a mutate a.value + 1 } }
-            },
-            async(Dispatchers.Default) {
-                repeat(opsPerVault) { vB action { b mutate b.value + 1 } }
-            },
-        )
-        jobs.awaitAll()
+            val jobs =
+                listOf(
+                    async(Dispatchers.Default) {
+                        repeat(opsPerVault) { vA action { a mutate a.value + 1 } }
+                    },
+                    async(Dispatchers.Default) {
+                        repeat(opsPerVault) { vB action { b mutate b.value + 1 } }
+                    },
+                )
+            jobs.awaitAll()
 
-        assertEquals(opsPerVault, vA.a.value)
-        assertEquals(opsPerVault, vB.b.value)
-    }
+            assertEquals(opsPerVault, vA.a.value)
+            assertEquals(opsPerVault, vB.b.value)
+        }
 
     @Test
     fun successfulActionInVaultADoesNotFireVaultBObservers() {

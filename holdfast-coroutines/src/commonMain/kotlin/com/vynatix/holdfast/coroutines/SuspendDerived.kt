@@ -8,7 +8,6 @@ import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.platform.runBlockingForInitialSeed
 import kotlinx.atomicfu.atomic
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -91,41 +90,44 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     val disposed = atomic(false)
 
     val initialFireFlags = BooleanArray(sources.size)
-    val subs = sources.mapIndexed { idx, src ->
-        @Suppress("UNCHECKED_CAST")
-        (src as MutableState<Any>).observe {
-            // Skip the initial-fire callback so we don't double-recompute.
-            if (!initialFireFlags[idx]) {
-                initialFireFlags[idx] = true
-                return@observe
-            }
-            if (disposed.value) return@observe
-            // Defer scheduling the launch past the parent's commit fanout, same
-            // as sync `derived`. `postCommit` ensures the launch is queued
-            // outside any pendingWrites iteration. The launch itself is async
-            // by definition (store.scope.launch), so the actual recompute runs
-            // on the scope's dispatcher.
-            self.postCommit {
-                if (disposed.value) return@postCommit
-                val job = self.scope.launch {
-                    // Stage the result via suspendAction. AsyncSerializer in
-                    // suspendAction serializes racing recomputes; the LAST
-                    // commit wins (see KDoc).
-                    self.suspendAction {
-                        @Suppress("UNCHECKED_CAST")
-                        (backingState as State<T>) mutate self.compute()
-                    }
+    val subs =
+        sources.mapIndexed { idx, src ->
+            @Suppress("UNCHECKED_CAST")
+            (src as MutableState<Any>).observe {
+                // Skip the initial-fire callback so we don't double-recompute.
+                if (!initialFireFlags[idx]) {
+                    initialFireFlags[idx] = true
+                    return@observe
                 }
-                latestJob.value = job
+                if (disposed.value) return@observe
+                // Defer scheduling the launch past the parent's commit fanout, same
+                // as sync `derived`. `postCommit` ensures the launch is queued
+                // outside any pendingWrites iteration. The launch itself is async
+                // by definition (store.scope.launch), so the actual recompute runs
+                // on the scope's dispatcher.
+                self.postCommit {
+                    if (disposed.value) return@postCommit
+                    val job =
+                        self.scope.launch {
+                            // Stage the result via suspendAction. AsyncSerializer in
+                            // suspendAction serializes racing recomputes; the LAST
+                            // commit wins (see KDoc).
+                            self.suspendAction {
+                                @Suppress("UNCHECKED_CAST")
+                                (backingState as State<T>) mutate self.compute()
+                            }
+                        }
+                    latestJob.value = job
+                }
             }
         }
-    }
 
-    val composite = Disposable {
-        if (!disposed.compareAndSet(expect = false, update = true)) return@Disposable
-        subs.forEach { runCatching { it.dispose() } }
-        latestJob.value?.let { runCatching { it.cancel() } }
-    }
+    val composite =
+        Disposable {
+            if (!disposed.compareAndSet(expect = false, update = true)) return@Disposable
+            subs.forEach { runCatching { it.dispose() } }
+            latestJob.value?.let { runCatching { it.cancel() } }
+        }
     return backingState to composite
 }
 

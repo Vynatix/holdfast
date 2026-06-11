@@ -25,9 +25,17 @@ package com.vynatix.holdfast.coroutines
  * store { balance suspendBridge SuspendingBridge(kv, "balance", LongCodec) }
  * ```
  */
-expect class SuspendingFileSystemKvStore(directory: String) : SuspendingKvStore {
+expect class SuspendingFileSystemKvStore(
+    directory: String,
+) : SuspendingKvStore {
     override suspend fun get(key: String): String?
-    override suspend fun put(key: String, value: String)
+
+    override suspend fun put(
+        key: String,
+        value: String,
+    )
+
     override suspend fun remove(key: String)
+
     override suspend fun snapshot(): Map<String, String>
 }

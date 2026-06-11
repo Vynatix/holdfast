@@ -28,85 +28,89 @@ private class BridgedVault : Store<BridgedVault>() {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SuspendingKvBridgeTest {
-
     @Test
-    fun publishConflatesAndPersists() = runTest {
-        val store = InMemorySuspendingKvStore()
-        val key = "user:name"
-        val bridge = store.bridge(key, StringCodec, scope = TestScope(testScheduler))
-        val v = BridgedVault()
+    fun publishConflatesAndPersists() =
+        runTest {
+            val store = InMemorySuspendingKvStore()
+            val key = "user:name"
+            val bridge = store.bridge(key, StringCodec, scope = TestScope(testScheduler))
+            val v = BridgedVault()
 
-        v.action { s bridge bridge }
+            v.action { s bridge bridge }
 
-        v.action { s mutate "alice" }
-        advanceUntilIdle()
+            v.action { s mutate "alice" }
+            advanceUntilIdle()
 
-        assertEquals(StringCodec.encode("alice"), store.get(key))
-    }
-
-    @Test
-    fun rapidPublishesCoalesceToLatest() = runTest {
-        val store = CountingSuspendingKvStore()
-        val key = "counter"
-        val bridge = store.bridge(key, IntCodec, scope = TestScope(testScheduler))
-        val v = BridgedVault()
-
-        v.action { n bridge bridge }
-
-        // 100 rapid publishes — the conflated channel must keep only the latest.
-        for (i in 1..100) {
-            v.action { n mutate i }
+            assertEquals(StringCodec.encode("alice"), store.get(key))
         }
-        advanceUntilIdle()
-
-        // Final value reaches the store.
-        assertEquals(IntCodec.encode(100), store.get(key))
-        // The conflation contract: far fewer than 100 puts hit the backend.
-        // We can't pin an exact count (depends on dispatcher interleaving) but it
-        // MUST be strictly less than the publish count, otherwise CONFLATED isn't
-        // doing its job.
-        assertTrue(
-            store.putCount < 100,
-            "expected conflation to drop intermediate values, but saw ${store.putCount} puts",
-        )
-    }
 
     @Test
-    fun loadOnAttachHydratesStateFromStore() = runTest {
-        val store = InMemorySuspendingKvStore(mapOf("greet" to "hello"))
-        val bridge = store.bridge("greet", StringCodec, scope = TestScope(testScheduler))
-        val v = BridgedVault()
+    fun rapidPublishesCoalesceToLatest() =
+        runTest {
+            val store = CountingSuspendingKvStore()
+            val key = "counter"
+            val bridge = store.bridge(key, IntCodec, scope = TestScope(testScheduler))
+            val v = BridgedVault()
 
-        v.action { s bridge bridge }
-        advanceUntilIdle()
+            v.action { n bridge bridge }
 
-        assertEquals("hello", v.s.value)
-    }
+            // 100 rapid publishes — the conflated channel must keep only the latest.
+            for (i in 1..100) {
+                v.action { n mutate i }
+            }
+            advanceUntilIdle()
+
+            // Final value reaches the store.
+            assertEquals(IntCodec.encode(100), store.get(key))
+            // The conflation contract: far fewer than 100 puts hit the backend.
+            // We can't pin an exact count (depends on dispatcher interleaving) but it
+            // MUST be strictly less than the publish count, otherwise CONFLATED isn't
+            // doing its job.
+            assertTrue(
+                store.putCount < 100,
+                "expected conflation to drop intermediate values, but saw ${store.putCount} puts",
+            )
+        }
 
     @Test
-    fun storeFailureSurfacesOnErrorsFlow() = runTest {
-        val boom = RuntimeException("disk full")
-        val store = ThrowingSuspendingKvStore(boom)
-        val bridge = store.bridge("x", StringCodec, scope = TestScope(testScheduler))
-        val v = BridgedVault()
+    fun loadOnAttachHydratesStateFromStore() =
+        runTest {
+            val store = InMemorySuspendingKvStore(mapOf("greet" to "hello"))
+            val bridge = store.bridge("greet", StringCodec, scope = TestScope(testScheduler))
+            val v = BridgedVault()
 
-        v.action { s bridge bridge }
-        v.action { s mutate "trigger" }
+            v.action { s bridge bridge }
+            advanceUntilIdle()
 
-        val first = bridge.errors.take(1).toList()
-        assertEquals(1, first.size)
-        assertSame(boom, first.single())
-    }
+            assertEquals("hello", v.s.value)
+        }
 
     @Test
-    fun publishReturnsTrueWithoutBlocking() = runTest {
-        val store = InMemorySuspendingKvStore()
-        val bridge = store.bridge("k", StringCodec, scope = TestScope(testScheduler))
+    fun storeFailureSurfacesOnErrorsFlow() =
+        runTest {
+            val boom = RuntimeException("disk full")
+            val store = ThrowingSuspendingKvStore(boom)
+            val bridge = store.bridge("x", StringCodec, scope = TestScope(testScheduler))
+            val v = BridgedVault()
 
-        // publish must NOT suspend / block — fire-and-forget by contract.
-        val ok = bridge.publish("v")
-        assertTrue(ok)
-    }
+            v.action { s bridge bridge }
+            v.action { s mutate "trigger" }
+
+            val first = bridge.errors.take(1).toList()
+            assertEquals(1, first.size)
+            assertSame(boom, first.single())
+        }
+
+    @Test
+    fun publishReturnsTrueWithoutBlocking() =
+        runTest {
+            val store = InMemorySuspendingKvStore()
+            val bridge = store.bridge("k", StringCodec, scope = TestScope(testScheduler))
+
+            // publish must NOT suspend / block — fire-and-forget by contract.
+            val ok = bridge.publish("v")
+            assertTrue(ok)
+        }
 }
 
 /**
@@ -121,22 +125,35 @@ private class CountingSuspendingKvStore : SuspendingKvStore {
 
     override suspend fun get(key: String): String? = mutex.withLock { map[key] }
 
-    override suspend fun put(key: String, value: String): Unit = mutex.withLock {
-        putCount += 1
-        map[key] = value
-    }
+    override suspend fun put(
+        key: String,
+        value: String,
+    ): Unit =
+        mutex.withLock {
+            putCount += 1
+            map[key] = value
+        }
 
-    override suspend fun remove(key: String): Unit = mutex.withLock {
-        map.remove(key)
-    }
+    override suspend fun remove(key: String): Unit =
+        mutex.withLock {
+            map.remove(key)
+        }
 
     override suspend fun snapshot(): Map<String, String> = mutex.withLock { map.toMap() }
 }
 
 /** Always throws on `put` — feeds the errors-flow test. */
-private class ThrowingSuspendingKvStore(private val boom: Throwable) : SuspendingKvStore {
+private class ThrowingSuspendingKvStore(
+    private val boom: Throwable,
+) : SuspendingKvStore {
     override suspend fun get(key: String): String? = null
-    override suspend fun put(key: String, value: String): Unit = throw boom
+
+    override suspend fun put(
+        key: String,
+        value: String,
+    ): Unit = throw boom
+
     override suspend fun remove(key: String) = Unit
+
     override suspend fun snapshot(): Map<String, String> = emptyMap()
 }

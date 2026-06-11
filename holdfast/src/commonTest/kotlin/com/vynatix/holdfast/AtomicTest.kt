@@ -8,7 +8,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-private class AccountVault(initial: Long = 0) : Store<AccountVault>() {
+private class AccountVault(
+    initial: Long = 0,
+) : Store<AccountVault>() {
     val balance by state { initial }
 }
 
@@ -17,14 +19,14 @@ private class LedgerVault : Store<LedgerVault>() {
 }
 
 class AtomicSuccessTest {
-
     @Test fun atomicWithTwoVaultsCommitsBothBodiesAtomically() {
         val a = AccountVault(initial = 100)
         val b = AccountVault(initial = 0)
-        val r = atomic(a, b) {
-            a.action { balance update { it - 30 } }
-            b.action { balance update { it + 30 } }
-        }
+        val r =
+            atomic(a, b) {
+                a.action { balance update { it - 30 } }
+                b.action { balance update { it + 30 } }
+            }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(70L, a.balance.value)
         assertEquals(30L, b.balance.value)
@@ -33,11 +35,12 @@ class AtomicSuccessTest {
     @Test fun atomicReturnsBodyValueViaSuccess() {
         val a = AccountVault(initial = 50)
         val b = AccountVault(initial = 50)
-        val r = atomic(a, b) {
-            a.action { balance update { it - 10 } }
-            b.action { balance update { it + 10 } }
-            "transferred"
-        }
+        val r =
+            atomic(a, b) {
+                a.action { balance update { it - 10 } }
+                b.action { balance update { it + 10 } }
+                "transferred"
+            }
         assertIs<TransactionResult.Success<String>>(r)
         assertEquals("transferred", r.value)
     }
@@ -46,11 +49,12 @@ class AtomicSuccessTest {
         val a = AccountVault(initial = 1)
         val b = AccountVault(initial = 2)
         val c = AccountVault(initial = 3)
-        val r = atomic(a, b, c) {
-            a.action { balance update { it + 10 } }
-            b.action { balance update { it + 20 } }
-            c.action { balance update { it + 30 } }
-        }
+        val r =
+            atomic(a, b, c) {
+                a.action { balance update { it + 10 } }
+                b.action { balance update { it + 20 } }
+                c.action { balance update { it + 30 } }
+            }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(11L, a.balance.value)
         assertEquals(22L, b.balance.value)
@@ -59,15 +63,15 @@ class AtomicSuccessTest {
 }
 
 class AtomicRollbackTest {
-
     @Test fun atomicBodyThrowingRollsBackAllVaults() {
         val a = AccountVault(initial = 100)
         val b = AccountVault(initial = 0)
-        val r = atomic(a, b) {
-            a.action { balance update { it - 30 } }
-            b.action { balance update { it + 30 } }
-            error("simulated mid-transfer failure")
-        }
+        val r =
+            atomic(a, b) {
+                a.action { balance update { it - 30 } }
+                b.action { balance update { it + 30 } }
+                error("simulated mid-transfer failure")
+            }
         assertIs<TransactionResult.Error>(r)
         assertEquals(100L, a.balance.value, "store a rolled back")
         assertEquals(0L, b.balance.value, "store b rolled back")
@@ -83,7 +87,6 @@ class AtomicRollbackTest {
 }
 
 class AtomicCrossVaultObserverTest {
-
     @Test fun observersFireForEachVaultAfterAtomicCommit() {
         val a = AccountVault(initial = 100)
         val b = AccountVault(initial = 0)
@@ -107,15 +110,15 @@ class AtomicCrossVaultObserverTest {
 }
 
 class AtomicMixedTypesTest {
-
     @Test fun atomicCoordinatesDifferentVaultClasses() {
         val acct = AccountVault(initial = 1000)
         val ledger = LedgerVault()
 
-        val r = atomic(acct, ledger) {
-            acct.action { balance update { it - 100 } }
-            ledger.action { entries update { it + "withdraw 100" } }
-        }
+        val r =
+            atomic(acct, ledger) {
+                acct.action { balance update { it - 100 } }
+                ledger.action { entries update { it + "withdraw 100" } }
+            }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(900L, acct.balance.value)
         assertEquals(listOf("withdraw 100"), ledger.entries.value)
@@ -123,25 +126,26 @@ class AtomicMixedTypesTest {
 }
 
 class AtomicConcurrencyTest {
+    @Test fun concurrentAtomicTransfersHaveNoLostUpdates() =
+        runBlocking {
+            val a = AccountVault(initial = 0)
+            val b = AccountVault(initial = 0)
+            val workers = 4
+            val perWorker = 50
 
-    @Test fun concurrentAtomicTransfersHaveNoLostUpdates() = runBlocking {
-        val a = AccountVault(initial = 0)
-        val b = AccountVault(initial = 0)
-        val workers = 4
-        val perWorker = 50
-
-        val jobs = List(workers) {
-            async(Dispatchers.Default) {
-                repeat(perWorker) {
-                    atomic(a, b) {
-                        a.action { balance update { it + 1 } }
-                        b.action { balance update { it + 2 } }
+            val jobs =
+                List(workers) {
+                    async(Dispatchers.Default) {
+                        repeat(perWorker) {
+                            atomic(a, b) {
+                                a.action { balance update { it + 1 } }
+                                b.action { balance update { it + 2 } }
+                            }
+                        }
                     }
                 }
-            }
+            jobs.awaitAll()
+            assertEquals((workers * perWorker).toLong(), a.balance.value)
+            assertEquals((workers * perWorker * 2L), b.balance.value)
         }
-        jobs.awaitAll()
-        assertEquals((workers * perWorker).toLong(), a.balance.value)
-        assertEquals((workers * perWorker * 2L), b.balance.value)
-    }
 }

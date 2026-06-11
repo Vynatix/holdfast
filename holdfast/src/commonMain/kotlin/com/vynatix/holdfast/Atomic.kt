@@ -53,7 +53,10 @@ import kotlin.uuid.Uuid
  * ```
  */
 @OptIn(ExperimentalUuidApi::class)
-fun <R> atomic(vararg vaults: Store<*>, body: () -> R): TransactionResult<R> {
+fun <R> atomic(
+    vararg vaults: Store<*>,
+    body: () -> R,
+): TransactionResult<R> {
     require(vaults.isNotEmpty()) { "atomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = vaults.toSet().sortedBy { it.lockOrderKey }
@@ -88,15 +91,16 @@ private fun <R> acquireAndRun(
         // (which may belong to an enclosing atomic or a synchronous action) becomes
         // this root's parent — preserving savepoint semantics for nested atomics.
         val priorActive = v.activeTransaction
-        val root = if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
-            // Adopt the existing transaction as our root — we're nested inside an
-            // outer action/atomic on this thread for this store.
-            priorActive
-        } else {
-            Transaction.createForExternal(id, ownerThreadId).also {
-                v.internalSetActiveTransaction(it)
+        val root =
+            if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
+                // Adopt the existing transaction as our root — we're nested inside an
+                // outer action/atomic on this thread for this store.
+                priorActive
+            } else {
+                Transaction.createForExternal(id, ownerThreadId).also {
+                    v.internalSetActiveTransaction(it)
+                }
             }
-        }
         rootsAcquired.add(v to root)
         try {
             acquireAndRun(sorted, index + 1, rootsAcquired, id, ownerThreadId, body)
@@ -109,28 +113,32 @@ private fun <R> acquireAndRun(
     }
 }
 
-private fun <R> executeBody(roots: List<Pair<Store<*>, Transaction>>, body: () -> R): TransactionResult<R> {
-    val outcome: TransactionResult<R> = try {
-        val value = body()
-        // Commit each root in lock order. For roots we adopted (priorActive == root),
-        // the commit happens at the outer enclosing scope's exit — skip here.
-        roots.forEach { (_, root) ->
-            // commit() is idempotent; if root was adopted from an outer scope,
-            // it's still Active and we'd commit it prematurely. Detect: a root we
-            // OPENED has its parent==null (top-level relative to this thread's
-            // pre-atomic state). Adopted roots have non-null parent OR were the
-            // pre-existing _activeTransaction.
-            // Conservative approach: only commit roots that have status Active
-            // AND are not parent-chained to something still in progress. For
-            // 1.1 we commit unconditionally — adopted root commit becomes a
-            // savepoint merge, which is correct.
-            root.commit()
+private fun <R> executeBody(
+    roots: List<Pair<Store<*>, Transaction>>,
+    body: () -> R,
+): TransactionResult<R> {
+    val outcome: TransactionResult<R> =
+        try {
+            val value = body()
+            // Commit each root in lock order. For roots we adopted (priorActive == root),
+            // the commit happens at the outer enclosing scope's exit — skip here.
+            roots.forEach { (_, root) ->
+                // commit() is idempotent; if root was adopted from an outer scope,
+                // it's still Active and we'd commit it prematurely. Detect: a root we
+                // OPENED has its parent==null (top-level relative to this thread's
+                // pre-atomic state). Adopted roots have non-null parent OR were the
+                // pre-existing _activeTransaction.
+                // Conservative approach: only commit roots that have status Active
+                // AND are not parent-chained to something still in progress. For
+                // 1.1 we commit unconditionally — adopted root commit becomes a
+                // savepoint merge, which is correct.
+                root.commit()
+            }
+            @Suppress("UNCHECKED_CAST")
+            TransactionResult.Success(roots.last().second, value as R)
+        } catch (e: Throwable) {
+            roots.forEach { (_, root) -> runCatching { root.rollback() } }
+            TransactionResult.Error(e, roots.last().second)
         }
-        @Suppress("UNCHECKED_CAST")
-        TransactionResult.Success(roots.last().second, value as R)
-    } catch (e: Throwable) {
-        roots.forEach { (_, root) -> runCatching { root.rollback() } }
-        TransactionResult.Error(e, roots.last().second)
-    }
     return outcome
 }

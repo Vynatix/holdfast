@@ -10,7 +10,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
-private class CountingInitVault(private val onInit: () -> Unit) : Store<CountingInitVault>() {
+private class CountingInitVault(
+    private val onInit: () -> Unit,
+) : Store<CountingInitVault>() {
     val n by state {
         onInit()
         0
@@ -76,7 +78,6 @@ private class ParallelInitVault : Store<ParallelInitVault>() {
 }
 
 class InitializerTest {
-
     @Test
     fun initializerIsNotCalledUntilFirstStateAccess() {
         var calls = 0
@@ -148,23 +149,25 @@ class InitializerTest {
     }
 
     @Test
-    fun parallelFirstAccessOnSameStateInvokesInitializerAtMostOnce() = runBlocking {
-        val v = ParallelInitVault()
-        val workers = 16
-        val gate = CompletableDeferred<Unit>()
-        val jobs = List(workers) {
-            async(Dispatchers.Default) {
-                gate.await()
-                v.n
-            }
-        }
-        gate.complete(Unit)
-        jobs.awaitAll()
+    fun parallelFirstAccessOnSameStateInvokesInitializerAtMostOnce() =
+        runBlocking {
+            val v = ParallelInitVault()
+            val workers = 16
+            val gate = CompletableDeferred<Unit>()
+            val jobs =
+                List(workers) {
+                    async(Dispatchers.Default) {
+                        gate.await()
+                        v.n
+                    }
+                }
+            gate.complete(Unit)
+            jobs.awaitAll()
 
-        assertEquals(
-            1,
-            v.callCount.value,
-            "propertiesLock must serialize first-access; initializer ran once across $workers parallel readers",
-        )
-    }
+            assertEquals(
+                1,
+                v.callCount.value,
+                "propertiesLock must serialize first-access; initializer ran once across $workers parallel readers",
+            )
+        }
 }

@@ -29,7 +29,6 @@ import kotlinx.atomicfu.locks.synchronized
  * ```
  */
 class FakeKvStore : KvStore {
-
     private val lock = SynchronizedObject()
     private val store: MutableMap<String, String> = mutableMapOf()
 
@@ -48,7 +47,10 @@ class FakeKvStore : KvStore {
 
     override fun get(key: String): String? = synchronized(lock) { store[key] }
 
-    override fun put(key: String, value: String) {
+    override fun put(
+        key: String,
+        value: String,
+    ) {
         synchronized(lock) { store[key] = value }
     }
 

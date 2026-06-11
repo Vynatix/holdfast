@@ -29,5 +29,7 @@ import com.vynatix.holdfast.Store
  * either Store context-receiver support or a Store-core change to expose the
  * mutator from outside `action { }` scope.
  */
-fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxed(validator: Validator<P, O>, initial: () -> P): StateDelegate<O> =
-    state(transformer = ValidatingTransformer(validator)) { validator of initial() }
+fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxed(
+    validator: Validator<P, O>,
+    initial: () -> P,
+): StateDelegate<O> = state(transformer = ValidatingTransformer(validator)) { validator of initial() }

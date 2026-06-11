@@ -56,11 +56,12 @@ internal class AwaitingRegistry {
      * the entry whose channel is already drained).
      */
     fun cancelAll() {
-        val snapshot = synchronized(lock) {
-            val copy = channels.toList()
-            channels.clear()
-            copy
-        }
+        val snapshot =
+            synchronized(lock) {
+                val copy = channels.toList()
+                channels.clear()
+                copy
+            }
         for (channel in snapshot) {
             channel.close()
         }

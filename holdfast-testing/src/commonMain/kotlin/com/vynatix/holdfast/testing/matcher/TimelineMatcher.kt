@@ -9,12 +9,12 @@ import com.vynatix.holdfast.testing.EmissionEvent
 import com.vynatix.holdfast.testing.MiddlewareCompleted
 import com.vynatix.holdfast.testing.MiddlewareErrored
 import com.vynatix.holdfast.testing.MiddlewareStarted
+import com.vynatix.holdfast.testing.StoreEvent
+import com.vynatix.holdfast.testing.StoreHandle
 import com.vynatix.holdfast.testing.TransactionCommitted
 import com.vynatix.holdfast.testing.TransactionErrored
 import com.vynatix.holdfast.testing.TransactionRolledBack
 import com.vynatix.holdfast.testing.TransactionStarted
-import com.vynatix.holdfast.testing.StoreEvent
-import com.vynatix.holdfast.testing.StoreHandle
 import kotlin.reflect.KProperty1
 
 /**
@@ -49,8 +49,9 @@ annotation class TimelineMatcherDsl
  * predicates that don't need a store.
  */
 @TimelineMatcherDsl
-class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: V?) {
-
+class TimelineMatcher<V : Store<V>> internal constructor(
+    internal val vaultRef: V?,
+) {
     /**
      * Predicates collected in declaration order. The four combinators iterate
      * this list, so order matters for [shouldFireInOrder] /
@@ -106,23 +107,25 @@ class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: 
      * lifecycle events, so a `middleware<UserClass>()` block will never match
      * anything in v1. This is documented and tested via the recorder.
      */
-    inline fun <reified M : Middleware<*>> middleware(): MiddlewareBuilder<V> = MiddlewareBuilder(
-        owner = this,
-        classMatch = { it is M },
-        instanceMatch = null,
-        label = M::class.simpleName ?: "Middleware",
-    )
+    inline fun <reified M : Middleware<*>> middleware(): MiddlewareBuilder<V> =
+        MiddlewareBuilder(
+            owner = this,
+            classMatch = { it is M },
+            instanceMatch = null,
+            label = M::class.simpleName ?: "Middleware",
+        )
 
     /**
      * Open a [MiddlewareBuilder] scoped to a specific middleware [instance].
      * Matches by referential equality (`===`).
      */
-    fun <M : Middleware<*>> middleware(instance: M): MiddlewareBuilder<V> = MiddlewareBuilder(
-        owner = this,
-        classMatch = null,
-        instanceMatch = instance,
-        label = instance::class.simpleName ?: "Middleware",
-    )
+    fun <M : Middleware<*>> middleware(instance: M): MiddlewareBuilder<V> =
+        MiddlewareBuilder(
+            owner = this,
+            classMatch = null,
+            instanceMatch = instance,
+            label = instance::class.simpleName ?: "Middleware",
+        )
 
     /**
      * Match any [EmissionEvent] for the [State] referenced by [prop]. Resolves
@@ -133,45 +136,56 @@ class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: 
      * Throws [IllegalStateException] if [vaultRef] is null (i.e. when invoked
      * via the [List]-receiver combinator without a store context).
      */
-    fun emitted(prop: KProperty1<V, State<*>>): EmissionPredicate = register(
-        EmissionPredicate(
-            target = resolveState(prop, "emitted"),
-            propName = prop.name,
-            checkNewValue = false,
-            expectedNewValue = null,
-        ),
-    )
+    fun emitted(prop: KProperty1<V, State<*>>): EmissionPredicate =
+        register(
+            EmissionPredicate(
+                target = resolveState(prop, "emitted"),
+                propName = prop.name,
+                checkNewValue = false,
+                expectedNewValue = null,
+            ),
+        )
 
     /**
      * Match any [EmissionEvent] for [prop] whose `newValue` equals [value]
      * (`==`). [value] may be `null` to match emissions whose `newValue` is null.
      */
-    fun emitted(prop: KProperty1<V, State<*>>, value: Any?): EmissionPredicate = register(
-        EmissionPredicate(
-            target = resolveState(prop, "emitted"),
-            propName = prop.name,
-            checkNewValue = true,
-            expectedNewValue = value,
-        ),
-    )
+    fun emitted(
+        prop: KProperty1<V, State<*>>,
+        value: Any?,
+    ): EmissionPredicate =
+        register(
+            EmissionPredicate(
+                target = resolveState(prop, "emitted"),
+                propName = prop.name,
+                checkNewValue = true,
+                expectedNewValue = value,
+            ),
+        )
 
     /** Match any [BridgePublished] event for the State referenced by [prop]. */
-    fun bridgePublished(prop: KProperty1<V, State<*>>): BridgePublishedPredicate = register(
-        BridgePublishedPredicate(target = resolveState(prop, "bridgePublished"), propName = prop.name),
-    )
+    fun bridgePublished(prop: KProperty1<V, State<*>>): BridgePublishedPredicate =
+        register(
+            BridgePublishedPredicate(target = resolveState(prop, "bridgePublished"), propName = prop.name),
+        )
 
     /** Match any [BridgeObserved] event for the State referenced by [prop]. */
-    fun bridgeObserved(prop: KProperty1<V, State<*>>): BridgeObservedPredicate = register(
-        BridgeObservedPredicate(target = resolveState(prop, "bridgeObserved"), propName = prop.name),
-    )
+    fun bridgeObserved(prop: KProperty1<V, State<*>>): BridgeObservedPredicate =
+        register(
+            BridgeObservedPredicate(target = resolveState(prop, "bridgeObserved"), propName = prop.name),
+        )
 
-    private fun resolveState(prop: KProperty1<V, State<*>>, surface: String): State<*> {
-        val v = vaultRef
-            ?: error(
-                "$surface(${prop.name}) requires a store context. Use " +
-                    "StoreHandle.$surface { … } instead of List<StoreEvent>.$surface { … }, " +
-                    "or build a synthetic-timeline test that doesn't reference state properties.",
-            )
+    private fun resolveState(
+        prop: KProperty1<V, State<*>>,
+        surface: String,
+    ): State<*> {
+        val v =
+            vaultRef
+                ?: error(
+                    "$surface(${prop.name}) requires a store context. Use " +
+                        "StoreHandle.$surface { … } instead of List<StoreEvent>.$surface { … }, " +
+                        "or build a synthetic-timeline test that doesn't reference state properties.",
+                )
         return prop.get(v)
     }
 
@@ -193,31 +207,35 @@ class TimelineMatcher<V : Store<V>> internal constructor(internal val vaultRef: 
  * checks at match time.
  */
 @TimelineMatcherDsl
-class MiddlewareBuilder<V : Store<V>> @PublishedApi internal constructor(
-    private val owner: TimelineMatcher<V>,
-    private val classMatch: ((Middleware<*>) -> Boolean)?,
-    private val instanceMatch: Middleware<*>?,
-    private val label: String,
-) {
+class MiddlewareBuilder<V : Store<V>>
+    @PublishedApi
+    internal constructor(
+        private val owner: TimelineMatcher<V>,
+        private val classMatch: ((Middleware<*>) -> Boolean)?,
+        private val instanceMatch: Middleware<*>?,
+        private val label: String,
+    ) {
+        /** Match a [MiddlewareStarted] event for this builder's middleware scope. */
+        val started: MiddlewareStartedPredicate
+            get() =
+                owner.registerFromBuilder(
+                    MiddlewareStartedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
+                )
 
-    /** Match a [MiddlewareStarted] event for this builder's middleware scope. */
-    val started: MiddlewareStartedPredicate
-        get() = owner.registerFromBuilder(
-            MiddlewareStartedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
-        )
+        /** Match a [MiddlewareCompleted] event for this builder's middleware scope. */
+        val completed: MiddlewareCompletedPredicate
+            get() =
+                owner.registerFromBuilder(
+                    MiddlewareCompletedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
+                )
 
-    /** Match a [MiddlewareCompleted] event for this builder's middleware scope. */
-    val completed: MiddlewareCompletedPredicate
-        get() = owner.registerFromBuilder(
-            MiddlewareCompletedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
-        )
-
-    /** Match a [MiddlewareErrored] event for this builder's middleware scope. */
-    val errored: MiddlewareErroredPredicate
-        get() = owner.registerFromBuilder(
-            MiddlewareErroredPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
-        )
-}
+        /** Match a [MiddlewareErrored] event for this builder's middleware scope. */
+        val errored: MiddlewareErroredPredicate
+            get() =
+                owner.registerFromBuilder(
+                    MiddlewareErroredPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
+                )
+    }
 
 /**
  * Sealed root of timeline predicates. Each predicate carries:
@@ -241,26 +259,38 @@ sealed interface EventPredicate {
 // ----- Transaction lifecycle predicates -----
 
 /** Match [TransactionStarted]; if [id] is non-null, additionally require the transaction id. */
-class TransactionStartedPredicate internal constructor(internal val id: String?) : EventPredicate {
+class TransactionStartedPredicate internal constructor(
+    internal val id: String?,
+) : EventPredicate {
     override val description: String = if (id == null) "any transaction started" else "transaction '$id' started"
+
     override fun matches(event: StoreEvent): Boolean = event is TransactionStarted && (id == null || event.transaction.id == id)
 }
 
 /** Match [TransactionCommitted]; if [id] is non-null, additionally require the transaction id. */
-class TransactionCommittedPredicate internal constructor(internal val id: String?) : EventPredicate {
+class TransactionCommittedPredicate internal constructor(
+    internal val id: String?,
+) : EventPredicate {
     override val description: String = if (id == null) "any transaction committed" else "transaction '$id' committed"
+
     override fun matches(event: StoreEvent): Boolean = event is TransactionCommitted && (id == null || event.transaction.id == id)
 }
 
 /** Match [TransactionRolledBack]; if [id] is non-null, additionally require the transaction id. */
-class TransactionRolledBackPredicate internal constructor(internal val id: String?) : EventPredicate {
+class TransactionRolledBackPredicate internal constructor(
+    internal val id: String?,
+) : EventPredicate {
     override val description: String = if (id == null) "any transaction rolledBack" else "transaction '$id' rolledBack"
+
     override fun matches(event: StoreEvent): Boolean = event is TransactionRolledBack && (id == null || event.transaction.id == id)
 }
 
 /** Match [TransactionErrored]; if [id] is non-null, additionally require the transaction id. */
-class TransactionErroredPredicate internal constructor(internal val id: String?) : EventPredicate {
+class TransactionErroredPredicate internal constructor(
+    internal val id: String?,
+) : EventPredicate {
     override val description: String = if (id == null) "any transaction errored" else "transaction '$id' errored"
+
     override fun matches(event: StoreEvent): Boolean = event is TransactionErrored && (id == null || event.transaction.id == id)
 }
 
@@ -277,6 +307,7 @@ class MiddlewareStartedPredicate internal constructor(
     internal val label: String,
 ) : EventPredicate {
     override val description: String = "middleware<$label> started"
+
     override fun matches(event: StoreEvent): Boolean =
         event is MiddlewareStarted && middlewareMatches(event.middleware, classMatch, instanceMatch)
 }
@@ -288,6 +319,7 @@ class MiddlewareCompletedPredicate internal constructor(
     internal val label: String,
 ) : EventPredicate {
     override val description: String = "middleware<$label> completed"
+
     override fun matches(event: StoreEvent): Boolean =
         event is MiddlewareCompleted && middlewareMatches(event.middleware, classMatch, instanceMatch)
 }
@@ -299,6 +331,7 @@ class MiddlewareErroredPredicate internal constructor(
     internal val label: String,
 ) : EventPredicate {
     override val description: String = "middleware<$label> errored"
+
     override fun matches(event: StoreEvent): Boolean =
         event is MiddlewareErrored && middlewareMatches(event.middleware, classMatch, instanceMatch)
 }
@@ -319,28 +352,38 @@ class EmissionPredicate internal constructor(
     internal val checkNewValue: Boolean,
     internal val expectedNewValue: Any?,
 ) : EventPredicate {
-    override val description: String = if (!checkNewValue) {
-        "emitted($propName)"
-    } else {
-        "emitted($propName) with newValue=$expectedNewValue"
-    }
+    override val description: String =
+        if (!checkNewValue) {
+            "emitted($propName)"
+        } else {
+            "emitted($propName) with newValue=$expectedNewValue"
+        }
 
-    override fun matches(event: StoreEvent): Boolean = event is EmissionEvent &&
-        event.state === target &&
-        (!checkNewValue || event.newValue == expectedNewValue)
+    override fun matches(event: StoreEvent): Boolean =
+        event is EmissionEvent &&
+            event.state === target &&
+            (!checkNewValue || event.newValue == expectedNewValue)
 }
 
 // ----- Bridge predicates -----
 
 /** Match [BridgePublished] events for a specific State. See [EmissionPredicate] for the resolution strategy. */
-class BridgePublishedPredicate internal constructor(internal val target: State<*>, internal val propName: String) : EventPredicate {
+class BridgePublishedPredicate internal constructor(
+    internal val target: State<*>,
+    internal val propName: String,
+) : EventPredicate {
     override val description: String = "bridgePublished($propName)"
+
     override fun matches(event: StoreEvent): Boolean = event is BridgePublished && event.state === target
 }
 
 /** Match [BridgeObserved] events for a specific State. See [EmissionPredicate] for the resolution strategy. */
-class BridgeObservedPredicate internal constructor(internal val target: State<*>, internal val propName: String) : EventPredicate {
+class BridgeObservedPredicate internal constructor(
+    internal val target: State<*>,
+    internal val propName: String,
+) : EventPredicate {
     override val description: String = "bridgeObserved($propName)"
+
     override fun matches(event: StoreEvent): Boolean = event is BridgeObserved && event.state === target
 }
 
@@ -350,7 +393,11 @@ class BridgeObservedPredicate internal constructor(internal val target: State<*>
  * was configured with — exactly one of [classMatch] / [instanceMatch] is
  * non-null.
  */
-internal fun middlewareMatches(actual: Middleware<*>, classMatch: ((Middleware<*>) -> Boolean)?, instanceMatch: Middleware<*>?): Boolean =
+internal fun middlewareMatches(
+    actual: Middleware<*>,
+    classMatch: ((Middleware<*>) -> Boolean)?,
+    instanceMatch: Middleware<*>?,
+): Boolean =
     when {
         classMatch != null -> classMatch(actual)
         instanceMatch != null -> actual === instanceMatch

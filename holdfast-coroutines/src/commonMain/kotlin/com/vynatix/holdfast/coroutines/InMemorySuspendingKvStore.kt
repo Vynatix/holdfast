@@ -15,27 +15,36 @@ import kotlinx.coroutines.sync.withLock
  *
  * Concurrent operations are serialized by a [Mutex]; no writes are lost.
  */
-class InMemorySuspendingKvStore(initial: Map<String, String> = emptyMap()) : SuspendingKvStore {
+class InMemorySuspendingKvStore(
+    initial: Map<String, String> = emptyMap(),
+) : SuspendingKvStore {
     private val mutex = Mutex()
     private val map = initial.toMutableMap()
 
-    override suspend fun get(key: String): String? = mutex.withLock {
-        delay(0)
-        map[key]
-    }
+    override suspend fun get(key: String): String? =
+        mutex.withLock {
+            delay(0)
+            map[key]
+        }
 
-    override suspend fun put(key: String, value: String): Unit = mutex.withLock {
-        delay(0)
-        map[key] = value
-    }
+    override suspend fun put(
+        key: String,
+        value: String,
+    ): Unit =
+        mutex.withLock {
+            delay(0)
+            map[key] = value
+        }
 
-    override suspend fun remove(key: String): Unit = mutex.withLock {
-        delay(0)
-        map.remove(key)
-    }
+    override suspend fun remove(key: String): Unit =
+        mutex.withLock {
+            delay(0)
+            map.remove(key)
+        }
 
-    override suspend fun snapshot(): Map<String, String> = mutex.withLock {
-        delay(0)
-        map.toMap()
-    }
+    override suspend fun snapshot(): Map<String, String> =
+        mutex.withLock {
+            delay(0)
+            map.toMap()
+        }
 }

@@ -17,8 +17,10 @@ import com.vynatix.holdfast.Store
  * store.middlewares(LoggingMiddleware("CounterVault"))
  * ```
  */
-class LoggingMiddleware<V : Store<V>>(private val tag: String, private val log: (String) -> Unit = ::println) : Middleware<V>() {
-
+class LoggingMiddleware<V : Store<V>>(
+    private val tag: String,
+    private val log: (String) -> Unit = ::println,
+) : Middleware<V>() {
     override fun onTransactionStarted(context: MiddlewareContext<V>) {
         val parent = context.transaction.parent?.id
         val parentSuffix = if (parent != null) " (savepoint of $parent)" else ""
@@ -29,7 +31,10 @@ class LoggingMiddleware<V : Store<V>>(private val tag: String, private val log: 
         log("$tag ✓ ${context.transaction.id}")
     }
 
-    override fun onTransactionError(context: MiddlewareContext<V>, error: Throwable) {
+    override fun onTransactionError(
+        context: MiddlewareContext<V>,
+        error: Throwable,
+    ) {
         log("$tag ✗ ${context.transaction.id} → ${error::class.simpleName}: ${error.message}")
     }
 }

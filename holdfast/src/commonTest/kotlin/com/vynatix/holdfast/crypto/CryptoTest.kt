@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.crypto
 
-import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.bridge.InMemoryKvStore
 import com.vynatix.holdfast.bridge.KvBridge
 import com.vynatix.holdfast.bridge.StringCodec
@@ -21,7 +21,6 @@ private class SecureVault : Store<SecureVault>() {
 }
 
 class XorCipherTest {
-
     @Test fun roundTripPreservesShortPlaintext() {
         val c = XorCipher(SEED)
         val s = "hello, world!"
@@ -64,7 +63,6 @@ class XorCipherTest {
 }
 
 class EncryptingTransformerTest {
-
     @Test fun storedValueIsCiphertextAndReadIsPlaintext() {
         val v = SecureVault()
         v action { token mutate "the-secret-jwt" }
@@ -83,10 +81,11 @@ class EncryptingTransformerTest {
     @Test fun rollbackPreservesPriorPlaintext() {
         val v = SecureVault()
         v action { token mutate "first" }
-        val r = v action {
-            token mutate "second"
-            error("rollback")
-        }
+        val r =
+            v action {
+                token mutate "second"
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(r)
         assertEquals("first", v.token.value, "rollback restored ciphertext that decrypts to the prior plaintext")
     }

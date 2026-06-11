@@ -13,7 +13,6 @@ private class DerivedVault : Store<DerivedVault>() {
 }
 
 class ComputedTest {
-
     @Test fun computedReflectsCurrentSourceValues() {
         val v = DerivedVault()
         val total = v.computed { items.value.sum() }
@@ -35,7 +34,6 @@ class ComputedTest {
 }
 
 class DerivedTest {
-
     private val disposables = mutableListOf<Disposable>()
 
     @AfterTest fun cleanup() {

@@ -42,8 +42,9 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * (view.published as List<String>) shouldBe listOf("dark")
  * ```
  */
-class BridgeView<T : Any> internal constructor(private val source: Source<T>) {
-
+class BridgeView<T : Any> internal constructor(
+    private val source: Source<T>,
+) {
     /**
      * Snapshot of every value passed to [Bridge.publish] on the underlying
      * bridge in call order. Returns a defensive copy; safe to iterate after
@@ -81,25 +82,35 @@ class BridgeView<T : Any> internal constructor(private val source: Source<T>) {
      */
     internal sealed interface Source<T : Any> {
         fun published(): List<T>
+
         fun simulateInbound(value: T)
     }
 
-    internal class RecordingSource<T : Any>(private val bridge: RecordingBridge<T>) : Source<T> {
+    internal class RecordingSource<T : Any>(
+        private val bridge: RecordingBridge<T>,
+    ) : Source<T> {
         override fun published(): List<T> = bridge.published
+
         override fun simulateInbound(value: T) {
             bridge.simulateInbound(value)
         }
     }
 
-    internal class LatchedSource<T : Any>(private val bridge: LatchedBridge<T>) : Source<T> {
+    internal class LatchedSource<T : Any>(
+        private val bridge: LatchedBridge<T>,
+    ) : Source<T> {
         override fun published(): List<T> = bridge.published
+
         override fun simulateInbound(value: T) {
             bridge.simulateInbound(value)
         }
     }
 
-    internal class WrappedSource<T : Any>(private val wrapper: RecordingBridgeWrapper<T>) : Source<T> {
+    internal class WrappedSource<T : Any>(
+        private val wrapper: RecordingBridgeWrapper<T>,
+    ) : Source<T> {
         override fun published(): List<T> = wrapper.published
+
         override fun simulateInbound(value: T) {
             wrapper.simulateInbound(value)
         }

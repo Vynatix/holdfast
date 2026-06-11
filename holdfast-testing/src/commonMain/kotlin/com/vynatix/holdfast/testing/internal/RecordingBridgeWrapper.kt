@@ -55,7 +55,6 @@ internal class RecordingBridgeWrapper<T : Any>(
     private val delegate: Bridge<T>,
     private val recorder: Recorder<*>,
 ) : Bridge<T> {
-
     private val lock = SynchronizedObject()
     private val publishedList: MutableList<T> = mutableListOf()
     private var capturedObserver: ((T) -> Unit)? = null

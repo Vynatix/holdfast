@@ -12,6 +12,7 @@ import kotlin.test.assertTrue
  */
 private class IncrementOnGetTransformer : Transformer<Int> {
     override fun set(value: Int): Int = value
+
     override fun get(value: Int): Int = value + 1
 }
 
@@ -21,6 +22,7 @@ private class IncrementOnGetTransformer : Transformer<Int> {
  */
 private class CaseFlippingTransformer : Transformer<String> {
     override fun set(value: String): String = value.uppercase()
+
     override fun get(value: String): String = value.lowercase()
 }
 
@@ -31,10 +33,12 @@ private class CaseFlippingTransformer : Transformer<String> {
 private class CountingTransformer : Transformer<Int> {
     var setCalls = 0
     var getCalls = 0
+
     override fun set(value: Int): Int {
         setCalls++
         return value
     }
+
     override fun get(value: Int): Int {
         getCalls++
         return value
@@ -46,12 +50,13 @@ private class AsymmetricTransformerVault : Store<AsymmetricTransformerVault>() {
     val s by state(CaseFlippingTransformer()) { "hello" }
 }
 
-private class CountingTransformerVault(val transformer: CountingTransformer) : Store<CountingTransformerVault>() {
+private class CountingTransformerVault(
+    val transformer: CountingTransformer,
+) : Store<CountingTransformerVault>() {
     val n by state(transformer) { 0 }
 }
 
 class TransformerCallCountTest {
-
     @Test
     fun singleMutateInvokesTransformerSetExactlyOnce() {
         val tr = CountingTransformer()
@@ -86,7 +91,6 @@ class TransformerCallCountTest {
 }
 
 class TransformerRollbackTest {
-
     @Test
     fun rolledBackActionPreservesReadingViewUnderAsymmetricTransformer() {
         val v = AsymmetricTransformerVault()
@@ -94,10 +98,11 @@ class TransformerRollbackTest {
         val before = v.n.value
         assertEquals(1, before, "initial: stored 0, getter returns 0+1=1")
 
-        val result = v action {
-            n mutate 50
-            error("rollback")
-        }
+        val result =
+            v action {
+                n mutate 50
+                error("rollback")
+            }
         assertIs<TransactionResult.Error>(result)
 
         val after = v.n.value
@@ -150,7 +155,6 @@ class TransformerRollbackTest {
 }
 
 class TransformerEffectConsistencyTest {
-
     @Test
     fun initialEffectCallbackMatchesValueGetterUnderTransformer() {
         val v = AsymmetricTransformerVault()
@@ -189,26 +193,32 @@ private class ConditionalTransformer : Transformer<Int> {
     var setCalls = 0
     var getCalls = 0
     var shouldTransformCalls = 0
+
     override fun set(value: Int): Int {
         setCalls++
         return value * -1
     }
+
     override fun get(value: Int): Int {
         getCalls++
         return value * -1
     }
+
     override fun shouldTransform(value: Int): Boolean {
         shouldTransformCalls++
         return false
     }
 }
 
-private class ConditionalTransformerVault(val transformer: ConditionalTransformer) : Store<ConditionalTransformerVault>() {
+private class ConditionalTransformerVault(
+    val transformer: ConditionalTransformer,
+) : Store<ConditionalTransformerVault>() {
     val n by state(transformer) { 7 }
 }
 
 private class ThrowingSetTransformer : Transformer<Int> {
     override fun set(value: Int): Int = throw RuntimeException("set refused")
+
     override fun get(value: Int): Int = value
 }
 
@@ -218,6 +228,7 @@ private class ThrowingSetVault : Store<ThrowingSetVault>() {
 
 private class ThrowingGetTransformer : Transformer<Int> {
     override fun set(value: Int): Int = value
+
     override fun get(value: Int): Int = throw RuntimeException("get refused")
 }
 
@@ -231,22 +242,25 @@ private class NullTransformerVault : Store<NullTransformerVault>() {
 
 private class TimingTransformer : Transformer<Int> {
     val calls = mutableListOf<String>()
+
     override fun set(value: Int): Int {
         calls.add("set:$value")
         return value
     }
+
     override fun get(value: Int): Int {
         calls.add("get:$value")
         return value
     }
 }
 
-private class TimingTransformerVault(val transformer: TimingTransformer) : Store<TimingTransformerVault>() {
+private class TimingTransformerVault(
+    val transformer: TimingTransformer,
+) : Store<TimingTransformerVault>() {
     val n by state(transformer) { 0 }
 }
 
 class TransformerEdgeCaseTest {
-
     @Test
     fun transformerWhoseShouldTransformReturnsFalseBypassesSetAndGet() {
         val tr = ConditionalTransformer()

@@ -58,9 +58,10 @@ class StoreLock : SynchronizedObject() {
         }
     }
 
-    private fun isReentrant(threadId: Long): Boolean = synchronized(this) {
-        isLocked() && ownerThreadId == threadId
-    }
+    private fun isReentrant(threadId: Long): Boolean =
+        synchronized(this) {
+            isLocked() && ownerThreadId == threadId
+        }
 
     private fun isLocked(): Boolean = locked
 }

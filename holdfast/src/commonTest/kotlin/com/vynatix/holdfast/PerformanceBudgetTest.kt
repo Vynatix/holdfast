@@ -19,7 +19,6 @@ private class BudgetVault : Store<BudgetVault>() {
 }
 
 class PerformanceBudgetTest {
-
     @Test
     fun tenThousandSingleStateMutatesCompleteUnderFiveSeconds() {
         val v = BudgetVault()
@@ -40,9 +39,10 @@ class PerformanceBudgetTest {
     @Test
     fun oneThousandActionsWithFanOutToFiveSubscribersCompleteUnderTwoSeconds() {
         val v = BudgetVault()
-        val disposables = (1..5).map { id ->
-            v { n effect { /* noop subscriber #$id */ } }
-        }
+        val disposables =
+            (1..5).map { id ->
+                v { n effect { /* noop subscriber #$id */ } }
+            }
         val mark = TimeSource.Monotonic.markNow()
 
         repeat(1_000) {
@@ -78,24 +78,26 @@ class PerformanceBudgetTest {
     }
 
     @Test
-    fun oneHundredConcurrentActionsAcrossFourWorkersCompleteUnderThreeSeconds() = runBlocking {
-        val v = BudgetVault()
-        val mark = TimeSource.Monotonic.markNow()
+    fun oneHundredConcurrentActionsAcrossFourWorkersCompleteUnderThreeSeconds() =
+        runBlocking {
+            val v = BudgetVault()
+            val mark = TimeSource.Monotonic.markNow()
 
-        val jobs = List(4) {
-            async(Dispatchers.Default) {
-                repeat(25) {
-                    v action { n mutate n.value + 1 }
+            val jobs =
+                List(4) {
+                    async(Dispatchers.Default) {
+                        repeat(25) {
+                            v action { n mutate n.value + 1 }
+                        }
+                    }
                 }
-            }
-        }
-        jobs.awaitAll()
+            jobs.awaitAll()
 
-        val elapsedMs = mark.elapsedNow().inWholeMilliseconds
-        assertEquals(100, v.n.value)
-        assertTrue(
-            elapsedMs < 3_000,
-            "100 concurrent actions across 4 workers took ${elapsedMs}ms; budget 3 000ms exceeded",
-        )
-    }
+            val elapsedMs = mark.elapsedNow().inWholeMilliseconds
+            assertEquals(100, v.n.value)
+            assertTrue(
+                elapsedMs < 3_000,
+                "100 concurrent actions across 4 workers took ${elapsedMs}ms; budget 3 000ms exceeded",
+            )
+        }
 }

@@ -18,15 +18,22 @@ private class MiddlewareTestVault : Store<MiddlewareTestVault>() {
     val m by state { "init" }
 }
 
-private class GlobalRecordingMiddleware(private val tag: String, private val events: MutableList<String>) :
-    Middleware<MiddlewareTestVault>() {
+private class GlobalRecordingMiddleware(
+    private val tag: String,
+    private val events: MutableList<String>,
+) : Middleware<MiddlewareTestVault>() {
     override fun onTransactionStarted(context: MiddlewareContext<MiddlewareTestVault>) {
         events.add("$tag:started")
     }
+
     override fun onTransactionCompleted(context: MiddlewareContext<MiddlewareTestVault>) {
         events.add("$tag:completed")
     }
-    override fun onTransactionError(context: MiddlewareContext<MiddlewareTestVault>, error: Throwable) {
+
+    override fun onTransactionError(
+        context: MiddlewareContext<MiddlewareTestVault>,
+        error: Throwable,
+    ) {
         events.add("$tag:error")
     }
 }
@@ -34,10 +41,12 @@ private class GlobalRecordingMiddleware(private val tag: String, private val eve
 private class MetadataMiddleware : Middleware<MiddlewareTestVault>() {
     var metadataInCompleted: Any? = null
     var metadataInStarted: Any? = null
+
     override fun onTransactionStarted(context: MiddlewareContext<MiddlewareTestVault>) {
         metadataInStarted = context.metadata["seen"]
         context.metadata["seen"] = "value-set-in-started"
     }
+
     override fun onTransactionCompleted(context: MiddlewareContext<MiddlewareTestVault>) {
         metadataInCompleted = context.metadata["seen"]
     }
@@ -46,29 +55,33 @@ private class MetadataMiddleware : Middleware<MiddlewareTestVault>() {
 private class ContextCapturingMiddleware : Middleware<MiddlewareTestVault>() {
     var capturedVault: MiddlewareTestVault? = null
     var capturedTransaction: Transaction? = null
+
     override fun onTransactionStarted(context: MiddlewareContext<MiddlewareTestVault>) {
         capturedVault = context.store
         capturedTransaction = context.transaction
     }
 }
 
-private class ThrowingOnStartedMiddleware(val message: String) : Middleware<MiddlewareTestVault>() {
+private class ThrowingOnStartedMiddleware(
+    val message: String,
+) : Middleware<MiddlewareTestVault>() {
     override fun onTransactionStarted(context: MiddlewareContext<MiddlewareTestVault>): Unit = throw RuntimeException(message)
 }
 
 class MiddlewareLifecycleTest {
-
     @Test
-    fun onTransactionStartedRunsBeforeActionBlock() = vaultTest {
-        val events = mutableListOf<String>()
-        val v = MiddlewareTestVault().apply { middlewares(GlobalRecordingMiddleware("M", events)) }
-        track(v).action {
-            events.add("BLOCK")
-            n mutate 1
-        }.shouldBeSuccess()
-        assertEquals("M:started", events.first())
-        assertTrue(events.indexOf("M:started") < events.indexOf("BLOCK"), "onTransactionStarted must precede the action block")
-    }
+    fun onTransactionStartedRunsBeforeActionBlock() =
+        vaultTest {
+            val events = mutableListOf<String>()
+            val v = MiddlewareTestVault().apply { middlewares(GlobalRecordingMiddleware("M", events)) }
+            track(v)
+                .action {
+                    events.add("BLOCK")
+                    n mutate 1
+                }.shouldBeSuccess()
+            assertEquals("M:started", events.first())
+            assertTrue(events.indexOf("M:started") < events.indexOf("BLOCK"), "onTransactionStarted must precede the action block")
+        }
 
     @Test
     fun onTransactionCompletedRunsAfterSuccessfulActionBlock() {
@@ -93,10 +106,11 @@ class MiddlewareLifecycleTest {
         val events = mutableListOf<String>()
         v.middlewares(GlobalRecordingMiddleware("M", events))
 
-        val result = v action {
-            events.add("BLOCK")
-            error("intentional")
-        }
+        val result =
+            v action {
+                events.add("BLOCK")
+                error("intentional")
+            }
 
         assertIs<TransactionResult.Error>(result)
         assertEquals("intentional", result.exception.message)
@@ -138,7 +152,6 @@ class MiddlewareLifecycleTest {
 }
 
 class MiddlewareChainTest {
-
     @Test
     fun multipleMiddlewaresExecuteInLastRegisteredFirstOrder() {
         val v = MiddlewareTestVault()
@@ -203,7 +216,6 @@ class MiddlewareChainTest {
 }
 
 class MiddlewareSnapshotTest {
-
     @Test
     fun middlewareAddedDuringAnInProgressActionDoesNotApplyToCurrentAction() {
         val v = MiddlewareTestVault()
@@ -241,7 +253,6 @@ class MiddlewareSnapshotTest {
 }
 
 class MiddlewareImplicitTransactionTest {
-
     @Test
     fun middlewareFiresForImplicitTransactionCreatedByMutateOutsideAction() {
         val v = MiddlewareTestVault()
@@ -257,65 +268,69 @@ class MiddlewareImplicitTransactionTest {
 }
 
 class MiddlewareConcurrentRegistrationTest {
-
     @Test
-    fun concurrentMiddlewaresRegisterAndClearDuringInFlightActionsDoNotCorruptList() = runBlocking {
-        val v = MiddlewareTestVault()
-        val workers = 8
-        val opsPerWorker = 50
+    fun concurrentMiddlewaresRegisterAndClearDuringInFlightActionsDoNotCorruptList() =
+        runBlocking {
+            val v = MiddlewareTestVault()
+            val workers = 8
+            val opsPerWorker = 50
 
-        val jobs = List(workers) { workerId ->
-            async(Dispatchers.Default) {
-                repeat(opsPerWorker) {
-                    when (workerId % 4) {
-                        0 -> v.middlewares(GlobalRecordingMiddleware("w$workerId-$it", mutableListOf()))
-                        1 -> v.clearMiddleware()
-                        2 -> v action { n mutate it }
-                        3 -> v { n.value }
+            val jobs =
+                List(workers) { workerId ->
+                    async(Dispatchers.Default) {
+                        repeat(opsPerWorker) {
+                            when (workerId % 4) {
+                                0 -> v.middlewares(GlobalRecordingMiddleware("w$workerId-$it", mutableListOf()))
+                                1 -> v.clearMiddleware()
+                                2 -> v action { n mutate it }
+                                3 -> v { n.value }
+                            }
+                        }
                     }
                 }
-            }
-        }
-        jobs.awaitAll()
+            jobs.awaitAll()
 
-        // The store should still be usable: register a single fresh middleware and run an action.
-        v.clearMiddleware()
-        val finalEvents = mutableListOf<String>()
-        v.middlewares(GlobalRecordingMiddleware("FINAL", finalEvents))
-        v action { n mutate 999 }
-        assertEquals(listOf("FINAL:started", "FINAL:completed"), finalEvents)
-        assertEquals(999, v.n.value)
-    }
+            // The store should still be usable: register a single fresh middleware and run an action.
+            v.clearMiddleware()
+            val finalEvents = mutableListOf<String>()
+            v.middlewares(GlobalRecordingMiddleware("FINAL", finalEvents))
+            v action { n mutate 999 }
+            assertEquals(listOf("FINAL:started", "FINAL:completed"), finalEvents)
+            assertEquals(999, v.n.value)
+        }
 
     @Test
-    fun clearMiddlewareCalledFromOneCoroutineDoesNotAffectActionInProgressOnAnotherCoroutine() = runBlocking {
-        val v = MiddlewareTestVault()
-        val events = mutableListOf<String>()
-        v.middlewares(GlobalRecordingMiddleware("M", events))
+    fun clearMiddlewareCalledFromOneCoroutineDoesNotAffectActionInProgressOnAnotherCoroutine() =
+        runBlocking {
+            val v = MiddlewareTestVault()
+            val events = mutableListOf<String>()
+            v.middlewares(GlobalRecordingMiddleware("M", events))
 
-        // Run many actions in parallel while another coroutine clears middleware.
-        // The action's middleware snapshot is taken at the start of the action under
-        // transactionLock; concurrent clearMiddleware can't tear that snapshot.
-        val opsPerWorker = 100
-        val actorJobs = List(4) {
-            async(Dispatchers.Default) {
-                repeat(opsPerWorker) {
-                    runCatching { v action { n mutate it } }
+            // Run many actions in parallel while another coroutine clears middleware.
+            // The action's middleware snapshot is taken at the start of the action under
+            // transactionLock; concurrent clearMiddleware can't tear that snapshot.
+            val opsPerWorker = 100
+            val actorJobs =
+                List(4) {
+                    async(Dispatchers.Default) {
+                        repeat(opsPerWorker) {
+                            runCatching { v action { n mutate it } }
+                        }
+                    }
                 }
-            }
-        }
-        val clearJobs = List(2) {
-            async(Dispatchers.Default) {
-                repeat(opsPerWorker) {
-                    v.clearMiddleware()
+            val clearJobs =
+                List(2) {
+                    async(Dispatchers.Default) {
+                        repeat(opsPerWorker) {
+                            v.clearMiddleware()
+                        }
+                    }
                 }
-            }
-        }
-        (actorJobs + clearJobs).awaitAll()
+            (actorJobs + clearJobs).awaitAll()
 
-        // Final state: store is consistent; final action runs without error
-        v.clearMiddleware()
-        v action { n mutate 0 }
-        assertEquals(0, v.n.value)
-    }
+            // Final state: store is consistent; final action runs without error
+            v.clearMiddleware()
+            v action { n mutate 0 }
+            assertEquals(0, v.n.value)
+        }
 }

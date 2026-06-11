@@ -20,10 +20,13 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * ciphertext is a printable String (round-tripping through any [Cipher] consumer).
  */
 @OptIn(ExperimentalEncodingApi::class)
-class XorCipher(seed: ByteArray) : Cipher {
+class XorCipher(
+    seed: ByteArray,
+) : Cipher {
     init {
         require(seed.isNotEmpty()) { "XorCipher seed must be non-empty" }
     }
+
     private val key: ByteArray = seed.copyOf()
 
     override fun encrypt(plaintext: String): String {

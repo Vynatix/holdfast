@@ -29,7 +29,10 @@ internal object PendingErrorRegistry : SynchronizedObject() {
     private val errorToHandle: MutableMap<TransactionResult.Error, StoreHandle<*>> = mutableMapOf()
 
     /** Record [error] as produced by [handle]. Idempotent for the same key. */
-    fun register(error: TransactionResult.Error, handle: StoreHandle<*>) {
+    fun register(
+        error: TransactionResult.Error,
+        handle: StoreHandle<*>,
+    ) {
         synchronized(this) {
             errorToHandle[error] = handle
         }

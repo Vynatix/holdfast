@@ -37,8 +37,9 @@ import kotlinx.coroutines.CompletableDeferred
  * so a publish completes its waiters atomically with respect to a concurrent
  * `awaitPublishAttempt` call.
  */
-class LatchedBridge<T : Any>(@Suppress("unused") private val initial: T) : Bridge<T> {
-
+class LatchedBridge<T : Any>(
+    @Suppress("unused") private val initial: T,
+) : Bridge<T> {
     private val lock = SynchronizedObject()
     private val publishedList: MutableList<T> = mutableListOf()
     private val pendingAttemptWaiters: MutableList<CompletableDeferred<T>> = mutableListOf()
@@ -85,12 +86,13 @@ class LatchedBridge<T : Any>(@Suppress("unused") private val initial: T) : Bridg
      * see the class KDoc for the spec deviation rationale.
      */
     override fun publish(value: T): Boolean {
-        val waitersToComplete: List<CompletableDeferred<T>> = synchronized(lock) {
-            publishedList.add(value)
-            val drained = pendingAttemptWaiters.toList()
-            pendingAttemptWaiters.clear()
-            drained
-        }
+        val waitersToComplete: List<CompletableDeferred<T>> =
+            synchronized(lock) {
+                publishedList.add(value)
+                val drained = pendingAttemptWaiters.toList()
+                pendingAttemptWaiters.clear()
+                drained
+            }
         for (waiter in waitersToComplete) {
             waiter.complete(value)
         }

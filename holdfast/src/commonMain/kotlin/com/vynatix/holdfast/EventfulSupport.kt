@@ -58,12 +58,12 @@ class EventfulSupport<E : Any>(
     extraBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
     onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
 ) : Eventful<E> {
-
-    private val _events: MutableSharedFlow<E> = MutableSharedFlow(
-        replay = 0,
-        extraBufferCapacity = extraBufferCapacity,
-        onBufferOverflow = onBufferOverflow,
-    )
+    private val _events: MutableSharedFlow<E> =
+        MutableSharedFlow(
+            replay = 0,
+            extraBufferCapacity = extraBufferCapacity,
+            onBufferOverflow = onBufferOverflow,
+        )
 
     /**
      * The hot [SharedFlow] of events emitted via this support. Subscribers
@@ -102,14 +102,16 @@ class EventfulSupport<E : Any>(
      * transactional so rollback can discard them.
      */
     override fun emit(event: E) {
-        val store = boundVault ?: error(
-            "EventfulSupport.emit called before bindVault. The hosting Store must " +
-                "call support.bindVault(this) in its init block.",
-        )
-        val txn = store.activeTransaction ?: error(
-            "emit(event) called outside of an action / suspendAction. " +
-                "Events must be staged inside a transaction so rollback can discard them.",
-        )
+        val store =
+            boundVault ?: error(
+                "EventfulSupport.emit called before bindVault. The hosting Store must " +
+                    "call support.bindVault(this) in its init block.",
+            )
+        val txn =
+            store.activeTransaction ?: error(
+                "emit(event) called outside of an action / suspendAction. " +
+                    "Events must be staged inside a transaction so rollback can discard them.",
+            )
         txn.stagePendingEvent(_events, event)
     }
 
