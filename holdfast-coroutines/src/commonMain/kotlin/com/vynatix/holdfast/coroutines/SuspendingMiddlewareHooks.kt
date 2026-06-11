@@ -83,5 +83,8 @@ interface SuspendingMiddlewareHooks<V : Store<V>> {
      * error path AFTER the body throws and BEFORE this middleware's sync
      * `onTransactionError`.
      */
-    suspend fun onTransactionErrorAsync(context: Middleware.MiddlewareContext<V>, error: Throwable) {}
+    suspend fun onTransactionErrorAsync(
+        context: Middleware.MiddlewareContext<V>,
+        error: Throwable,
+    ) {}
 }

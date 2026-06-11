@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
  * here are written to be order-independent: whichever test "first sets" defaultScope wins,
  * and every subsequent set throws regardless of order.
  */
-class VaultScopeTest {
+class StoreScopeTest {
     private class TestVault : Store<TestVault>()
 
     @Test
@@ -52,9 +52,10 @@ class VaultScopeTest {
         runCatching { Store.defaultScope = a }
 
         // The very next assignment MUST throw, no matter what.
-        val ex = assertFailsWith<IllegalStateException> {
-            Store.defaultScope = b
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                Store.defaultScope = b
+            }
         assertTrue(
             ex.message?.contains("defaultScope") == true,
             "Expected exception to mention 'defaultScope'; was: ${ex.message}",

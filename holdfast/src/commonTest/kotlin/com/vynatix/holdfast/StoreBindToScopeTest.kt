@@ -14,11 +14,13 @@ import kotlin.test.assertSame
  * Resolution order per source doc §3.1 / Q3:
  *   per-call → per-store override → bound (bindToScope) → process default.
  */
-class VaultBindToScopeTest {
+class StoreBindToScopeTest {
     private class PlainVault : Store<PlainVault>()
 
     /** Per-store subclass override (resolution level 2) — must beat any bound scope. */
-    private class OverrideVault(private val s: CoroutineScope) : Store<OverrideVault>() {
+    private class OverrideVault(
+        private val s: CoroutineScope,
+    ) : Store<OverrideVault>() {
         override val scope: CoroutineScope get() = s
     }
 

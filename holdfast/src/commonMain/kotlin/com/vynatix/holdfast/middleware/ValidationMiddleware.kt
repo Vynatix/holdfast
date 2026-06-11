@@ -20,8 +20,9 @@ import com.vynatix.holdfast.Store
  * })
  * ```
  */
-class ValidationMiddleware<V : Store<V>>(private val check: V.() -> Unit) : Middleware<V>() {
-
+class ValidationMiddleware<V : Store<V>>(
+    private val check: V.() -> Unit,
+) : Middleware<V>() {
     override fun onTransactionCompleted(context: MiddlewareContext<V>) {
         context.store.check()
     }

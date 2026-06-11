@@ -60,12 +60,12 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
     onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
 ) : Store<Self>(),
     Eventful<E> {
-
-    private val _events: MutableSharedFlow<E> = MutableSharedFlow(
-        replay = 0,
-        extraBufferCapacity = extraBufferCapacity,
-        onBufferOverflow = onBufferOverflow,
-    )
+    private val _events: MutableSharedFlow<E> =
+        MutableSharedFlow(
+            replay = 0,
+            extraBufferCapacity = extraBufferCapacity,
+            onBufferOverflow = onBufferOverflow,
+        )
 
     /**
      * The hot [SharedFlow] of events emitted by this store. Subscribers see only
@@ -87,10 +87,11 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
      * could not honor the rollback-discards-events guarantee.
      */
     final override fun emit(event: E) {
-        val txn = activeTransaction ?: error(
-            "emit(event) called outside of an action / suspendAction. " +
-                "Events must be staged inside a transaction so rollback can discard them.",
-        )
+        val txn =
+            activeTransaction ?: error(
+                "emit(event) called outside of an action / suspendAction. " +
+                    "Events must be staged inside a transaction so rollback can discard them.",
+            )
         txn.stagePendingEvent(_events, event)
     }
 

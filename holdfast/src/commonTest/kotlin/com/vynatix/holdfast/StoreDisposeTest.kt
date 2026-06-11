@@ -20,7 +20,7 @@ import kotlin.test.assertTrue
  * - Idempotent (second dispose is a no-op).
  * - Does NOT cancel any scope bound via `bindToScope`.
  */
-class VaultDisposeTest {
+class StoreDisposeTest {
     private class CountVault : Store<CountVault>() {
         val n by state { 0 }
     }
@@ -42,9 +42,10 @@ class VaultDisposeTest {
     fun action_after_dispose_throws_with_disposed_message() {
         val v = CountVault()
         v.dispose()
-        val ex = assertFailsWith<IllegalStateException> {
-            v action { n mutate 1 }
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v action { n mutate 1 }
+            }
         assertTrue(
             ex.message?.contains("disposed") == true,
             "expected 'disposed' in message; was: ${ex.message}",
@@ -55,9 +56,10 @@ class VaultDisposeTest {
     fun mutate_after_dispose_throws_with_disposed_message() {
         val v = CountVault()
         v.dispose()
-        val ex = assertFailsWith<IllegalStateException> {
-            v { n mutate 5 }
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v { n mutate 5 }
+            }
         assertTrue(ex.message?.contains("disposed") == true)
     }
 
@@ -65,9 +67,10 @@ class VaultDisposeTest {
     fun update_after_dispose_throws_with_disposed_message() {
         val v = CountVault()
         v.dispose()
-        val ex = assertFailsWith<IllegalStateException> {
-            v { n update { it + 1 } }
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v { n update { it + 1 } }
+            }
         assertTrue(ex.message?.contains("disposed") == true)
     }
 
@@ -75,9 +78,10 @@ class VaultDisposeTest {
     fun effect_after_dispose_throws_with_disposed_message() {
         val v = CountVault()
         v.dispose()
-        val ex = assertFailsWith<IllegalStateException> {
-            v { n effect { /* no-op */ } }
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v { n effect { /* no-op */ } }
+            }
         assertTrue(ex.message?.contains("disposed") == true)
     }
 
@@ -102,9 +106,10 @@ class VaultDisposeTest {
         // after dispose (it should also throw), so we inspect the snapshot taken
         // by the property accessor — which we expect to be guarded too. Use the
         // 'properties' read which is gated.
-        val ex = assertFailsWith<IllegalStateException> {
-            v.hasState("n")
-        }
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v.hasState("n")
+            }
         assertTrue(ex.message?.contains("disposed") == true)
     }
 
