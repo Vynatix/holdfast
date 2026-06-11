@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:FileSystemKvStore.wasmJs.kt:FileSystemKvStore : KvStore</ID>
+    <ID>MatchingDeclarationName:Snapshot.kt:StoreSnapshot</ID>
+    <ID>MaxLineLength:Contract.kt:&lt;no name provided>$override fun shouldTransform: Boolean</ID>
+    <ID>MaxLineLength:Effect.kt:val</ID>
+    <ID>MaxLineLength:FileSystemKvStore.ios.kt:FileSystemKvStore$NSFileManager.defaultManager.createDirectoryAtURL(it, withIntermediateDirectories = true, attributes = null, error = null)</ID>
+    <ID>MaxLineLength:MutableState.kt:MutableState$internal</ID>
+    <ID>MaxLineLength:MutableState.kt:MutableState$private fun afterGet: T</ID>
+    <ID>MaxLineLength:MutableState.kt:val ms = (this as? MutableState&lt;T>) ?: error("observerCount is only defined for MutableState (store.state { ... })")</ID>
+    <ID>TooGenericExceptionCaught:Atomic.kt:e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:Middleware.kt:Middleware$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:MutableState.kt:MutableState$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:Store.kt:Store$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:Transaction.kt:Transaction$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>
