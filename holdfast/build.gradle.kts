@@ -75,3 +75,10 @@ val wasmJsTestTasks =
 tasks.matching { it.name in wasmJsTestTasks }.configureEach {
     enabled = false
 }
+
+// Disabled tasks still get their dependencies computed during task-graph
+// construction, and :holdfast-testing has no wasmJs variant — keep it out of
+// the wasmJs test classpaths so a bare `./gradlew check` can schedule at all.
+configurations.matching { it.name.startsWith("wasmJsTest") }.configureEach {
+    exclude(group = "com.vynatix", module = "holdfast-testing")
+}
