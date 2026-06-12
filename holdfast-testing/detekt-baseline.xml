@@ -7,7 +7,6 @@
     <ID>MaxLineLength:ResultMatchers.kt:inline</ID>
     <ID>MaxLineLength:StoreAutoRegistration.kt:StoreAutoRegistration$suspend</ID>
     <ID>MaxLineLength:StoreHandle.kt:StoreHandle$is RecordingBridgeWrapper&lt;*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper&lt;Any>))</ID>
-    <ID>MaxLineLength:StoreTestScope.kt:StoreTestScope$appendLine("vaultTest body finished with ${unconsumed.size} unconsumed TransactionResult.Error value(s):")</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionCommittedPredicate$override fun matches: Boolean</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionErroredPredicate$override fun matches: Boolean</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionRolledBackPredicate$override fun matches: Boolean</ID>

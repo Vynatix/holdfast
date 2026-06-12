@@ -24,9 +24,19 @@ class MutableState<T : Any>(
     initialValue: T,
     private val transformer: Transformer<T>? = null,
     @property:StoreInternalApi
-    val owningVault: Store<*>,
+    val owningStore: Store<*>,
     internal val distinct: Boolean = false,
 ) : State<T> {
+    /** Deprecated alias for [owningStore], kept for one minor release. */
+    @Deprecated(
+        message = "Renamed to owningStore.",
+        replaceWith = ReplaceWith("owningStore"),
+        level = DeprecationLevel.WARNING,
+    )
+    @StoreInternalApi
+    val owningVault: Store<*>
+        get() = owningStore
+
     private val stateLock = StoreLock()
     private val observersLock = StoreLock()
     private val bridgeLock = StoreLock()
@@ -77,7 +87,7 @@ class MutableState<T : Any>(
     override val value: T
         get() =
             stateLock.withLock {
-                val txn = owningVault.activeTransaction
+                val txn = owningStore.activeTransaction
                 if (txn != null && txn.ownerThreadId == currentThreadId()) {
                     val pending = txn.findPendingValue(this)
                     if (pending != null) return@withLock afterGet(pending)
@@ -163,7 +173,7 @@ class MutableState<T : Any>(
     }
 
     private fun notifyObservers(value: T) {
-        val handler = owningVault.uncaughtObserverHandler
+        val handler = owningStore.uncaughtObserverHandler
         observersLock.withLock {
             observers.toSet().forEach { observer ->
                 try {

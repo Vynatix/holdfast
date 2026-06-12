@@ -6,7 +6,7 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
 /**
- * Thread-safe, in-memory [KvStore] for unit-testing [KvBridge]-based vaults
+ * Thread-safe, in-memory [KvStore] for unit-testing [KvBridge]-based stores
  * without touching the real filesystem (or any platform key-value backend).
  *
  * Functionally equivalent to [com.vynatix.holdfast.bridge.InMemoryKvStore] except:
@@ -18,9 +18,9 @@ import kotlinx.atomicfu.locks.synchronized
  * Typical use:
  * ```
  * @Test
- * fun persistsViaKvBridge() = vaultTest {
+ * fun persistsViaKvBridge() = storeTest {
  *     val kv = FakeKvStore()
- *     val ctr = track(SettingsVault().also {
+ *     val ctr = track(SettingsStore().also {
  *         it { theme bridge KvBridge(kv, "theme", StringCodec) }
  *     })
  *     ctr.action { theme mutate "dark" }

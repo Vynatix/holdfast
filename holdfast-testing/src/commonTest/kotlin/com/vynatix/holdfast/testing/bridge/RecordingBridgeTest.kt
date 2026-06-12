@@ -5,7 +5,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.BridgeObserved
 import com.vynatix.holdfast.testing.BridgePublished
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -78,7 +78,7 @@ class RecordingBridgeTest {
 
     @Test
     fun integrationWithVaultPublishesOnCommit() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "light")
             val ctr =
                 track(
@@ -94,7 +94,7 @@ class RecordingBridgeTest {
 
     @Test
     fun integrationWithVaultEmitsBridgePublishedEvent() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "light")
             val ctr =
                 track(
@@ -113,7 +113,7 @@ class RecordingBridgeTest {
 
     @Test
     fun integrationWithVaultEmitsBridgeObservedOnReAttach() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "light")
             val v = ThemeVault().also { v -> v { theme bridge bridge } }
             // The wrapping by track() re-attaches the bridge, which replays
@@ -127,7 +127,7 @@ class RecordingBridgeTest {
 
     @Test
     fun simulateInboundUpdatesStateOnAttachedVault() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "light")
             val ctr =
                 track(
@@ -143,7 +143,7 @@ class RecordingBridgeTest {
 
     @Test
     fun bridgeViewLookupReturnsCorrectBridge() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "light")
             val ctr =
                 track(

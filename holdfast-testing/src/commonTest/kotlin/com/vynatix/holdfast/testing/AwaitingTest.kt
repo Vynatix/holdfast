@@ -21,7 +21,7 @@ private class AwaitingCounterVault : Store<AwaitingCounterVault>() {
 class AwaitingTest {
     @Test
     fun returnsNextMatchingEvent() =
-        vaultTest {
+        storeTest {
             val ctr = track(AwaitingCounterVault())
             // Schedule a future commit on the test scheduler's virtual time.
             // Action body returns synchronously; delay participates in virtual
@@ -38,7 +38,7 @@ class AwaitingTest {
 
     @Test
     fun returnsPastEventWhenAlreadyOccurred() =
-        vaultTest {
+        storeTest {
             val ctr = track(AwaitingCounterVault())
             ctr.action { count mutate 1 }.shouldBeSuccess()
             // Event already in timeline; awaiting must return immediately via the
@@ -49,7 +49,7 @@ class AwaitingTest {
 
     @Test
     fun timesOutWhenNoMatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(AwaitingCounterVault())
             ctr.action { count mutate 1 }.shouldBeSuccess()
             // No BridgeEvent will ever fire (Issue 12 owns bridge instrumentation);
@@ -65,7 +65,7 @@ class AwaitingTest {
 
     @Test
     fun skipsNonMatchingEvents() =
-        vaultTest {
+        storeTest {
             val ctr = track(AwaitingCounterVault())
             // Two commits scheduled on virtual time — non-matching events
             // (TransactionStarted, MiddlewareStarted, EmissionEvent, etc.) must
@@ -87,7 +87,7 @@ class AwaitingTest {
 
     @Test
     fun timeoutMessageIncludesEventTailFromTimeline() =
-        vaultTest {
+        storeTest {
             val ctr = track(AwaitingCounterVault())
             // Three actions ⇒ several events in the timeline. The augmented
             // message must include the recent tail (up to 5 events).
@@ -111,7 +111,7 @@ class AwaitingTest {
 
     @Test
     fun replayCheckMatchesAcrossMultipleHandles() =
-        vaultTest {
+        storeTest {
             // Two tracked vaults, only the second emits the matching event.
             // awaiting fans in across all tracked handles.
             val a = track(AwaitingCounterVault())

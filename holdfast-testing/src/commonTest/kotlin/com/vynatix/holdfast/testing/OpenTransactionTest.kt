@@ -23,7 +23,7 @@ private class OpenTxnCounterVault : Store<OpenTxnCounterVault>() {
 class OpenTransactionTest {
     @Test
     fun openCommitsApplyMutations() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             // Same-thread (owner) read sees the pending value via the
@@ -40,7 +40,7 @@ class OpenTransactionTest {
 
     @Test
     fun openCommitsAppliesMultiStateAtomically() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open =
                 transaction(on = ctr) {
@@ -58,7 +58,7 @@ class OpenTransactionTest {
 
     @Test
     fun openRollbacksDiscardMutations() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             open.rollback()
@@ -69,7 +69,7 @@ class OpenTransactionTest {
 
     @Test
     fun bodyThrowsPropagateImmediately() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val ise = IllegalStateException("body failed")
             val thrown =
@@ -87,7 +87,7 @@ class OpenTransactionTest {
 
     @Test
     fun bodyThrowFlipsManufacturedTransactionToRolledBack() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             // Use a probe to capture the `transaction` reference even though the
             // transaction(...) call propagates the throw. We use a store-level
@@ -108,7 +108,7 @@ class OpenTransactionTest {
 
     @Test
     fun reCommitAfterCommitThrows() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             open.commit().shouldBeSuccess()
@@ -118,7 +118,7 @@ class OpenTransactionTest {
 
     @Test
     fun reRollbackAfterRollbackThrows() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             open.rollback()
@@ -128,7 +128,7 @@ class OpenTransactionTest {
 
     @Test
     fun rollbackAfterCommitThrows() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             open.commit().shouldBeSuccess()
@@ -138,7 +138,7 @@ class OpenTransactionTest {
 
     @Test
     fun commitAfterRollbackThrows() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 5 }
             open.rollback()
@@ -148,7 +148,7 @@ class OpenTransactionTest {
 
     @Test
     fun observersDoNotFireOnRollback() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val seen = mutableListOf<Int>()
             val sub = ctr.store { count effect { seen.add(this) } }
@@ -163,7 +163,7 @@ class OpenTransactionTest {
 
     @Test
     fun observersFireOnceOnCommit() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val seen = mutableListOf<Int>()
             val sub = ctr.store { count effect { seen.add(this) } }
@@ -178,7 +178,7 @@ class OpenTransactionTest {
 
     @Test
     fun offThreadReadSeesCommittedNotPending() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 999 }
             // Off-owner-thread read on Dispatchers.Default — must see committed (0),
@@ -193,7 +193,7 @@ class OpenTransactionTest {
     @Test
     fun autoRollbackAtScopeExit() {
         // Direct runTest + manual scope so we can inspect the store AFTER
-        // tearDown. The standard vaultTest entry point doesn't give us a hook
+        // tearDown. The standard storeTest entry point doesn't give us a hook
         // to read state post-tearDown.
         val ctr = OpenTxnCounterVault()
         runTest {
@@ -216,7 +216,7 @@ class OpenTransactionTest {
 
     @Test
     fun openCommitReturnsSuccessWithUnitValue() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 1 }
             val result = open.commit()
@@ -227,7 +227,7 @@ class OpenTransactionTest {
 
     @Test
     fun isClosedReflectsLifecycle() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val open = transaction(on = ctr) { count mutate 1 }
             assertEquals(false, open.isClosed)
@@ -237,7 +237,7 @@ class OpenTransactionTest {
 
     @Test
     fun nestedTransactionWhileOneIsOpenIsRejected() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val outer = transaction(on = ctr) { count mutate 1 }
             // Opening a SECOND transaction while one is open should fail loudly —
@@ -256,7 +256,7 @@ class OpenTransactionTest {
 
     @Test
     fun consecutiveOpenTransactionsRunIndependently() =
-        vaultTest {
+        storeTest {
             val ctr = track(OpenTxnCounterVault())
             val first = transaction(on = ctr) { count mutate 10 }
             first.commit().shouldBeSuccess()
@@ -269,7 +269,7 @@ class OpenTransactionTest {
 
     @Test
     fun peerActionWhileOpenNestsAsSavepoint() =
-        vaultTest {
+        storeTest {
             // Acceptance criterion 5: a peer `action` issued while a transaction
             // is open observes the store's serialization rules. In v1 those rules
             // are the production nested-action contract — same thread or not, an

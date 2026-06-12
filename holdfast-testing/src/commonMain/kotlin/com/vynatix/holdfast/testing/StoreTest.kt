@@ -12,8 +12,8 @@ import kotlin.time.Duration.Companion.seconds
  * tracked store state is cleaned up at the end:
  * ```
  * @Test
- * fun readsInitialState() = vaultTest {
- *     val ctr = track(CountVault())
+ * fun readsInitialState() = storeTest {
+ *     val ctr = track(CountStore())
  *     assertEquals(0, ctr.read { count.value })
  * }
  * ```
@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.seconds
  * The default [timeout] of 60 seconds matches `runTest`'s own default; pass a
  * larger value when exercising long virtual-time delays.
  */
-fun vaultTest(
+fun storeTest(
     timeout: Duration = 60.seconds,
     body: suspend StoreTestScope.() -> Unit,
 ): TestResult =
@@ -45,3 +45,14 @@ fun vaultTest(
             scope.tearDown(bodyFailed)
         }
     }
+
+/** Deprecated alias for [storeTest], kept for one minor release. */
+@Deprecated(
+    message = "Renamed to storeTest.",
+    replaceWith = ReplaceWith("storeTest(timeout, body)"),
+    level = DeprecationLevel.WARNING,
+)
+fun vaultTest(
+    timeout: Duration = 60.seconds,
+    body: suspend StoreTestScope.() -> Unit,
+): TestResult = storeTest(timeout, body)

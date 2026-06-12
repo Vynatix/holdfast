@@ -14,7 +14,7 @@ import com.vynatix.holdfast.testing.TransactionErrored
 import com.vynatix.holdfast.testing.TransactionRolledBack
 import com.vynatix.holdfast.testing.TransactionStarted
 import com.vynatix.holdfast.testing.internal.Recorder
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
@@ -403,7 +403,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldFireInOrderForRealVault() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -416,7 +416,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldFireForRealVault() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -428,7 +428,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldNotFireForRealVault() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -440,7 +440,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldFireInExactOrderRecorderSelfEvents() =
-        vaultTest {
+        storeTest {
             // The recorder pushes: TransactionStarted, MiddlewareStarted,
             // EmissionEvent(count), TransactionCommitted, MiddlewareCompleted.
             // Strict consecutive match for the lifecycle backbone.
@@ -462,7 +462,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverEmittedWithValueMatches() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 42 }.shouldBeSuccess()
 
@@ -473,7 +473,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverEmittedWithWrongValueFails() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -490,7 +490,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverDistinguishesStatesByReference() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -507,7 +507,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverErroredPathFiresRollbackAndErrored() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr
                 .action<Unit> { throw IllegalStateException("boom") }
@@ -526,7 +526,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverExposesSameVaultRefAcrossPredicates() =
-        vaultTest {
+        storeTest {
             // Two emitted predicates against different states — both resolve via the
             // handle's store, so ordering of declaration doesn't break resolution.
             val ctr = track(TimelineCountVault())
@@ -544,7 +544,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldFireInExactOrderFailureMessage() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 
@@ -563,7 +563,7 @@ class TimelineMatcherTest {
 
     @Test
     fun handleReceiverShouldNotFireFailsWhenEventDidFire() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
 

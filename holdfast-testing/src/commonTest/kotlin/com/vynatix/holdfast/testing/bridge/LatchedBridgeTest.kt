@@ -2,7 +2,7 @@ package com.vynatix.holdfast.testing.bridge
 
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,7 +62,7 @@ class LatchedBridgeTest {
 
     @Test
     fun awaitPublishAttemptResumesOnNextPublish() =
-        vaultTest {
+        storeTest {
             val bridge = LatchedBridge<String>(initial = "init")
 
             // Schedule a publish a few virtual ticks from now.
@@ -79,7 +79,7 @@ class LatchedBridgeTest {
 
     @Test
     fun awaitPublishAttemptIgnoresPastPublishes() =
-        vaultTest {
+        storeTest {
             val bridge = LatchedBridge<String>(initial = "init")
             // Past publishes do NOT satisfy a subsequent awaitPublishAttempt.
             bridge.publish("past1")
@@ -98,7 +98,7 @@ class LatchedBridgeTest {
 
     @Test
     fun multipleConcurrentAwaitersAllResumeOnSinglePublish() =
-        vaultTest {
+        storeTest {
             val bridge = LatchedBridge<Int>(initial = 0)
 
             // Use backgroundScope so the awaiters participate in the test
@@ -120,7 +120,7 @@ class LatchedBridgeTest {
 
     @Test
     fun integrationWithVaultRecordsPublish() =
-        vaultTest {
+        storeTest {
             val bridge = LatchedBridge<String>(initial = "init")
             val ctr =
                 track(

@@ -10,11 +10,11 @@ import kotlin.reflect.KProperty1
 /**
  * Member-extension surface that lets tests skip explicit [StoreTestScope.track]
  * and call action / read / timeline / emissions / etc. directly on a
- * [Store] instance inside a [vaultTest] block:
+ * [Store] instance inside a [storeTest] block:
  *
  * ```
- * @Test fun implicit() = vaultTest {
- *     val v = MyVault()
+ * @Test fun implicit() = storeTest {
+ *     val v = MyStore()
  *     v.action { count mutate 1 }                  // member of Store, sees recorder if installed
  *     assertEquals(1, v.read { count.value })      // extension — auto-registers on first touch
  * }

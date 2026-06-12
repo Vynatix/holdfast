@@ -5,7 +5,7 @@ import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import com.vynatix.holdfast.testing.matcher.shouldHaveLastPublished
 import com.vynatix.holdfast.testing.matcher.shouldHavePublished
 import com.vynatix.holdfast.testing.matcher.shouldHavePublishedInOrder
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -74,7 +74,7 @@ class BridgeViewTest {
 
     @Test
     fun handleBridgeLookupReturnsViewForAttachedBridge() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "init")
             val ctr =
                 track(
@@ -91,7 +91,7 @@ class BridgeViewTest {
 
     @Test
     fun handleBridgeLookupThrowsWhenNoBridgeAttached() =
-        vaultTest {
+        storeTest {
             val ctr = track(TextVault())
             val ex = assertFailsWith<IllegalStateException> { ctr.bridge(TextVault::text) }
             // Error message identifies the missing bridge by property name.
@@ -103,7 +103,7 @@ class BridgeViewTest {
 
     @Test
     fun handleBridgeLookupReceivingPushesIntoState() =
-        vaultTest {
+        storeTest {
             val bridge = RecordingBridge<String>(initial = "")
             val ctr =
                 track(

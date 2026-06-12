@@ -13,13 +13,13 @@ import kotlinx.coroutines.flow.asSharedFlow
  * abstract base) but still wants the [Eventful] capability:
  *
  * ```
- * class MyVault private constructor(
+ * class MyStore private constructor(
  *     private val support: EventfulSupport<MyEvent>,
  * ) : SomeDomainBase(), Eventful<MyEvent> by support {
  *     constructor() : this(EventfulSupport())
  *
  *     init {
- *         support.bindVault(this)
+ *         support.bindStore(this)
  *     }
  * }
  * ```
@@ -41,9 +41,9 @@ import kotlinx.coroutines.flow.asSharedFlow
  * ## Store binding
  *
  * Because [EventfulSupport] does not extend [Store], it has no direct view of
- * the active transaction. The hosting store MUST call [bindVault] exactly
+ * the active transaction. The hosting store MUST call [bindStore] exactly
  * once during construction (typically in an `init` block). Calling [emit]
- * before [bindVault] throws [IllegalStateException]. Calling [bindVault]
+ * before [bindStore] throws [IllegalStateException]. Calling [bindStore]
  * twice on the same instance also throws — one support per store.
  *
  * @param extraBufferCapacity Buffer slots beyond `replay = 0` available before
@@ -72,7 +72,7 @@ class EventfulSupport<E : Any>(
     override val events: SharedFlow<E> = _events.asSharedFlow()
 
     @kotlin.concurrent.Volatile
-    private var boundVault: Store<*>? = null
+    private var boundStore: Store<*>? = null
 
     /**
      * Wire this support to its hosting [Store] so [emit] can locate the
@@ -85,27 +85,35 @@ class EventfulSupport<E : Any>(
      * not a circular leak: when the store is unreachable, both objects
      * collect together.
      */
-    fun bindVault(store: Store<*>) {
-        check(boundVault == null) {
-            "EventfulSupport.bindVault must be called at most once per instance"
+    fun bindStore(store: Store<*>) {
+        check(boundStore == null) {
+            "EventfulSupport.bindStore must be called at most once per instance"
         }
-        boundVault = store
+        boundStore = store
     }
+
+    /** Deprecated alias for [bindStore], kept for one minor release. */
+    @Deprecated(
+        message = "Renamed to bindStore.",
+        replaceWith = ReplaceWith("bindStore(store)"),
+        level = DeprecationLevel.WARNING,
+    )
+    fun bindVault(store: Store<*>) = bindStore(store)
 
     /**
      * Stage [event] onto the bound store's active transaction's pendingEvents
      * buffer. On commit, drained AFTER state observers and AFTER bridge
      * publishes — same commit-phase contract as [EventfulStore].
      *
-     * Throws [IllegalStateException] if [bindVault] has not been called or if
+     * Throws [IllegalStateException] if [bindStore] has not been called or if
      * called outside an `action` / `suspendAction`. Events MUST be
      * transactional so rollback can discard them.
      */
     override fun emit(event: E) {
         val store =
-            boundVault ?: error(
-                "EventfulSupport.emit called before bindVault. The hosting Store must " +
-                    "call support.bindVault(this) in its init block.",
+            boundStore ?: error(
+                "EventfulSupport.emit called before bindStore. The hosting Store must " +
+                    "call support.bindStore(this) in its init block.",
             )
         val txn =
             store.activeTransaction ?: error(

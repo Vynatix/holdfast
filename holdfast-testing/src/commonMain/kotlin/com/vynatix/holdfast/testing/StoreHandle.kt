@@ -29,7 +29,7 @@ import kotlin.reflect.KProperty1
  * [shouldBeSuccess][com.vynatix.holdfast.testing.matcher.shouldBeSuccess] or
  * [shouldRollbackWith][com.vynatix.holdfast.testing.matcher.shouldRollbackWith]
  * clears the mark for that result; any errors left unconsumed when the
- * surrounding [vaultTest] block returns fail the test. Use
+ * surrounding [storeTest] block returns fail the test. Use
  * [consumeAllPendingErrors] as an explicit opt-out when a test deliberately
  * ignores an error.
  *
@@ -157,7 +157,7 @@ class StoreHandle<V : Store<V>> internal constructor(
     /**
      * Filter of [timeline] for [EmissionEvent]s targeting [prop]'s state on
      * this store. Resolves [prop] against the live store instance, so
-     * `MyVault::count` returns events for the same `State<*>` reference the
+     * `MyStore::count` returns events for the same `State<*>` reference the
      * recorder pushed at commit time. Order is preserved.
      */
     fun emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> {

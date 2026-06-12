@@ -13,7 +13,7 @@ private class TinyVault : Store<TinyVault>() {
 class StoreTestScopeTest {
     @Test
     fun bodyExecutes() =
-        vaultTest {
+        storeTest {
             var ran = false
             run { ran = true }
             assertTrue(ran)
@@ -21,7 +21,7 @@ class StoreTestScopeTest {
 
     @Test
     fun trackReturnsHandleWithVault() =
-        vaultTest {
+        storeTest {
             val v = TinyVault()
             val h = track(v)
             assertSame(v, h.store)
@@ -29,7 +29,7 @@ class StoreTestScopeTest {
 
     @Test
     fun trackIsIdempotentByIdentity() =
-        vaultTest {
+        storeTest {
             val v = TinyVault()
             val h1 = track(v)
             val h2 = track(v)
@@ -38,7 +38,7 @@ class StoreTestScopeTest {
 
     @Test
     fun distinctVaultsGetDistinctHandles() =
-        vaultTest {
+        storeTest {
             val a = TinyVault()
             val b = TinyVault()
             val ha = track(a)
@@ -50,21 +50,21 @@ class StoreTestScopeTest {
 
     @Test
     fun captureModeAllByDefault() =
-        vaultTest {
+        storeTest {
             val h = track(TinyVault())
             assertEquals(Capture.All, h.captureMode)
         }
 
     @Test
     fun captureModeNonePreserved() =
-        vaultTest {
+        storeTest {
             val h = track(TinyVault(), Capture.None)
             assertEquals(Capture.None, h.captureMode)
         }
 
     @Test
     fun captureModeRingBufferPreserved() =
-        vaultTest {
+        storeTest {
             val h = track(TinyVault(), Capture.RingBuffer(size = 16))
             assertEquals(Capture.RingBuffer(size = 16), h.captureMode)
         }

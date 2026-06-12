@@ -16,7 +16,7 @@ package com.vynatix.holdfast
  * [MutableState] under the hood.
  *
  * ```
- * val v = MyVault()
+ * val v = MyStore()
  * val d = v.count effect { println(it) }   // top-level, no `v { … }` wrapping
  * v action { count mutate 7 }              // prints 7
  * d.dispose()
@@ -26,6 +26,6 @@ package com.vynatix.holdfast
 infix fun <T : Any> State<T>.effect(handler: T.() -> Unit): Disposable {
     @Suppress("UNCHECKED_CAST")
     val mutable = (this as? MutableState<T>) ?: error("effect is only defined for State produced by store.state { ... }")
-    if (mutable.owningVault.isDisposed) error("store disposed")
+    if (mutable.owningStore.isDisposed) error("store disposed")
     return mutable.observe(handler::invoke)
 }

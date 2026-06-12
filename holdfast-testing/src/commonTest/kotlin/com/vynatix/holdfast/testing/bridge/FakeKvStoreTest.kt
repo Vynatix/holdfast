@@ -6,7 +6,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.KvBridge
 import com.vynatix.holdfast.bridge.LongCodec
 import com.vynatix.holdfast.bridge.StringCodec
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -91,7 +91,7 @@ class FakeKvStoreTest {
 
     @Test
     fun integrationWithKvBridgePersistsCommittedMutations() =
-        vaultTest {
+        storeTest {
             val kv = FakeKvStore()
             val ctr =
                 track(
@@ -110,7 +110,7 @@ class FakeKvStoreTest {
 
     @Test
     fun integrationWithKvBridgeHydratesSeededValueOnAttach() =
-        vaultTest {
+        storeTest {
             val kv = FakeKvStore()
             // Seed the store as if a previous run had persisted the value.
             kv.put("balance:1", "42")
@@ -125,7 +125,7 @@ class FakeKvStoreTest {
 
     @Test
     fun concurrentWritesFromMultipleCoroutinesDoNotCorruptState() =
-        vaultTest {
+        storeTest {
             val kv = FakeKvStore()
             val totalKeys = 100
 
@@ -144,7 +144,7 @@ class FakeKvStoreTest {
 
     @Test
     fun concurrentMixedReadsWritesAndRemovesRemainConsistent() =
-        vaultTest {
+        storeTest {
             val kv = FakeKvStore()
             // Pre-seed half the keys.
             repeat(50) { i -> kv.put("k$i", "seed-$i") }

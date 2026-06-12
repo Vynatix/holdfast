@@ -1,7 +1,7 @@
 package com.vynatix.holdfast.testing.matcher
 
 import com.vynatix.holdfast.Store
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
@@ -16,7 +16,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchPassesOnExactSubset() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr.action { count mutate 5 }.shouldBeSuccess()
             ctr shouldMatch {
@@ -26,7 +26,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchPassesWhenAllAssertedFieldsEqual() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -41,7 +41,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchIgnoresUnassertedFields() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             // Mutate both, but only assert one. Lenient: that's fine.
             ctr
@@ -56,7 +56,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchFailsOnMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -72,7 +72,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchListsEveryMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -95,7 +95,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchExactlyPassesOnComplete() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -110,7 +110,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchExactlyFailsOnMissing() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             // Touch both states so they're registered.
             ctr
@@ -132,7 +132,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchExactlyFailsOnValueMismatchAfterAllAsserted() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -154,7 +154,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchSnapshotOfPassesOnIdentical() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -175,7 +175,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchSnapshotOfFailsOnValueMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             ctr
                 .action {
@@ -201,7 +201,7 @@ class StateMatcherTest {
 
     @Test
     fun shouldMatchSnapshotOfFailsOnStateNameMismatch() =
-        vaultTest {
+        storeTest {
             // Two vaults of different shape — touch a different subset on each so
             // their snapshot.stateNames differ.
             val ctr = track(CountVault())

@@ -1,7 +1,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -71,7 +71,7 @@ private class ThrowingOnStartedMiddleware(
 class MiddlewareLifecycleTest {
     @Test
     fun onTransactionStartedRunsBeforeActionBlock() =
-        vaultTest {
+        storeTest {
             val events = mutableListOf<String>()
             val v = MiddlewareTestVault().apply { middlewares(GlobalRecordingMiddleware("M", events)) }
             track(v)

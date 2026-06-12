@@ -12,7 +12,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class BarrierTest {
     @Test
     fun releasesAllPartiesOnFullArrival() =
-        vaultTest {
+        storeTest {
             val b = barrier(parties = 3)
             val results =
                 parallel(3) { idx ->
@@ -24,7 +24,7 @@ class BarrierTest {
 
     @Test
     fun timesOutWhenArrivalsBelowParties() =
-        vaultTest {
+        storeTest {
             val b = barrier(parties = 3, timeout = 100.milliseconds)
             assertFailsWith<TimeoutCancellationException> {
                 parallel(2) { b.arrive() }
@@ -33,7 +33,7 @@ class BarrierTest {
 
     @Test
     fun excessArrivalsFailLoudly() =
-        vaultTest {
+        storeTest {
             val b = barrier(parties = 2)
             val ex =
                 assertFailsWith<IllegalStateException> {

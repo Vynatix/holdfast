@@ -40,6 +40,7 @@ public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/E
 	public fun <init> ()V
 	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
 	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun bindStore (Lcom/vynatix/holdfast/Store;)V
 	public final fun bindVault (Lcom/vynatix/holdfast/Store;)V
 	public fun emit (Ljava/lang/Object;)V
 	public fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
@@ -81,6 +82,7 @@ public final class com/vynatix/holdfast/MutableState : com/vynatix/holdfast/Stat
 	public final fun applyCommittedRaw (Ljava/lang/Object;)Z
 	public final fun getBridge ()Lcom/vynatix/holdfast/Bridge;
 	public final fun getObserverCount ()I
+	public final fun getOwningStore ()Lcom/vynatix/holdfast/Store;
 	public final fun getOwningVault ()Lcom/vynatix/holdfast/Store;
 	public fun getValue ()Ljava/lang/Object;
 	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;

@@ -8,6 +8,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Changed
+
+- Completed the Vault → Store rename in the public API:
+  `EventfulSupport.bindVault(...)` is now `bindStore(...)` and
+  `MutableState.owningVault` is now `owningStore`. The testing harness entry
+  point `vaultTest { }` (in `:holdfast-testing`) is now `storeTest { }`.
+
+### Deprecated
+
+- `EventfulSupport.bindVault`, `MutableState.owningVault`, and `vaultTest`
+  remain as `WARNING`-level deprecated aliases delegating to the new names;
+  they will be removed after one minor release.
+
 ## 0.1.0 — Initial public release
 
 First public release on Maven Central as `com.vynatix:holdfast` (plus the

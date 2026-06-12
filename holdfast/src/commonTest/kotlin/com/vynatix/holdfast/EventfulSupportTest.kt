@@ -49,7 +49,7 @@ private class SupportVault private constructor(
 
     init {
         @Suppress("LeakingThis")
-        support.bindVault(this)
+        support.bindStore(this)
     }
 }
 

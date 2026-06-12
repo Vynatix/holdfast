@@ -11,7 +11,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class EventuallyTest {
     @Test
     fun succeedsWhenAssertionEventuallyPasses() =
-        vaultTest {
+        storeTest {
             var attempts = 0
             eventually(within = 500.milliseconds, every = 10.milliseconds) {
                 attempts++
@@ -22,7 +22,7 @@ class EventuallyTest {
 
     @Test
     fun failsAfterTimeoutWithLastErrorMessage() =
-        vaultTest {
+        storeTest {
             val err =
                 assertFailsWith<AssertionError> {
                     eventually(within = 50.milliseconds, every = 5.milliseconds) {
@@ -36,7 +36,7 @@ class EventuallyTest {
 
     @Test
     fun returnsImmediatelyOnFirstSuccess() =
-        vaultTest {
+        storeTest {
             var attempts = 0
             eventually(within = 1000.milliseconds, every = 100.milliseconds) {
                 attempts++

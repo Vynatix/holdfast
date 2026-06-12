@@ -37,7 +37,7 @@ The hallmark modules (`:holdfast-hallmark`, `:holdfast-hallmark-coroutines`) are
 ├─ :holdfast-compose             collectAsState, rememberDisposable (only Compose module)
 ├─ :holdfast-hallmark            ValidatingTransformer, Store.boxed{}, BoxedCodec → external hallmark lib
 ├─ :holdfast-hallmark-coroutines suspendValidateAndMutate (uses coroutines + hallmark modules)
-└─ :holdfast-testing             vaultTest{} harness; core's own commonTest depends on it (deliberate test-only cycle)
+└─ :holdfast-testing             storeTest{} harness; core's own commonTest depends on it (deliberate test-only cycle)
 ```
 
 Build logic lives in `buildSrc/src/main/kotlin/holdfast.*.gradle.kts` convention plugins: `kmp.library` (base targets + `-Wextra -Xcontext-parameters -Xexpect-actual-classes`), `kmp.jvm`/`kmp.wasmJs` (opt-in targets), `compose.multiplatform`, `quality` (detekt + ktlint), `abi` (binary-compatibility-validator incl. klib), `dokka`, `publish`(+`.sonatype`). Versions in `gradle/libs.versions.toml` (re-imported by buildSrc).
@@ -57,11 +57,11 @@ The unit of consistency is the transaction; everything below is contractual, not
 - **wasmJs is single-threaded by assumption**: `currentThreadId()` returns `0` for everyone there — any new thread-identity logic must tolerate this. Expect/actual pairs live in `platform/Threading` and `bridge/FileSystemKvStore` (custom intermediate source sets `jvmAndAndroidMain`/`jvmAndAndroidHostTest` share JVM+Android actuals).
 - `Store.Companion.defaultScope` is CAS-settable **once per process** — setting it in a test poisons every later test in that process.
 
-Package layering: root kernel depends only on `platform`; `middleware/`, `bridge/`, `crypto/` are plug-ins over root contracts and never import each other. Grep trap: `middleware/HallmarkMiddleware.kt` contains `class ValidationMiddleware`. Internal "vault" identifiers (`owningVault`, `bindVault`, …) are pre-rename residue but are cross-module API surface — keep them stable.
+Package layering: root kernel depends only on `platform`; `middleware/`, `bridge/`, `crypto/` are plug-ins over root contracts and never import each other. Grep trap: `middleware/HallmarkMiddleware.kt` contains `class ValidationMiddleware`. The public "vault" trio is renamed (`owningVault`→`owningStore`, `bindVault`→`bindStore`, `vaultTest`→`storeTest`); the old names survive as WARNING-level deprecated aliases for one minor — don't remove them early, and don't use them in new code. Remaining lowercase "vault" prose/internals are pre-rename residue.
 
 ## Testing harness (`:holdfast-testing`)
 
-Entry point is `vaultTest { }` (not `holdfastTest` — stale KDoc mentions it). Inside, `track(store)` (or just using `store.action {}` in scope — auto-tracks) yields a `StoreHandle` exposing a `timeline` of `StoreEvent`s with infix matchers (`shouldFireInOrder`, `shouldHavePublished`, `shouldBeSuccess`/`shouldBeError`, …). Every `TransactionResult.Error` a handle returns must be consumed by a matcher (or `consumeAllPendingErrors()`) or teardown fails the test.
+Entry point is `storeTest { }` (`vaultTest` is a deprecated alias; `holdfastTest` never existed — stale KDoc mentions it). Inside, `track(store)` (or just using `store.action {}` in scope — auto-tracks) yields a `StoreHandle` exposing a `timeline` of `StoreEvent`s with infix matchers (`shouldFireInOrder`, `shouldHavePublished`, `shouldBeSuccess`/`shouldBeError`, …). Every `TransactionResult.Error` a handle returns must be consumed by a matcher (or `consumeAllPendingErrors()`) or teardown fails the test.
 
 ## Conventions
 

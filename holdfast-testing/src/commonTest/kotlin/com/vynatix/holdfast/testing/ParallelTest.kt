@@ -9,21 +9,21 @@ import kotlin.test.assertTrue
 class ParallelTest {
     @Test
     fun fansOutAndJoinsResultsInIndexOrder() =
-        vaultTest {
+        storeTest {
             val results = parallel(8) { it * 2 }
             assertEquals(listOf(0, 2, 4, 6, 8, 10, 12, 14), results)
         }
 
     @Test
     fun zeroWorkersReturnsEmptyImmediately() =
-        vaultTest {
+        storeTest {
             val results = parallel<Int>(0) { error("body should not run for n=0") }
             assertTrue(results.isEmpty())
         }
 
     @Test
     fun propagatesWorkerException() =
-        vaultTest {
+        storeTest {
             val ex =
                 assertFailsWith<IllegalStateException> {
                     parallel(3) { idx ->

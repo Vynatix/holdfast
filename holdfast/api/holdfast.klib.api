@@ -213,6 +213,7 @@ final class <#A: kotlin/Any> com.vynatix.holdfast/EventfulSupport : com.vynatix.
     final val events // com.vynatix.holdfast/EventfulSupport.events|{}events[0]
         final fun <get-events>(): kotlinx.coroutines.flow/SharedFlow<#A> // com.vynatix.holdfast/EventfulSupport.events.<get-events>|<get-events>(){}[0]
 
+    final fun bindStore(com.vynatix.holdfast/Store<*>) // com.vynatix.holdfast/EventfulSupport.bindStore|bindStore(com.vynatix.holdfast.Store<*>){}[0]
     final fun bindVault(com.vynatix.holdfast/Store<*>) // com.vynatix.holdfast/EventfulSupport.bindVault|bindVault(com.vynatix.holdfast.Store<*>){}[0]
     final fun emit(#A) // com.vynatix.holdfast/EventfulSupport.emit|emit(1:0){}[0]
 }
@@ -222,6 +223,8 @@ final class <#A: kotlin/Any> com.vynatix.holdfast/MutableState : com.vynatix.hol
 
     final val observerCount // com.vynatix.holdfast/MutableState.observerCount|{}observerCount[0]
         final fun <get-observerCount>(): kotlin/Int // com.vynatix.holdfast/MutableState.observerCount.<get-observerCount>|<get-observerCount>(){}[0]
+    final val owningStore // com.vynatix.holdfast/MutableState.owningStore|{}owningStore[0]
+        final fun <get-owningStore>(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast/MutableState.owningStore.<get-owningStore>|<get-owningStore>(){}[0]
     final val owningVault // com.vynatix.holdfast/MutableState.owningVault|{}owningVault[0]
         final fun <get-owningVault>(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast/MutableState.owningVault.<get-owningVault>|<get-owningVault>(){}[0]
     final val value // com.vynatix.holdfast/MutableState.value|{}value[0]

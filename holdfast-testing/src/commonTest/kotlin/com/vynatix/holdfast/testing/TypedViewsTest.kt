@@ -20,7 +20,7 @@ private class NoopMiddleware : Middleware<MultiVault>()
 class TypedViewsTest {
     @Test
     fun transactionsViewFiltersToTransactionEvents() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action { a mutate 1 }
             ctr.action { b mutate "x" }
@@ -35,7 +35,7 @@ class TypedViewsTest {
 
     @Test
     fun emissionsFilterByPropertyReference() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action {
                 a mutate 1
@@ -52,7 +52,7 @@ class TypedViewsTest {
 
     @Test
     fun emissionsCarryOldAndNewValues() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action { a mutate 7 }
             ctr.action { a mutate 12 }
@@ -69,7 +69,7 @@ class TypedViewsTest {
 
     @Test
     fun emissionEventStateIsExactReference() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action { a mutate 1 }
             val em = ctr.emissions(MultiVault::a).single()
@@ -78,7 +78,7 @@ class TypedViewsTest {
 
     @Test
     fun bridgeEventsViewIsEmptyInV1() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action {
                 a mutate 1
@@ -91,7 +91,7 @@ class TypedViewsTest {
 
     @Test
     fun middlewareEventsOfReturnsEmptyForUserClasses() =
-        vaultTest {
+        storeTest {
             // v1 caveat: user middlewares installed via store.middlewares() are
             // NOT auto-wrapped — :holdfast has no public hook to enumerate or
             // replace entries in the chain, and Middleware.invoke is final. Their
@@ -110,7 +110,7 @@ class TypedViewsTest {
 
     @Test
     fun middlewareEventsOfCapturesRecorderSelfEvents() =
-        vaultTest {
+        storeTest {
             // The recorder DOES push self-events for itself (so the typed view is
             // not entirely empty). Sanity-check by asking for ALL middleware events
             // and verifying we got Started + Completed for each action.
@@ -126,7 +126,7 @@ class TypedViewsTest {
 
     @Test
     fun emissionsEmptyWhenStateNotMutated() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action { a mutate 1 } // only 'a'
 
@@ -136,7 +136,7 @@ class TypedViewsTest {
 
     @Test
     fun timelinePreservesPushOrder() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action { a mutate 1 }
             ctr.action { b mutate "y" }
@@ -153,7 +153,7 @@ class TypedViewsTest {
 
     @Test
     fun emissionsIncludeAllStatesInModifiedSet() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             ctr.action {
                 a mutate 5
@@ -172,7 +172,7 @@ class TypedViewsTest {
 
     @Test
     fun lastResultExistsForBothSuccessAndError() =
-        vaultTest {
+        storeTest {
             val ctr = track(MultiVault())
             val ok = ctr.action { a mutate 1 }
             assertNotNull(ctr.lastResult)

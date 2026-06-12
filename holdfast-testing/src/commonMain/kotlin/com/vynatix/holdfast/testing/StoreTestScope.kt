@@ -13,7 +13,7 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 
 /**
- * Test scope produced by [vaultTest]. Wraps the underlying [TestScope] (so the
+ * Test scope produced by [storeTest]. Wraps the underlying [TestScope] (so the
  * body has full access to the coroutine-test machinery — virtual time, the
  * background scope, the scheduler) and adds a per-test [StoreHandle] registry.
  *
@@ -25,8 +25,8 @@ import kotlinx.coroutines.test.TestScope
  * `advanceTimeBy()`, and `currentTime` can be invoked against it directly.
  *
  * Implements [StoreAutoRegistration] — the member-extension surface that lets
- * tests call `myVault.action { … }`, `myVault.read { … }`, `myVault.timeline`,
- * etc. directly inside a [vaultTest] block without an explicit [track] call.
+ * tests call `myStore.action { … }`, `myStore.read { … }`, `myStore.timeline`,
+ * etc. directly inside a [storeTest] block without an explicit [track] call.
  * See [StoreAutoRegistration] for the resolution model. The
  * `inline reified middlewareEventsOf<M>()` overload is declared as a member
  * here (not in the interface) because reified type parameters require `inline`
@@ -34,7 +34,7 @@ import kotlinx.coroutines.test.TestScope
  * [track] dispatch awkwardly; declaring it on the implementing class lets the
  * inline call directly resolve to the concrete [HandleRegistry.getOrCreate].
  *
- * Constructed exclusively by [vaultTest]; never instantiated directly by user
+ * Constructed exclusively by [storeTest]; never instantiated directly by user
  * code.
  */
 class StoreTestScope internal constructor(
@@ -187,7 +187,10 @@ class StoreTestScope internal constructor(
         if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
             val msg =
                 buildString {
-                    appendLine("vaultTest body finished with ${unconsumed.size} unconsumed TransactionResult.Error value(s):")
+                    appendLine(
+                        "storeTest body finished with ${unconsumed.size} unconsumed " +
+                            "TransactionResult.Error value(s):",
+                    )
                     unconsumed.forEachIndexed { index, (handle, err) ->
                         val type = err.exception::class.simpleName ?: "Throwable"
                         val message = err.exception.message.orEmpty()

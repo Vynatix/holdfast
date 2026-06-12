@@ -15,7 +15,7 @@ private class CountVault : Store<CountVault>() {
 class StoreHandleActionTest {
     @Test
     fun actionCommitsAndReturnsSuccess() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             val result = ctr.action { count mutate 5 }
             assertIs<TransactionResult.Success<*>>(result)
@@ -24,7 +24,7 @@ class StoreHandleActionTest {
 
     @Test
     fun actionPropagatesThrowAsError() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             val ise = IllegalStateException("boom")
             val result = ctr.action<Unit> { throw ise }
@@ -36,7 +36,7 @@ class StoreHandleActionTest {
 
     @Test
     fun suspendActionCommitsAndReturnsSuccess() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             val result =
                 ctr.suspendAction {
@@ -50,7 +50,7 @@ class StoreHandleActionTest {
 
     @Test
     fun suspendActionPropagatesThrowAsError() =
-        vaultTest {
+        storeTest {
             val ctr = track(CountVault())
             val iae = IllegalArgumentException("nope")
             val result = ctr.suspendAction<Unit> { throw iae }

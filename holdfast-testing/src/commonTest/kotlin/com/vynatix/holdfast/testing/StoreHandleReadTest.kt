@@ -12,14 +12,14 @@ private class CounterVault : Store<CounterVault>() {
 class StoreHandleReadTest {
     @Test
     fun readEvaluatesAgainstLiveState() =
-        vaultTest {
+        storeTest {
             val ctr = track(CounterVault())
             assertEquals(42, ctr.read { count.value })
         }
 
     @Test
     fun readReturnsBlockResult() =
-        vaultTest {
+        storeTest {
             val ctr = track(CounterVault())
             val combined = ctr.read { "${label.value}-${count.value}" }
             assertEquals("init-42", combined)
@@ -27,7 +27,7 @@ class StoreHandleReadTest {
 
     @Test
     fun readSeesMutationsViaAction() =
-        vaultTest {
+        storeTest {
             val ctr = track(CounterVault())
             ctr.store action { count mutate 100 }
             assertEquals(100, ctr.read { count.value })

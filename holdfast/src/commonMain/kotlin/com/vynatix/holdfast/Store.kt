@@ -16,7 +16,7 @@ import kotlin.uuid.Uuid
  * at construction. Used by `atomic(...)` to acquire multi-store locks in a
  * deadlock-safe global order.
  */
-private val vaultLockOrderKeyGen = atomic(0L)
+private val storeLockOrderKeyGen = atomic(0L)
 
 /**
  * Base class for transactional state containers.
@@ -38,7 +38,7 @@ private val vaultLockOrderKeyGen = atomic(0L)
  *
  * Typical subclass:
  * ```
- * class CounterVault : Store<CounterVault>() {
+ * class CounterStore : Store<CounterStore>() {
  *     val count by state { 0 }
  *     val label by state { "init" }
  * }
@@ -53,7 +53,7 @@ abstract class Store<Self : Store<Self>> {
      * deadlock-safe global ordering across any combination of vaults.
      */
     @StoreInternalApi
-    val lockOrderKey: Long = vaultLockOrderKeyGen.incrementAndGet()
+    val lockOrderKey: Long = storeLockOrderKeyGen.incrementAndGet()
 
     /**
      * Volatile backing field for the scope bound via [bindToScope]. `null` until the
@@ -434,7 +434,7 @@ abstract class Store<Self : Store<Self>> {
         distinct: Boolean = false,
         initialize: Initializer<T>,
     ): StateDelegate<T> {
-        val owningVault: Store<*> = this
+        val owningStore: Store<*> = this
         return StateDelegate { _, property ->
             checkNotDisposed()
             propertiesLock.withLock {
@@ -443,7 +443,7 @@ abstract class Store<Self : Store<Self>> {
                     @Suppress("UNCHECKED_CAST")
                     existing as MutableState<T>
                 } else {
-                    MutableState(initialize(), transformer, owningVault, distinct).also { state ->
+                    MutableState(initialize(), transformer, owningStore, distinct).also { state ->
                         _properties[property.name] = state
                     }
                 }
@@ -558,14 +558,14 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * O(1) ownership check via [MutableState.owningVault]. Throws if [State] was
+     * O(1) ownership check via [MutableState.owningStore]. Throws if [State] was
      * created by a different store — without this, a foreign-store state would
      * silently pass the type cast and corrupt either store's state.
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
         @Suppress("UNCHECKED_CAST")
         val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
-        if (ms.owningVault !== this@Store) error("State must be created by this Store instance")
+        if (ms.owningStore !== this@Store) error("State must be created by this Store instance")
         return ms
     }
 

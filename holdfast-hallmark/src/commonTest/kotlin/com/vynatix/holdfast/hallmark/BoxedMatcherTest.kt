@@ -3,7 +3,7 @@ package com.vynatix.holdfast.hallmark
 import com.vynatix.hallmark.Boxed
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
@@ -24,7 +24,7 @@ private class MatcherVault : Store<MatcherVault>() {
 class BoxedMatcherTest {
     @Test
     fun shouldBeBoxedAsPassesOnExactPrimitive() =
-        vaultTest {
+        storeTest {
             val ctr = track(MatcherVault())
             ctr.action { email mutate Email("alice@example.com") }.shouldBeSuccess()
             ctr.read { email } shouldBeBoxedAs "alice@example.com"
@@ -32,7 +32,7 @@ class BoxedMatcherTest {
 
     @Test
     fun shouldBeBoxedAsPassesForNonStringPrimitive() =
-        vaultTest {
+        storeTest {
             val ctr = track(MatcherVault())
             ctr.action { ageBox mutate PositiveInt(42) }.shouldBeSuccess()
             ctr.read { ageBox } shouldBeBoxedAs 42
@@ -40,7 +40,7 @@ class BoxedMatcherTest {
 
     @Test
     fun shouldBeBoxedAsFailsOnPrimitiveMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(MatcherVault())
             ctr.action { email mutate Email("alice@example.com") }.shouldBeSuccess()
             val err =
@@ -54,7 +54,7 @@ class BoxedMatcherTest {
 
     @Test
     fun shouldBeBoxedAsFailureMessageIncludesWrapperClass() =
-        vaultTest {
+        storeTest {
             val ctr = track(MatcherVault())
             val err =
                 assertFailsWith<AssertionError> {

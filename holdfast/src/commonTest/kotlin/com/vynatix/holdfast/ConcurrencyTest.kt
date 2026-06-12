@@ -4,7 +4,7 @@ import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.testing.concurrency.parallel
 import com.vynatix.holdfast.testing.concurrency.transaction
 import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -220,7 +220,7 @@ class ParallelActionTest {
 
     @Test
     fun offThreadStateValueReadDuringActiveActionReturnsCommittedNotPending() =
-        vaultTest {
+        storeTest {
             val v = track(ParallelVault())
             v.action { count mutate 5 }.shouldBeSuccess()
             val txn = transaction(on = v) { count mutate 999 }

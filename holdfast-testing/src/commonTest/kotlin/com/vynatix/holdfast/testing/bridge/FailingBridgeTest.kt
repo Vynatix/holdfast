@@ -3,7 +3,7 @@ package com.vynatix.holdfast.testing.bridge
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionException
 import com.vynatix.holdfast.testing.matcher.shouldBeError
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -60,7 +60,7 @@ class FailingBridgeTest {
 
     @Test
     fun integrationPublishFailureSurfacesAsTransactionError() =
-        vaultTest {
+        storeTest {
             val cause = IllegalStateException("kv unreachable")
             val bridge = FailingBridge<Int>(initial = 0, failOn = FailingBridge.FailureMode.Publish, cause = cause)
 

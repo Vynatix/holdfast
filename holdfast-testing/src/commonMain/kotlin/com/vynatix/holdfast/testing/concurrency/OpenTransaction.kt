@@ -19,7 +19,7 @@ import kotlinx.atomicfu.atomic
  * "OpenTransaction already closed".
  *
  * Auto-rollback safety net: every [OpenTransaction] created inside a
- * [com.vynatix.holdfast.testing.vaultTest] block is registered with the hosting
+ * [com.vynatix.holdfast.testing.storeTest] block is registered with the hosting
  * [com.vynatix.holdfast.testing.StoreTestScope]. If the body returns without
  * having closed it, the scope's `tearDown` invokes [rollback] before clearing
  * the handle registry, so the store is left in the same state as if no open
@@ -170,14 +170,14 @@ class OpenTransaction internal constructor(
  *    does no suspending work in v1.
  *
  * Auto-rollback at scope exit: leaking an [OpenTransaction] past the
- * surrounding [com.vynatix.holdfast.testing.vaultTest] block triggers a
+ * surrounding [com.vynatix.holdfast.testing.storeTest] block triggers a
  * synchronous rollback during `tearDown`. The rollback runs after the
  * barrier-cancel step but before the recorder-dispose step, so a store that
  * never committed still has its pending writes discarded cleanly.
  *
  * Example:
  * ```
- * val ctr = track(CountVault())
+ * val ctr = track(CountStore())
  * val open = transaction(on = ctr) { count mutate 999 }   // pending, not committed
  * parallel(1) { ctr.read { count.value } shouldBe 0 }     // off-thread sees committed
  * open.commit().shouldBeSuccess()

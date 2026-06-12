@@ -69,7 +69,7 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
     get() {
         @Suppress("UNCHECKED_CAST")
         val mutable = (this as? MutableState<T>) ?: error("owningScope is only defined for State produced by store.state { ... }")
-        return mutable.owningVault.scope
+        return mutable.owningStore.scope
     }
 
 /**
@@ -99,7 +99,7 @@ fun <T : Any> State<T>.asStateFlow(
  *
  * ```
  * context(viewModelScope: CoroutineScope)
- * class MyViewModel(store: MyVault) {
+ * class MyViewModel(store: MyStore) {
  *     val flow = store.count.asStateFlow()
  * }
  * ```

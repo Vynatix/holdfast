@@ -4,6 +4,15 @@ All notable changes to `:holdfast-coroutines` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `asStateFlow`'s default-scope resolution now reads
+  `MutableState.owningStore` (renamed from `owningVault` in `:holdfast`), and
+  KDoc samples use `Store*` class names. No API or behavior change in this
+  module.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

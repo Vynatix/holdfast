@@ -18,7 +18,7 @@ private class TimelineCountVault : Store<TimelineCountVault>() {
 class TimelineCaptureTest {
     @Test
     fun captureAllRecordsTransactionLifecycle() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 5 }
 
@@ -39,7 +39,7 @@ class TimelineCaptureTest {
 
     @Test
     fun timelineShapeMatchesIssueAcceptance() =
-        vaultTest {
+        storeTest {
             // Mirrors the issue acceptance: 2 transactions x {start, emit, commit}.
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 1 }
@@ -57,7 +57,7 @@ class TimelineCaptureTest {
 
     @Test
     fun captureNoneRecordsNothing() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault(), Capture.None)
             ctr.action { count mutate 5 }
             ctr.action { count mutate 6 }
@@ -68,7 +68,7 @@ class TimelineCaptureTest {
 
     @Test
     fun captureRingBufferTruncatesOldest() =
-        vaultTest {
+        storeTest {
             // Ring of 2 events. After many actions, the timeline must contain only
             // the 2 most recent events.
             val ctr = track(TimelineCountVault(), Capture.RingBuffer(2))
@@ -89,7 +89,7 @@ class TimelineCaptureTest {
 
     @Test
     fun lastTransactionAndLastResultReflectMostRecent() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             val r1 = ctr.action { count mutate 1 }
             val r2 = ctr.action { count mutate 2 }
@@ -105,7 +105,7 @@ class TimelineCaptureTest {
 
     @Test
     fun lastTransactionReflectsRolledBackTransaction() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action { count mutate 1 } // success
             val ise = IllegalStateException("boom")
@@ -132,7 +132,7 @@ class TimelineCaptureTest {
 
     @Test
     fun nestedActionsRecordSeparateTransactions() =
-        vaultTest {
+        storeTest {
             val ctr = track(TimelineCountVault())
             ctr.action {
                 count mutate 1

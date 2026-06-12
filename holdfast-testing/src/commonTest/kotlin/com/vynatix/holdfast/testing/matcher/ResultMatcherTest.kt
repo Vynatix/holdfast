@@ -3,7 +3,7 @@ package com.vynatix.holdfast.testing.matcher
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
-import com.vynatix.holdfast.testing.vaultTest
+import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -20,7 +20,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeSuccessPassesOnSuccess() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val result: TransactionResult<Unit> = ctr.action { n mutate 5 }
             val success = result.shouldBeSuccess()
@@ -31,7 +31,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeSuccessRunsBlockReceiver() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             var blockRan = false
             ctr.action { n mutate 7 }.shouldBeSuccess {
@@ -43,7 +43,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeSuccessFailsOnError() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -59,7 +59,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeErrorPassesOnMatchingType() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             ctr
                 .action<Unit> { throw IllegalStateException("oops") }
@@ -70,7 +70,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeErrorRunsBlockReceiverAndConsumes() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             var blockRan = false
             ctr
@@ -85,7 +85,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeErrorFailsOnTypeMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -99,7 +99,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldBeErrorFailsWhenResultIsSuccess() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -112,7 +112,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldRollbackWithPassesOnRolledBack() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val result = ctr.action<Unit> { throw IllegalStateException("oops") }
             // Sanity: a thrown action rolls back the transaction.
@@ -122,7 +122,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldRollbackWithFailsOnSuccess() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -133,7 +133,7 @@ class ResultMatcherTest {
 
     @Test
     fun shouldRollbackWithFailsOnTypeMismatch() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             val err =
                 assertFailsWith<AssertionError> {
@@ -149,7 +149,7 @@ class ResultMatcherTest {
     fun unconsumedErrorFailsTeardown() {
         val err =
             assertFailsWith<AssertionError> {
-                vaultTest {
+                storeTest {
                     val ctr = track(TinyVault())
                     ctr.action<Unit> { throw IllegalStateException("oops") }
                     // Don't consume!
@@ -163,7 +163,7 @@ class ResultMatcherTest {
 
     @Test
     fun consumedErrorPassesTeardown() =
-        vaultTest {
+        storeTest {
             // Reaching scope-exit cleanly = matched-and-consumed errors don't fail.
             val ctr = track(TinyVault())
             ctr
@@ -173,7 +173,7 @@ class ResultMatcherTest {
 
     @Test
     fun consumeAllClearsPending() =
-        vaultTest {
+        storeTest {
             val ctr = track(TinyVault())
             ctr.action<Unit> { throw IllegalStateException("oops") }
             ctr.consumeAllPendingErrors()
@@ -190,7 +190,7 @@ class ResultMatcherTest {
         val original = AssertionError("body-thrown sentinel")
         val err =
             assertFailsWith<AssertionError> {
-                vaultTest {
+                storeTest {
                     val ctr = track(TinyVault())
                     ctr.action<Unit> { throw IllegalStateException("oops") }
                     throw original
@@ -203,7 +203,7 @@ class ResultMatcherTest {
     fun multipleUnconsumedErrorsAllReported() {
         val err =
             assertFailsWith<AssertionError> {
-                vaultTest {
+                storeTest {
                     val ctr = track(TinyVault())
                     ctr.action<Unit> { throw IllegalStateException("first") }
                     ctr.action<Unit> { throw IllegalArgumentException("second") }

@@ -29,7 +29,7 @@ private class AutoRegNoopMiddleware : Middleware<AutoRegVault>()
 class AutoRegistrationTest {
     @Test
     fun actionAutoRegistersAndCommits() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             val result = v.action { n mutate 5 }
             result.shouldBeSuccess()
@@ -38,7 +38,7 @@ class AutoRegistrationTest {
 
     @Test
     fun readAutoRegistersAndReturnsBlockResult() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // First touch via read should auto-register the store.
             val combined = v.read { "${label.value}-${n.value}" }
@@ -47,7 +47,7 @@ class AutoRegistrationTest {
 
     @Test
     fun timelineReflectsAutoRegisteredAction() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // Trigger auto-registration FIRST via a non-conflicting extension so
             // the recorder is in place when v.action runs. Store.action is a
@@ -63,7 +63,7 @@ class AutoRegistrationTest {
 
     @Test
     fun emissionsAutoRegistersAndFiltersByProperty() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             v.read { } // install recorder via auto-registration before the action
             v.action { n mutate 7 }.shouldBeSuccess()
@@ -80,7 +80,7 @@ class AutoRegistrationTest {
 
     @Test
     fun transactionsAutoRegistersAndFiltersToTransactionEvents() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             v.read { } // install recorder via auto-registration before the actions
             v.action { n mutate 1 }.shouldBeSuccess()
@@ -95,7 +95,7 @@ class AutoRegistrationTest {
 
     @Test
     fun bridgeEventsAutoRegistersAndIsEmptyInV1() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             v.read { } // install recorder via auto-registration before the action
             v.action { n mutate 1 }.shouldBeSuccess()
@@ -106,7 +106,7 @@ class AutoRegistrationTest {
 
     @Test
     fun middlewareEventsOfReifiedAutoRegisters() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             v.read { } // install recorder via auto-registration before the action
             v.action { n mutate 1 }.shouldBeSuccess()
@@ -118,7 +118,7 @@ class AutoRegistrationTest {
 
     @Test
     fun middlewareEventsOfInstanceAutoRegistersAndReturnsEmptyForUserInstance() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             val m = AutoRegNoopMiddleware()
             v.middlewares(m)
@@ -132,7 +132,7 @@ class AutoRegistrationTest {
 
     @Test
     fun suspendActionAutoRegisters() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             val result =
                 v.suspendAction {
@@ -146,7 +146,7 @@ class AutoRegistrationTest {
 
     @Test
     fun multipleAutoRegisteringCallsShareSameHandle() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             v.read { } // install recorder via auto-registration before the actions
             // Three different extension types — all should resolve through the same
@@ -163,7 +163,7 @@ class AutoRegistrationTest {
 
     @Test
     fun explicitTrackThenImplicitShareSameHandle() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // Explicit registration first — produces a handle and installs the recorder.
             val explicit = track(v)
@@ -183,7 +183,7 @@ class AutoRegistrationTest {
 
     @Test
     fun implicitThenExplicitTrackReturnsSameHandle() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // Auto-register first via the read extension (installs recorder).
             v.read { }
@@ -198,7 +198,7 @@ class AutoRegistrationTest {
 
     @Test
     fun explicitTrackWithCaptureNoneIsRespectedByExtensions() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // Pre-register with Capture.None — the registry's idempotency rule means
             // a later auto-reg call reuses this handle, so the capture mode sticks.
@@ -216,19 +216,19 @@ class AutoRegistrationTest {
 
     @Test
     fun autoRegisteredVaultIsDisposedAtScopeExit() {
-        // Capture an auto-registered store outside the vaultTest body — after
-        // teardown its handle must be detached: a fresh vaultTest body that
+        // Capture an auto-registered store outside the storeTest body — after
+        // teardown its handle must be detached: a fresh storeTest body that
         // touches the SAME store instance should produce a fresh, empty handle
         // (no leaked timeline carries over).
         val outerVault = AutoRegVault()
 
-        vaultTest {
+        storeTest {
             outerVault.read { } // installs recorder via auto-reg
             outerVault.action { n mutate 5 }.shouldBeSuccess()
             assertTrue(outerVault.timeline.isNotEmpty())
         }
 
-        vaultTest {
+        storeTest {
             // After the previous scope tore down, asking for the timeline should
             // start empty — a brand-new handle in a brand-new registry.
             assertTrue(outerVault.timeline.isEmpty(), "expected empty timeline post-teardown, got ${outerVault.timeline}")
@@ -239,7 +239,7 @@ class AutoRegistrationTest {
 
     @Test
     fun suspendActionErrorIsRecordedInPendingErrorsViaAutoRegistration() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // suspendAction routes through the member-extension (Store has no
             // matching member, so the extension wins), which calls
@@ -253,7 +253,7 @@ class AutoRegistrationTest {
 
     @Test
     fun lastResultIsAvailableViaAutoRegistrationWhenRouteIsExplicit() =
-        vaultTest {
+        storeTest {
             val v = AutoRegVault()
             // Use the explicit handle for the action so StoreHandle.action records
             // the result — Store.action (the member, the shadowing function) does

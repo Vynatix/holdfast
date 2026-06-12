@@ -16,7 +16,7 @@ import kotlinx.atomicfu.locks.synchronized
  * concurrently if a test uses `parallel { ... }` or otherwise drives `action` /
  * `suspendAction` from multiple coroutines.
  *
- * Lifetime caveat: this is a singleton, shared across all [vaultTest][com.vynatix.holdfast.testing.vaultTest]
+ * Lifetime caveat: this is a singleton, shared across all [storeTest][com.vynatix.holdfast.testing.storeTest]
  * blocks running in the same process. Two concurrent test scopes do not collide
  * because each [TransactionResult.Error] instance is unique by identity, so a
  * matcher call from scope A finds and clears only scope A's entry. The
