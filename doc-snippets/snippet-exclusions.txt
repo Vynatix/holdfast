@@ -1,0 +1,56 @@
+# Fenced ```kotlin doc blocks deliberately NOT twinned (and therefore not
+# compiled) by :doc-snippets. Format: `path#index: reason`, where index is the
+# zero-based position among the doc's ```kotlin fences in document order.
+# DocSnippetDriftTest fails if an entry goes stale or a block is neither
+# twinned nor listed here. Entries marked TODO(#10)/TODO(#12) should shrink
+# when those issues land.
+
+# --- root README ---
+README.md#1: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
+
+# --- holdfast/GUIDE.md: fragments that do not compile today ---
+holdfast/GUIDE.md#3: TODO(#10) bare generic `val result: TransactionResult = …` type annotation does not compile (needs a type argument)
+holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
+holdfast/GUIDE.md#17: TODO(#10) unqualified `this` inside the nested `action { }` lambda resolves to the store, not the effect payload — `this.sumOf` does not compile
+holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
+holdfast/GUIDE.md#45: TODO(#10) mixes stale pre-rename `AccountHoldfast` with `AccountStore` in one signature
+holdfast/GUIDE.md#60: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
+
+# --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
+holdfast/GUIDE.md#28: API-reference signature listing (Bridge/Observable/Publisher)
+holdfast/GUIDE.md#29: API-reference signature listing (Transformer)
+holdfast/GUIDE.md#30: API-reference signature listing (Middleware)
+holdfast/GUIDE.md#31: API-reference signature listing (TransactionResult; bodiless inline funs)
+holdfast/GUIDE.md#32: API-reference signature listing (StoreSnapshot; bodiless top-level funs)
+holdfast/GUIDE.md#34: API-reference signature listing (computed/derived)
+holdfast/GUIDE.md#35: API-reference signature listing (atomic)
+holdfast/GUIDE.md#37: API-reference signature listing (Cipher/EncryptingTransformer; bodiless classes)
+holdfast/GUIDE.md#38: API-reference signature listing (expect class FileSystemKvStore)
+holdfast/GUIDE.md#40: API-reference signature listing (standard middleware)
+holdfast/GUIDE.md#41: API-reference signature listing (KvStore/Codec; bodiless objects)
+holdfast/GUIDE.md#42: TODO(#10) API-reference signature listing (:holdfast-coroutines); also lists removed `asEagerStateFlow`
+holdfast/GUIDE.md#43: API-reference signature listing (:holdfast-compose); compose compiler not on doc-snippets classpath
+
+# --- holdfast/GUIDE.md: Compose sample ---
+holdfast/GUIDE.md#14: TODO(#12) Compose UI sample; compose compiler/runtime not wired into doc-snippets
+
+# --- holdfast/GUIDE.md §14.11: requires the Hallmark validation modules, excluded from the default build ---
+holdfast/GUIDE.md#49: requires Hallmark modules (off the default build); also an API-reference signature listing
+holdfast/GUIDE.md#50: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#51: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#52: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#53: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#54: requires Hallmark modules (off the default build) and Android `Resources`
+holdfast/GUIDE.md#55: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#56: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#57: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#58: requires Hallmark modules (off the default build)
+holdfast/GUIDE.md#59: requires Hallmark modules (off the default build; ValidatingTransformer)
+
+# --- holdfast-coroutines/README.md ---
+holdfast-coroutines/README.md#0: API-reference signature listing (asFlow/asStateFlow/first/awaitValue)
+
+# --- holdfast-compose/README.md ---
+holdfast-compose/README.md#0: API-reference signature listing (collectAsState/rememberDisposable)
+holdfast-compose/README.md#1: TODO(#12) compose compiler/runtime not wired into doc-snippets
+holdfast-compose/README.md#2: TODO(#12) compose compiler/runtime not wired into doc-snippets
