@@ -38,24 +38,26 @@ import kotlinx.coroutines.flow.stateIn
  * Thread safety: emissions happen on whatever thread runs the commit. Collectors
  * receive values on the same thread until they switch via `flowOn`.
  */
-fun <T : Any> State<T>.asFlow(): Flow<T> = flow {
-    val shared = MutableSharedFlow<T>(
-        replay = 1,
-        extraBufferCapacity = 0,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-    // Seed the replay slot with the value at subscribe time so a brand-new collector's
-    // first emission is the current value (not whatever effect fires next).
-    shared.tryEmit(this@asFlow.value)
-    // Top-level `effect` extension: cast-internal, public surface stays State<T>.
-    // The handler ignores its receiver and re-emits to the shared flow.
-    val disposable: Disposable = this@asFlow.effect { shared.tryEmit(this) }
-    try {
-        emitAll(shared)
-    } finally {
-        disposable.dispose()
+fun <T : Any> State<T>.asFlow(): Flow<T> =
+    flow {
+        val shared =
+            MutableSharedFlow<T>(
+                replay = 1,
+                extraBufferCapacity = 0,
+                onBufferOverflow = BufferOverflow.DROP_OLDEST,
+            )
+        // Seed the replay slot with the value at subscribe time so a brand-new collector's
+        // first emission is the current value (not whatever effect fires next).
+        shared.tryEmit(this@asFlow.value)
+        // Top-level `effect` extension: cast-internal, public surface stays State<T>.
+        // The handler ignores its receiver and re-emits to the shared flow.
+        val disposable: Disposable = this@asFlow.effect { shared.tryEmit(this) }
+        try {
+            emitAll(shared)
+        } finally {
+            disposable.dispose()
+        }
     }
-}
 
 /**
  * Package-internal accessor: resolves the [CoroutineScope] of the [Store] that
@@ -77,10 +79,12 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
  * immediately, then any subsequent commits while [scope] is active. When [scope]
  * cancels, the underlying observer is disposed.
  *
- * `scope` defaults to the owning store's [com.vynatix.holdfast.Holdfast.scope] (resolved
- * via the chain documented on `Store.scope` — per-store override / bound scope /
- * `Store.defaultScope`). Pass an explicit `scope` to override; the 1.x two-arg
- * call site `state.asStateFlow(myScope, started)` continues to compile.
+ * `scope` defaults to the owning store's `Store.scope` (resolved via the chain
+ * documented there — per-store override / bound scope / `Store.defaultScope`).
+ * The default applies at every call site, including inside coroutine bodies —
+ * there is no context-parameter overload competing for resolution. Pass an
+ * explicit `scope` to override; the 1.x two-arg call site
+ * `state.asStateFlow(myScope, started)` continues to compile.
  *
  * `started` defaults to [SharingStarted.WhileSubscribed] so the upstream
  * subscription only exists while at least one consumer collects — matching the
@@ -89,31 +93,6 @@ internal val <T : Any> State<T>.owningScope: CoroutineScope
  */
 fun <T : Any> State<T>.asStateFlow(
     scope: CoroutineScope = owningScope,
-    started: SharingStarted = SharingStarted.WhileSubscribed(),
-): StateFlow<T> = asFlow().stateIn(scope, started, this.value)
-
-/**
- * K2 context-parameter overload of [asStateFlow]. Resolves the sharing [CoroutineScope]
- * from the surrounding `context(scope: CoroutineScope) { … }` block instead of from the
- * owning store. Lets a consumer write
- *
- * ```
- * context(viewModelScope: CoroutineScope)
- * class MyViewModel(store: MyStore) {
- *     val flow = store.count.asStateFlow()
- * }
- * ```
- *
- * without forwarding `viewModelScope` explicitly through every adapter call. Coexists
- * with the default-param overload — outside any `context(...)` block, the call site
- * resolves to the default-param form and picks up `store.scope`.
- *
- * Behavior is identical to the default-param overload otherwise: the returned
- * [StateFlow] subscribes upstream while [started] permits, replays the current value
- * to late subscribers, and stops upstream when [scope] cancels.
- */
-context(scope: CoroutineScope)
-fun <T : Any> State<T>.asStateFlow(
     started: SharingStarted = SharingStarted.WhileSubscribed(),
 ): StateFlow<T> = asFlow().stateIn(scope, started, this.value)
 

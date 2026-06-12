@@ -13,6 +13,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   KDoc samples use `Store*` class names. No API or behavior change in this
   module.
 
+### Removed
+
+- **BREAKING: the K2 `context(scope: CoroutineScope)` overloads of
+  `State.asStateFlow`, `SuspendingKvStore.bridge`, and
+  `SuspendingKvStore.suspendingBridge`.** Inside any coroutine body the
+  implicit `CoroutineScope` receiver satisfied the context parameter, so a
+  zero-scope-arg call like
+  `runBlocking { state.asStateFlow(started = SharingStarted.Eagerly) }`
+  silently captured the ambient scope instead of the store's — attaching an
+  eager sharing job to `runBlocking` hung it forever. Only the default-param
+  forms remain. Migration: pass `scope` explicitly
+  (`state.asStateFlow(myScope)`, `store.bridge(key, codec, myScope)`) or
+  omit it to use the owning store's scope (`asStateFlow`) /
+  `Store.defaultScope` (bridge factories) — which is what the context
+  overloads were resolving away from.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

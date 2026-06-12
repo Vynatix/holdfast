@@ -17,15 +17,6 @@ private class DefaultsVault : Store<DefaultsVault>() {
     val count by state { 0 }
 }
 
-// These helpers must stay outside any CoroutineScope receiver: inside `runBlocking`,
-// the implicit CoroutineScope satisfies the `context(scope: CoroutineScope)` overload
-// of asStateFlow, which wins resolution and captures the test's own scope — the
-// Eagerly sharing job then becomes a never-completing child of runBlocking and the
-// test hangs. This class tests the default-param overload (scope = store.scope).
-private fun zeroArgCountFlow(v: DefaultsVault) = v.count.asStateFlow()
-
-private fun eagerCountFlow(v: DefaultsVault) = v.count.asStateFlow(started = SharingStarted.Eagerly)
-
 class AsStateFlowDefaultsTest {
     @Test fun zeroArgAsStateFlowReturnsStateFlowScopedToVaultScope() =
         runBlocking {
@@ -34,7 +25,7 @@ class AsStateFlowDefaultsTest {
             v.bindToScope(vaultScope)
 
             // No-args call: scope defaults to store.scope (= vaultScope after bindToScope).
-            val sf = zeroArgCountFlow(v)
+            val sf = v.count.asStateFlow()
             v action { count mutate 11 }
 
             val seen = withTimeout(2_000L) { sf.first { it == 11 } }
@@ -65,7 +56,7 @@ class AsStateFlowDefaultsTest {
             val v = DefaultsVault()
             v.bindToScope(vaultScope)
 
-            val sf = eagerCountFlow(v)
+            val sf = v.count.asStateFlow(started = SharingStarted.Eagerly)
             v action { count mutate 7 }
 
             val seen = withTimeout(2_000L) { sf.first { it == 7 } }
@@ -83,7 +74,7 @@ class AsStateFlowDefaultsTest {
             val v = DefaultsVault()
             v.bindToScope(vaultScope)
 
-            val sf = eagerCountFlow(v)
+            val sf = v.count.asStateFlow(started = SharingStarted.Eagerly)
             val collector =
                 launch {
                     sf.collect { /* no-op */ }

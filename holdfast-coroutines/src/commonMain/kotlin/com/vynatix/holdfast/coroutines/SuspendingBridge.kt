@@ -95,31 +95,6 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
 ): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
 
 /**
- * K2 context-parameter overload of [SuspendingKvStore.suspendingBridge]. Resolves the
- * bridge's driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
- * block instead of from [Store.defaultScope]. Lets a consumer write
- *
- * ```
- * context(viewModelScope: CoroutineScope)
- * class MyViewModel(store: SuspendingKvStore) {
- *     val bridge = store.suspendingBridge(key = "k", codec = StringCodec)
- * }
- * ```
- *
- * without forwarding `viewModelScope` explicitly. Coexists with the default-param
- * overload — outside any `context(...)` block the call site resolves to the
- * default-param form and falls back to [Store.defaultScope].
- *
- * Behavior is identical otherwise: see [SuspendingKvStore.suspendingBridge] for the
- * full contract.
- */
-context(scope: CoroutineScope)
-fun <T : Any> SuspendingKvStore.suspendingBridge(
-    key: String,
-    codec: Codec<T>,
-): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
-
-/**
  * Adapts a [SuspendingKvStore] to the sync [Bridge] contract used by `store.action { }`.
  *
  * **Save semantics — fire-and-forget.** [Bridge.publish] enqueues the encoded
@@ -159,30 +134,6 @@ fun <T : Any> SuspendingKvStore.bridge(
 ): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
 
 /**
- * K2 context-parameter overload of [SuspendingKvStore.bridge]. Resolves the bridge's
- * driving [CoroutineScope] from the surrounding `context(scope: CoroutineScope) { … }`
- * block instead of from [Store.defaultScope]. Lets a consumer write
- *
- * ```
- * context(viewModelScope: CoroutineScope)
- * class MyViewModel(store: SuspendingKvStore) {
- *     val bridge = store.bridge(key = "k", codec = StringCodec)
- * }
- * ```
- *
- * without forwarding `viewModelScope` explicitly. Coexists with the default-param
- * overload — outside any `context(...)` block the call site resolves to the
- * default-param form and falls back to [Store.defaultScope].
- *
- * Behavior is identical otherwise: see [SuspendingKvStore.bridge] for the full contract.
- */
-context(scope: CoroutineScope)
-fun <T : Any> SuspendingKvStore.bridge(
-    key: String,
-    codec: Codec<T>,
-): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
-
-/**
  * Concrete fire-and-forget [Bridge] returned by [SuspendingKvStore.bridge].
  * Held as a class (rather than a hidden anonymous object) so callers can
  * reach the [errors] flow without an extra cast. See [bridge] for the full
@@ -200,7 +151,6 @@ open class SuspendingKvBridge<T : Any> internal constructor(
     private val codec: Codec<T>,
     private val scope: CoroutineScope,
 ) : Bridge<T> {
-
     private val saves = Channel<T>(Channel.CONFLATED)
 
     private val _errors = MutableSharedFlow<Throwable>(replay = 0, extraBufferCapacity = 16)
@@ -245,21 +195,24 @@ open class SuspendingKvBridge<T : Any> internal constructor(
         // Async load-on-attach: read the persisted value (if any) on `scope` and push
         // it to the observer when it arrives. State remains at its initializer until
         // then — the suspending nature of the store is preserved.
-        val job = scope.launch {
-            val encoded = try {
-                store.get(key)
-            } catch (t: Throwable) {
-                _errors.tryEmit(t)
-                null
-            } ?: return@launch
-            val decoded = try {
-                codec.decode(encoded)
-            } catch (t: Throwable) {
-                _errors.tryEmit(t)
-                return@launch
+        val job =
+            scope.launch {
+                val encoded =
+                    try {
+                        store.get(key)
+                    } catch (t: Throwable) {
+                        _errors.tryEmit(t)
+                        null
+                    } ?: return@launch
+                val decoded =
+                    try {
+                        codec.decode(encoded)
+                    } catch (t: Throwable) {
+                        _errors.tryEmit(t)
+                        return@launch
+                    }
+                observer(decoded)
             }
-            observer(decoded)
-        }
         return Disposable { job.cancel() }
     }
 
@@ -291,8 +244,8 @@ open class SuspendingKvBridge<T : Any> internal constructor(
         key: String,
         codec: Codec<T>,
         scope: CoroutineScope,
-    ) : SuspendingKvBridge<T>(store, key, codec, scope), SuspendingBridge<T> {
-
+    ) : SuspendingKvBridge<T>(store, key, codec, scope),
+        SuspendingBridge<T> {
         /**
          * Persists [value] sequentially: encode + `store.put`. Errors surface
          * on [errors] (same as the fire-and-forget path) AND the call returns
