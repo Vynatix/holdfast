@@ -46,8 +46,8 @@ counter action {
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
 | [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `holdfastTest { }`, `StoreHandle`, timeline matchers. |
-| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`. |
-| [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. |
+| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
+| [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
 ## Install
 
@@ -80,6 +80,13 @@ dependencies {
 `:holdfast-hallmark` adapter (in this repo) bridges Hallmark's typed primitives
 with Holdfast's transactional state, so validated values live in state that
 respects them.
+
+`com.vynatix:hallmark` is not yet on Maven Central, so the hallmark modules
+are excluded from the default build. To work on them, publish the Hallmark
+repo to `mavenLocal` and run Gradle with `-Pholdfast.includeHallmark=true` —
+this adds `:holdfast-hallmark` and `:holdfast-hallmark-coroutines` to the
+build, including the `shouldBeBoxedAs` matcher (which lives in
+`:holdfast-hallmark`, not `:holdfast-testing`).
 
 ## Stability
 

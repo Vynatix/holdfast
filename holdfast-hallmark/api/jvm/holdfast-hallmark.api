@@ -29,6 +29,10 @@ public final class com/vynatix/holdfast/hallmark/BoxedHandleKt {
 	public static final fun boxedHandle (Lcom/vynatix/holdfast/Store;Lcom/vynatix/hallmark/Validator;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/hallmark/BoxedHandleDelegate;
 }
 
+public final class com/vynatix/holdfast/hallmark/BoxedMatchersKt {
+	public static final fun shouldBeBoxedAs (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)V
+}
+
 public final class com/vynatix/holdfast/hallmark/BoxedStateKt {
 	public static final fun boxed (Lcom/vynatix/holdfast/Store;Lcom/vynatix/hallmark/Validator;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/StateDelegate;
 }

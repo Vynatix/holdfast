@@ -1,4 +1,4 @@
-package com.vynatix.holdfast.testing.matcher
+package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.holdfast.State

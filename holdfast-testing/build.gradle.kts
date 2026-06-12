@@ -25,8 +25,6 @@ kotlin {
         commonMain.dependencies {
             api(project(":holdfast"))
             api(project(":holdfast-coroutines"))
-            api(project(":holdfast-hallmark"))
-            api("com.vynatix:hallmark:0.1.0")
             api(libs.kotest.assertions.core)
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.coroutines.test)

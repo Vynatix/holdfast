@@ -1,7 +1,8 @@
-package com.vynatix.holdfast.testing.matcher
+package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import com.vynatix.holdfast.testing.vaultTest
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -15,7 +16,7 @@ private data class PositiveInt(
     override val value: Int,
 ) : Boxed<Int>
 
-private class UserVault : Store<UserVault>() {
+private class MatcherVault : Store<MatcherVault>() {
     val email by state { Email("seed@example.com") }
     val ageBox by state { PositiveInt(1) }
 }
@@ -24,7 +25,7 @@ class BoxedMatcherTest {
     @Test
     fun shouldBeBoxedAsPassesOnExactPrimitive() =
         vaultTest {
-            val ctr = track(UserVault())
+            val ctr = track(MatcherVault())
             ctr.action { email mutate Email("alice@example.com") }.shouldBeSuccess()
             ctr.read { email } shouldBeBoxedAs "alice@example.com"
         }
@@ -32,7 +33,7 @@ class BoxedMatcherTest {
     @Test
     fun shouldBeBoxedAsPassesForNonStringPrimitive() =
         vaultTest {
-            val ctr = track(UserVault())
+            val ctr = track(MatcherVault())
             ctr.action { ageBox mutate PositiveInt(42) }.shouldBeSuccess()
             ctr.read { ageBox } shouldBeBoxedAs 42
         }
@@ -40,7 +41,7 @@ class BoxedMatcherTest {
     @Test
     fun shouldBeBoxedAsFailsOnPrimitiveMismatch() =
         vaultTest {
-            val ctr = track(UserVault())
+            val ctr = track(MatcherVault())
             ctr.action { email mutate Email("alice@example.com") }.shouldBeSuccess()
             val err =
                 assertFailsWith<AssertionError> {
@@ -54,7 +55,7 @@ class BoxedMatcherTest {
     @Test
     fun shouldBeBoxedAsFailureMessageIncludesWrapperClass() =
         vaultTest {
-            val ctr = track(UserVault())
+            val ctr = track(MatcherVault())
             val err =
                 assertFailsWith<AssertionError> {
                     ctr.read { email } shouldBeBoxedAs "different@example.com"

@@ -4,6 +4,21 @@ All notable changes to `:holdfast-hallmark` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `shouldBeBoxedAs` test matcher moved here from `:holdfast-testing` (package
+  `com.vynatix.holdfast.hallmark`, previously
+  `com.vynatix.holdfast.testing.matcher`), so `:holdfast-testing` no longer
+  depends on the unpublished `com.vynatix:hallmark` artifact.
+
+### Changed
+
+- The module is excluded from the default build; opt in with
+  `-Pholdfast.includeHallmark=true` after publishing the sibling
+  [Hallmark](https://github.com/vynatix/hallmark) repo to `mavenLocal`.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

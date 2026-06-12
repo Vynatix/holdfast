@@ -27,7 +27,7 @@ Lint gotchas: detekt findings are baselined per module (`<module>/detekt-baselin
 
 CI (`.github/workflows/ci.yml`, push/PR to main) runs per module: `jvmTest` + `testAndroidHostTest` + `apiCheck` + `dokkaGenerate` + detekt/ktlint on ubuntu, `iosSimulatorArm64Test` + `jvmTest` on macos-15. **Known broken as written (verify before trusting/copying):** publish.yml calls `publishAndReleaseToMavenCentral` (vanniktech plugin — not applied anywhere; the build's own task is `publishAllPublicationsToSonatypeRepository`).
 
-The Hallmark deps (`com.vynatix:hallmark*:0.1.0`) resolve via `mavenLocal()` — if resolution fails, build/publish the sibling [hallmark repo](https://github.com/vynatix/hallmark) to `~/.m2` first.
+The hallmark modules (`:holdfast-hallmark`, `:holdfast-hallmark-coroutines`) are excluded from the default build because their `com.vynatix:hallmark*:0.1.0` deps only resolve via `mavenLocal()`. To include them, build/publish the sibling [hallmark repo](https://github.com/vynatix/hallmark) to `~/.m2` first, then run Gradle with `-Pholdfast.includeHallmark=true` (CI does exactly this). The `shouldBeBoxedAs` matcher lives in `:holdfast-hallmark`, not `:holdfast-testing`, for the same reason.
 
 ## Module graph (all project deps are `api`)
 

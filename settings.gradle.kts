@@ -34,5 +34,12 @@ include(":holdfast")
 include(":holdfast-coroutines")
 include(":holdfast-compose")
 include(":holdfast-testing")
-include(":holdfast-hallmark")
-include(":holdfast-hallmark-coroutines")
+
+// The hallmark modules depend on com.vynatix:hallmark, which is not yet on
+// Maven Central and only resolves from mavenLocal (publish the sibling
+// https://github.com/vynatix/hallmark repo first). Keep them out of the
+// default build so a fresh clone can `./gradlew check`.
+if (providers.gradleProperty("holdfast.includeHallmark").orNull?.toBoolean() == true) {
+    include(":holdfast-hallmark")
+    include(":holdfast-hallmark-coroutines")
+}

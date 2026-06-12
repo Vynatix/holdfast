@@ -360,10 +360,6 @@ public final class com/vynatix/holdfast/testing/internal/PendingErrorRegistry {
 	public final fun unregisterAll (Lcom/vynatix/holdfast/testing/StoreHandle;)V
 }
 
-public final class com/vynatix/holdfast/testing/matcher/BoxedMatchersKt {
-	public static final fun shouldBeBoxedAs (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)V
-}
-
 public final class com/vynatix/holdfast/testing/matcher/BridgeMatchersKt {
 	public static final fun shouldHaveLastPublished (Lcom/vynatix/holdfast/testing/bridge/BridgeView;Ljava/lang/Object;)V
 	public static final fun shouldHavePublished (Lcom/vynatix/holdfast/testing/bridge/BridgeView;Ljava/lang/Object;)V

@@ -50,6 +50,7 @@ jobs:
       - name: Build and test (JVM + Android)
         run: |
           ./gradlew \
+            -Pholdfast.includeHallmark=true \
             :holdfast:jvmTest :holdfast:testAndroidHostTest \
             :holdfast-coroutines:jvmTest :holdfast-coroutines:testAndroidHostTest \
             :holdfast-compose:jvmTest :holdfast-compose:testAndroidHostTest \
@@ -61,6 +62,7 @@ jobs:
       - name: API check and Dokka
         run: |
           ./gradlew \
+            -Pholdfast.includeHallmark=true \
             :holdfast:apiCheck :holdfast:dokkaGenerate \
             :holdfast-coroutines:apiCheck :holdfast-coroutines:dokkaGenerate \
             :holdfast-compose:apiCheck :holdfast-compose:dokkaGenerate \
@@ -72,6 +74,7 @@ jobs:
       - name: Lint and static analysis
         run: |
           ./gradlew \
+            -Pholdfast.includeHallmark=true \
             :holdfast:detekt :holdfast:ktlintCheck \
             :holdfast-coroutines:detekt :holdfast-coroutines:ktlintCheck \
             :holdfast-compose:detekt :holdfast-compose:ktlintCheck \
@@ -113,6 +116,7 @@ jobs:
       - name: iOS sim arm64 and JVM tests
         run: |
           ./gradlew \
+            -Pholdfast.includeHallmark=true \
             :holdfast:iosSimulatorArm64Test :holdfast:jvmTest \
             :holdfast-coroutines:iosSimulatorArm64Test :holdfast-coroutines:jvmTest \
             :holdfast-compose:iosSimulatorArm64Test :holdfast-compose:jvmTest \

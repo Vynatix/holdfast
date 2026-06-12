@@ -40,14 +40,16 @@ jobs:
           fi
           echo "HOLDFAST_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
+      # Hallmark modules are gated behind -Pholdfast.includeHallmark=true and
+      # excluded from the publish set (their hallmark dep is mavenLocal-only).
       - name: Verify build before publish
         run: |
           ./gradlew \
             "-Pholdfast.version=${HOLDFAST_VERSION}" \
             :holdfast:allTests :holdfast-coroutines:allTests :holdfast-compose:allTests \
-            :holdfast-testing:allTests :holdfast-hallmark:allTests :holdfast-hallmark-coroutines:allTests \
+            :holdfast-testing:allTests \
             :holdfast:apiCheck :holdfast-coroutines:apiCheck :holdfast-compose:apiCheck \
-            :holdfast-testing:apiCheck :holdfast-hallmark:apiCheck :holdfast-hallmark-coroutines:apiCheck \
+            :holdfast-testing:apiCheck \
             --stacktrace
 
       - name: Publish to Maven Central
