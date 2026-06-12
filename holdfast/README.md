@@ -149,6 +149,19 @@ and `com.vynatix.holdfast.crypto`:
 | `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
 | `com.vynatix:holdfast-hallmark-coroutines` | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. |
 
+## Platform support
+
+Android, JVM, and iOS are supported tiers — their tests run in CI. **wasmJs is
+experimental**: the artifact is still published for downstream consumers, but
+
+- tests are disabled on wasmJs (the test suite uses `runBlocking` /
+  `newSingleThreadContext`, absent on wasm);
+- `FileSystemKvStore` throws `UnsupportedOperationException` (no synchronous
+  filesystem API in the browser);
+- `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
+- the platform is single-threaded (`currentThreadId() == 0`), so
+  thread-confinement checks trivially pass.
+
 ## Positioning
 
 Holdfast sits in a different niche from common Kotlin/JVM state-management choices:

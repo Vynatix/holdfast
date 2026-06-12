@@ -28,6 +28,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `onSuccess { }` / `onError { }` extensions — so fire-and-forget `action`
   callers can surface rollbacks instead of silently dropping them.
 
+- Documented platform support tiers in the root and module READMEs:
+  Android/JVM/iOS are supported (tests run in CI); wasmJs is **experimental** —
+  the artifact is still published, but tests are disabled on wasmJs,
+  `FileSystemKvStore` throws `UnsupportedOperationException`, `suspendDerived`
+  is unusable (`runBlocking` initial seed), and the platform is single-threaded
+  (`currentThreadId() == 0`). Doc-only; no code changes.
+
 ## 0.1.0 — Initial public release
 
 First public release on Maven Central as `com.vynatix:holdfast` (plus the

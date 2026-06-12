@@ -51,6 +51,30 @@ failed.onError { println("rolled back: ${it.exception.message}") }   // rolled b
 | [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
+## Platform support
+
+| Platform | Tier | Notes |
+|---|---|---|
+| Android | Supported | Tests run in CI. |
+| JVM | Supported | Tests run in CI. |
+| iOS (`iosArm64`, `iosSimulatorArm64`) | Supported | Tests run in CI. |
+| wasmJs (`:holdfast`, `:holdfast-coroutines`, `:holdfast-compose` only) | **Experimental** | Artifact published; limitations below. |
+
+wasmJs artifacts are still published for downstream consumers, but the target
+is **experimental** with these limitations:
+
+- **Tests are disabled on wasmJs** — the test suite uses `runBlocking` /
+  `newSingleThreadContext`, neither of which exists on wasm, so wasmJs test
+  tasks are force-disabled and never run in CI.
+- **`FileSystemKvStore` throws `UnsupportedOperationException`** — the browser
+  has no synchronous filesystem API; use `InMemoryKvStore` or a
+  browser-storage-backed `KvStore` instead.
+- **`suspendDerived` is unusable** — its eager initial seed requires
+  `runBlocking`, which is not available on wasmJs; seed asynchronously via
+  `suspendAction { … }` instead.
+- **Single-threaded model** — `currentThreadId()` returns `0` for every caller,
+  so thread-confinement checks trivially pass.
+
 ## Install
 
 ```kotlin
