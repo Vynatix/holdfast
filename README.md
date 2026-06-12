@@ -95,6 +95,27 @@ build, including the `shouldBeBoxedAs` matcher (which lives in
 **0.x — pre-stable.** The public API may break in any 0.x bump. Consumers should
 pin to exact versions. SemVer guarantees apply once 1.0 is declared.
 
+## Known issues
+
+Three open hazards in 0.1.0, named honestly. All three fixes land in 0.3.0 —
+see [`ROADMAP.md`](ROADMAP.md).
+
+- **Mixing blocking `action { }` with `suspendAction { }` on the same store can
+  livelock.** The blocking action busy-spins waiting for a lock the suspending
+  action holds across a suspension point, and neither side progresses.
+  *Workaround:* use only `suspendAction` (or only `action`) per store. 0.3.0
+  ships a fail-fast guard that turns the livelock into an immediate exception.
+- **Standalone `state.update { }` outside an action is not atomic.** It is a
+  read-modify-write, so concurrent callers overwrite each other — measured,
+  about 50% of 10,000 concurrent increments are lost. *Workaround:* wrap the
+  update in `action { }`, which serializes it under the store's transaction
+  lock. Standalone `update` becomes atomic in 0.3.0.
+- **`store { }` (plain invoke) does not open a transaction — `store action { }`
+  does.** Writes inside a bare invoke commit one by one, with observers firing
+  between them, so observers can see intermediate states. *Workaround:* use
+  `store action { }` for any mutation. In 0.3.0 mutating inside a bare invoke
+  fails loudly instead of silently committing piecemeal.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). For security disclosures, email
