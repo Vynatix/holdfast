@@ -2,7 +2,7 @@
 # compiled) by :doc-snippets. Format: `path#index: reason`, where index is the
 # zero-based position among the doc's ```kotlin fences in document order.
 # DocSnippetDriftTest fails if an entry goes stale or a block is neither
-# twinned nor listed here. Entries marked TODO(#10)/TODO(#12) should shrink
+# twinned nor listed here. Entries marked TODO(#12) should shrink
 # when those issues land.
 
 # --- root README ---

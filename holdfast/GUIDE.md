@@ -1367,7 +1367,7 @@ holdfast { token bridge KvBridge(kv, "session", StringCodec) }
 // token is plaintext on read; persisted file contains ciphertext.
 ```
 
-**Cross-holdfast transfer with one-line atomicity**:
+**Cross-store transfer with one-line atomicity**:
 ```kotlin
 fun AccountStore.transferTo(other: AccountStore, cents: Long) =
     atomic(this, other) {

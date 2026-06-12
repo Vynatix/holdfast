@@ -55,8 +55,8 @@ A `Store<Self>` is a **state container with transactional commit semantics**:
 
 1. **States** (`val count by state { 0 }`) are typed cells that observers can
    subscribe to.
-2. **Transactions** (`action { … }`) are
-   atomic units of mutation. Inside the body, writes are buffered; only on
+2. **Transactions** (`action { … }`) are atomic units of mutation.
+   Inside the body, writes are buffered; only on
    successful body completion do they commit and observers fire. A throw inside
    the body rolls back every write atomically — observers never see the
    intermediate state.
