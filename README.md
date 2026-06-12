@@ -32,10 +32,12 @@ when (result) {
 }
 
 // Failed transactions roll back atomically — observers never fire.
-counter action {
+// Don't drop the result: surface the failure.
+val failed = counter action {
     count mutate 99
     error("simulated")
 }
+failed.onError { println("rolled back: ${it.exception.message}") }   // rolled back: simulated
 ```
 
 ## Modules

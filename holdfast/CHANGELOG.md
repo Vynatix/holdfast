@@ -21,6 +21,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   remain as `WARNING`-level deprecated aliases delegating to the new names;
   they will be removed after one minor release.
 
+### Added
+
+- `TransactionResult` ergonomics: `getOrThrow()` (returns the `Success` value
+  or rethrows the original `Error.exception`), `valueOrNull`, and chainable
+  `onSuccess { }` / `onError { }` extensions — so fire-and-forget `action`
+  callers can surface rollbacks instead of silently dropping them.
+
 ## 0.1.0 — Initial public release
 
 First public release on Maven Central as `com.vynatix:holdfast` (plus the

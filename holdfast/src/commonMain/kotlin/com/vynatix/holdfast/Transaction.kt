@@ -357,6 +357,10 @@ class TransactionException(
  * `TransactionResult<Int>` is assignable to `TransactionResult<Number>` and to
  * `TransactionResult<Any>`. [Error] does not carry a value and extends
  * `TransactionResult<Nothing>`, making it the bottom type that fits any `R`.
+ *
+ * Don't fire-and-forget: an [Error] you never look at is a rollback you never
+ * hear about. Either branch on the result with `when`, surface failures with
+ * [onError], or rethrow them with [getOrThrow].
  */
 sealed interface TransactionResult<out R> {
     data class Success<R>(
@@ -368,4 +372,58 @@ sealed interface TransactionResult<out R> {
         val exception: Throwable,
         val transaction: Transaction,
     ) : TransactionResult<Nothing>
+
+    /**
+     * The body's computed value on [Success], or throws the **original**
+     * exception (the exact [Error.exception] instance — not a wrapper) on
+     * [Error].
+     *
+     * Use this when a failure should propagate instead of being silently
+     * dropped: `store action { … }` returns a result that is easy to ignore,
+     * and an ignored [Error] makes the rollback invisible. `getOrThrow()`
+     * converts it back into an ordinary thrown exception.
+     */
+    fun getOrThrow(): R =
+        when (this) {
+            is Success -> value
+            is Error -> throw exception
+        }
+
+    /**
+     * The body's computed value on [Success], or `null` on [Error].
+     *
+     * Note that this conflates "the action failed" with "the body returned
+     * `null`" — prefer [onError] or [getOrThrow] when the failure itself
+     * matters.
+     */
+    val valueOrNull: R?
+        get() =
+            when (this) {
+                is Success -> value
+                is Error -> null
+            }
+}
+
+/**
+ * Runs [block] with the [TransactionResult.Error] if this result is a failure;
+ * does nothing on [TransactionResult.Success]. Returns `this` so calls chain
+ * with [onSuccess].
+ *
+ * Prefer this (or [TransactionResult.getOrThrow]) over ignoring the result of
+ * a fire-and-forget `store action { … }` — an unobserved [TransactionResult.Error]
+ * means the rollback happened silently.
+ */
+inline fun <R> TransactionResult<R>.onError(block: (TransactionResult.Error) -> Unit): TransactionResult<R> {
+    if (this is TransactionResult.Error) block(this)
+    return this
+}
+
+/**
+ * Runs [block] with the committed body value if this result is a
+ * [TransactionResult.Success]; does nothing on [TransactionResult.Error].
+ * Returns `this` so calls chain with [onError].
+ */
+inline fun <R> TransactionResult<R>.onSuccess(block: (R) -> Unit): TransactionResult<R> {
+    if (this is TransactionResult.Success) block(value)
+    return this
 }

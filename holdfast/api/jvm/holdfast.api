@@ -205,7 +205,19 @@ public final class com/vynatix/holdfast/TransactionException : java/lang/Excepti
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
+public final class com/vynatix/holdfast/TransactionKt {
+	public static final fun onError (Lcom/vynatix/holdfast/TransactionResult;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun onSuccess (Lcom/vynatix/holdfast/TransactionResult;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
 public abstract interface class com/vynatix/holdfast/TransactionResult {
+	public fun getOrThrow ()Ljava/lang/Object;
+	public fun getValueOrNull ()Ljava/lang/Object;
+}
+
+public final class com/vynatix/holdfast/TransactionResult$DefaultImpls {
+	public static fun getOrThrow (Lcom/vynatix/holdfast/TransactionResult;)Ljava/lang/Object;
+	public static fun getValueOrNull (Lcom/vynatix/holdfast/TransactionResult;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/holdfast/TransactionResult$Error : com/vynatix/holdfast/TransactionResult {
@@ -216,7 +228,11 @@ public final class com/vynatix/holdfast/TransactionResult$Error : com/vynatix/ho
 	public static synthetic fun copy$default (Lcom/vynatix/holdfast/TransactionResult$Error;Ljava/lang/Throwable;Lcom/vynatix/holdfast/Transaction;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult$Error;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getException ()Ljava/lang/Throwable;
+	public synthetic fun getOrThrow ()Ljava/lang/Object;
+	public fun getOrThrow ()Ljava/lang/Void;
 	public final fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
+	public synthetic fun getValueOrNull ()Ljava/lang/Object;
+	public fun getValueOrNull ()Ljava/lang/Void;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -228,8 +244,10 @@ public final class com/vynatix/holdfast/TransactionResult$Success : com/vynatix/
 	public final fun copy (Lcom/vynatix/holdfast/Transaction;Ljava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult$Success;
 	public static synthetic fun copy$default (Lcom/vynatix/holdfast/TransactionResult$Success;Lcom/vynatix/holdfast/Transaction;Ljava/lang/Object;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult$Success;
 	public fun equals (Ljava/lang/Object;)Z
+	public fun getOrThrow ()Ljava/lang/Object;
 	public final fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
 	public final fun getValue ()Ljava/lang/Object;
+	public fun getValueOrNull ()Ljava/lang/Object;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }

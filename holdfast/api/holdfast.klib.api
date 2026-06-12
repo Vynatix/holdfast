@@ -84,6 +84,11 @@ abstract interface com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.
 }
 
 sealed interface <#A: out kotlin/Any?> com.vynatix.holdfast/TransactionResult { // com.vynatix.holdfast/TransactionResult|null[0]
+    open val valueOrNull // com.vynatix.holdfast/TransactionResult.valueOrNull|{}valueOrNull[0]
+        open fun <get-valueOrNull>(): #A? // com.vynatix.holdfast/TransactionResult.valueOrNull.<get-valueOrNull>|<get-valueOrNull>(){}[0]
+
+    open fun getOrThrow(): #A // com.vynatix.holdfast/TransactionResult.getOrThrow|getOrThrow(){}[0]
+
     final class <#A1: kotlin/Any?> Success : com.vynatix.holdfast/TransactionResult<#A1> { // com.vynatix.holdfast/TransactionResult.Success|null[0]
         constructor <init>(com.vynatix.holdfast/Transaction, #A1) // com.vynatix.holdfast/TransactionResult.Success.<init>|<init>(com.vynatix.holdfast.Transaction;1:0){}[0]
 
@@ -365,6 +370,8 @@ final fun <#A: kotlin/Any> (com.vynatix.holdfast/Transformer<#A>).com.vynatix.ho
 final fun <#A: kotlin/Any?> com.vynatix.holdfast/atomic(kotlin/Array<out com.vynatix.holdfast/Store<*>>..., kotlin/Function0<#A>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/atomic|atomic(kotlin.Array<out|com.vynatix.holdfast.Store<*>>...;kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
 final fun com.vynatix.holdfast.platform/currentThreadId(): kotlin/Long // com.vynatix.holdfast.platform/currentThreadId|currentThreadId(){}[0]
 final fun com.vynatix.holdfast.platform/threadYield() // com.vynatix.holdfast.platform/threadYield|threadYield(){}[0]
+final inline fun <#A: kotlin/Any?> (com.vynatix.holdfast/TransactionResult<#A>).com.vynatix.holdfast/onError(kotlin/Function1<com.vynatix.holdfast/TransactionResult.Error, kotlin/Unit>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/onError|onError@com.vynatix.holdfast.TransactionResult<0:0>(kotlin.Function1<com.vynatix.holdfast.TransactionResult.Error,kotlin.Unit>){0§<kotlin.Any?>}[0]
+final inline fun <#A: kotlin/Any?> (com.vynatix.holdfast/TransactionResult<#A>).com.vynatix.holdfast/onSuccess(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/onSuccess|onSuccess@com.vynatix.holdfast.TransactionResult<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any?>}[0]
 
 // Targets: [ios]
 final class com.vynatix.holdfast/StoreLock : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.holdfast/StoreLock|null[0]

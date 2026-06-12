@@ -1102,7 +1102,14 @@ open class Middleware<V : Store<V>> {
 sealed interface TransactionResult<out R> {
     data class Success<R>(val transaction: Transaction, val value: R) : TransactionResult<R>
     data class Error(val exception: Throwable, val transaction: Transaction) : TransactionResult<Nothing>
+
+    fun getOrThrow(): R      // Success.value, or rethrows the original Error.exception
+    val valueOrNull: R?      // Success.value, or null on Error
 }
+
+// Chainable side-effect hooks — each returns the receiver.
+inline fun <R> TransactionResult<R>.onSuccess(block: (R) -> Unit): TransactionResult<R>
+inline fun <R> TransactionResult<R>.onError(block: (TransactionResult.Error) -> Unit): TransactionResult<R>
 
 enum class TransactionStatus { Active, Committed, RolledBack, Failed }
 ```
