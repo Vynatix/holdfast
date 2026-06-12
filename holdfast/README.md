@@ -9,8 +9,10 @@ is a **transaction**. Mutations buffer, observers see only committed values,
 failed transactions never leak, and the type system enforces that a state class
 anchors itself to its own type via the recursive `Store<Self>` pattern.
 
-No Compose dependency in core. No coroutines dependency in core. Runs on
-Android, iOS, JVM, and wasmJs.
+Core depends only on `kotlinx-coroutines-core` (as `api` — `CoroutineScope`
+and `SharedFlow` appear in the public surface) and `kotlinx-atomicfu`; there
+are no Compose or Android framework dependencies. Runs on Android, iOS, JVM,
+and wasmJs.
 
 ## Quick start
 
@@ -53,7 +55,7 @@ A `Store<Self>` is a **state container with transactional commit semantics**:
 
 1. **States** (`val count by state { 0 }`) are typed cells that observers can
    subscribe to.
-2. **Transactions** (`action { … }` or `transaction(on = store) { … }`) are
+2. **Transactions** (`action { … }`) are
    atomic units of mutation. Inside the body, writes are buffered; only on
    successful body completion do they commit and observers fire. A throw inside
    the body rolls back every write atomically — observers never see the
@@ -81,7 +83,7 @@ property, fully typed.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
 - **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
-- **`atomic(vararg stores) { }`** — cross-holdfast transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store.
+- **`atomic(vararg stores) { }`** — cross-store transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store.
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
 
@@ -97,7 +99,7 @@ property, fully typed.
 
 ### `:holdfast-testing` extension
 
-- **`holdfastTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
+- **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
 
 ### `:holdfast-hallmark` + `:holdfast-hallmark-coroutines`
 
@@ -127,15 +129,15 @@ and `com.vynatix.holdfast.crypto`:
 
 ## Concurrency model
 
-- All holdfast writes serialize through a per-store reentrant lock.
+- All store writes serialize through a per-store reentrant lock.
 - Transactions are thread-confined: only the action's owner thread sees pending
   writes. Cross-thread reads see committed values.
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
   middleware fires; observers see only committed values.
-- `atomic(h1, h2, …)` sorts holdfasts by a process-monotonic `lockOrderKey`
+- `atomic(s1, s2, …)` sorts stores by a process-monotonic `lockOrderKey`
   and acquires locks in order — deadlock-safe across any combination.
 - `suspendAction` and blocking `action` are mutually exclusive on the same
-  holdfast via a coroutine `Mutex` installed lazily through an internal
+  store via a coroutine `Mutex` installed lazily through an internal
   `AsyncSerializer` hook.
 
 ## Modules
@@ -184,8 +186,9 @@ Holdfast sits in a different niche from common Kotlin/JVM state-management choic
   sequencing as a separate concept — `suspendAction { }` covers async-side flows.
 
 The library is intentionally focused — ~50 public types in core, no required
-dependencies beyond `kotlin-stdlib` + `kotlinx-atomicfu`. Optional features
-(coroutines, Compose, testing, Hallmark validation) layer on as separate
+dependencies beyond `kotlin-stdlib`, `kotlinx-coroutines-core`, and
+`kotlinx-atomicfu`. Optional features (Flow/StateFlow adapters and suspending
+transactions, Compose, testing, Hallmark validation) layer on as separate
 modules.
 
 ## Documentation

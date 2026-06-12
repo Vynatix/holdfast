@@ -44,10 +44,10 @@ failed.onError { println("rolled back: ${it.exception.message}") }   // rolled b
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-holdfast `atomic`, encryption transformer, file-system store. |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-store `atomic`, encryption transformer, file-system store. |
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
-| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `holdfastTest { }`, `StoreHandle`, timeline matchers. |
+| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers. |
 | [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
@@ -93,6 +93,11 @@ dependencies {
     testImplementation("com.vynatix:holdfast-testing:0.1.0")  // optional
 }
 ```
+
+**Toolchain floor:** the artifacts are built with Kotlin 2.3.x, so consuming
+projects need a Kotlin 2.3.x (or newer compatible) compiler to read the
+published klib/metadata format, and the JVM/Android class files target
+**JVM 21** — set your `jvmTarget` / `compileOptions` to 21 or higher.
 
 ## Documentation
 

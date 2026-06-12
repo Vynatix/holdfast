@@ -9,13 +9,41 @@ Pulls in `kotlinx-coroutines-core`; nothing else.
 fun <T : Any> State<T>.asFlow(): Flow<T>
 
 fun <T : Any> State<T>.asStateFlow(
-    scope: CoroutineScope,
+    scope: CoroutineScope = …,   // defaults to the owning store's Store.scope
     started: SharingStarted = SharingStarted.WhileSubscribed(),
 ): StateFlow<T>
+// Eager publishing: asStateFlow(started = SharingStarted.Eagerly).
 
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
+
+// Suspending transactions — bodies may delay/await/withContext. Mutually
+// exclusive with blocking action/atomic on the same store(s).
+suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): TransactionResult<R>
+
+// Push-recomputed derived state with a suspending compute.
+fun <V : Store<V>, T : Any> V.suspendDerived(
+    vararg sources: State<*>,
+    compute: suspend V.() -> T,
+): Pair<State<T>, Disposable>
+
+// Async persistence: suspend KvStore + bridges over it.
+interface SuspendingKvStore                          // suspend get / put / remove / snapshot
+interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
+fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
+fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
 ```
+
+`asStateFlow`'s `scope` parameter defaults to the owning store's
+`Store.scope` (per-store override → `bindToScope` binding →
+`Store.defaultScope`); pass a scope explicitly to override. `suspendAction`
+allows the transaction body to suspend; cancellation of the body rolls the
+transaction back, and the commit fanout runs under `NonCancellable` so it
+completes even if the surrounding scope cancels mid-commit. `bridge(...)`
+saves fire-and-forget (conflated — rapid publishes coalesce);
+`suspendingBridge(...)` returns an await-completion `SuspendingBridge` whose
+`publishAwaited` suspends until the value is persisted.
 
 ## Examples
 
@@ -33,7 +61,7 @@ viewModelScope.launch {
 
 ```kotlin
 class CounterViewModel : ViewModel() {
-    val holdfast = CounterHoldfast()
+    val holdfast = CounterStore()
     val count: StateFlow<Int> = holdfast.count.asStateFlow(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -44,8 +72,20 @@ class CounterViewModel : ViewModel() {
 ### Await predicate
 
 ```kotlin
-suspend fun waitForReady(holdfast: AccountHoldfast) {
-    holdfast.status.first { it == AccountStatus.Active }
+suspend fun waitForReady(store: AccountStore) {
+    store.status.first { it == AccountStatus.Active }
+}
+```
+
+### Suspending transaction
+
+```kotlin
+suspend fun refresh(store: CounterStore, api: Api) {
+    val result = store.suspendAction {
+        val delta = api.fetchDelta()      // suspending I/O inside the transaction
+        count update { it + delta }
+    }
+    result.onError { log("refresh rolled back: ${it.exception}") }
 }
 ```
 

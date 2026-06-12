@@ -9,11 +9,8 @@
 README.md#1: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
 
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
-holdfast/GUIDE.md#3: TODO(#10) bare generic `val result: TransactionResult = …` type annotation does not compile (needs a type argument)
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#17: TODO(#10) unqualified `this` inside the nested `action { }` lambda resolves to the store, not the effect payload — `this.sumOf` does not compile
 holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#45: TODO(#10) mixes stale pre-rename `AccountHoldfast` with `AccountStore` in one signature
 holdfast/GUIDE.md#60: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
 
 # --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
@@ -28,7 +25,7 @@ holdfast/GUIDE.md#37: API-reference signature listing (Cipher/EncryptingTransfor
 holdfast/GUIDE.md#38: API-reference signature listing (expect class FileSystemKvStore)
 holdfast/GUIDE.md#40: API-reference signature listing (standard middleware)
 holdfast/GUIDE.md#41: API-reference signature listing (KvStore/Codec; bodiless objects)
-holdfast/GUIDE.md#42: TODO(#10) API-reference signature listing (:holdfast-coroutines); also lists removed `asEagerStateFlow`
+holdfast/GUIDE.md#42: API-reference signature listing (:holdfast-coroutines) with `…` default-value placeholder
 holdfast/GUIDE.md#43: API-reference signature listing (:holdfast-compose); compose compiler not on doc-snippets classpath
 
 # --- holdfast/GUIDE.md: Compose sample ---
@@ -48,7 +45,7 @@ holdfast/GUIDE.md#58: requires Hallmark modules (off the default build)
 holdfast/GUIDE.md#59: requires Hallmark modules (off the default build; ValidatingTransformer)
 
 # --- holdfast-coroutines/README.md ---
-holdfast-coroutines/README.md#0: API-reference signature listing (asFlow/asStateFlow/first/awaitValue)
+holdfast-coroutines/README.md#0: API-reference signature listing (asFlow/asStateFlow/first/awaitValue/suspendAction/suspendAtomic/suspendDerived/SuspendingBridge) with `…` default-value placeholder
 
 # --- holdfast-compose/README.md ---
 holdfast-compose/README.md#0: API-reference signature listing (collectAsState/rememberDisposable)

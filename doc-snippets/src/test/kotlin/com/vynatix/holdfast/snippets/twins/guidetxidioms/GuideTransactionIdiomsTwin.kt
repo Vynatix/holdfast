@@ -48,15 +48,15 @@ private fun savepointSemantics() {
     // DOC-SNIPPET-END
 }
 
-@Suppress("unused")
+@Suppress("unused", "UNUSED_VARIABLE")
 private fun recoveringFromAnInnerError() {
     val holdfast = IdiomStore()
     // DOC-SNIPPET holdfast/GUIDE.md#20
     holdfast action {
         a mutate 1
-        val inner = runCatching { holdfast action { b mutate 2; error("flake") } }
-        // inner.exception is set; b's pending was discarded by inner's rollback.
-        // Outer continues with a's pending intact.
+        val inner = holdfast action { b mutate 2; error("flake") }
+        // inner is TransactionResult.Error; b's pending was discarded by the
+        // inner's own rollback. The outer continues with a's pending intact.
         c mutate 3
     }
     // Final: a=1, c=3, b=initial.

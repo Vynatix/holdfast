@@ -19,7 +19,7 @@ private class CookbookStore : Store<CookbookStore>() {
 }
 
 // Scaffold: §9.2's store; the recipe only declares the middleware.
-class AccountHoldfast : Store<AccountHoldfast>() {
+class AccountStore : Store<AccountStore>() {
     val balance by state { 0L }
 }
 
@@ -61,8 +61,8 @@ private fun loggingEveryTransaction() {
 }
 
 // DOC-SNIPPET holdfast/GUIDE.md#11
-class NonNegativeBalance : Middleware<AccountHoldfast>() {
-    override fun onTransactionCompleted(c: MiddlewareContext<AccountHoldfast>) {
+class NonNegativeBalance : Middleware<AccountStore>() {
+    override fun onTransactionCompleted(c: MiddlewareContext<AccountStore>) {
         // Pending writes already buffered; check against current view.
         if (c.store.balance.value < 0)
             error("Balance cannot go negative")
