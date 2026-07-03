@@ -15,6 +15,14 @@ fun <T : Any> State<T>.asStateFlow(
 
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
+
+suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+
+suspend fun <R> suspendAtomic(
+    vararg stores: Store<*>,
+    policy: FramePolicy = FramePolicy.Strict,
+    body: suspend () -> R,
+): TransactionResult<R>
 ```
 
 ## Examples
@@ -48,6 +56,24 @@ suspend fun waitForReady(holdfast: AccountHoldfast) {
     holdfast.status.first { it == AccountStatus.Active }
 }
 ```
+
+### Cross-store frame with a suspending body
+
+```kotlin
+val r = suspendAtomic(accountA, accountB) {
+    accountA { balance update { it - amount } }   // stages into A's frame root
+    accountB.suspendAction {                      // joins the frame as a savepoint
+        balance update { it + amount }
+    }
+}
+```
+
+Same contract as core `atomic` (see the
+[GUIDE's cross-store chapter](../holdfast/GUIDE.md#15-cross-store-transactions)):
+enrollment is enforced, inner errors abort the frame, and blocking
+`action { }` on a participant fails fast with `FrameInteropException`
+instead of deadlocking. Commit runs under `NonCancellable` with suspending
+bridge publishes awaited and event back-pressure honored.
 
 ## Build
 

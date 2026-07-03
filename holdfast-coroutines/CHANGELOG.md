@@ -6,7 +6,45 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`suspendAtomic` graduated to a first-class cross-store frame**, matching
+  the core `atomic` contract (see `:holdfast`'s changelog and GUIDE §15):
+  `policy: FramePolicy = FramePolicy.Strict` parameter, enrollment
+  enforcement (`UnenrolledStoreException`), inner-error escalation, nested
+  lock-order verification (`FrameLockOrderException`), per-store middleware
+  parity, shared `Transaction.frameId`, and `FrameObserver` dispatch. The
+  enforcement marker follows the suspending body across dispatcher hops via
+  `ThreadContextElement` on JVM/Android and a delegating
+  `ContinuationInterceptor` on iOS/wasmJs (on those two platforms a nested
+  `withContext(otherDispatcher)` section inside the body is not policed).
+- **Blocking `action { }` on a `suspendAtomic` participant now throws
+  `FrameInteropException` immediately** instead of deadlocking on the
+  store's suspend mutex; the message names the working alternatives
+  (`mutate`/`update` or `suspendAction`). Blocking `atomic` overlapping a
+  suspending frame's participants fails the same way, at frame entry.
+- **`suspendAction` on a `suspendAtomic` participant now joins the frame as
+  a savepoint** (commit merges into the frame root; observers/bridges fire
+  once, at frame commit) — previously it deadlocked on the already-held
+  mutex despite the KDoc's savepoint claim. Its `Error` results escalate per
+  the frame's `FramePolicy`.
+
+### Fixed
+
+- **Nested `suspendAtomic` no longer leaks writes into the outer frame on
+  failure.** Stores shared with an enclosing frame get a savepoint of the
+  outer root; a failed nested frame discards only its own writes.
+  Previously nested writes staged directly into the outer root and
+  committed with it even when the nested frame returned `Error`.
+- **`derived` recomputes queued during a `suspendAtomic` are drained after
+  the store's mutex releases.** Previously the drain ran while the frame
+  still held the mutex, so a recompute (a blocking `action`) could spin
+  forever.
+
 ### Changed
+
+- `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
+  `vaults`) — source-compatible for positional calls.
 
 - `asStateFlow`'s default-scope resolution now reads
   `MutableState.owningStore` (renamed from `owningVault` in `:holdfast`), and

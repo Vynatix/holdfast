@@ -2,10 +2,15 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FrameContractException
+import com.vynatix.holdfast.FrameInteropException
+import com.vynatix.holdfast.FrameMarker
+import com.vynatix.holdfast.FrameMarkers
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.UnenrolledStoreException
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -56,6 +61,15 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+    // Frame policing (body-only: the marker travels with the frame's coroutine
+    // and is popped before commit fanout). A participant of a suspendAtomic
+    // frame runs as a SAVEPOINT of its frame root — no mutex re-acquisition
+    // (the frame already holds it; re-locking here would deadlock). An
+    // unenrolled store is an escape unless the frame's policy allows it.
+    val frame = FrameMarkers.current()
+    if (frame != null && frameGateAllowsOnlySavepoint(frame)) {
+        return suspendActionInFrame(frame, body)
+    }
     val serializer = ensureSerializer(this)
     val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
 
@@ -94,15 +108,7 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
         // sync sibling — interleaved per-middleware so the master ordering is
         //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
-        for (i in middlewareChain.indices.reversed()) {
-            runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
-            val mw = middlewareChain[i]
-            if (mw is SuspendingMiddlewareHooks<*>) {
-                @Suppress("UNCHECKED_CAST")
-                val async = mw as SuspendingMiddlewareHooks<V>
-                runCatching { async.onTransactionStartedAsync(contexts[i]) }
-            }
-        }
+        fireStartedHooks(middlewareChain, contexts)
 
         val outcome: TransactionResult<R> =
             try {
@@ -171,6 +177,158 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
                 internalDrainPostCommitTasks()
             }
         outcome
+    }
+}
+
+/**
+ * Frame-entry gate for [suspendAction]. Returns `true` when this store is a
+ * participant of an active suspending frame — the caller must then run as a
+ * savepoint of the frame root instead of acquiring the mutex. Throws for the
+ * two contract violations: enrollment in a BLOCKING frame (the lock
+ * disciplines don't compose) and an unenrolled write under a strict policy.
+ */
+private fun <V : Store<V>> V.frameGateAllowsOnlySavepoint(frame: FrameMarker): Boolean {
+    val enrolling = frame.enrollingFrame(this)
+    if (enrolling != null) {
+        if (!enrolling.suspending) {
+            throw FrameInteropException(
+                "suspendAction on ${this::class.simpleName ?: "Store"} inside blocking " +
+                    "atomic${enrolling.describeParticipants()} (frame '${enrolling.frameId}') is not " +
+                    "supported: the blocking frame's lock discipline does not compose with the " +
+                    "suspend mutex. Use blocking `action { }` or bare `mutate`/`update` inside an " +
+                    "atomic body, or make the whole composition suspending via suspendAtomic.",
+            )
+        }
+        return true
+    }
+    if (!frame.policy.allowUnenrolled) {
+        val name = this::class.simpleName ?: "Store"
+        val fn = if (frame.suspending) "suspendAtomic" else "atomic"
+        throw UnenrolledStoreException(
+            "$name was mutated (via suspendAction) inside $fn${frame.describeParticipants()} but is " +
+                "not enrolled. Its writes would commit independently and would NOT roll back with " +
+                "the frame. Fix: add $name to the $fn(...) participant list. (Mid-frame enrollment " +
+                "is not possible — it would acquire a lock outside the sorted global order.) To " +
+                "deliberately run an independent side-transaction, pass " +
+                "policy = FramePolicy.AllowUnenrolled.",
+        )
+    }
+    return false
+}
+
+/**
+ * In-frame [suspendAction]: the store is a participant of an active
+ * suspendAtomic frame, so this action runs as a SAVEPOINT of the store's frame
+ * root — commit merges pending writes into the root (observers/bridges fire
+ * only at frame commit); rollback discards just the savepoint. No mutex work:
+ * the frame already holds the store's serializer mutex.
+ *
+ * Middleware fires per savepoint exactly like a nested blocking action would:
+ * sync + [SuspendingMiddlewareHooks] async hooks, concentric order, per-hook
+ * `runCatching` isolation.
+ *
+ * Error escalation: a [TransactionResult.Error] from this savepoint aborts the
+ * whole frame (the exception is rethrown so the frame's unwind rolls every
+ * participant back) unless the frame's policy is
+ * [FramePolicy.tolerateInnerErrors]. [FrameContractException]s always
+ * escalate.
+ */
+@OptIn(ExperimentalUuidApi::class)
+private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
+    frame: FrameMarker,
+    body: suspend V.() -> R,
+): TransactionResult<R> {
+    val parentTxn =
+        activeTransaction
+            ?: error(
+                "Internal: ${this::class.simpleName} is enrolled in frame '${frame.frameId}' " +
+                    "but has no active root transaction.",
+            )
+    val txn =
+        Transaction.createSavepointForExternal(
+            id = body::class.simpleName ?: Uuid.random().toString(),
+            ownerThreadId = currentThreadId(),
+            parent = parentTxn,
+            frameId = parentTxn.frameId,
+        )
+    internalSetActiveTransaction(txn)
+
+    val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
+    val contexts: List<Middleware.MiddlewareContext<V>> =
+        middlewareChain.map {
+            Middleware.MiddlewareContext(store = selfForExternal, transaction = txn)
+        }
+    fireStartedHooks(middlewareChain, contexts)
+
+    val outcome: TransactionResult<R> =
+        try {
+            val value: R = selfForExternal.body()
+            for (i in middlewareChain.indices) {
+                val mw = middlewareChain[i]
+                if (mw is SuspendingMiddlewareHooks<*>) {
+                    @Suppress("UNCHECKED_CAST")
+                    val async = mw as SuspendingMiddlewareHooks<V>
+                    runCatching { async.onTransactionCompletedAsync(contexts[i]) }
+                }
+                runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
+            }
+            // Savepoint commit: merge into the frame root — non-suspending,
+            // no fanout (that happens once, at frame commit).
+            txn.commit()
+            TransactionResult.Success(txn, value)
+        } catch (ce: CancellationException) {
+            fireErrorHooks(middlewareChain, contexts, ce)
+            runCatching { txn.rollback() }
+            throw ce
+        } catch (e: Throwable) {
+            fireErrorHooks(middlewareChain, contexts, e)
+            runCatching { txn.rollback() }
+            TransactionResult.Error(e, txn)
+        } finally {
+            internalSetActiveTransaction(parentTxn)
+        }
+
+    if (outcome is TransactionResult.Error) {
+        val e = outcome.exception
+        if (e is FrameContractException || !frame.policy.tolerateInnerErrors) throw e
+    }
+    return outcome
+}
+
+/**
+ * Concentric outermost-first `started` dispatch (reversed chain order), sync
+ * hook then async [SuspendingMiddlewareHooks] sibling per middleware, each
+ * `runCatching`-isolated. Shared by the mutex path and the in-frame
+ * savepoint path so the ordering contract is single-sourced.
+ */
+private suspend fun <V : Store<V>> fireStartedHooks(
+    middlewareChain: List<Middleware<V>>,
+    contexts: List<Middleware.MiddlewareContext<V>>,
+) {
+    for (i in middlewareChain.indices.reversed()) {
+        runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
+        val mw = middlewareChain[i]
+        if (mw is SuspendingMiddlewareHooks<*>) {
+            @Suppress("UNCHECKED_CAST")
+            val async = mw as SuspendingMiddlewareHooks<V>
+            runCatching { async.onTransactionStartedAsync(contexts[i]) }
+        }
+    }
+}
+
+private suspend fun <V : Store<V>> fireErrorHooks(
+    middlewareChain: List<Middleware<V>>,
+    contexts: List<Middleware.MiddlewareContext<V>>,
+    error: Throwable,
+) {
+    for (i in middlewareChain.indices) {
+        val mw = middlewareChain[i]
+        if (mw is SuspendingMiddlewareHooks<*>) {
+            @Suppress("UNCHECKED_CAST")
+            val async = mw as SuspendingMiddlewareHooks<V>
+            runCatching { async.onTransactionErrorAsync(contexts[i], error) }
+        }
+        runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], error) }
     }
 }
 
