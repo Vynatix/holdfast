@@ -238,7 +238,7 @@ class StoreHandle<V : Store<V>> internal constructor(
      * is an instance of [M].
      *
      * **v1 caveat**: only events for the recorder itself (an internal class) are
-     * captured. User middlewares installed via [com.vynatix.holdfast.Holdfast.middlewares]
+     * captured. User middlewares installed via [com.vynatix.holdfast.Store.middlewares]
      * are NOT wrapped — :holdfast has no public hook to enumerate or replace
      * entries in the chain, and `Middleware.invoke` is final, so a peer wrapper
      * cannot observe a user middleware's started/completed/error events. For
@@ -345,11 +345,11 @@ class StoreHandle<V : Store<V>> internal constructor(
      * post-teardown action accidentally records events.
      *
      * Detachment is "all-middleware-clear" because :holdfast only exposes
-     * [com.vynatix.holdfast.Holdfast.clearMiddleware] for removal — there is no
+     * [com.vynatix.holdfast.Store.clearMiddleware] for removal — there is no
      * single-entry uninstall. Tests that install user middlewares before
      * `track(v)` and expect them to persist past teardown should re-install
      * them in the next test. (Pragmatically, store instances rarely outlive a
-     * `holdfastTest` block.)
+     * `storeTest` block.)
      */
     internal fun disposeRecorderInternal() {
         val r = recorder ?: return

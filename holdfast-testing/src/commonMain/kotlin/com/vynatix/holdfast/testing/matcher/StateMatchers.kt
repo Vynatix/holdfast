@@ -18,8 +18,8 @@ import kotlin.reflect.KProperty1
  * Use the [shouldEqual] infix to record an assertion:
  * ```
  * ctr shouldMatch {
- *     MyVault::name shouldEqual "Hilde"
- *     MyVault::age  shouldEqual 30
+ *     MyStore::name shouldEqual "Hilde"
+ *     MyStore::age  shouldEqual 30
  * }
  * ```
  */

@@ -82,7 +82,7 @@ internal object PrivilegedHooks {
      *
      * Throws if invoked off the owner thread; the recorder's hooks always run
      * on the owner thread (the middleware chain is synchronous and on the
-     * thread that called [com.vynatix.holdfast.Holdfast.action]).
+     * thread that called [com.vynatix.holdfast.Store.action]).
      */
     fun modifiedStates(transaction: Transaction): Set<State<*>> = transaction.modifiedStates
 

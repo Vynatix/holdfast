@@ -177,7 +177,7 @@ internal class Recorder<V : Store<V>>(
      * Drop every recorded event and clear bookkeeping. Called from the test
      * scope's tearDown so a leaked handle reference doesn't keep events alive.
      * Does NOT detach this recorder from the store's middleware list — that
-     * happens via [com.vynatix.holdfast.Holdfast.clearMiddleware] in the same
+     * happens via [com.vynatix.holdfast.Store.clearMiddleware] in the same
      * tearDown path.
      */
     fun dispose() {

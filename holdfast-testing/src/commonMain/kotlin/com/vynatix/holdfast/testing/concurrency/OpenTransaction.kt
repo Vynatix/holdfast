@@ -143,7 +143,7 @@ class OpenTransaction internal constructor(
  * What the body does:
  *  - Receiver is the tracked store. Mutations like `count mutate 999` stage
  *    into the new transaction's pending writes — same staging as inside a
- *    production [com.vynatix.holdfast.Holdfast.action] body.
+ *    production [com.vynatix.holdfast.Store.action] body.
  *  - Reads honor read-your-own-writes on the body's owner thread; an
  *    off-owner-thread read (e.g. via [parallel]) sees the COMMITTED value,
  *    not the pending one.
@@ -162,7 +162,7 @@ class OpenTransaction internal constructor(
  *    the manufactured transaction as `activeTransaction`) and at
  *    commit/rollback (to apply or discard pending writes). The body runs
  *    without holding the lock, so async work between open and close is
- *    unrestricted — but a peer blocking [com.vynatix.holdfast.Holdfast.action]
+ *    unrestricted — but a peer blocking [com.vynatix.holdfast.Store.action]
  *    from another thread will lock-wait until [OpenTransaction.commit] or
  *    [OpenTransaction.rollback] runs.
  *  - [transaction] itself is `suspend` so callers can compose it with other

@@ -19,7 +19,7 @@ import kotlin.time.Duration.Companion.seconds
  * `"eventually: gave up after Xms (last: <inner-message>)"` and the most recent
  * failure as its cause.
  *
- * Both [within] and [every] are virtual-time durations under `holdfastTest`:
+ * Both [within] and [every] are virtual-time durations under `storeTest`:
  * `delay` and `withTimeoutOrNull` participate in the test scheduler, so a poll
  * over `1.seconds` resolves in near-zero wall time. Real-time waiting only
  * happens when called outside `runTest`.

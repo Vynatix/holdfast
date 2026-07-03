@@ -29,12 +29,12 @@ import kotlin.time.Duration.Companion.seconds
  * most recent five events across all tracked timelines for diagnosis.
  *
  * Both [timeout] and the resulting suspension participate in the test
- * scheduler's virtual time: under `holdfastTest`, a 200 ms timeout completes in
+ * scheduler's virtual time: under `storeTest`, a 200 ms timeout completes in
  * near-zero wall time when no match arrives.
  *
  * Example — wait for the next [com.vynatix.holdfast.testing.TransactionCommitted]:
  * ```
- * val ctr = track(MyVault())
+ * val ctr = track(MyStore())
  * backgroundScope.launch {
  *     delay(50.milliseconds)
  *     ctr.action { count mutate 1 }.shouldBeSuccess()
