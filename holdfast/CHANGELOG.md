@@ -8,7 +8,56 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-store transaction API graduated to first class.** `atomic(vararg
+  stores)` gains a `policy: FramePolicy = FramePolicy.Strict` parameter and a
+  written consistency contract (GUIDE §15):
+  - **Enrollment enforcement** — writing to a store not enrolled in the frame
+    (via `action`, `mutate`, or `update`, including through an enclosing
+    action's open transaction) throws `UnenrolledStoreException` instead of
+    committing independently while the frame rolls back. Enforcement covers
+    the frame body only; observers reacting to the commit may still write to
+    foreign stores. Opt out per call site with
+    `policy = FramePolicy.AllowUnenrolled`.
+  - **Inner-error escalation** — an inner `action { }` on a participant that
+    returns `TransactionResult.Error` now aborts the whole frame (all
+    participants roll back; the frame returns `Error` carrying the inner
+    exception). Opt out with `policy = FramePolicy.TolerateInnerErrors`.
+    Frame-contract violations always escalate and RETHROW out of the frame
+    instead of being folded into an ignorable `Error` result.
+  - **Nested lock-order verification** — a nested frame introducing a store
+    whose `lockOrderKey` sorts below an already-held key throws
+    `FrameLockOrderException` at entry (always-on O(1) check) instead of
+    risking a latent deadlock against a concurrent frame.
+  - **Frame observability** — participant roots share a new
+    `Transaction.frameId`; each participant store's middleware chain now
+    fires for the frame (`started` before the body, `completed` for ALL
+    stores before ANY store commits — a throw rolls the whole frame back —
+    and `error` on rollback). New experimental (`@ExperimentalStoreApi`)
+    `FrameObserver` / `FrameObservers` surface frame-level
+    started/committed/rolledBack events.
+  - New exception hierarchy: `FrameContractException` ←
+    `UnenrolledStoreException` / `FrameLockOrderException` /
+    `FrameInteropException`.
+
+### Fixed
+
+- **Nested `atomic` no longer commits shared stores prematurely.** A nested
+  frame overlapping an enclosing action/frame on the same thread now opens
+  savepoints: its commit merges into the enclosing scope, and the enclosing
+  rollback discards nested writes. Previously the nested frame committed the
+  adopted root at inner exit, silently disabling the outer rollback for that
+  store.
+- **`derived` recomputes queued during an `atomic` frame now run at frame
+  exit.** Previously the frame never drained the post-commit queue, so
+  recomputes were deferred until the next unrelated action on that store.
+
 ### Changed
+
+- `atomic`'s vararg parameter is named `stores` (was pre-rename `vaults`) —
+  source-compatible for positional calls; update any named-argument call
+  sites.
 
 - Completed the Vault → Store rename in the public API:
   `EventfulSupport.bindVault(...)` is now `bindStore(...)` and

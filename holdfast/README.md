@@ -81,7 +81,7 @@ property, fully typed.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
 - **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
-- **`atomic(vararg stores) { }`** — cross-holdfast transactions. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store.
+- **`atomic(vararg stores, policy) { }`** — cross-store transaction frames. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store. Enrollment is enforced (`UnenrolledStoreException` on writes to stores outside the frame), inner action errors abort the whole frame, and per-store middleware fires for the frame with a shared `Transaction.frameId`. Opt-outs per call site via `FramePolicy`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
 
@@ -133,7 +133,10 @@ and `com.vynatix.holdfast.crypto`:
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
   middleware fires; observers see only committed values.
 - `atomic(h1, h2, …)` sorts holdfasts by a process-monotonic `lockOrderKey`
-  and acquires locks in order — deadlock-safe across any combination.
+  and acquires locks in order — deadlock-safe across any combination. Frame
+  bodies are policed: writes to unenrolled stores throw, nested frames verify
+  lock order at entry, and blocking/suspending frame misuse fails fast with
+  `FrameInteropException` instead of deadlocking.
 - `suspendAction` and blocking `action` are mutually exclusive on the same
   holdfast via a coroutine `Mutex` installed lazily through an internal
   `AsyncSerializer` hook.

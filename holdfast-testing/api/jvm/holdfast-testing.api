@@ -431,6 +431,17 @@ public final class com/vynatix/holdfast/testing/matcher/StateMatchersKt {
 	public static final fun shouldMatchSnapshotOf (Lcom/vynatix/holdfast/testing/StoreHandle;Lcom/vynatix/holdfast/Store;)V
 }
 
+public final class com/vynatix/holdfast/testing/matcher/StoreHandleGroup {
+	public final fun and (Lcom/vynatix/holdfast/testing/StoreHandle;)Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;
+}
+
+public final class com/vynatix/holdfast/testing/matcher/StoreHandleGroupKt {
+	public static final fun and (Lcom/vynatix/holdfast/testing/StoreHandle;Lcom/vynatix/holdfast/testing/StoreHandle;)Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;
+	public static final fun committedFrameIds (Lcom/vynatix/holdfast/testing/StoreHandle;)Ljava/util/List;
+	public static final fun shouldCommitTogether (Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;)Ljava/lang/String;
+	public static final fun shouldNotCommitTogether (Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;)V
+}
+
 public final class com/vynatix/holdfast/testing/matcher/TimelineCombinatorsKt {
 	public static final fun shouldFire (Lcom/vynatix/holdfast/testing/StoreHandle;Lkotlin/jvm/functions/Function1;)V
 	public static final fun shouldFire (Ljava/util/List;Lkotlin/jvm/functions/Function1;)V

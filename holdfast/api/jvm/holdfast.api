@@ -1,5 +1,6 @@
 public final class com/vynatix/holdfast/AtomicKt {
-	public static final fun atomic ([Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun atomic ([Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/FramePolicy;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun atomic$default ([Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/FramePolicy;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public abstract interface class com/vynatix/holdfast/Bridge : com/vynatix/holdfast/Observable, com/vynatix/holdfast/Publisher {
@@ -44,6 +45,85 @@ public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/E
 	public final fun bindVault (Lcom/vynatix/holdfast/Store;)V
 	public fun emit (Ljava/lang/Object;)V
 	public fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+}
+
+public abstract interface annotation class com/vynatix/holdfast/ExperimentalStoreApi : java/lang/annotation/Annotation {
+}
+
+public class com/vynatix/holdfast/FrameContractException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/vynatix/holdfast/FrameInteropException : com/vynatix/holdfast/FrameContractException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/vynatix/holdfast/FrameKt {
+	public static final fun verifyFrameNesting (Lcom/vynatix/holdfast/FrameMarker;Ljava/util/List;Z)V
+}
+
+public final class com/vynatix/holdfast/FrameLockOrderException : com/vynatix/holdfast/FrameContractException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/vynatix/holdfast/FrameMarker {
+	public fun <init> (Ljava/lang/String;Ljava/util/Set;Lcom/vynatix/holdfast/FramePolicy;ZLcom/vynatix/holdfast/FrameMarker;)V
+	public final fun describeParticipants ()Ljava/lang/String;
+	public final fun enrollingFrame (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/FrameMarker;
+	public final fun getFrameId ()Ljava/lang/String;
+	public final fun getMaxHeldLockOrderKey ()J
+	public final fun getParent ()Lcom/vynatix/holdfast/FrameMarker;
+	public final fun getParticipants ()Ljava/util/Set;
+	public final fun getPolicy ()Lcom/vynatix/holdfast/FramePolicy;
+	public final fun getSuspending ()Z
+	public final fun isEnrolled (Lcom/vynatix/holdfast/Store;)Z
+}
+
+public final class com/vynatix/holdfast/FrameMarkers {
+	public static final field INSTANCE Lcom/vynatix/holdfast/FrameMarkers;
+	public final fun current ()Lcom/vynatix/holdfast/FrameMarker;
+	public final fun install (Lcom/vynatix/holdfast/FrameMarker;)Lcom/vynatix/holdfast/FrameMarker;
+}
+
+public final class com/vynatix/holdfast/FrameMiddlewareSession {
+	public final fun fireCompleted ()V
+	public final fun fireError (Ljava/lang/Throwable;)V
+	public final fun fireStarted ()V
+}
+
+public abstract interface class com/vynatix/holdfast/FrameObserver {
+	public fun onFrameCommitted (Ljava/lang/String;)V
+	public fun onFrameRolledBack (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public fun onFrameStarted (Ljava/lang/String;Ljava/util/List;)V
+}
+
+public final class com/vynatix/holdfast/FrameObserver$DefaultImpls {
+	public static fun onFrameCommitted (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;)V
+	public static fun onFrameRolledBack (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/lang/Throwable;)V
+	public static fun onFrameStarted (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/util/List;)V
+}
+
+public final class com/vynatix/holdfast/FrameObservers {
+	public static final field INSTANCE Lcom/vynatix/holdfast/FrameObservers;
+	public final fun clear ()V
+	public final fun register (Lcom/vynatix/holdfast/FrameObserver;)V
+	public final fun snapshot ()Ljava/util/List;
+	public final fun unregister (Lcom/vynatix/holdfast/FrameObserver;)V
+}
+
+public final class com/vynatix/holdfast/FramePolicy {
+	public static final field Companion Lcom/vynatix/holdfast/FramePolicy$Companion;
+	public synthetic fun <init> (ZZLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAllowUnenrolled ()Z
+	public final fun getTolerateInnerErrors ()Z
+	public final fun plus (Lcom/vynatix/holdfast/FramePolicy;)Lcom/vynatix/holdfast/FramePolicy;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/FramePolicy$Companion {
+	public final fun getAllowUnenrolled ()Lcom/vynatix/holdfast/FramePolicy;
+	public final fun getStrict ()Lcom/vynatix/holdfast/FramePolicy;
+	public final fun getTolerateInnerErrors ()Lcom/vynatix/holdfast/FramePolicy;
 }
 
 public abstract interface class com/vynatix/holdfast/Initializer : kotlin/jvm/functions/Function0 {
@@ -134,6 +214,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
 	public final fun hasState (Ljava/lang/String;)Z
 	public final fun internalDrainPostCommitTasks ()V
+	public final fun internalFrameMiddlewareSession (Lcom/vynatix/holdfast/Transaction;)Lcom/vynatix/holdfast/FrameMiddlewareSession;
 	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
 	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public final fun isDisposed ()Z
@@ -189,6 +270,7 @@ public final class com/vynatix/holdfast/Transaction {
 	public final fun commitDispatching (Lkotlin/jvm/functions/Function2;)V
 	public final fun commitDispatching (Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function1;)V
 	public final fun getEndTime ()Ljava/lang/Long;
+	public final fun getFrameId ()Ljava/lang/String;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getModifiedStates ()Ljava/util/Set;
 	public final fun getStatus ()Lcom/vynatix/holdfast/TransactionStatus;
@@ -197,7 +279,10 @@ public final class com/vynatix/holdfast/Transaction {
 }
 
 public final class com/vynatix/holdfast/Transaction$Companion {
-	public final fun createForExternal (Ljava/lang/String;J)Lcom/vynatix/holdfast/Transaction;
+	public final fun createForExternal (Ljava/lang/String;JLjava/lang/String;)Lcom/vynatix/holdfast/Transaction;
+	public static synthetic fun createForExternal$default (Lcom/vynatix/holdfast/Transaction$Companion;Ljava/lang/String;JLjava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/Transaction;
+	public final fun createSavepointForExternal (Ljava/lang/String;JLcom/vynatix/holdfast/Transaction;Ljava/lang/String;)Lcom/vynatix/holdfast/Transaction;
+	public static synthetic fun createSavepointForExternal$default (Lcom/vynatix/holdfast/Transaction$Companion;Ljava/lang/String;JLcom/vynatix/holdfast/Transaction;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/Transaction;
 }
 
 public final class com/vynatix/holdfast/TransactionException : java/lang/Exception {
@@ -270,6 +355,10 @@ public abstract interface class com/vynatix/holdfast/Transformer {
 
 public final class com/vynatix/holdfast/Transformer$DefaultImpls {
 	public static fun shouldTransform (Lcom/vynatix/holdfast/Transformer;Ljava/lang/Object;)Z
+}
+
+public final class com/vynatix/holdfast/UnenrolledStoreException : com/vynatix/holdfast/FrameContractException {
+	public fun <init> (Ljava/lang/String;)V
 }
 
 public final class com/vynatix/holdfast/bridge/BooleanCodec : com/vynatix/holdfast/bridge/Codec {
