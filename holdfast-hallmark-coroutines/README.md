@@ -1,6 +1,7 @@
 # `:holdfast-hallmark-coroutines` — suspend Holdfast adapter
 
-Bridges `:validation-coroutines`' `SuspendValidator` into Holdfast's
+Bridges the `SuspendValidator` from [Hallmark](https://github.com/vynatix/hallmark)'s
+`com.vynatix:hallmark-coroutines` (a separate repository) into Holdfast's
 `suspendAction { }`. Use when validation involves I/O (DB unique-name lookup,
 remote feature gate, moderation API call) and you want the result mutated
 into a Holdfast state atomically.
@@ -26,12 +27,12 @@ class UsernameValidator(taken: Set<String>) : SuspendBoxedValidator<String, User
     )
 }
 
-class UserHoldfast : Store<UserHoldfast>() {
+class UserStore : Store<UserStore>() {
     val username by boxed(/* sync leaf */ UsernameFormatValidator) { "init" }
 }
 
-suspend fun adoptUsername(name: String): TransactionResult<Unit> =
-    holdfast.suspendValidateAndMutate(holdfast.username, UsernameValidator(taken = …), name)
+suspend fun adoptUsername(store: UserStore, name: String): TransactionResult<Unit> =
+    store.suspendValidateAndMutate(store.username, UsernameValidator(taken = …), name)
 ```
 
 `suspendValidateAndMutate` runs the suspend validator, then mutates the

@@ -2,8 +2,10 @@
 
 `com.vynatix.holdfast` is a Kotlin Multiplatform state-management library built around
 **transactional state**: every mutation lives inside a transaction; observers see only
-committed values; failed transactions never leak. It has no Compose dependency, no
-coroutine dependency in its API, and no dependencies on Android or iOS frameworks.
+committed values; failed transactions never leak. The core depends only on
+`kotlinx-coroutines-core` (exposed as `api` — `CoroutineScope` and `SharedFlow`
+appear in the public surface) and `kotlinx-atomicfu`; there are no Compose,
+Android, or iOS framework dependencies.
 
 This guide covers the mental model, the seven primitives, the full transaction
 workflow, decision charts for picking the right tool, feature differentiation tables,
@@ -188,7 +190,7 @@ commit and observers fire; on throw the buffer is dropped and nobody
 notices the attempt happened.
 
 ```kotlin
-val result: TransactionResult = holdfast action {
+val result: TransactionResult<Unit> = holdfast action {
     items mutate listOf("a", "b")
     draft mutate "drafted"
 }
@@ -245,8 +247,10 @@ skips observers, middleware, or commit semantics.
 state. It fires:
 
 - **Once immediately** with the current `value` (post-`transformer.get`).
-- **Once per top-level commit** that actually changes the raw stored value.
-  (Same-value commits do not re-fire — see §6.)
+- **Once per top-level commit** that staged a write to this state. By default
+  (`distinct = false`) a commit that re-applies the same value re-fires
+  observers; declare the state with `state(distinct = true) { … }` to opt into
+  StateFlow-style same-value dedup (see §6).
 
 ```kotlin
 val sub = holdfast { count effect { println("count=$this") } }
@@ -305,8 +309,9 @@ class Logger<V : Store<V>> : Middleware<V>() {
 holdfast.middlewares(Logger())
 ```
 
-Middleware composes left-to-right: `middlewares(A, B)` runs A's started
-hook first, then B's, then the user action, then B's completed, then A's.
+Middleware nests with the LAST-registered middleware outermost:
+`middlewares(A, B)` runs `B.started`, `A.started`, the user action body,
+`A.completed`, `B.completed` (and on a throw, `A.error` then `B.error`).
 The chain is rebuilt fresh per `action`, so middleware added later applies
 to subsequent actions.
 
@@ -356,8 +361,8 @@ goes through middleware and observers.
                                    │
                 ┌──────────────────┼──────────────────┐
                 │                  │                  │
-            body returns       body throws          inner txn
-            normally           (any exception)      throws
+            body returns       body throws          outer re-throws an
+            normally           (any exception)      inner action's Error
                 │                  │                  │
                 ▼                  ▼                  ▼
         ┌───────────────┐  ┌───────────────┐  ┌──────────────────┐
@@ -421,12 +426,13 @@ than a state corruptor.
 | `mutate v2` after v1 (same action) | post-`get(v2)` ← pending | committed v0 | (silent) | (silent) |
 | Action body throws | committed v0 | committed v0 | (never fired for v1/v2) | (never published) |
 | Action commits with final = v2 | committed v2 | committed v2 | fires once with `get(v2)` | publishes raw v2 |
-| Action commits with final = v0 (same as start) | committed v0 | committed v0 | (no fire — dedup) | (no publish — dedup) |
+| Action commits with final = v0 (same as start) | committed v0 | committed v0 | fires with `get(v0)` (`distinct = true` skips) | publishes raw v0 (`distinct = true` skips) |
 
 Three things to internalize:
 
 1. **Observers and bridges only ever see committed values.** No mid-transaction
-   leak. No rolled-back leak. Same-value commits are deduped.
+   leak. No rolled-back leak. Same-value commits re-fire by default; states
+   declared `state(distinct = true) { … }` dedup them.
 2. **Read-your-own-writes is owner-thread-only.** The thread executing the
    action sees its own pending writes. Other threads see committed values
    only — they cannot witness "in-flight" mutations.
@@ -647,8 +653,8 @@ holdfast.middlewares(Logger("Counter"))
 ### 9.2 Validation that aborts the transaction
 
 ```kotlin
-class NonNegativeBalance : Middleware<AccountHoldfast>() {
-    override fun onTransactionCompleted(c: MiddlewareContext<AccountHoldfast>) {
+class NonNegativeBalance : Middleware<AccountStore>() {
+    override fun onTransactionCompleted(c: MiddlewareContext<AccountStore>) {
         // Pending writes already buffered; check against current view.
         if (c.store.balance.value < 0)
             error("Balance cannot go negative")
@@ -745,7 +751,10 @@ fun MyScreen(holdfast: TodoStore) {
 
 ### 9.6 Computed / derived state
 
-The library has no native `derive(other) { … }` operator. The two idioms:
+The library ships native operators for this — `computed { … }` (read-time)
+and `derived(sources) { … }` (push-recomputed); see §14.2. The hand-rolled
+idioms below remain useful when you want the recompute to land inside the
+same commit as the source write:
 
 **Read-only derived (compute on demand):** define a holdfast function.
 
@@ -774,14 +783,15 @@ class CartStore : Store<CartStore>() {
 ```kotlin
 init {
     items effect {
-        action { total mutate this.sumOf { it.price * it.qty } }
+        val current = this   // the effect's payload: the committed List<Line>
+        action { total mutate current.sumOf { it.price * it.qty } }
     }
 }
 ```
 
 The third pattern double-commits and is rarely worth the indirection;
 prefer pattern two — keeping derived consistency inside the original
-action.
+action — or the built-in `derived` from §14.2.
 
 ### 9.7 Read-your-own-writes inside an action
 
@@ -813,20 +823,25 @@ holdfast action {                      // T_outer
 // On error("abort"): nothing committed; observers see no change.
 ```
 
-Inner errors propagate to the outer's catch and roll the outer back. To
-*recover* from an inner error and continue the outer, wrap the inner in
-runCatching:
+A nested `action` catches its own body's throw and returns
+`TransactionResult.Error` — the inner rollback discards only the savepoint's
+pending writes. **The outer action continues by default**; nothing propagates
+unless you make it:
 
 ```kotlin
 holdfast action {
     a mutate 1
-    val inner = runCatching { holdfast action { b mutate 2; error("flake") } }
-    // inner.exception is set; b's pending was discarded by inner's rollback.
-    // Outer continues with a's pending intact.
+    val inner = holdfast action { b mutate 2; error("flake") }
+    // inner is TransactionResult.Error; b's pending was discarded by the
+    // inner's own rollback. The outer continues with a's pending intact.
     c mutate 3
 }
 // Final: a=1, c=3, b=initial.
 ```
+
+To abort the outer when the inner fails, re-throw explicitly —
+`if (inner is TransactionResult.Error) throw inner.exception` — which lands
+in the outer's catch and rolls back everything, including `a`.
 
 ### 9.9 Idempotent rollback for cancellation
 
@@ -1005,8 +1020,10 @@ never T1's pending writes.
 |---|---|---|
 | Observer fires twice for one logical event | Subscribed via `effect` AND wired through a bridge | Pick one |
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
-| `IllegalStateException: Failed to record state change` | Mutating in a foreign-holdfast state | The state belongs to a different holdfast — pass the right state |
-| `TransactionException: Cannot mutate state on a Committed transaction` | Holding a `Transaction` after `action` returned and trying to mutate via it directly | `Transaction` is owned by `action`; just call `holdfast action { … }` again |
+| `IllegalStateException: State must be created by this Store instance` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
+| `IllegalStateException: Cannot mutate state on a Committed transaction` | Mutating after manually calling `commit()`/`rollback()` on the active transaction inside the action body | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
+| `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
+| `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
 | Effect callbacks leak after a Composable disappears | `Disposable` not captured | Use `DisposableEffect` and call `.dispose()` in `onDispose` |
 | Nested action's commit "doesn't seem to do anything" | Inner committed — but it's a savepoint; outer still owns the pending writes | This is correct. Inner's commit merged into outer; outer's commit/rollback is what the world sees |
@@ -1027,6 +1044,10 @@ never T1's pending writes.
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
 | `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Optional handler for commit-fire observer exceptions (default null = silent swallow) |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
+| `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
+| `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
+| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
+| `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
 
@@ -1293,13 +1314,26 @@ implementation (in-memory, file system, MultiplatformSettings, …).
 
 ```kotlin
 fun <T : Any> State<T>.asFlow(): Flow<T>
-fun <T : Any> State<T>.asStateFlow(scope: CoroutineScope, started: SharingStarted = SharingStarted.WhileSubscribed()): StateFlow<T>
-fun <T : Any> State<T>.asEagerStateFlow(): EagerStateFlow<T>
+fun <T : Any> State<T>.asStateFlow(
+    scope: CoroutineScope = …,   // defaults to the owning store's Store.scope
+    started: SharingStarted = SharingStarted.WhileSubscribed(),
+): StateFlow<T>
+// Eager publishing: asStateFlow(started = SharingStarted.Eagerly).
 
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
+suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): TransactionResult<R>
+fun <V : Store<V>, T : Any> V.suspendDerived(
+    vararg sources: State<*>,
+    compute: suspend V.() -> T,
+): Pair<State<T>, Disposable>
+
+interface SuspendingKvStore                          // suspend get / put / remove / snapshot
+interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
+fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
+fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
@@ -1348,9 +1382,9 @@ holdfast { token bridge KvBridge(kv, "session", StringCodec) }
 // token is plaintext on read; persisted file contains ciphertext.
 ```
 
-**Cross-holdfast transfer with one-line atomicity**:
+**Cross-store transfer with one-line atomicity**:
 ```kotlin
-fun AccountStore.transferTo(other: AccountHoldfast, cents: Long) =
+fun AccountStore.transferTo(other: AccountStore, cents: Long) =
     atomic(this, other) {
         action { balance update { it - cents } }
         other.action { balance update { it + cents } }
@@ -1384,9 +1418,10 @@ val r = holdfast.suspendAction {
 
 ### 14.11 Validation 0.3.0 — three modules at the boundary
 
-`:validation` is a standalone KMP refinement-types library; `:holdfast-hallmark`
-is a thin Holdfast adapter on top of it; `:validation-coroutines` adds suspend
-support. The premise: every primitive (`String`, `Long`, …) flowing into your
+[Hallmark](https://github.com/vynatix/hallmark) (`com.vynatix:hallmark`) is a
+standalone KMP refinement-types library maintained in its own repository;
+`:holdfast-hallmark` (in this repo) is a thin Holdfast adapter on top of it;
+`com.vynatix:hallmark-coroutines` adds suspend support. The premise: every primitive (`String`, `Long`, …) flowing into your
 domain is validated and wrapped in a typed `Boxed<P>` exactly once, at the
 boundary. Inside the domain, you pass wrappers, never raw primitives — the
 canonical fix for the **primitive obsession** code smell.
@@ -1395,9 +1430,9 @@ canonical fix for the **primitive obsession** code smell.
 
 | Artifact | Role |
 |---|---|
-| `com.vynatix:validation` | Core lib. No Holdfast dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
-| `com.vynatix:validation-coroutines` | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
-| `com.vynatix:holdfast-hallmark` | Holdfast adapter. `ValidatingTransformer`, `Store.boxed { }` factory, `BoxedCodec`. |
+| `com.vynatix:hallmark` *(separate [Hallmark repo](https://github.com/vynatix/hallmark))* | Core lib. No Holdfast dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
+| `com.vynatix:hallmark-coroutines` *(separate Hallmark repo)* | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
+| `com.vynatix:holdfast-hallmark` *(this repo)* | Holdfast adapter. `ValidatingTransformer`, `Store.boxed { }` factory, `BoxedCodec`. |
 
 #### Core surface (`com.vynatix.hallmark`)
 
@@ -1558,7 +1593,7 @@ Useful for OpenAPI / JSON-Schema generation, form-builder UIs, or doc
 generation. Ships introspection only — actual schema-format export is
 adopter-side.
 
-#### Holdfast integration (`holdfast-validation`)
+#### Holdfast integration (`:holdfast-hallmark`)
 
 Two state factories:
 
@@ -1595,7 +1630,7 @@ holdfast {
   constructor bypass (`data class copy`) is rejected.
 - **`BoxedCodec`** — round-trips `Boxed<P>` through any `Codec<P>`.
 
-#### Suspend validation (`validation-coroutines`)
+#### Suspend validation (`hallmark-coroutines`)
 
 ```kotlin
 class UniqueUsernameRule(private val taken: Set<String>) : SuspendRule<String>(
@@ -1625,7 +1660,7 @@ val r: HallmarkResult<NewUser> = v.validate(NewUser("alice", "Alice"))
 The composite DSL accepts either sync or suspend sub-validators via
 overloaded `field` factories.
 
-#### Holdfast adapter for suspend validation (`holdfast-validation-coroutines`)
+#### Holdfast adapter for suspend validation (`:holdfast-hallmark-coroutines`)
 
 ```kotlin
 suspend fun adoptUsername(name: String): TransactionResult<Unit> =
@@ -1654,9 +1689,9 @@ Ships in `:holdfast` core.
 
 #### Migrating from Konform
 
-See [`validation/KONFORM-MIGRATION.md`](../validation/KONFORM-MIGRATION.md)
-for a 1:1 mapping from Konform's `Validation<T>` API to this library's
-surface. No runtime Konform dep.
+The [Hallmark repository](https://github.com/vynatix/hallmark) carries a
+Konform migration guide with a 1:1 mapping from Konform's `Validation<T>`
+API to Hallmark's surface. No runtime Konform dep.
 
 ---
 

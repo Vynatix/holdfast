@@ -16,29 +16,31 @@ fun rememberDisposable(make: () -> Disposable): Disposable
 
 ## Examples
 
-### Bind holdfast state to a Composable
+### Bind store state to a Composable
 
 ```kotlin
 @Composable
-fun CounterScreen(holdfast: CounterHoldfast) {
-    val count by holdfast.collectAsState(holdfast.count)
-    val label by holdfast.collectAsState(holdfast.label)
+fun CounterScreen(store: CounterStore) {
+    val count by store.collectAsState(store.count)
+    val label by store.collectAsState(store.label)
 
     Column {
         Text("Count: $count — $label")
-        Button(onClick = { holdfast.action { count update { it + 1 } } }) {
+        // Inside action { } the local `count` delegate shadows the state
+        // property, so qualify with `this.` to reach the State<Int>.
+        Button(onClick = { store.action { this.count update { it + 1 } } }) {
             Text("+1")
         }
     }
 }
 ```
 
-### Wire an inbound `Observable<T>` to a holdfast state for a Composable's lifetime
+### Wire an inbound `Observable<T>` to a store state for a Composable's lifetime
 
 ```kotlin
 @Composable
-fun StatusListener(holdfast: AccountHoldfast, channel: Observable<AccountStatus>) {
-    rememberDisposable { holdfast { status observeFrom channel } }
+fun StatusListener(store: AccountStore, channel: Observable<AccountStatus>) {
+    rememberDisposable { store { status observeFrom channel } }
 }
 ```
 

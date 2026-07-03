@@ -115,6 +115,11 @@ dependencies {
 }
 ```
 
+**Toolchain floor:** the artifacts are built with Kotlin 2.3.x, so consuming
+projects need a Kotlin 2.3.x (or newer compatible) compiler to read the
+published klib/metadata format, and the JVM/Android class files target
+**JVM 21** — set your `jvmTarget` / `compileOptions` to 21 or higher.
+
 ## Documentation
 
 - [`holdfast/README.md`](holdfast/README.md) — full guide: mental model, transactions, state, middleware, positioning vs. other state-management libraries.
