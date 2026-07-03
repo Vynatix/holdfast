@@ -40,14 +40,35 @@ val failed = counter action {
 failed.onError { println("rolled back: ${it.exception.message}") }   // rolled back: simulated
 ```
 
+## Cross-store transactions
+
+When an invariant spans stores, `atomic(a, b) { … }` (and its suspending peer
+`suspendAtomic`) runs in-memory two-phase commit with deadlock-safe global
+lock ordering — all participants commit or roll back together, something no
+mainstream Kotlin state-management library offers:
+
+```kotlin
+val r = atomic(accountA, accountB) {
+    accountA.action { balance update { it - amount } }
+    accountB.action { balance update { it + amount } }
+}
+```
+
+The frame is enforced, not advisory: writing to a store you forgot to enroll
+throws instead of committing independently, a failed inner action aborts the
+whole frame, and blocking/suspending misuse fails fast with a teaching
+exception instead of deadlocking. See the
+[GUIDE's cross-store chapter](holdfast/GUIDE.md#15-cross-store-transactions)
+for the full consistency contract.
+
 ## Modules
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-holdfast `atomic`, encryption transformer, file-system store. |
-| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` for async transactional bodies. |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-store `atomic` frames, encryption transformer, file-system store. |
+| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
-| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `holdfastTest { }`, `StoreHandle`, timeline matchers. |
+| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers. |
 | [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
