@@ -10,6 +10,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **`ProfilingMiddleware`** (`com.vynatix.holdfast.middleware`) — drop-in
+  transaction profiler. Records per-transaction monotonic-clock duration,
+  outcome, savepoint/`frameId` identity, and the names of the state
+  properties written; streams each finished transaction as a
+  `TransactionSample` via an optional `onSample` callback and aggregates
+  into a `StoreProfile` (`profile()`/`reset()`) with per-state write
+  counts, slowest sample, and total/max/average durations. Purely
+  observational — its own bookkeeping never throws, so attaching it cannot
+  change a transaction's outcome; when state-name attribution is illegal
+  (owner-thread-confined read after a `suspendAction` thread hop) the
+  sample degrades to empty `modifiedStates` instead of failing.
+
 - **Cross-store transaction API graduated to first class.** `atomic(vararg
   stores)` gains a `policy: FramePolicy = FramePolicy.Strict` parameter and a
   written consistency contract (GUIDE §15):
