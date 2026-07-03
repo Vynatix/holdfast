@@ -6,12 +6,12 @@
 # when those issues land.
 
 # --- root README ---
-README.md#1: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
+README.md#2: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
 
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
 holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#60: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
+holdfast/GUIDE.md#63: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
 
 # --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
 holdfast/GUIDE.md#28: API-reference signature listing (Bridge/Observable/Publisher)
@@ -30,6 +30,9 @@ holdfast/GUIDE.md#43: API-reference signature listing (:holdfast-compose); compo
 
 # --- holdfast/GUIDE.md: Compose sample ---
 holdfast/GUIDE.md#14: TODO(#12) Compose UI sample; compose compiler/runtime not wired into doc-snippets
+
+# --- holdfast/GUIDE.md §15: cross-store transactions ---
+holdfast/GUIDE.md#61: illustrative FrameObserver registration with `…` placeholder bodies
 
 # --- holdfast/GUIDE.md §14.11: requires the Hallmark validation modules, excluded from the default build ---
 holdfast/GUIDE.md#49: requires Hallmark modules (off the default build); also an API-reference signature listing
