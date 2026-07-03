@@ -48,9 +48,22 @@ lock ordering — all participants commit or roll back together, something no
 mainstream Kotlin state-management library offers:
 
 ```kotlin
-val r = atomic(accountA, accountB) {
-    accountA.action { balance update { it - amount } }
-    accountB.action { balance update { it + amount } }
+class AccountStore(initial: Long = 0) : Store<AccountStore>() {
+    val balance by state { initial }
+}
+
+val accountA = AccountStore(initial = 100)
+val accountB = AccountStore()
+
+// Both stores commit together, or neither does.
+val transfer = atomic(accountA, accountB) {
+    accountA.action { balance update { it - 30 } }
+    accountB.action { balance update { it + 30 } }
+    "transferred"                                    // body's value flows into Success
+}
+when (transfer) {
+    is TransactionResult.Success -> println(transfer.value)   // transferred — A=70, B=30
+    is TransactionResult.Error   -> println("rolled back: ${transfer.exception}")
 }
 ```
 

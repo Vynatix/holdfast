@@ -72,6 +72,50 @@ of a transaction has access to *your* state class's properties without casting.
 Inside `counter action { count update { … } }`, `count` is your `CounterStore`'s
 property, fully typed.
 
+## Cross-store transactions
+
+A single `action { }` is atomic within one store. When one invariant spans
+several stores — debit one account and credit another, or neither — enroll
+them all in an `atomic(...)` frame: every participant commits or rolls back
+together.
+
+```kotlin
+class AccountStore(initial: Long = 0) : Store<AccountStore>() {
+    val balance by state { initial }
+}
+
+val accountA = AccountStore(initial = 100)
+val accountB = AccountStore()
+
+// Both stores commit together, or neither does.
+val transfer = atomic(accountA, accountB) {
+    accountA.action { balance update { it - 30 } }
+    accountB.action { balance update { it + 30 } }
+    "transferred"                                    // body's value flows into Success
+}
+when (transfer) {
+    is TransactionResult.Success -> println(transfer.value)   // transferred — A=70, B=30
+    is TransactionResult.Error   -> println("rolled back: ${transfer.exception}")
+}
+
+// A throw anywhere in the body rolls back EVERY participant:
+// the debit below never commits because the credit leg failed.
+val failed = atomic(accountA, accountB) {
+    accountA.action { balance update { it - 50 } }
+    error("credit leg failed")
+}
+failed.onError { println("rolled back: ${it.exception.message}") }   // rolled back: credit leg failed
+// accountA.balance.value is still 70 — the staged debit was discarded.
+```
+
+Participant locks are acquired in a deadlock-safe global order, and the frame
+is enforced rather than advisory: writing to a store you forgot to enroll
+throws `UnenrolledStoreException` instead of committing independently, and a
+failed inner action aborts the whole frame (both enforcements have per-call-site
+opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
+`:holdfast-coroutines`. Full consistency contract in
+[GUIDE §15](GUIDE.md#15-cross-store-transactions).
+
 ## Major capabilities
 
 ### Core surface
@@ -83,7 +127,7 @@ property, fully typed.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
 - **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
-- **`atomic(vararg stores, policy) { }`** — cross-store transaction frames. Sorts by `lockOrderKey` for deadlock-safe lock acquisition; body throw rolls back every store. Enrollment is enforced (`UnenrolledStoreException` on writes to stores outside the frame), inner action errors abort the whole frame, and per-store middleware fires for the frame with a shared `Transaction.frameId`. Opt-outs per call site via `FramePolicy`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
+- **`atomic(vararg stores, policy) { }`** — cross-store transaction frames: all enrolled stores commit or roll back together (basic usage in [Cross-store transactions](#cross-store-transactions) above). Per-store middleware fires for the frame with a shared `Transaction.frameId`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
 
