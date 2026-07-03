@@ -19,6 +19,29 @@ import kotlin.uuid.Uuid
 private val storeLockOrderKeyGen = atomic(0L)
 
 /**
+ * One store's middleware hooks, pre-bound to a frame root transaction. Handed
+ * out by [Store.internalFrameMiddlewareSession] so `atomic(...)` and
+ * `:holdfast-coroutines.suspendAtomic` can drive per-store middleware without
+ * seeing the store's `Self` type. See that hook's KDoc for the exact
+ * exception-isolation semantics of each phase.
+ */
+@StoreInternalApi
+class FrameMiddlewareSession internal constructor(
+    private val started: () -> Unit,
+    private val completed: () -> Unit,
+    private val errored: (Throwable) -> Unit,
+) {
+    /** Fire every middleware's `onTransactionStarted`, outermost-first. */
+    fun fireStarted() = started()
+
+    /** Fire every middleware's `onTransactionCompleted`, innermost-first. */
+    fun fireCompleted() = completed()
+
+    /** Fire every middleware's `onTransactionError`, innermost-first, each isolated. */
+    fun fireError(error: Throwable) = errored(error)
+}
+
+/**
  * Base class for transactional state containers.
  *
  * A Store holds a set of named [State] properties created via [state]. Mutations are
@@ -353,16 +376,78 @@ abstract class Store<Self : Store<Self>> {
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
         checkNotDisposed()
-        // If a suspending caller (store-coroutines.suspendAction) has installed a
-        // serializer, block here until they release. This makes blocking action and
-        // suspending action mutually exclusive on the same store.
+        // Frame policing (body-only: the marker is cleared before commit fanout,
+        // so observer-triggered actions never land here). Ordered BEFORE the
+        // serializer acquire — a blocking acquire on a suspendAtomic
+        // participant's mutex would deadlock, which is exactly what the
+        // interop check converts into a teaching exception.
+        val frame = FrameMarkers.current()
+        if (frame != null) checkFrameAllowsBlockingAction(frame)
         val serializer = asyncSerializer
         serializer?.blockingAcquire()
-        try {
-            return runBlockingActionUnderLock(body)
-        } finally {
-            serializer?.blockingRelease()
+        val result =
+            try {
+                runBlockingActionUnderLock(body)
+            } finally {
+                serializer?.blockingRelease()
+            }
+        escalateInFrameError(frame, result)
+        return result
+    }
+
+    /**
+     * Frame-entry gate for blocking [action]. Inside an active frame body:
+     *  - an UNENROLLED store must not be written (unless the frame's policy
+     *    says [FramePolicy.allowUnenrolled]) — its commit would escape the frame;
+     *  - a store enrolled in a SUSPENDING frame must not run a blocking action —
+     *    it would deadlock on the store's suspend mutex, so fail fast instead.
+     */
+    private fun checkFrameAllowsBlockingAction(frame: FrameMarker) {
+        val enrolling = frame.enrollingFrame(this)
+        if (enrolling == null) {
+            if (!frame.policy.allowUnenrolled) {
+                throw UnenrolledStoreException(unenrolledMessage(frame, "action"))
+            }
+        } else if (enrolling.suspending) {
+            val name = this::class.simpleName ?: "Store"
+            throw FrameInteropException(
+                "Blocking action { } on $name inside suspendAtomic${enrolling.describeParticipants()} " +
+                    "would deadlock on the store's suspend mutex (held by frame '${enrolling.frameId}'). " +
+                    "Use `mutate`/`update` (e.g. `store { state mutate value }`) or `suspendAction { }` " +
+                    "inside a suspendAtomic body.",
+            )
         }
+    }
+
+    /**
+     * Fail-fast escalation of in-frame action errors ([FramePolicy.tolerateInnerErrors]
+     * inverts it back to check-the-result-yourself). [FrameContractException]s always
+     * escalate — a contract violation swallowed into a tolerated inner error would
+     * recreate the silent-escape hole the contract exists to close.
+     */
+    private fun escalateInFrameError(
+        frame: FrameMarker?,
+        result: TransactionResult<*>,
+    ) {
+        if (frame == null || result !is TransactionResult.Error) return
+        val exception = result.exception
+        val escalate =
+            exception is FrameContractException ||
+                (frame.isEnrolled(this) && !frame.policy.tolerateInnerErrors)
+        if (escalate) throw exception
+    }
+
+    private fun unenrolledMessage(
+        frame: FrameMarker,
+        via: String,
+    ): String {
+        val name = this::class.simpleName ?: "Store"
+        val fn = if (frame.suspending) "suspendAtomic" else "atomic"
+        return "$name was mutated (via $via) inside $fn${frame.describeParticipants()} but is not " +
+            "enrolled. Its writes would commit independently and would NOT roll back with the frame. " +
+            "Fix: add $name to the $fn(...) participant list. (Mid-frame enrollment is not possible — " +
+            "it would acquire a lock outside the sorted global order.) To deliberately run an " +
+            "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
     }
 
     @OptIn(ExperimentalUuidApi::class)
@@ -542,6 +627,17 @@ abstract class Store<Self : Store<Self>> {
         val onOwnerCoroutine = txn != null && suspendingOwner != null
 
         if (txn != null && (onOwnerThread || onOwnerCoroutine)) {
+            // Frame policing for the direct-stage path: a store with an active
+            // transaction from an ENCLOSING action can be written here without
+            // ever passing through `action` — e.g. `c.action { atomic(a, b) {
+            // c.x mutate 1 } }` — and those writes would commit with c's outer
+            // action regardless of the frame's outcome. Same rule as the
+            // action-path check: unenrolled writes inside a frame body are an
+            // escape unless the policy explicitly allows them.
+            val frame = FrameMarkers.current()
+            if (frame != null && !frame.isEnrolled(this@Store) && !frame.policy.allowUnenrolled) {
+                throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
+            }
             // Defensive: a transaction that's been manually committed or rolled back
             // shouldn't accept further mutations. Throw rather than silently lose the write.
             check(txn.status == TransactionStatus.Active) {
@@ -678,6 +774,46 @@ abstract class Store<Self : Store<Self>> {
      */
     @StoreInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)
+
+    /**
+     * Internal hook for `atomic(...)` / `:holdfast-coroutines.suspendAtomic`.
+     * Snapshots this store's middleware chain once (same semantics as an
+     * action-start snapshot) and returns a session whose hooks the frame
+     * drives around [txn]:
+     *
+     *  - [FrameMiddlewareSession.fireStarted] — concentric outermost-first
+     *    (LAST-registered fires first), matching `action`'s fold order. NOT
+     *    exception-isolated: a throwing `started` aborts the frame.
+     *  - [FrameMiddlewareSession.fireCompleted] — innermost-first unwind,
+     *    after the body returns and BEFORE any participant commits. NOT
+     *    exception-isolated: a throwing `completed` (e.g. validation) rolls
+     *    the whole frame back — for frames, `completed` does NOT mean
+     *    durably-committed.
+     *  - [FrameMiddlewareSession.fireError] — innermost-first, each hook
+     *    `runCatching`-isolated, matching the suspending action path.
+     *
+     * One [Middleware.MiddlewareContext] per middleware is reused across the
+     * session so metadata stashed in `started` is readable in `completed`/`error`.
+     */
+    @StoreInternalApi
+    fun internalFrameMiddlewareSession(txn: Transaction): FrameMiddlewareSession {
+        val chain = snapshotMiddleware()
+        val contexts =
+            chain.map {
+                Middleware.MiddlewareContext(store = self, transaction = txn)
+            }
+        return FrameMiddlewareSession(
+            started = {
+                for (i in chain.indices.reversed()) chain[i].invokeOnTransactionStarted(contexts[i])
+            },
+            completed = {
+                for (i in chain.indices) chain[i].invokeOnTransactionCompleted(contexts[i])
+            },
+            errored = { e ->
+                for (i in chain.indices) runCatching { chain[i].invokeOnTransactionError(contexts[i], e) }
+            },
+        )
+    }
 
     companion object {
         /**

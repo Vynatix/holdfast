@@ -92,6 +92,10 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.testing.ma
     final fun <#A1: kotlin/Any> (kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<#A1>>).shouldEqual(#A1) // com.vynatix.holdfast.testing.matcher/StateMatcher.shouldEqual|shouldEqual@kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<0:0>>(0:0){0§<kotlin.Any>}[0]
 }
 
+final class com.vynatix.holdfast.testing.matcher/StoreHandleGroup { // com.vynatix.holdfast.testing.matcher/StoreHandleGroup|null[0]
+    final fun and(com.vynatix.holdfast.testing/StoreHandle<*>): com.vynatix.holdfast.testing.matcher/StoreHandleGroup // com.vynatix.holdfast.testing.matcher/StoreHandleGroup.and|and(com.vynatix.holdfast.testing.StoreHandle<*>){}[0]
+}
+
 final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.testing.matcher/TimelineMatcher { // com.vynatix.holdfast.testing.matcher/TimelineMatcher|null[0]
     final val committed // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed|{}committed[0]
         final fun <get-committed>(): com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed.<get-committed>|<get-committed>(){}[0]
@@ -508,6 +512,10 @@ final object com.vynatix.holdfast.testing.internal/PendingErrorRegistry : kotlin
     final fun unregisterAll(com.vynatix.holdfast.testing/StoreHandle<*>) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.unregisterAll|unregisterAll(com.vynatix.holdfast.testing.StoreHandle<*>){}[0]
 }
 
+final fun (com.vynatix.holdfast.testing.matcher/StoreHandleGroup).com.vynatix.holdfast.testing.matcher/shouldCommitTogether(): kotlin/String // com.vynatix.holdfast.testing.matcher/shouldCommitTogether|shouldCommitTogether@com.vynatix.holdfast.testing.matcher.StoreHandleGroup(){}[0]
+final fun (com.vynatix.holdfast.testing.matcher/StoreHandleGroup).com.vynatix.holdfast.testing.matcher/shouldNotCommitTogether() // com.vynatix.holdfast.testing.matcher/shouldNotCommitTogether|shouldNotCommitTogether@com.vynatix.holdfast.testing.matcher.StoreHandleGroup(){}[0]
+final fun (com.vynatix.holdfast.testing/StoreHandle<*>).com.vynatix.holdfast.testing.matcher/and(com.vynatix.holdfast.testing/StoreHandle<*>): com.vynatix.holdfast.testing.matcher/StoreHandleGroup // com.vynatix.holdfast.testing.matcher/and|and@com.vynatix.holdfast.testing.StoreHandle<*>(com.vynatix.holdfast.testing.StoreHandle<*>){}[0]
+final fun (com.vynatix.holdfast.testing/StoreHandle<*>).com.vynatix.holdfast.testing.matcher/committedFrameIds(): kotlin.collections/List<kotlin/String> // com.vynatix.holdfast.testing.matcher/committedFrameIds|committedFrameIds@com.vynatix.holdfast.testing.StoreHandle<*>(){}[0]
 final fun (com.vynatix.holdfast.testing/StoreTestScope).com.vynatix.holdfast.testing.concurrency/barrier(kotlin/Int, kotlin.time/Duration = ...): com.vynatix.holdfast.testing.concurrency/Barrier // com.vynatix.holdfast.testing.concurrency/barrier|barrier@com.vynatix.holdfast.testing.StoreTestScope(kotlin.Int;kotlin.time.Duration){}[0]
 final fun (com.vynatix.holdfast/TransactionResult<*>).com.vynatix.holdfast.testing.matcher/shouldRollbackWith(kotlin.reflect/KClass<out kotlin/Throwable>) // com.vynatix.holdfast.testing.matcher/shouldRollbackWith|shouldRollbackWith@com.vynatix.holdfast.TransactionResult<*>(kotlin.reflect.KClass<out|kotlin.Throwable>){}[0]
 final fun (kotlin.collections/List<com.vynatix.holdfast.testing/StoreEvent>).com.vynatix.holdfast.testing.matcher/shouldFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFire|shouldFire@kotlin.collections.List<com.vynatix.holdfast.testing.StoreEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]

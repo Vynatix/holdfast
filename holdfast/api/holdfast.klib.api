@@ -7,6 +7,10 @@
 // - Show declarations: true
 
 // Library unique name: <com.vynatix:holdfast>
+open annotation class com.vynatix.holdfast/ExperimentalStoreApi : kotlin/Annotation { // com.vynatix.holdfast/ExperimentalStoreApi|null[0]
+    constructor <init>() // com.vynatix.holdfast/ExperimentalStoreApi.<init>|<init>(){}[0]
+}
+
 open annotation class com.vynatix.holdfast/StoreActionDsl : kotlin/Annotation { // com.vynatix.holdfast/StoreActionDsl|null[0]
     constructor <init>() // com.vynatix.holdfast/StoreActionDsl.<init>|<init>(){}[0]
 }
@@ -81,6 +85,12 @@ abstract interface com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast
 abstract interface com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.crypto/Cipher|null[0]
     abstract fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.decrypt|decrypt(kotlin.String){}[0]
     abstract fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+abstract interface com.vynatix.holdfast/FrameObserver { // com.vynatix.holdfast/FrameObserver|null[0]
+    open fun onFrameCommitted(kotlin/String) // com.vynatix.holdfast/FrameObserver.onFrameCommitted|onFrameCommitted(kotlin.String){}[0]
+    open fun onFrameRolledBack(kotlin/String, kotlin/Throwable) // com.vynatix.holdfast/FrameObserver.onFrameRolledBack|onFrameRolledBack(kotlin.String;kotlin.Throwable){}[0]
+    open fun onFrameStarted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameStarted|onFrameStarted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
 }
 
 sealed interface <#A: out kotlin/Any?> com.vynatix.holdfast/TransactionResult { // com.vynatix.holdfast/TransactionResult|null[0]
@@ -174,6 +184,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun getState(kotlin/String): com.vynatix.holdfast/State<*>? // com.vynatix.holdfast/Store.getState|getState(kotlin.String){}[0]
     final fun hasState(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/Store.hasState|hasState(kotlin.String){}[0]
     final fun internalDrainPostCommitTasks() // com.vynatix.holdfast/Store.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
+    final fun internalFrameMiddlewareSession(com.vynatix.holdfast/Transaction): com.vynatix.holdfast/FrameMiddlewareSession // com.vynatix.holdfast/Store.internalFrameMiddlewareSession|internalFrameMiddlewareSession(com.vynatix.holdfast.Transaction){}[0]
     final fun internalSetActiveTransaction(com.vynatix.holdfast/Transaction?) // com.vynatix.holdfast/Store.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.holdfast.Transaction?){}[0]
     final fun middlewares(kotlin/Array<out com.vynatix.holdfast/Middleware<#A>>...) // com.vynatix.holdfast/Store.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.Middleware<1:0>>...){}[0]
     final fun postCommit(kotlin/Function0<kotlin/Unit>) // com.vynatix.holdfast/Store.postCommit|postCommit(kotlin.Function0<kotlin.Unit>){}[0]
@@ -275,6 +286,68 @@ final class com.vynatix.holdfast.crypto/XorCipher : com.vynatix.holdfast.crypto/
     final fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.encrypt|encrypt(kotlin.String){}[0]
 }
 
+final class com.vynatix.holdfast/FrameInteropException : com.vynatix.holdfast/FrameContractException { // com.vynatix.holdfast/FrameInteropException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameInteropException.<init>|<init>(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast/FrameLockOrderException : com.vynatix.holdfast/FrameContractException { // com.vynatix.holdfast/FrameLockOrderException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameLockOrderException.<init>|<init>(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast/FrameMarker { // com.vynatix.holdfast/FrameMarker|null[0]
+    constructor <init>(kotlin/String, kotlin.collections/Set<com.vynatix.holdfast/Store<*>>, com.vynatix.holdfast/FramePolicy, kotlin/Boolean, com.vynatix.holdfast/FrameMarker?) // com.vynatix.holdfast/FrameMarker.<init>|<init>(kotlin.String;kotlin.collections.Set<com.vynatix.holdfast.Store<*>>;com.vynatix.holdfast.FramePolicy;kotlin.Boolean;com.vynatix.holdfast.FrameMarker?){}[0]
+
+    final val frameId // com.vynatix.holdfast/FrameMarker.frameId|{}frameId[0]
+        final fun <get-frameId>(): kotlin/String // com.vynatix.holdfast/FrameMarker.frameId.<get-frameId>|<get-frameId>(){}[0]
+    final val maxHeldLockOrderKey // com.vynatix.holdfast/FrameMarker.maxHeldLockOrderKey|{}maxHeldLockOrderKey[0]
+        final fun <get-maxHeldLockOrderKey>(): kotlin/Long // com.vynatix.holdfast/FrameMarker.maxHeldLockOrderKey.<get-maxHeldLockOrderKey>|<get-maxHeldLockOrderKey>(){}[0]
+    final val parent // com.vynatix.holdfast/FrameMarker.parent|{}parent[0]
+        final fun <get-parent>(): com.vynatix.holdfast/FrameMarker? // com.vynatix.holdfast/FrameMarker.parent.<get-parent>|<get-parent>(){}[0]
+    final val participants // com.vynatix.holdfast/FrameMarker.participants|{}participants[0]
+        final fun <get-participants>(): kotlin.collections/Set<com.vynatix.holdfast/Store<*>> // com.vynatix.holdfast/FrameMarker.participants.<get-participants>|<get-participants>(){}[0]
+    final val policy // com.vynatix.holdfast/FrameMarker.policy|{}policy[0]
+        final fun <get-policy>(): com.vynatix.holdfast/FramePolicy // com.vynatix.holdfast/FrameMarker.policy.<get-policy>|<get-policy>(){}[0]
+    final val suspending // com.vynatix.holdfast/FrameMarker.suspending|{}suspending[0]
+        final fun <get-suspending>(): kotlin/Boolean // com.vynatix.holdfast/FrameMarker.suspending.<get-suspending>|<get-suspending>(){}[0]
+
+    final fun describeParticipants(): kotlin/String // com.vynatix.holdfast/FrameMarker.describeParticipants|describeParticipants(){}[0]
+    final fun enrollingFrame(com.vynatix.holdfast/Store<*>): com.vynatix.holdfast/FrameMarker? // com.vynatix.holdfast/FrameMarker.enrollingFrame|enrollingFrame(com.vynatix.holdfast.Store<*>){}[0]
+    final fun isEnrolled(com.vynatix.holdfast/Store<*>): kotlin/Boolean // com.vynatix.holdfast/FrameMarker.isEnrolled|isEnrolled(com.vynatix.holdfast.Store<*>){}[0]
+}
+
+final class com.vynatix.holdfast/FrameMiddlewareSession { // com.vynatix.holdfast/FrameMiddlewareSession|null[0]
+    final fun fireCompleted() // com.vynatix.holdfast/FrameMiddlewareSession.fireCompleted|fireCompleted(){}[0]
+    final fun fireError(kotlin/Throwable) // com.vynatix.holdfast/FrameMiddlewareSession.fireError|fireError(kotlin.Throwable){}[0]
+    final fun fireStarted() // com.vynatix.holdfast/FrameMiddlewareSession.fireStarted|fireStarted(){}[0]
+}
+
+final class com.vynatix.holdfast/FramePolicy { // com.vynatix.holdfast/FramePolicy|null[0]
+    final val allowUnenrolled // com.vynatix.holdfast/FramePolicy.allowUnenrolled|{}allowUnenrolled[0]
+        final fun <get-allowUnenrolled>(): kotlin/Boolean // com.vynatix.holdfast/FramePolicy.allowUnenrolled.<get-allowUnenrolled>|<get-allowUnenrolled>(){}[0]
+    final val tolerateInnerErrors // com.vynatix.holdfast/FramePolicy.tolerateInnerErrors|{}tolerateInnerErrors[0]
+        final fun <get-tolerateInnerErrors>(): kotlin/Boolean // com.vynatix.holdfast/FramePolicy.tolerateInnerErrors.<get-tolerateInnerErrors>|<get-tolerateInnerErrors>(){}[0]
+
+    final fun plus(com.vynatix.holdfast/FramePolicy): com.vynatix.holdfast/FramePolicy // com.vynatix.holdfast/FramePolicy.plus|plus(com.vynatix.holdfast.FramePolicy){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/FramePolicy.toString|toString(){}[0]
+
+    final object Companion { // com.vynatix.holdfast/FramePolicy.Companion|null[0]
+        final val AllowUnenrolled // com.vynatix.holdfast/FramePolicy.Companion.AllowUnenrolled|{}AllowUnenrolled[0]
+            final fun <get-AllowUnenrolled>(): com.vynatix.holdfast/FramePolicy // com.vynatix.holdfast/FramePolicy.Companion.AllowUnenrolled.<get-AllowUnenrolled>|<get-AllowUnenrolled>(){}[0]
+        final val Strict // com.vynatix.holdfast/FramePolicy.Companion.Strict|{}Strict[0]
+            final fun <get-Strict>(): com.vynatix.holdfast/FramePolicy // com.vynatix.holdfast/FramePolicy.Companion.Strict.<get-Strict>|<get-Strict>(){}[0]
+        final val TolerateInnerErrors // com.vynatix.holdfast/FramePolicy.Companion.TolerateInnerErrors|{}TolerateInnerErrors[0]
+            final fun <get-TolerateInnerErrors>(): com.vynatix.holdfast/FramePolicy // com.vynatix.holdfast/FramePolicy.Companion.TolerateInnerErrors.<get-TolerateInnerErrors>|<get-TolerateInnerErrors>(){}[0]
+    }
+}
+
+final class com.vynatix.holdfast/StoreLock { // com.vynatix.holdfast/StoreLock|null[0]
+    constructor <init>() // com.vynatix.holdfast/StoreLock.<init>|<init>(){}[0]
+
+    final fun acquire() // com.vynatix.holdfast/StoreLock.acquire|acquire(){}[0]
+    final fun release() // com.vynatix.holdfast/StoreLock.release|release(){}[0]
+    final inline fun <#A1: kotlin/Any?> withLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/StoreLock.withLock|withLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+}
+
 final class com.vynatix.holdfast/StoreSnapshot { // com.vynatix.holdfast/StoreSnapshot|null[0]
     final val size // com.vynatix.holdfast/StoreSnapshot.size|{}size[0]
         final fun <get-size>(): kotlin/Int // com.vynatix.holdfast/StoreSnapshot.size.<get-size>|<get-size>(){}[0]
@@ -285,6 +358,8 @@ final class com.vynatix.holdfast/StoreSnapshot { // com.vynatix.holdfast/StoreSn
 final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transaction|null[0]
     final val endTime // com.vynatix.holdfast/Transaction.endTime|{}endTime[0]
         final fun <get-endTime>(): kotlin/Long? // com.vynatix.holdfast/Transaction.endTime.<get-endTime>|<get-endTime>(){}[0]
+    final val frameId // com.vynatix.holdfast/Transaction.frameId|{}frameId[0]
+        final fun <get-frameId>(): kotlin/String? // com.vynatix.holdfast/Transaction.frameId.<get-frameId>|<get-frameId>(){}[0]
     final val id // com.vynatix.holdfast/Transaction.id|{}id[0]
         final fun <get-id>(): kotlin/String // com.vynatix.holdfast/Transaction.id.<get-id>|<get-id>(){}[0]
     final val modifiedStates // com.vynatix.holdfast/Transaction.modifiedStates|{}modifiedStates[0]
@@ -299,12 +374,17 @@ final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transacti
     final fun stagePendingEvent(kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any) // com.vynatix.holdfast/Transaction.stagePendingEvent|stagePendingEvent(kotlinx.coroutines.flow.MutableSharedFlow<*>;kotlin.Any){}[0]
 
     final object Companion { // com.vynatix.holdfast/Transaction.Companion|null[0]
-        final fun createForExternal(kotlin/String, kotlin/Long): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Transaction.Companion.createForExternal|createForExternal(kotlin.String;kotlin.Long){}[0]
+        final fun createForExternal(kotlin/String, kotlin/Long, kotlin/String? = ...): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Transaction.Companion.createForExternal|createForExternal(kotlin.String;kotlin.Long;kotlin.String?){}[0]
+        final fun createSavepointForExternal(kotlin/String, kotlin/Long, com.vynatix.holdfast/Transaction, kotlin/String? = ...): com.vynatix.holdfast/Transaction // com.vynatix.holdfast/Transaction.Companion.createSavepointForExternal|createSavepointForExternal(kotlin.String;kotlin.Long;com.vynatix.holdfast.Transaction;kotlin.String?){}[0]
     }
 }
 
 final class com.vynatix.holdfast/TransactionException : kotlin/Exception { // com.vynatix.holdfast/TransactionException|null[0]
     constructor <init>(kotlin/String, kotlin/Throwable? = ...) // com.vynatix.holdfast/TransactionException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final class com.vynatix.holdfast/UnenrolledStoreException : com.vynatix.holdfast/FrameContractException { // com.vynatix.holdfast/UnenrolledStoreException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast/UnenrolledStoreException.<init>|<init>(kotlin.String){}[0]
 }
 
 open class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Middleware { // com.vynatix.holdfast/Middleware|null[0]
@@ -338,6 +418,10 @@ open class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Middleware 
     }
 }
 
+open class com.vynatix.holdfast/FrameContractException : kotlin/IllegalStateException { // com.vynatix.holdfast/FrameContractException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameContractException.<init>|<init>(kotlin.String){}[0]
+}
+
 final object com.vynatix.holdfast.bridge/BooleanCodec : com.vynatix.holdfast.bridge/Codec<kotlin/Boolean> { // com.vynatix.holdfast.bridge/BooleanCodec|null[0]
     final fun decode(kotlin/String): kotlin/Boolean // com.vynatix.holdfast.bridge/BooleanCodec.decode|decode(kotlin.String){}[0]
     final fun encode(kotlin/Boolean): kotlin/String // com.vynatix.holdfast.bridge/BooleanCodec.encode|encode(kotlin.Boolean){}[0]
@@ -358,6 +442,18 @@ final object com.vynatix.holdfast.bridge/StringCodec : com.vynatix.holdfast.brid
     final fun encode(kotlin/String): kotlin/String // com.vynatix.holdfast.bridge/StringCodec.encode|encode(kotlin.String){}[0]
 }
 
+final object com.vynatix.holdfast/FrameMarkers { // com.vynatix.holdfast/FrameMarkers|null[0]
+    final fun current(): com.vynatix.holdfast/FrameMarker? // com.vynatix.holdfast/FrameMarkers.current|current(){}[0]
+    final fun install(com.vynatix.holdfast/FrameMarker?): com.vynatix.holdfast/FrameMarker? // com.vynatix.holdfast/FrameMarkers.install|install(com.vynatix.holdfast.FrameMarker?){}[0]
+}
+
+final object com.vynatix.holdfast/FrameObservers { // com.vynatix.holdfast/FrameObservers|null[0]
+    final fun clear() // com.vynatix.holdfast/FrameObservers.clear|clear(){}[0]
+    final fun register(com.vynatix.holdfast/FrameObserver) // com.vynatix.holdfast/FrameObservers.register|register(com.vynatix.holdfast.FrameObserver){}[0]
+    final fun snapshot(): kotlin.collections/List<com.vynatix.holdfast/FrameObserver> // com.vynatix.holdfast/FrameObservers.snapshot|snapshot(){}[0]
+    final fun unregister(com.vynatix.holdfast/FrameObserver) // com.vynatix.holdfast/FrameObservers.unregister|unregister(com.vynatix.holdfast.FrameObserver){}[0]
+}
+
 final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCount|@com.vynatix.holdfast.State<0:0>{0§<kotlin.Any>}observerCount[0]
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.holdfast/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
 
@@ -367,23 +463,15 @@ final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapshot(): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/Transformer<#A>).com.vynatix.holdfast/then(com.vynatix.holdfast/Transformer<#A>): com.vynatix.holdfast/Transformer<#A> // com.vynatix.holdfast/then|then@com.vynatix.holdfast.Transformer<0:0>(com.vynatix.holdfast.Transformer<0:0>){0§<kotlin.Any>}[0]
-final fun <#A: kotlin/Any?> com.vynatix.holdfast/atomic(kotlin/Array<out com.vynatix.holdfast/Store<*>>..., kotlin/Function0<#A>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/atomic|atomic(kotlin.Array<out|com.vynatix.holdfast.Store<*>>...;kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> com.vynatix.holdfast/atomic(kotlin/Array<out com.vynatix.holdfast/Store<*>>..., com.vynatix.holdfast/FramePolicy = ..., kotlin/Function0<#A>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/atomic|atomic(kotlin.Array<out|com.vynatix.holdfast.Store<*>>...;com.vynatix.holdfast.FramePolicy;kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
 final fun com.vynatix.holdfast.platform/currentThreadId(): kotlin/Long // com.vynatix.holdfast.platform/currentThreadId|currentThreadId(){}[0]
 final fun com.vynatix.holdfast.platform/threadYield() // com.vynatix.holdfast.platform/threadYield|threadYield(){}[0]
+final fun com.vynatix.holdfast/verifyFrameNesting(com.vynatix.holdfast/FrameMarker?, kotlin.collections/List<com.vynatix.holdfast/Store<*>>, kotlin/Boolean) // com.vynatix.holdfast/verifyFrameNesting|verifyFrameNesting(com.vynatix.holdfast.FrameMarker?;kotlin.collections.List<com.vynatix.holdfast.Store<*>>;kotlin.Boolean){}[0]
 final inline fun <#A: kotlin/Any?> (com.vynatix.holdfast/TransactionResult<#A>).com.vynatix.holdfast/onError(kotlin/Function1<com.vynatix.holdfast/TransactionResult.Error, kotlin/Unit>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/onError|onError@com.vynatix.holdfast.TransactionResult<0:0>(kotlin.Function1<com.vynatix.holdfast.TransactionResult.Error,kotlin.Unit>){0§<kotlin.Any?>}[0]
 final inline fun <#A: kotlin/Any?> (com.vynatix.holdfast/TransactionResult<#A>).com.vynatix.holdfast/onSuccess(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast/onSuccess|onSuccess@com.vynatix.holdfast.TransactionResult<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any?>}[0]
 
 // Targets: [ios]
 final class com.vynatix.holdfast/StoreLock : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.holdfast/StoreLock|null[0]
-    constructor <init>() // com.vynatix.holdfast/StoreLock.<init>|<init>(){}[0]
-
-    final fun acquire() // com.vynatix.holdfast/StoreLock.acquire|acquire(){}[0]
-    final fun release() // com.vynatix.holdfast/StoreLock.release|release(){}[0]
-    final inline fun <#A1: kotlin/Any?> withLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/StoreLock.withLock|withLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
-}
-
-// Targets: [wasmJs]
-final class com.vynatix.holdfast/StoreLock { // com.vynatix.holdfast/StoreLock|null[0]
     constructor <init>() // com.vynatix.holdfast/StoreLock.<init>|<init>(){}[0]
 
     final fun acquire() // com.vynatix.holdfast/StoreLock.acquire|acquire(){}[0]

@@ -20,7 +20,11 @@ suspend fun <T : Any> State<T>.awaitValue(target: T): T
 // Suspending transactions — bodies may delay/await/withContext. Mutually
 // exclusive with blocking action/atomic on the same store(s).
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
-suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): TransactionResult<R>
+suspend fun <R> suspendAtomic(
+    vararg stores: Store<*>,
+    policy: FramePolicy = FramePolicy.Strict,
+    body: suspend () -> R,
+): TransactionResult<R>
 
 // Push-recomputed derived state with a suspending compute.
 fun <V : Store<V>, T : Any> V.suspendDerived(
@@ -88,6 +92,24 @@ suspend fun refresh(store: CounterStore, api: Api) {
     result.onError { log("refresh rolled back: ${it.exception}") }
 }
 ```
+
+### Cross-store frame with a suspending body
+
+```kotlin
+val r = suspendAtomic(accountA, accountB) {
+    accountA { balance update { it - amount } }   // stages into A's frame root
+    accountB.suspendAction {                      // joins the frame as a savepoint
+        balance update { it + amount }
+    }
+}
+```
+
+Same contract as core `atomic` (see the
+[GUIDE's cross-store chapter](../holdfast/GUIDE.md#15-cross-store-transactions)):
+enrollment is enforced, inner errors abort the frame, and blocking
+`action { }` on a participant fails fast with `FrameInteropException`
+instead of deadlocking. Commit runs under `NonCancellable` with suspending
+bridge publishes awaited and event back-pressure honored.
 
 ## Build
 

@@ -451,34 +451,41 @@ Three things to internalize:
                        │
                        ▼
        ┌───────────────────────────────┐
-       │ Multi-state, must be atomic?  │
+       │ Invariant spans STORES?       │
        └──────────┬──────────┬─────────┘
               yes │      no  │
                   ▼          ▼
-       ┌──────────────┐  ┌──────────────────────┐
-       │ action { … } │  │ Single-state, no     │
-       │              │  │ atomicity needed?    │
-       └──────────────┘  └────────┬─────────────┘
-                                  │
-                            ┌─────┴──────┐
-                          yes │      no  │
-                              ▼          ▼
-                       ┌──────────┐   ┌──────────────┐
-                       │  v {     │   │ action { … } │
-                       │   x      │   │  (use this   │
-                       │   mutate │   │  always when │
-                       │   y      │   │  unsure)     │
-                       │ }        │   └──────────────┘
-                       │ — same   │
-                       │ outcome  │
-                       │ as       │
-                       │ action   │
-                       └──────────┘
+  ┌────────────────────┐ ┌───────────────────────────────┐
+  │ atomic(a, b) { … } │ │ Multi-state, must be atomic?  │
+  │    (see §15)       │ └──────────┬──────────┬─────────┘
+  └────────────────────┘        yes │      no  │
+                                    ▼          ▼
+                         ┌──────────────┐  ┌──────────────────────┐
+                         │ action { … } │  │ Single-state, no     │
+                         │              │  │ atomicity needed?    │
+                         └──────────────┘  └────────┬─────────────┘
+                                                    │
+                                              ┌─────┴──────┐
+                                            yes │      no  │
+                                                ▼          ▼
+                                         ┌──────────┐   ┌──────────────┐
+                                         │  v {     │   │ action { … } │
+                                         │   x      │   │  (use this   │
+                                         │   mutate │   │  always when │
+                                         │   y      │   │  unsure)     │
+                                         │ }        │   └──────────────┘
+                                         │ — same   │
+                                         │ outcome  │
+                                         │ as       │
+                                         │ action   │
+                                         └──────────┘
 ```
 
 When in doubt, prefer `action`. The standalone-mutate form is the same
 runtime cost but reads less explicitly as "this is a write." Reserve the
 standalone form for one-liners where the action wrapper would be noise.
+When an invariant spans two or more STORES, a single-store `action` cannot
+protect it — reach for a cross-store frame instead ([§15](#15-cross-store-transactions)).
 
 ### 7.2 "Should I add a transformer?"
 
@@ -1191,16 +1198,20 @@ The recompute is deferred via `Store.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
 Disposing the `Disposable` stops recomputation.
 
-### 14.3 `atomic(vararg holdfasts) { body }`
+### 14.3 `atomic(vararg stores) { body }`
 
 ```kotlin
-fun <R> atomic(vararg stores: Store<*>, body: () -> R): TransactionResult<R>
+fun <R> atomic(
+    vararg stores: Store<*>,
+    policy: FramePolicy = FramePolicy.Strict,
+    body: () -> R,
+): TransactionResult<R>
 ```
 
-Brackets multiple holdfasts' transactions so they commit-or-rollback together.
+Brackets multiple stores' transactions so they commit-or-rollback together.
 Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
-frame as savepoints of each store's root. On body throw, every holdfast is
-rolled back; on body return, every holdfast commits in lock order with
+frame as savepoints of each store's root. On body throw, every store is
+rolled back; on body return, every store commits in lock order with
 sequential observer fanout per-store.
 
 ```kotlin
@@ -1210,9 +1221,13 @@ val r = atomic(accountA, accountB) {
 }
 ```
 
-Holdfasts are sorted by `Store.lockOrderKey` (process-monotonic, set at
+Stores are sorted by `Store.lockOrderKey` (process-monotonic, set at
 construction) before lock acquisition — deadlock-safe across any
-combination. Nested `atomic` is supported via reentrant locks.
+combination. Nested `atomic` is supported (savepoint semantics) with an
+always-on lock-order check. This section is only the signature summary —
+the full contract (enrollment enforcement, error escalation, `FramePolicy`,
+middleware phases, frame observability) lives in
+[§15 Cross-Store Transactions](#15-cross-store-transactions).
 
 ### 14.4 `EncryptingTransformer` + `Cipher` (`com.vynatix.holdfast.crypto`)
 
@@ -1677,6 +1692,178 @@ Ships in `:holdfast` core.
 The [Hallmark repository](https://github.com/vynatix/hallmark) carries a
 Konform migration guide with a 1:1 mapping from Konform's `Validation<T>`
 API to Hallmark's surface. No runtime Konform dep.
+
+---
+
+## 15. Cross-Store Transactions
+
+Per-domain stores keep coupling visible and tests isolated — but the rare
+invariant that SPANS stores (a sign-out that must clear four stores, a token
+update that must flip a status flag with it) cannot be protected by any
+single-store `action`. The cross-store frame is the tool for exactly that
+shape:
+
+```kotlin
+val r = atomic(settings, backendStatus) {
+    settings.action { backendToken mutate token }
+    backendStatus.action { authFailed mutate false }
+}
+
+// Suspending peer (:holdfast-coroutines) — same contract, suspending body:
+val r2 = suspendAtomic(settings, backendStatus) {
+    settings { backendToken mutate token }
+    backendStatus { authFailed mutate false }
+}
+```
+
+**When NOT to reach for a frame:** if two states change together in every
+flow, they belong in ONE store — frames are for the rare cross-domain step,
+not a substitute for store design. Frames hold every participant's lock for
+the whole body: keep bodies small and free of I/O (the same rule as
+`action { }`), because a slow body or observer on one participant stalls
+every other action on ALL participants.
+
+### 15.1 Enrollment is enforced
+
+Every store written inside the body must be in the participant list. A write
+to an unenrolled store throws `UnenrolledStoreException` — such a write
+would commit independently and would NOT roll back with the frame, silently
+breaking the all-or-nothing promise:
+
+```
+UnenrolledStoreException: SettingsStore was mutated (via action) inside
+atomic(HistoryStore, BackendStatusStore) but is not enrolled. Its writes
+would commit independently and would NOT roll back with the frame.
+Fix: add SettingsStore to the atomic(...) participant list. …
+```
+
+Rules of the enforcement window:
+
+- It covers the **body only**. Middleware hooks, commit fanout, and observer
+  callbacks run outside the window — an observer that reacts to a frame
+  commit by writing to a foreign store is post-commit and stays legal.
+- **Reads** of unenrolled stores are always legal (they see committed values).
+- There is **no auto-enroll**: enrolling mid-frame would acquire a lock
+  outside the sorted global order and reintroduce the deadlock class the
+  design exists to prevent.
+- The deliberate escape hatch is per call site:
+  `atomic(a, b, policy = FramePolicy.AllowUnenrolled) { … }` — greppable,
+  and scoped to that one frame.
+- In `suspendAtomic`, the enforcement marker travels with the coroutine
+  across dispatcher hops (JVM/Android: `ThreadContextElement`; iOS/wasmJs: a
+  delegating interceptor — on those two platforms a nested
+  `withContext(otherDispatcher)` section inside the body is not policed).
+  Coroutines launched onto OTHER scopes (`GlobalScope.launch`) escape the
+  frame on every platform — those writes are concurrent, not in-frame.
+
+### 15.2 Inner errors escalate
+
+An inner `action { }` / `suspendAction { }` on a participant that returns
+`TransactionResult.Error` **aborts the whole frame** — every participant
+rolls back and the frame returns `Error` carrying the inner exception. The
+pre-0.3 behavior (a failed sub-action commits the other stores anyway) is
+reachable per call site with `policy = FramePolicy.TolerateInnerErrors`, and
+then checking each inner result is on you. Frame-contract violations
+(`UnenrolledStoreException`, `FrameLockOrderException`,
+`FrameInteropException`) are never tolerated: they rethrow out of the frame
+after rollback instead of being folded into an ignorable `Error` result.
+
+Policies combine: `FramePolicy.AllowUnenrolled + FramePolicy.TolerateInnerErrors`.
+
+### 15.3 The consistency contract
+
+For `atomic(a, b, c) { body }` with lock order a < b < c:
+
+1. **Lock acquisition** — participants are de-duplicated and sorted by
+   `Store.lockOrderKey`; locks are acquired in that global order (deadlock-safe
+   by construction). One root transaction opens per store, all sharing one
+   `Transaction.frameId` (`"atomic-<uuid>"` / `"suspendAtomic-<uuid>"`).
+2. **Middleware `onTransactionStarted`** — per store, in lock order
+   (outermost-registered middleware first within each store). A throw aborts
+   the frame before the body runs.
+3. **The body** — mutates stage into each store's root; inner actions are
+   savepoints. Reads on the owner thread see pending writes
+   (read-your-own-writes); other threads see committed values only.
+4. **Middleware `onTransactionCompleted`** — ALL stores' hooks fire before
+   ANY store commits, so a validation middleware throwing on store `c` still
+   rolls `a` and `b` back. Corollary for middleware authors: for frames,
+   `completed` does NOT mean durably-committed.
+5. **Commit** — per store, in lock order. Store `a`'s observer → bridge →
+   event fanout completes before store `b`'s commit applies. There is no
+   cross-store snapshot isolation; however, an observer on `a` running on the
+   frame's thread reads `b` through `b`'s still-active root, so it sees `b`'s
+   about-to-be-committed value and the cross-store invariant holds at every
+   fanout point.
+6. **Rollback** (body throw, `started`/`completed` throw, or inner-error
+   escalation) — REVERSE lock order, `onTransactionError` per store first,
+   then rollback. Rollback never touches state and never re-runs
+   `Transformer.set`.
+7. **Post-commit drain** — deferred work (`derived` recomputes) runs per
+   store at frame exit, after that store's transaction slot is restored.
+
+`suspendAtomic` follows the same phases with the suspending machinery: the
+per-store `AsyncSerializer` mutex instead of the blocking lock, commit under
+`withContext(NonCancellable)`, `SuspendingBridge.publishAwaited` awaited, and
+the event drain honoring `BufferOverflow.SUSPEND` back-pressure.
+(One caveat: `SuspendingMiddlewareHooks` async hooks do not fire for frame
+roots yet — sync hooks do.)
+
+**Durability non-goal:** a frame is in-memory 2PC across stores in ONE
+process. Bridge/persistence publishes remain per-store post-commit fanout;
+there is no crash-consistency across external stores, and if a commit itself
+throws partway through phase 5, already-committed stores stay committed.
+
+### 15.4 Nesting and interop
+
+- A frame nested inside an `action` or another frame on the same
+  thread/coroutine opens SAVEPOINTS for shared stores: the nested frame's
+  commit merges into the enclosing scope; the enclosing rollback discards
+  everything, including nested writes. A nested frame's `Error` escalates to
+  the enclosing frame like an inner action's (same `TolerateInnerErrors`
+  opt-out).
+- A nested frame may only INTRODUCE stores whose `lockOrderKey` sorts above
+  every key the enclosing frame holds; otherwise `FrameLockOrderException`
+  fires at entry, before any lock is taken. Prefer enrolling everything in
+  the outermost frame.
+- Blocking and suspending frames do not compose on the same stores:
+  blocking `action { }` (or a nested `atomic`) on a `suspendAtomic`
+  participant throws `FrameInteropException` immediately instead of
+  deadlocking on the suspend mutex — use `mutate`/`update` or
+  `suspendAction { }` inside a suspending body. Inside `suspendAtomic`, a
+  participant's `suspendAction { }` joins the frame as a savepoint.
+
+### 15.5 Frame observability
+
+Per-store middleware already sees every frame root (correlate the N
+per-store transactions of one frame via `Transaction.frameId`). For
+app-level audit/telemetry that wants the frame as ONE event, register a
+`FrameObserver` (experimental — `@ExperimentalStoreApi`):
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+FrameObservers.register(object : FrameObserver {
+    override fun onFrameStarted(frameId: String, participants: List<Store<*>>) { … }
+    override fun onFrameCommitted(frameId: String) { … }
+    override fun onFrameRolledBack(frameId: String, cause: Throwable) { … }
+})
+```
+
+### 15.6 Testing cross-store invariants
+
+`:holdfast-testing` correlates frames across tracked handles:
+
+```kotlin
+storeTest {
+    val ha = track(accountA)
+    val hb = track(accountB)
+
+    atomic(accountA, accountB) { /* transfer */ }
+
+    (ha and hb).shouldCommitTogether()      // same frameId committed on both
+    ha.committedFrameIds()                  // all frame commits, in order
+    (ha and hb).shouldNotCommitTogether()   // negation, e.g. after a rollback
+}
+```
 
 ---
 

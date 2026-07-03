@@ -21,6 +21,14 @@ class Transaction internal constructor(
     val id: String,
     internal val parent: Transaction?,
     internal val ownerThreadId: Long,
+    /**
+     * Identity of the cross-store atomic frame this transaction belongs to, or
+     * `null` for ordinary single-store transactions. Every participant root
+     * (and in-frame savepoint) of one `atomic`/`suspendAtomic` call shares the
+     * same value, so middleware and the testing harness can correlate the N
+     * per-store transactions of one frame.
+     */
+    val frameId: String? = null,
 ) {
     companion object {
         /**
@@ -33,7 +41,22 @@ class Transaction internal constructor(
         fun createForExternal(
             id: String,
             ownerThreadId: Long,
-        ): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId)
+            frameId: String? = null,
+        ): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId, frameId = frameId)
+
+        /**
+         * Public-but-opt-in savepoint factory for `:holdfast-coroutines`
+         * (`suspendAtomic` nesting and in-frame `suspendAction`). The savepoint's
+         * commit merges into [parent]'s pending buffers; its rollback discards
+         * only the savepoint — exactly the nested-`action` contract.
+         */
+        @StoreInternalApi
+        fun createSavepointForExternal(
+            id: String,
+            ownerThreadId: Long,
+            parent: Transaction,
+            frameId: String? = null,
+        ): Transaction = Transaction(id, parent = parent, ownerThreadId = ownerThreadId, frameId = frameId)
     }
 
     private val statusLock = StoreLock()
