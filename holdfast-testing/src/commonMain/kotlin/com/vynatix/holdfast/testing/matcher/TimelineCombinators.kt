@@ -57,7 +57,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldNotFire(builder: TimelineMatcher<V
 // ============================================================================
 // Combinators (list-receiver) — synthetic-timeline form for matcher self-tests.
 //
-// Predicates that need a store context (e.g. `emitted(MyVault::count)`) throw
+// Predicates that need a store context (e.g. `emitted(MyStore::count)`) throw
 // [IllegalStateException] when invoked via these overloads — use the
 // [StoreHandle]-receiver form for those.
 // ============================================================================

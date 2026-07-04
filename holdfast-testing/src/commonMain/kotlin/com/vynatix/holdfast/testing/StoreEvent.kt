@@ -17,7 +17,7 @@ import com.vynatix.holdfast.Transaction
  *    [Transaction.modifiedStates], in iteration order.
  *  - [MiddlewareEvent] — middleware-level lifecycle for a specific [Middleware]
  *    instance. **In v1 only the recorder itself surfaces events here**; user
- *    middlewares installed via [com.vynatix.holdfast.Holdfast.middlewares] are not
+ *    middlewares installed via [com.vynatix.holdfast.Store.middlewares] are not
  *    automatically wrapped (no public `:holdfast` API exists for that yet). The
  *    typed views ([StoreHandle.middlewareEventsOf]) will return an empty list
  *    for any user class until that gap is filled.

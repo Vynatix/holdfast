@@ -12,7 +12,7 @@ import kotlinx.coroutines.coroutineScope
  * worker-index order.
  *
  * The default dispatcher is [Dispatchers.Default] — **not** the test scheduler
- * that drives `holdfastTest`. Store's `action { … }` acquires its lock with a
+ * that drives `storeTest`. Store's `action { … }` acquires its lock with a
  * blocking spin-loop; on a single-threaded test dispatcher every worker would
  * pin the only thread at the spin-loop and the call would deadlock the moment
  * any worker tried to commit a transaction. Real threads from

@@ -9,7 +9,7 @@ import kotlin.time.TimeSource
  *
  * Failure message: `"completed in Xms, expected ≤ Yms"`.
  *
- * Note: under `runTest` (which `holdfastTest` uses), `delay` is virtual. The
+ * Note: under `runTest` (which `storeTest` uses), `delay` is virtual. The
  * wall-clock measurement here does NOT capture virtual time — it captures the
  * real elapsed time of the body's non-suspended portions. If your body sleeps
  * via `delay`, the measurement may be near-zero even with seconds of virtual
@@ -30,7 +30,7 @@ infix fun (() -> Unit).shouldCompleteWithin(duration: Duration) {
  * Suspending counterpart of [shouldCompleteWithin]. Records wall-clock start,
  * invokes the suspending block, then asserts elapsed time <= [duration].
  *
- * Note: under `runTest` (which `holdfastTest` uses), `delay` is virtual. The
+ * Note: under `runTest` (which `storeTest` uses), `delay` is virtual. The
  * wall-clock measurement here does NOT capture virtual time — it captures the
  * real elapsed time of the body's non-suspended portions. If your body sleeps
  * via `delay`, the measurement may be near-zero even with seconds of virtual
