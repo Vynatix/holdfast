@@ -651,6 +651,49 @@ class TimelineMatcherTest {
         }
     }
 
+    // -------- Failure messages print the timeline (F24) --------
+
+    @Test
+    fun failureMessagesIncludeTimelineDumpForAllCombinators() {
+        val timeline = listOf<StoreEvent>(started("a"), errored("a"), committed("a"))
+        val failures =
+            listOf(
+                assertFailsWith<AssertionError> { timeline shouldFire { rolledBack } },
+                assertFailsWith<AssertionError> {
+                    timeline shouldFireInOrder {
+                        committed
+                        started
+                    }
+                },
+                assertFailsWith<AssertionError> {
+                    timeline shouldFireInExactOrder {
+                        started
+                        committed
+                    }
+                },
+                assertFailsWith<AssertionError> { timeline shouldNotFire { errored } },
+            )
+        for (err in failures) {
+            val msg = err.message.orEmpty()
+            assertContains(msg, "Timeline (3 events):", message = "expected timeline dump, got: $msg")
+            // Indexed, one event per line, with the txn id inlined.
+            assertContains(msg, "[0] TransactionStarted(txn 'a')", message = "expected indexed event lines, got: $msg")
+        }
+    }
+
+    @Test
+    fun emptyTimelineFailureListsKnownCaptureGaps() {
+        val err =
+            assertFailsWith<AssertionError> {
+                emptyList<StoreEvent>() shouldFire { committed }
+            }
+        val msg = err.message.orEmpty()
+        assertContains(msg, "Timeline (0 events): <empty>")
+        assertContains(msg, "Capture.None", message = "expected Capture.None hint, got: $msg")
+        assertContains(msg, "act { }", message = "expected untracked-Store.action hint, got: $msg")
+        assertContains(msg, "before track(store)", message = "expected pre-track hint, got: $msg")
+    }
+
     @Test
     fun assertContainsTimelineSizeInOrderFailure() {
         val timeline = listOf<StoreEvent>(started("a"))

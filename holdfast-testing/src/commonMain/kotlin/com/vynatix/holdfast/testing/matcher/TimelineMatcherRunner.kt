@@ -21,7 +21,7 @@ internal fun List<StoreEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
     matcher.validate("shouldFire")
     val unsatisfied = matcher.predicates.filter { p -> none { e -> p.matches(e) } }
     if (unsatisfied.isNotEmpty()) {
-        throw AssertionError(buildShouldFireMessage(unsatisfied))
+        failWithTimeline(buildShouldFireMessage(unsatisfied))
     }
 }
 
@@ -42,7 +42,7 @@ internal fun List<StoreEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) 
             }
         }
         if (matchIdx < 0) {
-            throw AssertionError(
+            failWithTimeline(
                 "shouldFireInOrder: predicate $i (${p.description}) did not match any event " +
                     "from index $startIdx onward (timeline size=$size)",
             )
@@ -62,12 +62,12 @@ internal fun List<StoreEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher
     val first = matcher.predicates[0]
     val candidates = indices.filter { idx -> first.matches(this[idx]) }
     if (candidates.isEmpty()) {
-        throw AssertionError(
+        failWithTimeline(
             "shouldFireInExactOrder: predicate 0 (${first.description}) did not match any event",
         )
     }
 
-    var lastFailure: AssertionError? = null
+    var lastFailure: String? = null
     for (anchor in candidates) {
         val failure = matchExactRunAt(anchor, matcher)
         if (failure == null) return // success — all predicates matched a consecutive run
@@ -76,7 +76,7 @@ internal fun List<StoreEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher
     // No anchor produced a clean run — surface the failure for the LAST attempted
     // anchor (most likely the user's intended position) so the message points at
     // the closest miss.
-    throw lastFailure ?: AssertionError("shouldFireInExactOrder: no consecutive run matched")
+    failWithTimeline(lastFailure ?: "shouldFireInExactOrder: no consecutive run matched")
 }
 
 /**
@@ -104,7 +104,7 @@ internal fun List<StoreEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
             filter { e -> p.matches(e) }.map { e -> p to e }
         }
     if (matched.isNotEmpty()) {
-        throw AssertionError(buildShouldNotFireMessage(matched))
+        failWithTimeline(buildShouldNotFireMessage(matched))
     }
 }
 
@@ -118,7 +118,7 @@ private fun EventPredicate.isMiddlewarePredicate(): Boolean =
 private fun List<StoreEvent>.matchExactRunAt(
     anchor: Int,
     matcher: TimelineMatcher<*>,
-): AssertionError? {
+): String? {
     matcher.predicates.forEachIndexed { i, p ->
         val targetIdx = anchor + i
         val failure = exactRunFailureAt(targetIdx, i, p)
@@ -131,18 +131,14 @@ private fun List<StoreEvent>.exactRunFailureAt(
     targetIdx: Int,
     predicateIdx: Int,
     p: EventPredicate,
-): AssertionError? =
+): String? =
     when {
         targetIdx >= size ->
-            AssertionError(
-                "shouldFireInExactOrder: ran out of events at predicate $predicateIdx (${p.description}) — " +
-                    "expected event at index $targetIdx but timeline size is $size",
-            )
+            "shouldFireInExactOrder: ran out of events at predicate $predicateIdx (${p.description}) — " +
+                "expected event at index $targetIdx but timeline size is $size"
         !p.matches(this[targetIdx]) ->
-            AssertionError(
-                "shouldFireInExactOrder: at index $targetIdx, expected ${p.description} " +
-                    "but got ${this[targetIdx]::class.simpleName}",
-            )
+            "shouldFireInExactOrder: at index $targetIdx, expected ${p.description} " +
+                "but got ${this[targetIdx]::class.simpleName}"
         else -> null
     }
 

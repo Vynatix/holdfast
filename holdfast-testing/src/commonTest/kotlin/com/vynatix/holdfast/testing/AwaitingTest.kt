@@ -79,7 +79,11 @@ class AwaitingTest {
             // subclass, or a launch{}ed awaiting would be swallowed as benign
             // cancellation and the test could pass green.
             assertIs<AssertionError>(err)
-            assertFalse(err is CancellationException, "AwaitingTimeoutException must not be a CancellationException")
+            val asThrowable: Throwable = err
+            assertFalse(
+                asThrowable is CancellationException,
+                "AwaitingTimeoutException must not be a CancellationException",
+            )
         }
 
     @Test
