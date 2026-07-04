@@ -1767,11 +1767,18 @@ would commit independently and would NOT roll back with the frame, silently
 breaking the all-or-nothing promise:
 
 ```
-UnenrolledStoreException: SettingsStore was mutated (via action) inside
-atomic(HistoryStore, BackendStatusStore) but is not enrolled. Its writes
+UnenrolledStoreException: SettingsStore#12 was mutated (via action) inside
+atomic(HistoryStore#3, BackendStatusStore#4) but is not enrolled. Its writes
 would commit independently and would NOT roll back with the frame.
-Fix: add SettingsStore to the atomic(...) participant list. …
+Fix: add SettingsStore#12 to the atomic(...) participant list. …
 ```
+
+The `#N` suffix is the store's `lockOrderKey` — a stable per-instance id
+that distinguishes multiple instances of one store class (`accountA` vs
+`accountB`) and matches the order in which frames acquire locks. The `via`
+clause names the actual entry point (`action`, `mutate`, `suspendAction`) —
+a bare `mutate` on an unenrolled store is reported as `via mutate` even
+though it internally synthesizes a one-shot action.
 
 Rules of the enforcement window:
 

@@ -172,11 +172,16 @@ class FrameMarker(
     fun isEnrolled(store: Store<*>): Boolean = enrollingFrame(store) != null
 
     /** Human-readable participant list for teaching exception messages. */
-    fun describeParticipants(): String =
-        participants.joinToString(prefix = "(", postfix = ")") {
-            it::class.simpleName ?: "Store"
-        }
+    fun describeParticipants(): String = participants.joinToString(prefix = "(", postfix = ")") { it.frameIdentity() }
 }
+
+/**
+ * Stable human-readable store identity for frame diagnostics:
+ * `SimpleName#<lockOrderKey>`. The key suffix distinguishes multiple
+ * instances of one store class (e.g. `accountA` vs `accountB`) and ties the
+ * message directly into the lock-order narrative of the frame contract.
+ */
+internal fun Store<*>.frameIdentity(): String = "${this::class.simpleName ?: "Store"}#$lockOrderKey"
 
 /**
  * Accessors for the thread-local frame-marker slot. Cross-module surface for
@@ -282,7 +287,7 @@ fun verifyFrameNesting(
     if (enclosing == null) return
     val newFrameName = if (suspending) "suspendAtomic" else "atomic"
     for (store in stores) {
-        val name = store::class.simpleName ?: "Store"
+        val name = store.frameIdentity()
         val enrolling = enclosing.enrollingFrame(store)
         if (enrolling != null) {
             if (enrolling.suspending != suspending) {
@@ -297,7 +302,7 @@ fun verifyFrameNesting(
             }
         } else if (store.lockOrderKey < enclosing.maxHeldLockOrderKey) {
             throw FrameLockOrderException(
-                "Nested $newFrameName introduces $name (lockOrderKey=${store.lockOrderKey}) which sorts " +
+                "Nested $newFrameName introduces $name, whose lockOrderKey sorts " +
                     "BELOW a key already held by enclosing frame '${enclosing.frameId}' " +
                     "(maxHeldLockOrderKey=${enclosing.maxHeldLockOrderKey}). Acquiring it here would " +
                     "violate the global lock order and could deadlock against a concurrent frame. " +

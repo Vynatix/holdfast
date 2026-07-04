@@ -382,7 +382,7 @@ abstract class Store<Self : Store<Self>> {
         // participant's mutex would deadlock, which is exactly what the
         // interop check converts into a teaching exception.
         val frame = FrameMarkers.current()
-        if (frame != null) checkFrameAllowsBlockingAction(frame)
+        if (frame != null) checkFrameAllowsBlockingAction(frame, via = "action")
         val serializer = asyncSerializer
         serializer?.blockingAcquire()
         val result =
@@ -402,19 +402,22 @@ abstract class Store<Self : Store<Self>> {
      *  - a store enrolled in a SUSPENDING frame must not run a blocking action —
      *    it would deadlock on the store's suspend mutex, so fail fast instead.
      */
-    private fun checkFrameAllowsBlockingAction(frame: FrameMarker) {
+    private fun checkFrameAllowsBlockingAction(
+        frame: FrameMarker,
+        via: String,
+    ) {
         val enrolling = frame.enrollingFrame(this)
         if (enrolling == null) {
             if (!frame.policy.allowUnenrolled) {
-                throw UnenrolledStoreException(unenrolledMessage(frame, "action"))
+                throw UnenrolledStoreException(unenrolledMessage(frame, via))
             }
         } else if (enrolling.suspending) {
-            val name = this::class.simpleName ?: "Store"
             throw FrameInteropException(
-                "Blocking action { } on $name inside suspendAtomic${enrolling.describeParticipants()} " +
-                    "would deadlock on the store's suspend mutex (held by frame '${enrolling.frameId}'). " +
-                    "Use `mutate`/`update` (e.g. `store { state mutate value }`) or `suspendAction { }` " +
-                    "inside a suspendAtomic body.",
+                "Blocking action { } on ${frameIdentity()} would deadlock: the store's suspend mutex " +
+                    "is held by the enclosing suspending scope '${enrolling.frameId}' " +
+                    "${enrolling.describeParticipants()}. Use `mutate`/`update` " +
+                    "(e.g. `store { state mutate value }`) or a nested `suspendAction { }` " +
+                    "inside a suspending body.",
             )
         }
     }
@@ -441,7 +444,7 @@ abstract class Store<Self : Store<Self>> {
         frame: FrameMarker,
         via: String,
     ): String {
-        val name = this::class.simpleName ?: "Store"
+        val name = frameIdentity()
         val fn = if (frame.suspending) "suspendAtomic" else "atomic"
         return "$name was mutated (via $via) inside $fn${frame.describeParticipants()} but is not " +
             "enrolled. Its writes would commit independently and would NOT roll back with the frame. " +
@@ -649,7 +652,11 @@ abstract class Store<Self : Store<Self>> {
 
         // No active transaction on this thread: wrap in a one-shot action so middleware
         // fires and observers see only the committed value. The recursive call lands
-        // in the branch above on the second pass.
+        // in the branch above on the second pass. Frame policing runs HERE first so a
+        // bare `mutate` inside a frame body is reported as "via mutate", not
+        // misattributed to the synthesized action.
+        val fallbackFrame = FrameMarkers.current()
+        if (fallbackFrame != null) checkFrameAllowsBlockingAction(fallbackFrame, via = "mutate")
         action { this@mutate mutate that }
     }
 

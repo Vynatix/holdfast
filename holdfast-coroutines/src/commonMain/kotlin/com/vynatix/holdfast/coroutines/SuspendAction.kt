@@ -192,7 +192,7 @@ private fun <V : Store<V>> V.frameGateAllowsOnlySavepoint(frame: FrameMarker): B
     if (enrolling != null) {
         if (!enrolling.suspending) {
             throw FrameInteropException(
-                "suspendAction on ${this::class.simpleName ?: "Store"} inside blocking " +
+                "suspendAction on ${frameIdentity()} inside blocking " +
                     "atomic${enrolling.describeParticipants()} (frame '${enrolling.frameId}') is not " +
                     "supported: the blocking frame's lock discipline does not compose with the " +
                     "suspend mutex. Use blocking `action { }` or bare `mutate`/`update` inside an " +
@@ -202,7 +202,7 @@ private fun <V : Store<V>> V.frameGateAllowsOnlySavepoint(frame: FrameMarker): B
         return true
     }
     if (!frame.policy.allowUnenrolled) {
-        val name = this::class.simpleName ?: "Store"
+        val name = frameIdentity()
         val fn = if (frame.suspending) "suspendAtomic" else "atomic"
         throw UnenrolledStoreException(
             "$name was mutated (via suspendAction) inside $fn${frame.describeParticipants()} but is " +
@@ -334,3 +334,10 @@ private suspend fun <V : Store<V>> fireErrorHooks(
 
 /** Owner sentinel for suspendAction calls that have no enclosing Job. */
 private object SuspendActionFallbackOwner
+
+/**
+ * Stable human-readable store identity for frame diagnostics, mirroring the
+ * core module's rendering: `SimpleName#<lockOrderKey>`. The key suffix
+ * distinguishes multiple instances of one store class.
+ */
+internal fun Store<*>.frameIdentity(): String = "${this::class.simpleName ?: "Store"}#$lockOrderKey"

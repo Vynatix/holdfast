@@ -66,12 +66,32 @@ class FrameEnrollmentTest {
         val a = FrameAccount()
         val b = FrameAccount()
         val c = FrameAccount()
-        assertFailsWith<UnenrolledStoreException> {
-            atomic(a, b) {
-                c { balance mutate 5L }
+        val e =
+            assertFailsWith<UnenrolledStoreException> {
+                atomic(a, b) {
+                    c { balance mutate 5L }
+                }
             }
-        }
+        assertTrue("via mutate" in (e.message ?: ""), "bare mutate is attributed to mutate, not the synthesized action: ${e.message}")
         assertEquals(0L, c.balance.value)
+    }
+
+    @OptIn(StoreInternalApi::class)
+    @Test
+    fun frameMessagesCarryInstanceIdentity() {
+        val a = FrameAccount()
+        val b = FrameAccount()
+        val c = FrameAccount()
+        val e =
+            assertFailsWith<UnenrolledStoreException> {
+                atomic(a, b) {
+                    c.action { balance mutate 1L }
+                }
+            }
+        val msg = e.message ?: ""
+        assertTrue("FrameAccount#${c.lockOrderKey}" in msg, "offender rendered as SimpleName#lockOrderKey: $msg")
+        assertTrue("FrameAccount#${a.lockOrderKey}" in msg, "participants rendered with instance identity: $msg")
+        assertTrue("via action" in msg, "entry point named: $msg")
     }
 
     @Test fun unenrolledMutateViaEnclosingActionIsCaught() {
