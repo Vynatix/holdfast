@@ -14,6 +14,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never used; the new form is called directly on the state:
   `store.count.collectAsState()`. This also brings the code in line with
   the surface this changelog already documented for 2.0.
+- Documented the dispose contract on both entry points (KDoc + README
+  "Dispose contract" section): composing against an already-disposed store
+  throws `IllegalStateException` ("store disposed"); `Store.dispose()`
+  while composed silently freezes `collectAsState` values at the last
+  committed value. Documentation only — no behavior change.
 
 ### Changed
 

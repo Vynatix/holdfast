@@ -21,6 +21,14 @@ import androidx.compose.runtime.State as ComposeState
  * Read-only — to mutate, call `store.action { state mutate … }` from a coroutine
  * scope (e.g. `LaunchedEffect`), an event handler, or directly from non-Composable code.
  *
+ * Lifecycle: this Composable does not survive `Store.dispose()`. Entering the
+ * composition with an already-disposed store throws `IllegalStateException`
+ * ("store disposed") from the producer coroutine. Disposing the store while
+ * the Composable is composed does not throw — the subscription is silently
+ * shut down and the UI freezes at the last committed value. Dispose the store
+ * only after every dependent Composable has left the composition (e.g. from
+ * a ViewModel's `onCleared` or an `onDispose` ordered after the UI).
+ *
  * Example:
  * ```
  * @Composable
@@ -65,6 +73,13 @@ fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): ComposeState<T> =
  *
  * Use for non-state store subscriptions you want bound to a Composable's
  * lifecycle — e.g. an [Store.observeFrom] inbound binding.
+ *
+ * Lifecycle: if [make] subscribes to a store (`observeFrom`, `effect`, …), the
+ * same dispose contract as [collectAsState] applies — running the factory
+ * against an already-disposed store throws `IllegalStateException`
+ * ("store disposed") during composition, while disposing the store afterwards
+ * silently ends the subscription. Dispose the store only after the owning
+ * Composable has left the composition.
  *
  * ```
  * @Composable

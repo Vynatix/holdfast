@@ -53,6 +53,22 @@ fun StatusListener(store: AccountStore, channel: Observable<AccountStatus>) {
 }
 ```
 
+## Dispose contract
+
+Neither entry point survives `Store.dispose()`:
+
+- Entering the composition with an **already-disposed** store throws
+  `IllegalStateException` ("store disposed") — from `collectAsState`'s
+  producer coroutine, or from a `rememberDisposable` factory that subscribes
+  to the store (`observeFrom`, `effect`, …).
+- Disposing the store **while composed** does not throw: subscriptions are
+  silently shut down, so `collectAsState` values freeze at the last committed
+  value and inbound bindings stop firing.
+
+Dispose a store only after every dependent Composable has left the
+composition — e.g. from a ViewModel's `onCleared`, or an `onDispose`
+registered before (and therefore run after) the UI's own disposables.
+
 ## Build
 
 ```

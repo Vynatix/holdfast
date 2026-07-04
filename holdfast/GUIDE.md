@@ -1397,7 +1397,14 @@ fun rememberDisposable(vararg keys: Any?, make: () -> Disposable): Disposable
 Bridges holdfast state into Compose's snapshot system as a
 `androidx.compose.runtime.State<T>`, triggering recomposition on every
 successful commit. Backed by `produceState`; subscription's lifecycle is
-tied to the surrounding Composable.
+tied to the surrounding Composable. `rememberDisposable` runs `make` on
+composition entry and again when any of `keys` changes (the lambda itself
+is not a key); the returned `Disposable` is disposed on key change or
+composition exit. Neither entry point survives `Store.dispose()`: composing
+against an already-disposed store throws `IllegalStateException`
+("store disposed"), while disposing mid-composition silently freezes
+`collectAsState` values at the last commit — dispose the store only after
+its dependent Composables have left the composition.
 
 ### 14.10 The cookbook: 1.1 idioms
 
