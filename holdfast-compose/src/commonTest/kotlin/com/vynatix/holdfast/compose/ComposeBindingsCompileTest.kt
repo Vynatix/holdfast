@@ -40,6 +40,9 @@ class ComposeBindingsCompileTest {
             rememberDisposable {
                 com.vynatix.holdfast.Disposable { /* no-op */ }
             }
+            rememberDisposable(v, "key") {
+                com.vynatix.holdfast.Disposable { /* no-op */ }
+            }
         }
         // Reference render to keep the closure in scope.
         @Suppress("UNUSED_EXPRESSION")

@@ -53,23 +53,32 @@ fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): ComposeState<T> =
 
 /**
  * Owns a [Disposable] for the lifetime of the surrounding Composable. The
- * factory [make] runs once per `key`/`store`/etc. change; the returned
- * [Disposable] is `dispose()`d when the Composable leaves the composition or
- * the keys change.
+ * factory [make] runs when the Composable enters the composition and again
+ * whenever any of [keys] changes; the returned [Disposable] is `dispose()`d
+ * when the keys change or the Composable leaves the composition.
+ *
+ * With no [keys], [make] runs exactly once per composition entry. The [make]
+ * lambda itself is **not** a key: recreating the lambda on recomposition (the
+ * common case for capturing lambdas) does not re-run the factory or
+ * resubscribe. To resubscribe when a captured value changes, pass it as a key:
+ * `rememberDisposable(store) { ... }`.
  *
  * Use for non-state store subscriptions you want bound to a Composable's
  * lifecycle — e.g. an [Store.observeFrom] inbound binding.
  *
  * ```
  * @Composable
- * fun StatusListener(store: AccountVault, channel: Observable<AccountStatus>) {
- *     rememberDisposable { store { status observeFrom channel } }
+ * fun StatusListener(store: AccountStore, channel: Observable<AccountStatus>) {
+ *     rememberDisposable(store, channel) { store { status observeFrom channel } }
  * }
  * ```
  */
 @Composable
-fun rememberDisposable(make: () -> Disposable): Disposable {
-    val disposable = remember(make) { make() }
+fun rememberDisposable(
+    vararg keys: Any?,
+    make: () -> Disposable,
+): Disposable {
+    val disposable = remember(*keys) { make() }
     DisposableEffect(disposable) {
         onDispose { disposable.dispose() }
     }

@@ -15,7 +15,7 @@ fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
-fun rememberDisposable(make: () -> Disposable): Disposable
+fun rememberDisposable(vararg keys: Any?, make: () -> Disposable): Disposable
 ```
 
 ## Examples
@@ -44,7 +44,12 @@ fun CounterScreen(store: CounterStore) {
 ```kotlin
 @Composable
 fun StatusListener(store: AccountStore, channel: Observable<AccountStatus>) {
+    // No keys: subscribes once on composition entry, disposes on exit.
+    // The lambda is NOT a key — recomposition never resubscribes.
     rememberDisposable { store { status observeFrom channel } }
+
+    // Keyed: resubscribes when `channel` changes.
+    rememberDisposable(channel) { store { status observeFrom channel } }
 }
 ```
 

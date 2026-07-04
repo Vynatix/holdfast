@@ -1391,7 +1391,7 @@ fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
-fun rememberDisposable(make: () -> Disposable): Disposable
+fun rememberDisposable(vararg keys: Any?, make: () -> Disposable): Disposable
 ```
 
 Bridges holdfast state into Compose's snapshot system as a

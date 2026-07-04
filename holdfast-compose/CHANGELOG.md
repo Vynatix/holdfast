@@ -15,6 +15,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `store.count.collectAsState()`. This also brings the code in line with
   the surface this changelog already documented for 2.0.
 
+### Changed
+
+- `rememberDisposable(make: () -> Disposable)` is now
+  `rememberDisposable(vararg keys: Any?, make: () -> Disposable)`. The old
+  form was keyed on the factory lambda's identity, so any capturing lambda
+  recreated on recomposition produced a fresh `Disposable` and
+  disposed/resubscribed **every recomposition**. The factory now runs once
+  on composition entry and again only when one of `keys` changes; the
+  lambda itself is no longer a key. Source compatible (existing
+  `rememberDisposable { ... }` call sites compile unchanged and silently
+  gain run-once behavior) but **binary incompatible** — recompile
+  consumers. Anyone who relied on lambda-identity resubscription must now
+  pass explicit keys.
+
 ### Deprecated
 
 - `V.collectAsState(state: State<T>)` — WARNING-level `@Deprecated` with
