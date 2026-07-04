@@ -57,6 +57,7 @@ jobs:
             :holdfast-testing:jvmTest :holdfast-testing:testAndroidHostTest \
             :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
             :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
+            :doc-snippets:test \
             --stacktrace
 
       - name: API check and Dokka
@@ -81,6 +82,7 @@ jobs:
             :holdfast-testing:detekt :holdfast-testing:ktlintCheck \
             :holdfast-hallmark:detekt :holdfast-hallmark:ktlintCheck \
             :holdfast-hallmark-coroutines:detekt :holdfast-hallmark-coroutines:ktlintCheck \
+            :doc-snippets:detekt :doc-snippets:ktlintCheck \
             --stacktrace
 
   ios-and-jvm:
