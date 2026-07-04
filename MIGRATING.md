@@ -81,6 +81,30 @@ atomic(a, b, policy = FramePolicy.AllowUnenrolled) {
 ```
 
 The same rule applies to `suspendAtomic` (the entry check is shared).
+## Removed: `SuspendingKvBridge.Awaiting` (`:holdfast-coroutines`)
+
+`SuspendingKvBridge` itself now implements `SuspendingBridge` — the nested
+`Awaiting` subclass is gone, and the two factory functions produce the same
+class. `suspendingBridge(...)` returns `SuspendingKvBridge<T>` (was
+`SuspendingKvBridge.Awaiting<T>`); `bridge(...)` is a `WARNING`-level
+deprecated alias of `suspendingBridge(...)`.
+
+```kotlin
+// Before
+val b: SuspendingKvBridge.Awaiting<Long> = kv.suspendingBridge("balance", LongCodec)
+val f: SuspendingKvBridge<Long> = kv.bridge("balance", LongCodec)   // never awaited
+
+// After — one class, one truth
+val b: SuspendingKvBridge<Long> = kv.suspendingBridge("balance", LongCodec)
+```
+
+Behavior change for former `bridge(...)` products: they are now
+`SuspendingBridge`s, so `suspendAction`'s commit phase **awaits** their writes
+(strictly more durable, adds per-commit latency, and no conflation across
+`suspendAction` commits). Under sync `action { }` nothing changes — saves stay
+fire-and-forget through the conflated channel. Callers who explicitly relied
+on `Awaiting`'s direct-launch sync publish now get the conflated-channel path
+instead; use `suspendAction` if every intermediate value must persist.
 
 ## See also
 

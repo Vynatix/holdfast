@@ -37,8 +37,8 @@ public abstract interface class com/vynatix/holdfast/coroutines/SuspendingBridge
 public final class com/vynatix/holdfast/coroutines/SuspendingBridgeKt {
 	public static final fun bridge (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge;
 	public static synthetic fun bridge$default (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge;
-	public static final fun suspendingBridge (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge$Awaiting;
-	public static synthetic fun suspendingBridge$default (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge$Awaiting;
+	public static final fun suspendingBridge (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge;
+	public static synthetic fun suspendingBridge$default (Lcom/vynatix/holdfast/coroutines/SuspendingKvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlinx/coroutines/CoroutineScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/coroutines/SuspendingKvBridge;
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendingFileSystemKvStore : com/vynatix/holdfast/coroutines/SuspendingKvStore {
@@ -52,15 +52,9 @@ public final class com/vynatix/holdfast/coroutines/SuspendingFileSystemKvStore :
 	public fun snapshot (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
-public class com/vynatix/holdfast/coroutines/SuspendingKvBridge : com/vynatix/holdfast/Bridge {
-	protected final fun getBridgeScope ()Lkotlinx/coroutines/CoroutineScope;
+public final class com/vynatix/holdfast/coroutines/SuspendingKvBridge : com/vynatix/holdfast/coroutines/SuspendingBridge {
 	public final fun getErrors ()Lkotlinx/coroutines/flow/SharedFlow;
 	public fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
-	public fun publish (Ljava/lang/Object;)Z
-	protected final fun putOrEmit (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-}
-
-public final class com/vynatix/holdfast/coroutines/SuspendingKvBridge$Awaiting : com/vynatix/holdfast/coroutines/SuspendingKvBridge, com/vynatix/holdfast/coroutines/SuspendingBridge {
 	public fun publish (Ljava/lang/Object;)Z
 	public fun publishAwaited (Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }

@@ -13,13 +13,16 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Tests for `SuspendingKvStore.bridge(...)` — the fire-and-forget factory that
- * adapts a `SuspendingKvStore` to the sync `Bridge<T>` interface used by
- * `store.action { }`. See issue 11.
+ * Tests for `SuspendingKvStore.suspendingBridge(...)` — the factory that adapts
+ * a `SuspendingKvStore` to the `SuspendingBridge<T>` contract: conflated
+ * fire-and-forget under sync `store.action { }`, awaited persistence under
+ * `store.suspendAction { }`. See issue 11 and finding F14 (the former
+ * `bridge(...)`/`suspendingBridge(...)` split is merged into one class).
  */
 private class BridgedVault : Store<BridgedVault>() {
     val s by state { "init" }
@@ -33,7 +36,7 @@ class SuspendingKvBridgeTest {
         runTest {
             val store = InMemorySuspendingKvStore()
             val key = "user:name"
-            val bridge = store.bridge(key, StringCodec, scope = TestScope(testScheduler))
+            val bridge = store.suspendingBridge(key, StringCodec, scope = TestScope(testScheduler))
             val v = BridgedVault()
 
             v.action { s bridge bridge }
@@ -49,7 +52,7 @@ class SuspendingKvBridgeTest {
         runTest {
             val store = CountingSuspendingKvStore()
             val key = "counter"
-            val bridge = store.bridge(key, IntCodec, scope = TestScope(testScheduler))
+            val bridge = store.suspendingBridge(key, IntCodec, scope = TestScope(testScheduler))
             val v = BridgedVault()
 
             v.action { n bridge bridge }
@@ -76,7 +79,7 @@ class SuspendingKvBridgeTest {
     fun loadOnAttachHydratesStateFromStore() =
         runTest {
             val store = InMemorySuspendingKvStore(mapOf("greet" to "hello"))
-            val bridge = store.bridge("greet", StringCodec, scope = TestScope(testScheduler))
+            val bridge = store.suspendingBridge("greet", StringCodec, scope = TestScope(testScheduler))
             val v = BridgedVault()
 
             v.action { s bridge bridge }
@@ -90,7 +93,7 @@ class SuspendingKvBridgeTest {
         runTest {
             val boom = RuntimeException("disk full")
             val store = ThrowingSuspendingKvStore(boom)
-            val bridge = store.bridge("x", StringCodec, scope = TestScope(testScheduler))
+            val bridge = store.suspendingBridge("x", StringCodec, scope = TestScope(testScheduler))
             val v = BridgedVault()
 
             v.action { s bridge bridge }
@@ -105,11 +108,50 @@ class SuspendingKvBridgeTest {
     fun publishReturnsTrueWithoutBlocking() =
         runTest {
             val store = InMemorySuspendingKvStore()
-            val bridge = store.bridge("k", StringCodec, scope = TestScope(testScheduler))
+            val bridge = store.suspendingBridge("k", StringCodec, scope = TestScope(testScheduler))
 
             // publish must NOT suspend / block — fire-and-forget by contract.
             val ok = bridge.publish("v")
             assertTrue(ok)
+        }
+
+    /**
+     * F14: the factories are merged — both produce a [SuspendingKvBridge] that
+     * IS a [SuspendingBridge], so `suspendAction`'s `is`-check awaits its
+     * writes. The deprecated `bridge(...)` alias returns the identical type.
+     */
+    @Suppress("DEPRECATION")
+    @Test
+    fun bothFactoriesProduceASuspendingBridge() =
+        runTest {
+            val store = InMemorySuspendingKvStore()
+            val viaSuspending: SuspendingKvBridge<String> =
+                store.suspendingBridge("a", StringCodec, scope = TestScope(testScheduler))
+            val viaDeprecatedAlias: SuspendingKvBridge<String> =
+                store.bridge("b", StringCodec, scope = TestScope(testScheduler))
+
+            assertIs<SuspendingBridge<String>>(viaSuspending)
+            assertIs<SuspendingBridge<String>>(viaDeprecatedAlias)
+        }
+
+    /**
+     * F14: under `suspendAction` the bridge's `publishAwaited` is awaited —
+     * the value is persisted before the action returns, with no scheduler
+     * advancement required.
+     */
+    @Test
+    fun suspendActionAwaitsPersistence() =
+        runTest {
+            val store = InMemorySuspendingKvStore()
+            val key = "awaited"
+            val bridge = store.suspendingBridge(key, StringCodec, scope = TestScope(testScheduler))
+            val v = BridgedVault()
+
+            v.action { s bridge bridge }
+            v.suspendAction { s mutate "bob" }
+
+            // No advanceUntilIdle: the write completed inside the suspendAction.
+            assertEquals(StringCodec.encode("bob"), store.get(key))
         }
 }
 

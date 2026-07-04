@@ -1,7 +1,10 @@
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.bridge.Codec
 import com.vynatix.holdfast.bridge.IntCodec
 import com.vynatix.holdfast.bridge.StringCodec
 import com.vynatix.holdfast.effect
@@ -27,20 +30,48 @@ import kotlin.test.assertTrue
  * Acceptance tests for issue 12 — `SuspendingBridge<T>.publishAwaited` and the
  * `suspendAction` commit-phase interpose.
  *
- * The defining contract: same `SuspendingKvStore` used to manufacture both a
- * `bridge(...)` (fire-and-forget) and a `suspendingBridge(...)` (await-completion).
+ * The defining contract (post-F14, one factory): `suspendingBridge(...)`
+ * produces a `SuspendingKvBridge` that IS a `SuspendingBridge`.
  *
- *  - Inside `store.action { ... }`, both behave fire-and-forget — `publish`
+ *  - Inside `store.action { ... }`, it behaves fire-and-forget — `publish`
  *    returns immediately and the persistence write happens off-thread.
- *  - Inside `store.suspendAction { ... }`, the suspendingBridge's
- *    `publishAwaited` is awaited under `withContext(NonCancellable)` while
- *    the regular bridge still publishes fire-and-forget.
+ *  - Inside `store.suspendAction { ... }`, `publishAwaited` is awaited under
+ *    `withContext(NonCancellable)` while a genuinely plain `Bridge` (see
+ *    [PlainLaunchBridge]) still publishes fire-and-forget.
  *
  * Caller picks the action type to pick the persistence guarantee.
  */
 private class TwoFieldVault : Store<TwoFieldVault>() {
     val s by state { "init" }
     val n by state { 0 }
+}
+
+/**
+ * A genuinely plain [Bridge] (NOT a [SuspendingBridge]) over a
+ * [SuspendingKvStore]: `publish` launches the put fire-and-forget on `scope`.
+ * Post-F14 both factory functions return the awaited `SuspendingKvBridge`, so
+ * tests that need the "plain bridges are not awaited" contrast build one by
+ * hand.
+ */
+private class PlainLaunchBridge<T : Any>(
+    private val store: SuspendingKvStore,
+    private val key: String,
+    private val codec: Codec<T>,
+    private val scope: CoroutineScope,
+) : Bridge<T> {
+    override fun observe(observer: (T) -> Unit): Disposable {
+        val job =
+            scope.launch {
+                val encoded = store.get(key) ?: return@launch
+                observer(codec.decode(encoded))
+            }
+        return Disposable { job.cancel() }
+    }
+
+    override fun publish(value: T): Boolean {
+        scope.launch { store.put(key, codec.encode(value)) }
+        return true
+    }
 }
 
 class SuspendingBridgePublishAwaitedTest {
@@ -54,8 +85,9 @@ class SuspendingBridgePublishAwaitedTest {
     /**
      * The defining test from the issue's acceptance criteria.
      *
-     * Same `SuspendingKvStore`. One state binds a `bridge(...)` (fire-and-forget),
-     * the other binds a `suspendingBridge(...)` (await-completion).
+     * Same `SuspendingKvStore`. One state binds a hand-rolled plain `Bridge`
+     * (fire-and-forget), the other binds a `suspendingBridge(...)`
+     * (await-completion).
      *
      * Inside `suspendAction`, the suspendingBridge's value is fully written to the
      * store BEFORE the action returns. The fire-and-forget bridge is allowed to
@@ -65,7 +97,7 @@ class SuspendingBridgePublishAwaitedTest {
     fun suspendActionAwaitsSuspendingBridgeButNotPlainBridge() =
         runBlocking {
             val store = SlowSuspendingKvStore(delayMs = 50)
-            val plain = store.bridge("plain", StringCodec, scope = testScope)
+            val plain = PlainLaunchBridge(store, "plain", StringCodec, scope = testScope)
             val awaiting = store.suspendingBridge("awaiting", IntCodec, scope = testScope)
 
             val v = TwoFieldVault()
@@ -88,10 +120,10 @@ class SuspendingBridgePublishAwaitedTest {
 
     /**
      * Inside `store.action { }` (sync), the suspendingBridge falls back to its
-     * default `publish` — `scope.launch { publishAwaited(value) }; return true`.
-     * The action returns BEFORE the persistence write completes. We verify by
-     * checking that the store does NOT yet have the value immediately after
-     * action returns (the slow store buys us the window).
+     * fire-and-forget `publish` — the conflated-channel drainer persists the
+     * value off-thread. The action returns BEFORE the persistence write
+     * completes. We verify by checking that the store does NOT yet have the
+     * value immediately after action returns (the slow store buys us the window).
      */
     @Test
     fun syncActionDoesNotAwaitSuspendingBridge() =
@@ -210,7 +242,7 @@ class SuspendingBridgePublishAwaitedTest {
         }
 
     /**
-     * Plain `bridge(...)` from a `SuspendingKvStore` retains fire-and-forget
+     * A plain `Bridge` over a `SuspendingKvStore` retains fire-and-forget
      * semantics under `suspendAction` too — only `SuspendingBridge` triggers
      * the await interpose. This guards against an over-eager `is`-check.
      */
@@ -218,7 +250,7 @@ class SuspendingBridgePublishAwaitedTest {
     fun suspendActionDoesNotAwaitPlainBridge() =
         runBlocking {
             val store = SlowSuspendingKvStore(delayMs = 250)
-            val plain = store.bridge("k", StringCodec, scope = testScope)
+            val plain = PlainLaunchBridge(store, "k", StringCodec, scope = testScope)
 
             val v = TwoFieldVault()
             v.action { s bridge plain }

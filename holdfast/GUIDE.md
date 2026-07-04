@@ -1357,8 +1357,9 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
 
 interface SuspendingKvStore                          // suspend get / put / remove / snapshot
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
-fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
-fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
+class SuspendingKvBridge<T : Any> : SuspendingBridge<T>   // exposes errors: SharedFlow<Throwable>
+fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
+// Deprecated WARNING-level alias returning the same type: SuspendingKvStore.bridge(key, codec, scope)
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).

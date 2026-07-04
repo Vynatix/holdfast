@@ -61,6 +61,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   back with the enclosing frame. Migration: enroll the store in the
   outermost frame, or pass `policy = FramePolicy.AllowUnenrolled` on the
   enclosing frame (see `MIGRATING.md`).
+- **BREAKING: `SuspendingKvBridge` now implements `SuspendingBridge` directly
+  and the nested `SuspendingKvBridge.Awaiting` class is removed** (F14).
+  `suspendingBridge(...)` returns `SuspendingKvBridge<T>` (was
+  `SuspendingKvBridge.Awaiting<T>`); `bridge(...)` is a `WARNING`-level
+  deprecated alias returning the same type. Behavior change for former
+  `bridge(...)` products: `suspendAction`'s commit phase now awaits their
+  `publishAwaited` (strictly more durable; adds per-commit latency and drops
+  cross-commit conflation under `suspendAction`). Sync `action { }` saves are
+  unchanged: fire-and-forget through the conflated channel — which is now
+  also the sync path for bridges that used to be `Awaiting` (previously a
+  direct per-publish launch with no conflation). See
+  [MIGRATING.md](../MIGRATING.md).
 
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.
@@ -69,6 +81,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MutableState.owningStore` (renamed from `owningVault` in `:holdfast`), and
   KDoc samples use `Store*` class names. No API or behavior change in this
   module.
+
+### Deprecated
+
+- **`SuspendingKvStore.bridge(key, codec, scope)`** — `WARNING`-level alias of
+  `suspendingBridge(...)`. The former fire-and-forget-only product no longer
+  exists; both factories return the same awaited-under-`suspendAction`
+  `SuspendingKvBridge`. Kept for one minor release.
 
 ### Removed
 

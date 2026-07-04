@@ -32,11 +32,12 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable>
 
-// Async persistence: suspend KvStore + bridges over it.
+// Async persistence: suspend KvStore + a bridge over it.
 interface SuspendingKvStore                          // suspend get / put / remove / snapshot
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
-fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
-fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
+class SuspendingKvBridge<T : Any> : SuspendingBridge<T>   // exposes errors: SharedFlow<Throwable>
+fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
+// Deprecated WARNING-level alias returning the same type: SuspendingKvStore.bridge(key, codec, scope)
 ```
 
 `asStateFlow`'s `scope` parameter defaults to the owning store's
@@ -44,10 +45,14 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 `Store.defaultScope`); pass a scope explicitly to override. `suspendAction`
 allows the transaction body to suspend; cancellation of the body rolls the
 transaction back, and the commit fanout runs under `NonCancellable` so it
-completes even if the surrounding scope cancels mid-commit. `bridge(...)`
-saves fire-and-forget (conflated — rapid publishes coalesce);
-`suspendingBridge(...)` returns an await-completion `SuspendingBridge` whose
-`publishAwaited` suspends until the value is persisted.
+completes even if the surrounding scope cancels mid-commit.
+`suspendingBridge(...)` returns a `SuspendingKvBridge` — one bridge, two save
+semantics picked by the action type: inside `suspendAction` the commit phase
+awaits `publishAwaited`, so every committed value is written before the action
+returns; inside sync `action { }` it saves fire-and-forget through a conflated
+channel (rapid publishes coalesce — only the latest value is guaranteed to
+land). The old `bridge(...)` factory is a WARNING-level deprecated alias that
+returns the same type.
 
 ## Examples
 

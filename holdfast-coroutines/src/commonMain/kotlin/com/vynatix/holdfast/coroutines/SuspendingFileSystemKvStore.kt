@@ -18,11 +18,12 @@ package com.vynatix.holdfast.coroutines
  * coordinate cross-process file locks. Concurrent writes from a single process
  * are safe (each write goes through tmp + atomic rename).
  *
- * Use as the backing for `SuspendingBridge` to get save-on-commit + load-on-attach
- * persistence with await-completion semantics:
+ * Use as the backing for a [SuspendingBridge] (via [suspendingBridge]) to get
+ * save-on-commit + load-on-attach persistence — awaited under `suspendAction`,
+ * conflated fire-and-forget under sync `action`:
  * ```
  * val kv = SuspendingFileSystemKvStore("/path/to/state")
- * store { balance suspendBridge SuspendingBridge(kv, "balance", LongCodec) }
+ * store.action { balance bridge kv.suspendingBridge("balance", LongCodec) }
  * ```
  */
 expect class SuspendingFileSystemKvStore(

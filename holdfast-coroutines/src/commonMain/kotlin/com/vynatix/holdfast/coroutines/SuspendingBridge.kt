@@ -14,97 +14,108 @@ import kotlinx.coroutines.launch
 /**
  * Bridge variant that extends [Bridge] with await-completion persistence semantics.
  *
- * `:holdfast-coroutines` 2.0 ships two ways of binding a `SuspendingKvStore` to store state:
+ * **Same bridge, two semantics — picked by the action type.** When a state
+ * bound to a `SuspendingBridge` is mutated inside `store.action { }` (sync),
+ * the bridge's [publish] runs: fire-and-forget, never suspends, returns
+ * immediately. When the same state is mutated inside `store.suspendAction { }`,
+ * the commit phase detects the `SuspendingBridge` via an `is`-check and
+ * **awaits** [publishAwaited] sequentially under `withContext(NonCancellable)`.
  *
- *  1. **Fire-and-forget** — [SuspendingKvStore.bridge] returns a plain `Bridge<T>`
- *     whose [Bridge.publish] schedules a save on a [Channel] with [Channel.CONFLATED]
- *     capacity and returns immediately. Failures surface only via the bridge's
- *     `errors` flow.
- *  2. **Await-completion** — [SuspendingKvStore.suspendingBridge] returns a
- *     `SuspendingBridge<T>` whose [publishAwaited] suspends until the store has
- *     accepted the value. Used by `suspendAction`'s commit phase so persistence
- *     is part of the all-or-nothing guarantee that distinguishes store from peer
- *     state libraries.
- *
- * **Same bridge, two semantics.** When attached to a state and that state is
- * mutated inside `store.action { }` (sync), the bridge's [publish] runs — by
- * default this launches a coroutine on the bridge's scope and calls
- * [publishAwaited] fire-and-forget, returning `true` immediately. When the same
- * state is mutated inside `store.suspendAction { }`, the commit phase detects
- * the `SuspendingBridge` via an `is`-check and **awaits** [publishAwaited]
- * sequentially under `withContext(NonCancellable)`. Caller picks the action
- * type to pick the persistence guarantee.
+ * The canonical implementation is [SuspendingKvBridge], produced by
+ * [SuspendingKvStore.suspendingBridge].
  */
 interface SuspendingBridge<T : Any> : Bridge<T> {
     /**
-     * Persist [value] and suspend until the store accepts it. Implementations
-     * SHOULD be cooperative with cancellation up to the point at which the
-     * external write is initiated; the suspendAction commit phase wraps every
-     * call in `withContext(NonCancellable)` so partial-commit cannot happen.
+     * Persist [value] and suspend until the external store accepts it.
+     * Implementations SHOULD be cooperative with cancellation up to the point
+     * at which the external write is initiated; the suspendAction commit phase
+     * wraps every call in `withContext(NonCancellable)` so a caller's
+     * cancellation cannot abandon the write midway.
      *
-     * Throwing surfaces as a failed transaction commit. Implementations that
+     * Throwing surfaces as a failed transaction commit
+     * ([com.vynatix.holdfast.TransactionResult.Error]). Implementations that
      * also publish failures on a hot `errors` flow (e.g. [SuspendingKvBridge])
-     * may suppress the throw and emit on the flow instead — the contract is
-     * that **either the value was accepted or an error was surfaced**.
+     * may emit there in addition to throwing — the contract is that **either
+     * the value was accepted or an error was surfaced**.
      */
     suspend fun publishAwaited(value: T)
 
     /**
-     * Default sync publish: launches a coroutine on the bridge's scope that
-     * calls [publishAwaited] fire-and-forget and always returns `true`. This
-     * is the path taken inside `store.action { }` (sync). The await-interpose
-     * inside `store.suspendAction { }` bypasses this method entirely and
-     * calls [publishAwaited] directly.
+     * Sync publish: fire-and-forget, must never suspend or block. This is the
+     * path taken inside `store.action { }` (sync). The await-interpose inside
+     * `store.suspendAction { }` bypasses this method entirely and calls
+     * [publishAwaited] directly.
      *
-     * Implementations may override to provide different fire-and-forget
-     * behavior — e.g. [SuspendingKvBridge] uses a conflated channel + drainer
-     * to coalesce rapid publishes. The contract is unchanged: never suspend,
-     * never block, always return `true` (or `false` if shutdown — the store
-     * does not act on the boolean today).
+     * Implementations choose their fire-and-forget mechanics — e.g.
+     * [SuspendingKvBridge] uses a conflated channel + drainer to coalesce
+     * rapid publishes. Return `true` when the value was accepted for
+     * asynchronous persistence, `false` if the bridge has shut down.
      */
     override fun publish(value: T): Boolean
 }
 
 /**
- * Adapts a [SuspendingKvStore] to the **await-completion** [SuspendingBridge]
- * contract used by `store.suspendAction { }`.
+ * Adapts a [SuspendingKvStore] to the [SuspendingBridge] contract:
+ * save-on-commit + load-on-attach over a suspending key-value store.
  *
- * Same store, same key, same codec as [SuspendingKvStore.bridge] — the
- * difference is purely binding semantics. When this bridge is attached to a
- * state and the state mutates inside a `suspendAction`, the action awaits the
- * persistence write before returning. Inside a sync `action`, the bridge
- * falls back to fire-and-forget by launching a coroutine on [scope] that
- * calls [publishAwaited]; the action returns immediately.
- *
- * Load semantics, conflated drainer for fire-and-forget calls coming through
- * [publish], and the `errors: SharedFlow<Throwable>` flow are identical to
- * [SuspendingKvBridge] — see that class's KDoc for the full contract.
+ * The returned bridge behaves per the action type that commits the mutation:
+ * awaited persistence under `store.suspendAction { }` (via
+ * [SuspendingBridge.publishAwaited]), conflated fire-and-forget under sync
+ * `store.action { }` (via [Bridge.publish]). See [SuspendingKvBridge] for the
+ * full save/load/error contract.
  *
  * @param key Storage key under which the encoded value is persisted.
  * @param codec String-codec for [T].
- * @param scope Coroutine scope hosting the channel drainer, the load job, and
- *   the fire-and-forget [publish] launches. Defaults to [Store.defaultScope].
- * @return A `SuspendingKvBridge.Awaiting<T>` whose [publishAwaited] is wired
- *   to `store.put(key, codec.encode(value))`. The same `errors` flow as the
- *   plain bridge surfaces serialization and store failures.
+ * @param scope Coroutine scope hosting the channel drainer and load jobs.
+ *   Defaults to [Store.defaultScope].
  */
 fun <T : Any> SuspendingKvStore.suspendingBridge(
     key: String,
     codec: Codec<T>,
     scope: CoroutineScope = Store.defaultScope,
-): SuspendingKvBridge.Awaiting<T> = SuspendingKvBridge.Awaiting(this, key, codec, scope)
+): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
 
 /**
- * Adapts a [SuspendingKvStore] to the sync [Bridge] contract used by `store.action { }`.
+ * Deprecated alias of [suspendingBridge].
  *
- * **Save semantics — fire-and-forget.** [Bridge.publish] enqueues the encoded
- * value on a [Channel] created with [Channel.CONFLATED] capacity and returns
- * `true` immediately without suspending. A single drainer coroutine, launched
- * on [scope], pulls from the channel and calls
- * `store.put(key, codec.encode(value))`. Because the channel is conflated,
- * rapid successive publishes coalesce — only the latest value is guaranteed
- * to reach the store. Callers who need every intermediate value must use the
- * await-completion variant ([suspendingBridge]).
+ * Historically this factory returned a fire-and-forget-only bridge (a plain
+ * `Bridge<T>` that `suspendAction` could not await) while [suspendingBridge]
+ * returned the await-completion variant. The two products are now the same
+ * class with the same behavior — [SuspendingKvBridge] implements
+ * [SuspendingBridge], so `suspendAction` awaits its writes and sync `action`
+ * keeps the conflated fire-and-forget path. Call [suspendingBridge] directly.
+ */
+@Deprecated(
+    message =
+        "bridge() and suspendingBridge() now produce the same SuspendingKvBridge " +
+            "(awaited under suspendAction, conflated fire-and-forget under sync action). " +
+            "Use suspendingBridge().",
+    replaceWith = ReplaceWith("this.suspendingBridge(key, codec, scope)"),
+    level = DeprecationLevel.WARNING,
+)
+fun <T : Any> SuspendingKvStore.bridge(
+    key: String,
+    codec: Codec<T>,
+    scope: CoroutineScope = Store.defaultScope,
+): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
+
+/**
+ * [SuspendingBridge] over a [SuspendingKvStore], produced by
+ * [SuspendingKvStore.suspendingBridge].
+ *
+ * **Save semantics under `suspendAction` — awaited.** The commit phase calls
+ * [publishAwaited], which encodes and `store.put`s the value directly and
+ * suspends until the store accepts it. No conflation applies on this path —
+ * every committed value is written, in commit order.
+ *
+ * **Save semantics under sync `action` — fire-and-forget, conflated.**
+ * [Bridge.publish] enqueues the value on a [Channel] created with
+ * [Channel.CONFLATED] capacity and returns `true` immediately without
+ * suspending. A single drainer coroutine, launched on [scope], pulls from the
+ * channel and calls `store.put(key, codec.encode(value))`. Because the channel
+ * is conflated, rapid successive publishes coalesce — only the latest value is
+ * guaranteed to reach the store. Callers who need every intermediate value
+ * persisted must commit via `suspendAction`.
  *
  * **Load semantics — async on observe attach.** When the bridge is attached
  * to a state via `state bridge bridge`, the store calls [Bridge.observe].
@@ -115,42 +126,17 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
  * resolves.
  *
  * **Errors.** Any throwable from `store.put`, `store.get`, or `codec.decode`
- * is forwarded to [SuspendingKvBridge.errors]. The flow is configured
- * `replay = 0`, `extraBufferCapacity = 16`, with no implicit collection —
- * callers MUST attach a collector if they care about persistence failures.
- *
- * @param key Storage key under which the encoded value is persisted.
- * @param codec String-codec for [T].
- * @param scope Coroutine scope hosting the channel drainer and load job.
- *   Defaults to [Store.defaultScope].
- * @return A plain `Bridge<T>` (NOT a `SuspendingBridge<T>` — the
- *   await-completion factory is [suspendingBridge]). The returned bridge also
- *   exposes an `errors: SharedFlow<Throwable>` field via [SuspendingKvBridge].
+ * is forwarded to [errors]. The flow is configured `replay = 0`,
+ * `extraBufferCapacity = 16`, with no implicit collection — callers MUST
+ * attach a collector if they care about persistence failures on the
+ * fire-and-forget path.
  */
-fun <T : Any> SuspendingKvStore.bridge(
-    key: String,
-    codec: Codec<T>,
-    scope: CoroutineScope = Store.defaultScope,
-): SuspendingKvBridge<T> = SuspendingKvBridge(this, key, codec, scope)
-
-/**
- * Concrete fire-and-forget [Bridge] returned by [SuspendingKvStore.bridge].
- * Held as a class (rather than a hidden anonymous object) so callers can
- * reach the [errors] flow without an extra cast. See [bridge] for the full
- * contract.
- *
- * The [Awaiting] nested class is the await-completion sibling returned by
- * [SuspendingKvStore.suspendingBridge]. It implements the same load-on-attach
- * and conflated-fire-and-forget machinery and additionally implements
- * [SuspendingBridge.publishAwaited] for use by the suspendAction commit
- * interpose.
- */
-open class SuspendingKvBridge<T : Any> internal constructor(
+class SuspendingKvBridge<T : Any> internal constructor(
     private val store: SuspendingKvStore,
     private val key: String,
     private val codec: Codec<T>,
     private val scope: CoroutineScope,
-) : Bridge<T> {
+) : SuspendingBridge<T> {
     private val saves = Channel<T>(Channel.CONFLATED)
 
     private val _errors = MutableSharedFlow<Throwable>(replay = 0, extraBufferCapacity = 16)
@@ -161,7 +147,7 @@ open class SuspendingKvBridge<T : Any> internal constructor(
      *
      * `replay = 0`, `extraBufferCapacity = 16`, no implicit collection. **Callers
      * MUST attach their own collector** if they care about persistence reliability —
-     * an unobserved errors flow swallows failures silently. Use
+     * an unobserved errors flow swallows fire-and-forget failures silently. Use
      * `bridge.errors.onEach { … }.launchIn(appScope)` or similar.
      */
     val errors: SharedFlow<Throwable> = _errors.asSharedFlow()
@@ -177,18 +163,29 @@ open class SuspendingKvBridge<T : Any> internal constructor(
     }
 
     /**
-     * Encode + put + emit on error. Shared between the channel drainer
-     * (fire-and-forget) and [Awaiting.publishAwaited] (await-completion).
-     * Errors are surfaced to [errors] in both cases — the await-completion
-     * caller does not need to attach the errors flow if it tolerates
-     * silent failures, but the recommended pattern is to attach.
+     * Encode + put + emit on error, used by the channel drainer
+     * (fire-and-forget). Errors are surfaced to [errors] only — rethrowing
+     * inside the drainer's `scope.launch` would crash the scope's uncaught
+     * handler instead of reporting.
      */
-    protected suspend fun putOrEmit(value: T) {
+    private suspend fun putOrEmit(value: T) {
         try {
             store.put(key, codec.encode(value))
         } catch (t: Throwable) {
             _errors.tryEmit(t)
         }
+    }
+
+    /**
+     * Persists [value] sequentially: encode + `store.put`, suspending until
+     * the store accepts it. Errors surface on [errors] (same as the
+     * fire-and-forget path); the call itself returns normally.
+     *
+     * Wrapped in `withContext(NonCancellable)` by the calling commit phase
+     * so cancellation cannot leave the store in an inconsistent state.
+     */
+    override suspend fun publishAwaited(value: T) {
+        putOrEmit(value)
     }
 
     override fun observe(observer: (T) -> Unit): Disposable {
@@ -221,57 +218,5 @@ open class SuspendingKvBridge<T : Any> internal constructor(
         // We swallow the result intentionally — fire-and-forget is the contract.
         saves.trySend(value)
         return true
-    }
-
-    /**
-     * Internal access to [scope] for the [Awaiting] subclass — needed so the
-     * default [Bridge.publish] override can launch a fire-and-forget call to
-     * [SuspendingBridge.publishAwaited] on the same scope as the drainer.
-     */
-    protected val bridgeScope: CoroutineScope get() = scope
-
-    /**
-     * Await-completion sibling of [SuspendingKvBridge]. Inherits the load
-     * machinery, the conflated drainer (used by [Bridge.publish] under sync
-     * `action`), and the `errors` flow. Adds [publishAwaited] for the
-     * `suspendAction` commit interpose.
-     *
-     * The class is `class` (not `object`) and not exposed as a constructable
-     * type — instances are produced exclusively by [suspendingBridge].
-     */
-    class Awaiting<T : Any> internal constructor(
-        store: SuspendingKvStore,
-        key: String,
-        codec: Codec<T>,
-        scope: CoroutineScope,
-    ) : SuspendingKvBridge<T>(store, key, codec, scope),
-        SuspendingBridge<T> {
-        /**
-         * Persists [value] sequentially: encode + `store.put`. Errors surface
-         * on [errors] (same as the fire-and-forget path) AND the call returns
-         * normally — the suspendAction commit phase does not crash on
-         * persistence failure today; it relies on the errors-flow contract.
-         *
-         * Wrapped in `withContext(NonCancellable)` by the calling commit phase
-         * so cancellation cannot leave the store in an inconsistent state.
-         */
-        override suspend fun publishAwaited(value: T) {
-            putOrEmit(value)
-        }
-
-        /**
-         * Fire-and-forget under sync `store.action { }` — launches a coroutine
-         * on the bridge's scope that calls [publishAwaited]. Returns `true`
-         * immediately. Distinct from the parent's channel-drainer path (which
-         * coalesces rapid publishes via [Channel.CONFLATED]); we use a direct
-         * launch here because the await-completion bridge's primary path is
-         * already serial under `suspendAction` — the sync fallback need not
-         * conflate to be sound. Callers that want conflation under sync
-         * action should use [SuspendingKvStore.bridge] instead.
-         */
-        override fun publish(value: T): Boolean {
-            bridgeScope.launch { publishAwaited(value) }
-            return true
-        }
     }
 }
