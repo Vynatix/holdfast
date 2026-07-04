@@ -1,12 +1,22 @@
 package com.vynatix.holdfast.testing
 
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.testing.concurrency.awaiting
 import com.vynatix.holdfast.testing.concurrency.eventually
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+
+private class EventuallyCounterVault : Store<EventuallyCounterVault>() {
+    val count by state { 0 }
+}
 
 class EventuallyTest {
     @Test
@@ -42,5 +52,25 @@ class EventuallyTest {
                 attempts++
             }
             assertEquals(1, attempts)
+        }
+
+    @Test
+    fun retriesAwaitingTimeouts() =
+        storeTest {
+            // AwaitingTimeoutException is an AssertionError, so the eventually
+            // loop must RETRY it (F21) — the first awaiting attempt times out
+            // before the commit lands, a later attempt sees it.
+            val ctr = track(EventuallyCounterVault())
+            backgroundScope.launch {
+                delay(80.milliseconds)
+                ctr.action { count mutate 1 }.shouldBeSuccess()
+            }
+            var attempts = 0
+            eventually(within = 2.seconds, every = 10.milliseconds) {
+                attempts++
+                awaiting(timeout = 30.milliseconds) { it is TransactionCommitted }
+            }
+            assertTrue(attempts > 1, "expected the first awaiting attempt to time out and be retried, attempts=$attempts")
+            assertEquals(1, ctr.read { count.value })
         }
 }

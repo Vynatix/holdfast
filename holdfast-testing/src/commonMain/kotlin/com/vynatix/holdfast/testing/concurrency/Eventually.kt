@@ -24,6 +24,11 @@ import kotlin.time.Duration.Companion.seconds
  * over `1.seconds` resolves in near-zero wall time. Real-time waiting only
  * happens when called outside `runTest`.
  *
+ * [CancellationException]s are rethrown immediately (cancellation is never
+ * retried), but [awaiting] timeouts ARE retried: [AwaitingTimeoutException]
+ * is an [AssertionError], so `eventually { awaiting(...) { ... } }` polls
+ * until the event arrives or [within] expires.
+ *
  * @param within total budget for the polling loop.
  * @param every interval between retries on failure.
  * @param block assertion or check to retry.

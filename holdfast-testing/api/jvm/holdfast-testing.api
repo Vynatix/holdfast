@@ -321,7 +321,7 @@ public final class com/vynatix/holdfast/testing/concurrency/AwaitingKt {
 	public static synthetic fun awaiting-dWUq8MI$default (Lcom/vynatix/holdfast/testing/StoreTestScope;JLkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
-public final class com/vynatix/holdfast/testing/concurrency/AwaitingTimeoutException : java/util/concurrent/CancellationException {
+public final class com/vynatix/holdfast/testing/concurrency/AwaitingTimeoutException : java/lang/AssertionError {
 }
 
 public final class com/vynatix/holdfast/testing/concurrency/Barrier {

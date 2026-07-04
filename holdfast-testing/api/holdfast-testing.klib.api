@@ -217,7 +217,7 @@ final class com.vynatix.holdfast.testing.bridge/FakeKvStore : com.vynatix.holdfa
     final fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.testing.bridge/FakeKvStore.snapshot|snapshot(){}[0]
 }
 
-final class com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException : kotlin.coroutines.cancellation/CancellationException // com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException|null[0]
+final class com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException : kotlin/AssertionError // com.vynatix.holdfast.testing.concurrency/AwaitingTimeoutException|null[0]
 
 final class com.vynatix.holdfast.testing.concurrency/Barrier { // com.vynatix.holdfast.testing.concurrency/Barrier|null[0]
     final suspend fun arrive() // com.vynatix.holdfast.testing.concurrency/Barrier.arrive|arrive(){}[0]

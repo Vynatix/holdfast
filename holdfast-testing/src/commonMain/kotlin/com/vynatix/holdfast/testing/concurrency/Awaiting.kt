@@ -4,7 +4,6 @@ import com.vynatix.holdfast.testing.StoreEvent
 import com.vynatix.holdfast.testing.StoreTestScope
 import com.vynatix.holdfast.testing.internal.awaitingsRegistry
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -23,10 +22,11 @@ import kotlin.time.Duration.Companion.seconds
  * that occurs AFTER is delivered via the channel — never both, never neither.
  *
  * On match, returns the matching event. On [timeout], throws an
- * [AwaitingTimeoutException] (a [CancellationException] subclass — see the
- * "Why a custom exception" note below) carrying the augmented message
- * `"awaiting: no event matched within Xms (saw N events: ...)"` listing the
- * most recent five events across all tracked timelines for diagnosis.
+ * [AwaitingTimeoutException] (an [AssertionError] subclass — see "Why an
+ * AssertionError" below) carrying the augmented message
+ * `"awaiting: no event matched within Xms (saw N events, last M: ...)"` with
+ * the total event count and the most recent five events across all tracked
+ * timelines for diagnosis.
  *
  * Both [timeout] and the resulting suspension participate in the test
  * scheduler's virtual time: under `storeTest`, a 200 ms timeout completes in
@@ -46,19 +46,22 @@ import kotlin.time.Duration.Companion.seconds
  * Cleanup: every `awaiting` call registers its subscriber channel with the
  * hosting [StoreTestScope]. If the test body returns while a coroutine is
  * suspended in `awaiting`, the scope's `tearDown` closes the channel — the
- * suspended `receive()` resumes with a [ClosedReceiveChannelException] and
- * the awaiting body's `try/finally` runs the unsubscribe path. So a forgotten
- * `awaiting` never leaks past the test.
+ * suspended `receive()` resumes with a [ClosedReceiveChannelException], which
+ * `awaiting` converts into a plain [CancellationException] ("storeTest scope
+ * tore down while awaiting") so the coroutine unwinds quietly and the
+ * `try/finally` runs the unsubscribe path. So a forgotten `awaiting` never
+ * leaks past the test and never fails it retroactively; only a genuine
+ * [timeout] expiry produces the loud [AwaitingTimeoutException].
  *
- * **Why a custom exception**: the spec calls for [TimeoutCancellationException]
- * with an augmented message, but kotlinx.coroutines defines TCE with an
- * `internal` constructor — external code cannot construct one with a custom
- * message and the class is `final` (cannot be subclassed). [AwaitingTimeoutException]
- * sits at the closest reachable point: a [CancellationException] subclass so
- * structured concurrency treats it as a normal cancellation, with the
- * augmented message available on `err.message`. Tests that want
- * a typed assertion should use `assertFailsWith<AwaitingTimeoutException>` or
- * the parent `assertFailsWith<CancellationException>`.
+ * **Why an AssertionError**: a timed-out `awaiting` is a failed expectation,
+ * so it must fail the test even when thrown inside `launch { }` — a
+ * [CancellationException] subclass there would be swallowed as benign
+ * cancellation and the test could pass green. As an [AssertionError] it also
+ * composes with [eventually], whose retry loop deliberately rethrows
+ * cancellation but retries assertion failures — so
+ * `eventually { awaiting(...) { ... } }` polls as expected. (The spec's
+ * [kotlinx.coroutines.TimeoutCancellationException] was never an option:
+ * kotlinx.coroutines keeps its constructor `internal` and the class `final`.)
  *
  * @param timeout total wait budget. On expiry an [AwaitingTimeoutException] is thrown.
  * @param predicate run against each event (replay first, then live deliveries).
@@ -89,22 +92,23 @@ suspend fun StoreTestScope.awaiting(
         if (past != null) return past
 
         // Live events — drain the channel, applying the predicate to each.
-        // withTimeoutOrNull returns null on expiry; on cancel-by-channel-close
-        // (scope teardown) the receive throws ClosedReceiveChannelException
-        // which is caught and surfaced as the same timeout error so the
-        // caller sees a uniform failure mode.
+        // withTimeoutOrNull returns null on expiry (the loud AssertionError
+        // path). Cancel-by-channel-close (scope teardown) surfaces as
+        // ClosedReceiveChannelException and is converted to a quiet
+        // CancellationException so a forgotten awaiting unwinds without
+        // failing the test.
         val match =
-            withTimeoutOrNull(timeout) {
-                try {
+            try {
+                withTimeoutOrNull(timeout) {
                     while (true) {
                         val event = channel.receive()
                         if (predicate(event)) return@withTimeoutOrNull event
                     }
                     @Suppress("UNREACHABLE_CODE")
                     null
-                } catch (_: ClosedReceiveChannelException) {
-                    null
                 }
+            } catch (_: ClosedReceiveChannelException) {
+                throw CancellationException("storeTest scope tore down while awaiting")
             }
         if (match != null) return match
 
@@ -122,26 +126,38 @@ private fun buildTimeoutMessage(
     timeout: Duration,
     handles: List<com.vynatix.holdfast.testing.StoreHandle<*>>,
 ): String {
-    val recent = handles.flatMap { it.timeline }.takeLast(RECENT_TAIL_COUNT)
+    val all = handles.flatMap { it.timeline }
+    val recent = all.takeLast(RECENT_TAIL_COUNT)
     return "awaiting: no event matched within ${timeout.inWholeMilliseconds}ms " +
-        "(saw ${recent.size} events: $recent)"
+        "(saw ${all.size} events, last ${recent.size}: $recent)"
 }
 
 private const val RECENT_TAIL_COUNT = 5
 
 /**
- * Thrown by [awaiting] on timeout. Subclass of [CancellationException] so
- * structured concurrency treats it as a normal cancellation: cancelling the
- * surrounding coroutine if uncaught, and not interfering with sibling
- * coroutines. Carries the augmented `"awaiting: no event matched within
- * Xms (saw N events: ...)"` message.
+ * Thrown by [awaiting] on timeout. Subclass of [AssertionError] — matching
+ * [eventually]'s failure convention — so a timed-out expectation:
+ *  - fails a coroutine launched in the test scope loudly instead of being
+ *    swallowed as benign cancellation (which a [CancellationException]
+ *    subclass would be);
+ *  - is reported by test runners as a *failure* (broken expectation), not an
+ *    error;
+ *  - is retryable inside [eventually], whose loop rethrows cancellation but
+ *    catches assertion failures.
  *
- * **Why not [TimeoutCancellationException]**: kotlinx.coroutines defines TCE
- * with `internal` constructors and as `final`, so external code cannot
- * construct one with a custom message and cannot subclass it.
- * [AwaitingTimeoutException] is the closest reachable equivalent within the
- * structured-concurrency hierarchy.
+ * Carries the augmented `"awaiting: no event matched within Xms (saw N
+ * events, last M: ...)"` message.
+ *
+ * Scope teardown does NOT throw this: when `storeTest` tears down while a
+ * coroutine is suspended in [awaiting], the subscriber channel closes and
+ * `awaiting` unwinds with a plain [CancellationException] instead, so a
+ * forgotten background `awaiting` stays quiet.
+ *
+ * **Why not [kotlinx.coroutines.TimeoutCancellationException]**:
+ * kotlinx.coroutines defines TCE with `internal` constructors and as `final`,
+ * so external code cannot construct one with a custom message and cannot
+ * subclass it — it was never a reachable option.
  */
 class AwaitingTimeoutException internal constructor(
     message: String,
-) : CancellationException(message)
+) : AssertionError(message)
