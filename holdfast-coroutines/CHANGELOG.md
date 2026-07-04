@@ -52,6 +52,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING (behavior): a nested `suspendAtomic` may no longer introduce an
+  unenrolled store under `FramePolicy.Strict` (F2).** Same rule as core
+  `atomic` (the check is shared `verifyFrameNesting`): introducing a store
+  no enclosing frame enrolls throws `UnenrolledStoreException` at entry
+  unless the enclosing policy is `AllowUnenrolled` — the introduced store's
+  fresh root would commit at the nested frame's exit and would NOT roll
+  back with the enclosing frame. Migration: enroll the store in the
+  outermost frame, or pass `policy = FramePolicy.AllowUnenrolled` on the
+  enclosing frame (see `MIGRATING.md`).
+
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.
 

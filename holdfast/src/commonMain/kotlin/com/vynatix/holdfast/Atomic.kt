@@ -66,9 +66,14 @@ import kotlin.uuid.Uuid
  * Nesting: an `atomic` nested inside an `action` or another `atomic` on the
  * same thread opens SAVEPOINTS of the enclosing transactions for shared
  * stores — inner commit merges into the enclosing scope; enclosing rollback
- * discards everything. A nested frame may only introduce stores whose
- * `lockOrderKey` sorts above every key the enclosing frame holds; violating
- * that throws [FrameLockOrderException] at entry (before any lock is taken).
+ * discards everything. A nested frame may only INTRODUCE a store (one not
+ * enrolled anywhere in the enclosing chain) when the enclosing frame's policy
+ * is [FramePolicy.AllowUnenrolled] — otherwise [UnenrolledStoreException] is
+ * thrown at entry, because the introduced store's fresh root would commit at
+ * the nested frame's exit and would NOT roll back with the enclosing frame.
+ * An introduced store must also sort above every `lockOrderKey` the
+ * enclosing frame holds; violating that throws [FrameLockOrderException] at
+ * entry (before any lock is taken).
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned

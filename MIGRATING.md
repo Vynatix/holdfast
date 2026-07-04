@@ -53,6 +53,35 @@ Only the default-parameter forms remain. Migration:
   `Store.defaultScope` (the bridge factories) — which is what the context
   overloads were resolving away from.
 
+## Behavior change: nested frames must enroll their stores (`atomic` / `suspendAtomic`)
+
+Under the default `FramePolicy.Strict`, a frame nested inside another frame
+may no longer introduce a store that no enclosing frame enrolls — the entry
+check throws `UnenrolledStoreException` before any lock is taken. An
+introduced store gets a fresh root that commits at the *nested* frame's exit
+and does **not** roll back with the enclosing frame, which silently breaks
+the enclosing frame's all-or-nothing promise (the same escape a bare
+unenrolled write would be, closed for the same reason).
+
+```kotlin
+// Before (silently ran c as an independent transaction):
+atomic(a, b) {
+    atomic(c) { c.action { flag mutate true } }
+}
+
+// After — either enroll c in the outermost frame (outer rollback covers it):
+atomic(a, b, c) {
+    c.action { flag mutate true }
+}
+
+// …or opt in explicitly to the independent (REQUIRES_NEW-style) side frame:
+atomic(a, b, policy = FramePolicy.AllowUnenrolled) {
+    atomic(c) { c.action { flag mutate true } }   // commits even if a/b roll back
+}
+```
+
+The same rule applies to `suspendAtomic` (the entry check is shared).
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

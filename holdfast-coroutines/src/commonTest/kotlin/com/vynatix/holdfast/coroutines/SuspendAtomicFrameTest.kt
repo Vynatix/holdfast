@@ -217,6 +217,39 @@ class SuspendFrameNestingTest {
             }
             assertEquals(0L, a.balance.value)
         }
+
+    @Test fun nestedFrameIntroducingUnenrolledStoreThrowsUnderStrict() =
+        runBlocking {
+            val a = SuspendFrameAccount()
+            val b = SuspendFrameAccount()
+            val c = SuspendFrameAccount() // highest lockOrderKey — lock order fine; enrollment is not
+            val e =
+                assertFailsWith<UnenrolledStoreException> {
+                    suspendAtomic(a, b) {
+                        a { balance mutate 1L }
+                        suspendAtomic(c) { c { balance mutate 3L } }
+                    }
+                }
+            assertTrue("FramePolicy.AllowUnenrolled" in (e.message ?: ""), "message names the opt-out: ${e.message}")
+            assertEquals(0L, a.balance.value, "outer frame rolled back")
+            assertEquals(0L, c.balance.value, "nested frame never ran")
+        }
+
+    @Test fun allowUnenrolledNestedFrameCommitsIndependentlyOfOuterRollback() =
+        runBlocking {
+            val a = SuspendFrameAccount(initial = 100)
+            val b = SuspendFrameAccount()
+            val c = SuspendFrameAccount()
+            val r =
+                suspendAtomic(a, b, policy = FramePolicy.AllowUnenrolled) {
+                    a { balance update { it - 30 } }
+                    suspendAtomic(c) { c { balance mutate 7L } }
+                    error("outer aborts after the nested frame committed")
+                }
+            assertIs<TransactionResult.Error>(r)
+            assertEquals(100L, a.balance.value, "outer frame rolled back")
+            assertEquals(7L, c.balance.value, "independent nested frame stayed committed")
+        }
 }
 
 class SuspendFrameMiddlewareTest {

@@ -277,8 +277,15 @@ object FrameObservers {
  *  - **Lock order**: a store NOT already held must sort above every held key,
  *    or acquiring it could deadlock against a concurrent frame; throws
  *    [FrameLockOrderException].
+ *  - **Enrollment**: a store NOT enrolled anywhere in the enclosing chain may
+ *    only be introduced when the enclosing frame's policy is
+ *    [FramePolicy.allowUnenrolled] — an introduced store gets a FRESH root
+ *    that commits at the nested frame's exit and does NOT roll back with the
+ *    enclosing frame, the same escape a bare unenrolled write would be;
+ *    throws [UnenrolledStoreException].
  */
 @StoreInternalApi
+@Suppress("ThrowsCount") // The gate's whole job is throwing one teaching exception per violation class.
 fun verifyFrameNesting(
     enclosing: FrameMarker?,
     stores: List<Store<*>>,
@@ -307,6 +314,15 @@ fun verifyFrameNesting(
                     "(maxHeldLockOrderKey=${enclosing.maxHeldLockOrderKey}). Acquiring it here would " +
                     "violate the global lock order and could deadlock against a concurrent frame. " +
                     "Enroll $name in the outermost frame instead.",
+            )
+        } else if (!enclosing.policy.allowUnenrolled) {
+            throw UnenrolledStoreException(
+                "Nested $newFrameName introduces $name, which is not enrolled in the enclosing frame " +
+                    "'${enclosing.frameId}' ${enclosing.describeParticipants()}. Its writes would commit " +
+                    "at the nested frame's exit and would NOT roll back with the enclosing frame. " +
+                    "Enroll $name in the OUTERMOST frame, or pass policy = FramePolicy.AllowUnenrolled " +
+                    "on the enclosing frame to deliberately run the nested frame as an independent " +
+                    "(REQUIRES_NEW-style) transaction.",
             )
         }
     }

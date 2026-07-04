@@ -80,6 +80,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **BREAKING (behavior): a nested `atomic` may no longer introduce an
+  unenrolled store under `FramePolicy.Strict` (F2).** `verifyFrameNesting`
+  now throws `UnenrolledStoreException` at entry when a nested frame enrolls
+  a store that no frame in the enclosing chain enrolls and the enclosing
+  policy is not `AllowUnenrolled`. An introduced store gets a fresh root
+  that commits at the nested frame's exit and does NOT roll back with the
+  enclosing frame — the same silent escape a bare unenrolled write would
+  be, now closed for nested frames too. Migration (see `MIGRATING.md`):
+  enroll the store in the outermost frame, or pass
+  `policy = FramePolicy.AllowUnenrolled` on the enclosing frame to run the
+  nested frame as a deliberate independent (REQUIRES_NEW-style)
+  transaction.
+
 - `atomic`'s vararg parameter is named `stores` (was pre-rename `vaults`) —
   source-compatible for positional calls; update any named-argument call
   sites.

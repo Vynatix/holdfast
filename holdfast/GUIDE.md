@@ -1864,10 +1864,16 @@ throws partway through phase 5, already-committed stores stay committed.
   everything, including nested writes. A nested frame's `Error` escalates to
   the enclosing frame like an inner action's (same `TolerateInnerErrors`
   opt-out).
-- A nested frame may only INTRODUCE stores whose `lockOrderKey` sorts above
-  every key the enclosing frame holds; otherwise `FrameLockOrderException`
-  fires at entry, before any lock is taken. Prefer enrolling everything in
-  the outermost frame.
+- A nested frame may only INTRODUCE a store (one not enrolled anywhere in
+  the enclosing chain) when the enclosing frame's policy is
+  `FramePolicy.AllowUnenrolled`; under `Strict` the introduction throws
+  `UnenrolledStoreException` at entry — an introduced store gets a FRESH
+  root that commits at the nested frame's exit and does NOT roll back with
+  the enclosing frame (REQUIRES_NEW semantics), the same escape a bare
+  unenrolled write would be. An introduced store must also sort above every
+  `lockOrderKey` the enclosing frame holds; otherwise
+  `FrameLockOrderException` fires at entry, before any lock is taken.
+  Prefer enrolling everything in the outermost frame.
 - Blocking and suspending frames do not compose on the same stores:
   blocking `action { }` (or a nested `atomic`) on a `suspendAtomic`
   participant throws `FrameInteropException` immediately instead of

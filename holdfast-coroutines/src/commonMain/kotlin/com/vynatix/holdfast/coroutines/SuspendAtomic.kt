@@ -63,7 +63,12 @@ import kotlin.uuid.Uuid
  * SAVEPOINT of the outer root — the nested frame's commit merges into the
  * outer frame; the nested frame's rollback discards only its own writes.
  * Only newly-introduced stores' mutexes are acquired (kotlinx `Mutex` is not
- * owner-reentrant, so reentrancy is managed at the frame level).
+ * owner-reentrant, so reentrancy is managed at the frame level). Introducing
+ * a store the enclosing frame does not enroll requires the ENCLOSING policy
+ * to be [FramePolicy.AllowUnenrolled] — otherwise
+ * [com.vynatix.holdfast.UnenrolledStoreException] fires at entry, because
+ * the introduced store's fresh root commits at the nested frame's exit and
+ * does NOT roll back with the enclosing frame.
  *
  * Commit fanout order (the cross-store consistency contract): per-store
  * middleware `onTransactionStarted` in lock order, then the body, then ALL

@@ -311,15 +311,49 @@ class FrameNestingTest {
     @Test fun nestedFrameIntroducingHigherKeyStoreIsAllowed() {
         val a = FrameAccount()
         val b = FrameAccount()
-        val c = FrameAccount() // highest lockOrderKey — safe to introduce nested
+        val c = FrameAccount() // highest lockOrderKey — lock-order-safe to introduce nested
         val r =
-            atomic(a, b) {
+            atomic(a, b, policy = FramePolicy.AllowUnenrolled) {
                 a.action { balance mutate 1L }
                 atomic(c) { c.action { balance mutate 3L } }
             }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(1L, a.balance.value)
         assertEquals(3L, c.balance.value)
+    }
+
+    @Test fun nestedFrameIntroducingUnenrolledStoreThrowsUnderStrict() {
+        val a = FrameAccount()
+        val b = FrameAccount()
+        val c = FrameAccount() // highest lockOrderKey — lock order is fine; enrollment is not
+        val e =
+            assertFailsWith<UnenrolledStoreException> {
+                atomic(a, b) {
+                    a.action { balance mutate 1L }
+                    atomic(c) { c.action { balance mutate 3L } }
+                }
+            }
+        assertTrue("FramePolicy.AllowUnenrolled" in (e.message ?: ""), "message names the opt-out: ${e.message}")
+        assertEquals(0L, a.balance.value, "outer frame rolled back")
+        assertEquals(0L, c.balance.value, "nested frame never ran")
+    }
+
+    @Test fun allowUnenrolledNestedFrameCommitsIndependentlyOfOuterRollback() {
+        // Pins the documented REQUIRES_NEW semantics: an introduced store gets a
+        // fresh root that commits at the NESTED frame's exit and does NOT roll
+        // back with the enclosing frame.
+        val a = FrameAccount(initial = 100)
+        val b = FrameAccount()
+        val c = FrameAccount()
+        val r =
+            atomic(a, b, policy = FramePolicy.AllowUnenrolled) {
+                a.action { balance update { it - 30 } }
+                atomic(c) { c.action { balance mutate 7L } }
+                error("outer aborts after the nested frame committed")
+            }
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(100L, a.balance.value, "outer frame rolled back")
+        assertEquals(7L, c.balance.value, "independent nested frame stayed committed")
     }
 }
 

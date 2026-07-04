@@ -1,6 +1,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.EventfulStore
+import com.vynatix.holdfast.FramePolicy
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
@@ -248,9 +249,12 @@ class SuspendAtomicNestedTest {
             val c = AccountVault(initial = 0)
 
             // Outer covers [a, b]. Inner adds [b, c]. The inner call's `b` is
-            // already held; only `c` should be newly acquired.
+            // already held; only `c` should be newly acquired. Introducing `c`
+            // requires AllowUnenrolled on the OUTER frame since 0.3 (F2): c's
+            // fresh root commits at the inner frame's exit and does not roll
+            // back with the outer frame.
             val r =
-                suspendAtomic(a, b) {
+                suspendAtomic(a, b, policy = FramePolicy.AllowUnenrolled) {
                     a { balance update { it + 1 } }
                     suspendAtomic(b, c) {
                         b { balance update { it + 10 } }
