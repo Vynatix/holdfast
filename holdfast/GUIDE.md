@@ -1384,6 +1384,10 @@ calls fall outside the recognized owner.
 
 ```kotlin
 @Composable
+fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
+
+@Deprecated("The Store receiver is unused; call collectAsState() directly on the state.")
+@Composable
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable

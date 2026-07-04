@@ -8,9 +8,10 @@ import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
+import androidx.compose.runtime.State as ComposeState
 
 /**
- * Bridges a store [State] into Compose's snapshot system as a `androidx.compose.runtime.State`,
+ * Bridges this store [State] into Compose's snapshot system as a `androidx.compose.runtime.State`,
  * triggering recomposition on every successful commit that modifies this state.
  *
  * Backed by [produceState], which manages the subscription's lifecycle: the
@@ -23,19 +24,32 @@ import com.vynatix.holdfast.effect
  * Example:
  * ```
  * @Composable
- * fun CounterScreen(store: CounterVault) {
- *     val count by store.collectAsState(store.count)
+ * fun CounterScreen(store: CounterStore) {
+ *     val count by store.count.collectAsState()
  *     Text("Count: $count")
- *     Button(onClick = { store.action { count update { it + 1 } } }) { Text("+1") }
+ *     // Inside action { } the local `count` delegate shadows the state
+ *     // property, so qualify with `this.` to reach the State<Int>.
+ *     Button(onClick = { store.action { this.count update { it + 1 } } }) { Text("+1") }
  * }
  * ```
  */
 @Composable
-fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> =
-    produceState(initialValue = state.value, state) {
-        val disposable = state effect { value = this }
+fun <T : Any> State<T>.collectAsState(): ComposeState<T> =
+    produceState(initialValue = value, this) {
+        val disposable = this@collectAsState effect { value = this }
         awaitDispose { disposable.dispose() }
     }
+
+/**
+ * Deprecated: the [Store] receiver was never used — call [collectAsState] directly
+ * on the state instead: `store.count.collectAsState()`.
+ */
+@Deprecated(
+    message = "The Store receiver is unused; call collectAsState() directly on the state.",
+    replaceWith = ReplaceWith("state.collectAsState()"),
+)
+@Composable
+fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): ComposeState<T> = state.collectAsState()
 
 /**
  * Owns a [Disposable] for the lifetime of the surrounding Composable. The

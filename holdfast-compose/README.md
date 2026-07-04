@@ -8,6 +8,10 @@ depend on from any UI module that uses Compose.
 
 ```kotlin
 @Composable
+fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
+
+@Deprecated("The Store receiver is unused; call collectAsState() directly on the state.")
+@Composable
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
@@ -21,8 +25,8 @@ fun rememberDisposable(make: () -> Disposable): Disposable
 ```kotlin
 @Composable
 fun CounterScreen(store: CounterStore) {
-    val count by store.collectAsState(store.count)
-    val label by store.collectAsState(store.label)
+    val count by store.count.collectAsState()
+    val label by store.label.collectAsState()
 
     Column {
         Text("Count: $count — $label")

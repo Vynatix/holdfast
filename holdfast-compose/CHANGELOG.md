@@ -4,6 +4,23 @@ All notable changes to `:holdfast-compose` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `State<T>.collectAsState()` — the primary form. The previous
+  `V.collectAsState(state)` required naming the store twice
+  (`store.collectAsState(store.count)`) because its `Store` receiver was
+  never used; the new form is called directly on the state:
+  `store.count.collectAsState()`. This also brings the code in line with
+  the surface this changelog already documented for 2.0.
+
+### Deprecated
+
+- `V.collectAsState(state: State<T>)` — WARNING-level `@Deprecated` with
+  `ReplaceWith`; delegates to the new `State<T>.collectAsState()`. Kept as
+  a source-compatible shim for one minor per the repo deprecation policy.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

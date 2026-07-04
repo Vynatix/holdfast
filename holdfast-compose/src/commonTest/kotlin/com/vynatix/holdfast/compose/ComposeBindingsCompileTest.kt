@@ -27,11 +27,16 @@ class ComposeBindingsCompileTest {
         @Composable
         fun render() {
             val v = ComposeBindingsVault()
-            val n = v.collectAsState(v.n)
-            val s = v.collectAsState(v.s)
+            val n = v.n.collectAsState()
+            val s = v.s.collectAsState()
+
+            // Deprecated shim must stay source-compatible for one minor.
+            @Suppress("DEPRECATION")
+            val nLegacy = v.collectAsState(v.n)
             // Avoid unused warnings.
             n.value
             s.value
+            nLegacy.value
             rememberDisposable {
                 com.vynatix.holdfast.Disposable { /* no-op */ }
             }
