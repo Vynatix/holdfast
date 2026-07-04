@@ -208,6 +208,13 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.middleware
     constructor <init>(kotlin/String, kotlin/Function1<kotlin/String, kotlin/Unit> = ...) // com.vynatix.holdfast.middleware/LoggingMiddleware.<init>|<init>(kotlin.String;kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
 }
 
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.middleware/ProfilingMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/ProfilingMiddleware|null[0]
+    constructor <init>(kotlin/Function1<com.vynatix.holdfast.middleware/TransactionSample, kotlin/Unit>? = ...) // com.vynatix.holdfast.middleware/ProfilingMiddleware.<init>|<init>(kotlin.Function1<com.vynatix.holdfast.middleware.TransactionSample,kotlin.Unit>?){}[0]
+
+    final fun profile(): com.vynatix.holdfast.middleware/StoreProfile // com.vynatix.holdfast.middleware/ProfilingMiddleware.profile|profile(){}[0]
+    final fun reset(): com.vynatix.holdfast.middleware/StoreProfile // com.vynatix.holdfast.middleware/ProfilingMiddleware.reset|reset(){}[0]
+}
+
 final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.middleware/TimingMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/TimingMiddleware|null[0]
     constructor <init>(kotlin/Function3<kotlin/String, com.vynatix.holdfast/TransactionStatus, kotlin/Long, kotlin/Unit>) // com.vynatix.holdfast.middleware/TimingMiddleware.<init>|<init>(kotlin.Function3<kotlin.String,com.vynatix.holdfast.TransactionStatus,kotlin.Long,kotlin.Unit>){}[0]
 }
@@ -284,6 +291,69 @@ final class com.vynatix.holdfast.crypto/XorCipher : com.vynatix.holdfast.crypto/
 
     final fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.decrypt|decrypt(kotlin.String){}[0]
     final fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.encrypt|encrypt(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast.middleware/StoreProfile { // com.vynatix.holdfast.middleware/StoreProfile|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long, kotlin/Long, kotlin/Long, kotlin.time/Duration, com.vynatix.holdfast.middleware/TransactionSample?, kotlin.collections/Map<kotlin/String, kotlin/Long>) // com.vynatix.holdfast.middleware/StoreProfile.<init>|<init>(kotlin.Long;kotlin.Long;kotlin.Long;kotlin.Long;kotlin.time.Duration;com.vynatix.holdfast.middleware.TransactionSample?;kotlin.collections.Map<kotlin.String,kotlin.Long>){}[0]
+
+    final val averageDuration // com.vynatix.holdfast.middleware/StoreProfile.averageDuration|{}averageDuration[0]
+        final fun <get-averageDuration>(): kotlin.time/Duration // com.vynatix.holdfast.middleware/StoreProfile.averageDuration.<get-averageDuration>|<get-averageDuration>(){}[0]
+    final val committedCount // com.vynatix.holdfast.middleware/StoreProfile.committedCount|{}committedCount[0]
+        final fun <get-committedCount>(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.committedCount.<get-committedCount>|<get-committedCount>(){}[0]
+    final val maxDuration // com.vynatix.holdfast.middleware/StoreProfile.maxDuration|{}maxDuration[0]
+        final fun <get-maxDuration>(): kotlin.time/Duration // com.vynatix.holdfast.middleware/StoreProfile.maxDuration.<get-maxDuration>|<get-maxDuration>(){}[0]
+    final val rolledBackCount // com.vynatix.holdfast.middleware/StoreProfile.rolledBackCount|{}rolledBackCount[0]
+        final fun <get-rolledBackCount>(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.rolledBackCount.<get-rolledBackCount>|<get-rolledBackCount>(){}[0]
+    final val savepointCount // com.vynatix.holdfast.middleware/StoreProfile.savepointCount|{}savepointCount[0]
+        final fun <get-savepointCount>(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.savepointCount.<get-savepointCount>|<get-savepointCount>(){}[0]
+    final val slowest // com.vynatix.holdfast.middleware/StoreProfile.slowest|{}slowest[0]
+        final fun <get-slowest>(): com.vynatix.holdfast.middleware/TransactionSample? // com.vynatix.holdfast.middleware/StoreProfile.slowest.<get-slowest>|<get-slowest>(){}[0]
+    final val stateWriteCounts // com.vynatix.holdfast.middleware/StoreProfile.stateWriteCounts|{}stateWriteCounts[0]
+        final fun <get-stateWriteCounts>(): kotlin.collections/Map<kotlin/String, kotlin/Long> // com.vynatix.holdfast.middleware/StoreProfile.stateWriteCounts.<get-stateWriteCounts>|<get-stateWriteCounts>(){}[0]
+    final val totalDuration // com.vynatix.holdfast.middleware/StoreProfile.totalDuration|{}totalDuration[0]
+        final fun <get-totalDuration>(): kotlin.time/Duration // com.vynatix.holdfast.middleware/StoreProfile.totalDuration.<get-totalDuration>|<get-totalDuration>(){}[0]
+    final val transactionCount // com.vynatix.holdfast.middleware/StoreProfile.transactionCount|{}transactionCount[0]
+        final fun <get-transactionCount>(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.transactionCount.<get-transactionCount>|<get-transactionCount>(){}[0]
+
+    final fun component1(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.holdfast.middleware/StoreProfile.component4|component4(){}[0]
+    final fun component5(): kotlin.time/Duration // com.vynatix.holdfast.middleware/StoreProfile.component5|component5(){}[0]
+    final fun component6(): com.vynatix.holdfast.middleware/TransactionSample? // com.vynatix.holdfast.middleware/StoreProfile.component6|component6(){}[0]
+    final fun component7(): kotlin.collections/Map<kotlin/String, kotlin/Long> // com.vynatix.holdfast.middleware/StoreProfile.component7|component7(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin.time/Duration = ..., com.vynatix.holdfast.middleware/TransactionSample? = ..., kotlin.collections/Map<kotlin/String, kotlin/Long> = ...): com.vynatix.holdfast.middleware/StoreProfile // com.vynatix.holdfast.middleware/StoreProfile.copy|copy(kotlin.Long;kotlin.Long;kotlin.Long;kotlin.Long;kotlin.time.Duration;com.vynatix.holdfast.middleware.TransactionSample?;kotlin.collections.Map<kotlin.String,kotlin.Long>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.middleware/StoreProfile.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.middleware/StoreProfile.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.middleware/StoreProfile.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.middleware/TransactionSample { // com.vynatix.holdfast.middleware/TransactionSample|null[0]
+    constructor <init>(kotlin/String, kotlin/String?, kotlin/Boolean, com.vynatix.holdfast/TransactionStatus, kotlin.time/Duration, kotlin.collections/Set<kotlin/String>) // com.vynatix.holdfast.middleware/TransactionSample.<init>|<init>(kotlin.String;kotlin.String?;kotlin.Boolean;com.vynatix.holdfast.TransactionStatus;kotlin.time.Duration;kotlin.collections.Set<kotlin.String>){}[0]
+
+    final val duration // com.vynatix.holdfast.middleware/TransactionSample.duration|{}duration[0]
+        final fun <get-duration>(): kotlin.time/Duration // com.vynatix.holdfast.middleware/TransactionSample.duration.<get-duration>|<get-duration>(){}[0]
+    final val frameId // com.vynatix.holdfast.middleware/TransactionSample.frameId|{}frameId[0]
+        final fun <get-frameId>(): kotlin/String? // com.vynatix.holdfast.middleware/TransactionSample.frameId.<get-frameId>|<get-frameId>(){}[0]
+    final val isSavepoint // com.vynatix.holdfast.middleware/TransactionSample.isSavepoint|{}isSavepoint[0]
+        final fun <get-isSavepoint>(): kotlin/Boolean // com.vynatix.holdfast.middleware/TransactionSample.isSavepoint.<get-isSavepoint>|<get-isSavepoint>(){}[0]
+    final val modifiedStates // com.vynatix.holdfast.middleware/TransactionSample.modifiedStates|{}modifiedStates[0]
+        final fun <get-modifiedStates>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast.middleware/TransactionSample.modifiedStates.<get-modifiedStates>|<get-modifiedStates>(){}[0]
+    final val status // com.vynatix.holdfast.middleware/TransactionSample.status|{}status[0]
+        final fun <get-status>(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast.middleware/TransactionSample.status.<get-status>|<get-status>(){}[0]
+    final val transactionId // com.vynatix.holdfast.middleware/TransactionSample.transactionId|{}transactionId[0]
+        final fun <get-transactionId>(): kotlin/String // com.vynatix.holdfast.middleware/TransactionSample.transactionId.<get-transactionId>|<get-transactionId>(){}[0]
+
+    final fun component1(): kotlin/String // com.vynatix.holdfast.middleware/TransactionSample.component1|component1(){}[0]
+    final fun component2(): kotlin/String? // com.vynatix.holdfast.middleware/TransactionSample.component2|component2(){}[0]
+    final fun component3(): kotlin/Boolean // com.vynatix.holdfast.middleware/TransactionSample.component3|component3(){}[0]
+    final fun component4(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast.middleware/TransactionSample.component4|component4(){}[0]
+    final fun component5(): kotlin.time/Duration // com.vynatix.holdfast.middleware/TransactionSample.component5|component5(){}[0]
+    final fun component6(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast.middleware/TransactionSample.component6|component6(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/TransactionStatus = ..., kotlin.time/Duration = ..., kotlin.collections/Set<kotlin/String> = ...): com.vynatix.holdfast.middleware/TransactionSample // com.vynatix.holdfast.middleware/TransactionSample.copy|copy(kotlin.String;kotlin.String?;kotlin.Boolean;com.vynatix.holdfast.TransactionStatus;kotlin.time.Duration;kotlin.collections.Set<kotlin.String>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.middleware/TransactionSample.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.middleware/TransactionSample.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.middleware/TransactionSample.toString|toString(){}[0]
 }
 
 final class com.vynatix.holdfast/FrameInteropException : com.vynatix.holdfast/FrameContractException { // com.vynatix.holdfast/FrameInteropException|null[0]

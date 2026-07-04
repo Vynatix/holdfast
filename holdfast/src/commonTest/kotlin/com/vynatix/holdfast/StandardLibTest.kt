@@ -7,7 +7,9 @@ import com.vynatix.holdfast.bridge.KvBridge
 import com.vynatix.holdfast.bridge.LongCodec
 import com.vynatix.holdfast.bridge.StringCodec
 import com.vynatix.holdfast.middleware.LoggingMiddleware
+import com.vynatix.holdfast.middleware.ProfilingMiddleware
 import com.vynatix.holdfast.middleware.TimingMiddleware
+import com.vynatix.holdfast.middleware.TransactionSample
 import com.vynatix.holdfast.middleware.ValidationMiddleware
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,6 +17,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 
 private class StdLibVault : Store<StdLibVault>() {
     val n by state { 0 }
@@ -116,6 +119,184 @@ class ValidationMiddlewareTest {
         val r = v action { balance mutate 100 }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(100L, v.balance.value)
+    }
+}
+
+class ProfilingMiddlewareTest {
+    @Test
+    fun profilingMiddlewareRecordsCommittedSampleWithModifiedStateNames() {
+        val v = StdLibVault()
+        val samples = mutableListOf<TransactionSample>()
+        val profiler = ProfilingMiddleware<StdLibVault>(samples::add)
+        v.middlewares(profiler)
+        v action { n mutate 1 }
+
+        assertEquals(1, samples.size)
+        val sample = samples[0]
+        assertEquals(TransactionStatus.Committed, sample.status)
+        assertEquals(setOf("n"), sample.modifiedStates)
+        assertTrue(!sample.isSavepoint)
+        assertNull(sample.frameId)
+        assertTrue(sample.duration >= Duration.ZERO)
+
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount)
+        assertEquals(1L, profile.committedCount)
+        assertEquals(0L, profile.rolledBackCount)
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
+        assertEquals(sample, profile.slowest)
+    }
+
+    @Test
+    fun profilingMiddlewareCountsRolledBackActivityWithoutChangingOutcome() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        v.middlewares(profiler)
+        val r =
+            v action {
+                n mutate 1
+                error("boom")
+            }
+
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(0, v.n.value, "rolled back to initial")
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount)
+        assertEquals(0L, profile.committedCount)
+        assertEquals(1L, profile.rolledBackCount)
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts, "staged writes count even when rolled back")
+    }
+
+    @Test
+    fun profilingMiddlewareAttributesSavepointsAndParentMerge() {
+        val v = StdLibVault()
+        val samples = mutableListOf<TransactionSample>()
+        val profiler = ProfilingMiddleware<StdLibVault>(samples::add)
+        v.middlewares(profiler)
+        v action {
+            s mutate "outer"
+            v action { n mutate 1 }
+        }
+
+        // Inner (savepoint) completes first, outer second.
+        assertEquals(2, samples.size)
+        val (inner, outer) = samples
+        assertTrue(inner.isSavepoint)
+        assertEquals(setOf("n"), inner.modifiedStates, "savepoint sample carries only its own writes")
+        assertTrue(!outer.isSavepoint)
+        assertEquals(setOf("s", "n"), outer.modifiedStates, "committed savepoint writes merge into the parent")
+
+        val profile = profiler.profile()
+        assertEquals(2L, profile.transactionCount)
+        assertEquals(1L, profile.savepointCount)
+        assertEquals(mapOf("s" to 1L, "n" to 2L), profile.stateWriteCounts)
+    }
+
+    @Test
+    fun profilingMiddlewareTracksSlowestAndDurations() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        v.middlewares(profiler)
+        v action { n mutate 1 }
+        v action { n mutate 2 }
+
+        val profile = profiler.profile()
+        assertEquals(2L, profile.transactionCount)
+        val slowest = assertNotNull(profile.slowest)
+        assertEquals(slowest.duration, profile.maxDuration)
+        assertTrue(profile.maxDuration >= profile.averageDuration)
+        assertTrue(profile.totalDuration >= profile.maxDuration)
+    }
+
+    @Test
+    fun profilingMiddlewareRecordsOnceWhenOnSampleThrows() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault> { error("sink failure") }
+        v.middlewares(profiler)
+        val r = v action { n mutate 1 }
+
+        // Sync path: the onSample throw propagates out of the completed hook and
+        // rolls the transaction back...
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(0, v.n.value, "rolled back to initial")
+        // ...and the subsequent error-hook re-entry must NOT record a second
+        // sample (the start mark was consumed by the first record).
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount, "one transaction, one sample")
+        assertEquals(1L, profile.committedCount, "hook-level attribution: completed fired first")
+        assertEquals(0L, profile.rolledBackCount)
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
+    }
+
+    @Test
+    fun profilingMiddlewareRecordsOnceWhenAtomicFrameIsVetoedByAnotherStore() {
+        val a = StdLibVault()
+        val b = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        a.middlewares(profiler)
+        b.middlewares(ValidationMiddleware<StdLibVault> { error("veto") })
+
+        val r =
+            atomic(a, b) {
+                a { n mutate 1 }
+                b { n mutate 2 }
+            }
+
+        // The frame rolls back everywhere; the frame's error fanout re-fires
+        // every participant's hooks, so without mark consumption A's profiler
+        // would double-record.
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(0, a.n.value, "frame rolled back on A")
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount, "one frame transaction, one sample")
+        assertEquals(
+            1L,
+            profile.committedCount + profile.rolledBackCount,
+            "attribution depends on cross-store hook order, but only one record exists",
+        )
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
+    }
+
+    @Test
+    fun profilingMiddlewareResetZeroesAggregatesButKeepsProfiling() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        v.middlewares(profiler)
+        v action { n mutate 1 }
+        val drained = profiler.reset()
+        assertEquals(1L, drained.transactionCount, "reset returns the final snapshot (lossless drain)")
+        assertEquals(mapOf("n" to 1L), drained.stateWriteCounts)
+
+        val cleared = profiler.profile()
+        assertEquals(0L, cleared.transactionCount)
+        assertNull(cleared.slowest)
+        assertTrue(cleared.stateWriteCounts.isEmpty())
+        assertEquals(Duration.ZERO, cleared.averageDuration)
+
+        v action { n mutate 2 }
+        assertEquals(1L, profiler.profile().transactionCount, "profiling continues after reset")
+    }
+
+    @Test
+    fun profilingMiddlewareProfileSnapshotIsDetached() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        v.middlewares(profiler)
+        v action { n mutate 1 }
+        val before = profiler.profile()
+        v action { s mutate "later" }
+        assertEquals(mapOf("n" to 1L), before.stateWriteCounts, "snapshot unaffected by later transactions")
+    }
+
+    @Test
+    fun profilingMiddlewareFiresForBareMutateOneShotAction() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        v.middlewares(profiler)
+        v { n mutate 7 }
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount, "bare mutate synthesizes a one-shot action")
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
     }
 }
 

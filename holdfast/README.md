@@ -122,7 +122,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 
 - **Transactional `action { }`** — atomic multi-state writes; body's return value flows into `TransactionResult.Success<R>`.
 - **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`.
-- **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, or your own.
+- **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, `ProfilingMiddleware`, or your own.
 - **Transformers** — normalize on write / project on read, including the asymmetric case where `set` and `get` produce different shapes.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
 - **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
@@ -164,6 +164,7 @@ and `com.vynatix.holdfast.crypto`:
 | `LoggingMiddleware<V>(tag, log)` | Trace every transaction's lifecycle |
 | `TimingMiddleware<V>(onResult)` | Wall-clock duration per transaction |
 | `ValidationMiddleware<V>(check)` | Post-body invariant check (throws → rollback) |
+| `ProfilingMiddleware<V>(onSample)` | Per-transaction profile (duration, outcome, written states) with aggregates via `profile()` |
 | `KvBridge<T>(kv, key, codec)` | Save-on-commit + load-on-attach via any `KvStore` |
 | `Codec<T>` (`StringCodec`, `LongCodec`, `IntCodec`, `BooleanCodec`) | Trivial encoders for common types |
 | `InMemoryKvStore` | Trivial KV impl for tests + dev |
