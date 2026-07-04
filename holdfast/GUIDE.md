@@ -1279,7 +1279,7 @@ class TimingMiddleware<V>(onResult: (id: String, status: TransactionStatus, elap
 class ValidationMiddleware<V>(check: V.() -> Unit)
 class ProfilingMiddleware<V>(onSample: ((TransactionSample) -> Unit)? = null) {
     fun profile(): StoreProfile
-    fun reset()
+    fun reset(): StoreProfile   // atomic drain: zeroes and returns the final snapshot
 }
 data class TransactionSample(transactionId, frameId, isSavepoint, status, duration, modifiedStates)
 data class StoreProfile(transactionCount, committedCount, rolledBackCount, savepointCount,
@@ -1295,12 +1295,19 @@ it sees errors thrown by validation middleware placed earlier.
 (body + inner middleware; commit fanout is excluded), outcome, savepoint and
 `frameId` identity, and which state properties were written. Read aggregates
 with `profile()` (per-state write counts, slowest sample, average/max
-duration), stream every sample via the `onSample` callback, and zero the
-counters with `reset()`. Its own bookkeeping never throws, so attaching it
-cannot change a transaction's outcome; under `suspendAction` a body that
-resumes on another thread yields a sample with empty `modifiedStates`
-(owner-thread-confined read) rather than an error. Register it LAST to
-profile the full middleware chain, or first to profile the bare body.
+duration), stream every sample via the `onSample` callback, and drain with
+`reset()` — it atomically zeroes the counters and returns the final
+snapshot, so periodic collection is lossless. Its own bookkeeping never
+throws, so attaching it cannot change a transaction's outcome; under
+`suspendAction` a body that resumes on another thread yields a sample with
+empty `modifiedStates` (owner-thread-confined read) rather than an error.
+Each transaction is recorded at most once, and `status` is hook-level
+attribution: `Committed` means the completed hook fired (before commit), so
+a LATER throw — an outer middleware, or another participant vetoing an
+`atomic` frame — can leave a `Committed` count for a rolled-back
+transaction. Register it LAST to profile the full middleware chain with
+exact sync attribution, or first to profile the bare body at the cost of
+that accuracy.
 
 ### 14.7 `KvBridge` + `Codec` + `KvStore` (`com.vynatix.holdfast.bridge`)
 

@@ -462,7 +462,7 @@ public final class com/vynatix/holdfast/middleware/ProfilingMiddleware : com/vyn
 	public fun <init> (Lkotlin/jvm/functions/Function1;)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun profile ()Lcom/vynatix/holdfast/middleware/StoreProfile;
-	public final fun reset ()V
+	public final fun reset ()Lcom/vynatix/holdfast/middleware/StoreProfile;
 }
 
 public final class com/vynatix/holdfast/middleware/StoreProfile {

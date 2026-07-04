@@ -15,8 +15,10 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   outcome, savepoint/`frameId` identity, and the names of the state
   properties written; streams each finished transaction as a
   `TransactionSample` via an optional `onSample` callback and aggregates
-  into a `StoreProfile` (`profile()`/`reset()`) with per-state write
-  counts, slowest sample, and total/max/average durations. Purely
+  into a `StoreProfile` — read with `profile()`, or drain atomically with
+  `reset()` (zeroes the counters and returns the final snapshot, so
+  periodic collection is lossless) — with per-state write counts, slowest
+  sample, and total/max/average durations. Purely
   observational — its own bookkeeping never throws, so attaching it cannot
   change a transaction's outcome; when state-name attribution is illegal
   (owner-thread-confined read after a `suspendAction` thread hop) the

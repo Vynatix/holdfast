@@ -16,6 +16,14 @@ import kotlin.time.TimeSource
  * inner middleware, but NOT the commit fanout (observers, bridge publish,
  * event drain), which happens after the middleware chain unwinds.
  *
+ * [status] reports which hook produced the sample, not the final fate of the
+ * writes: [TransactionStatus.Committed] means the profiler's completed hook
+ * fired (the commit follows unless a LATER hook — an outer middleware, or
+ * another participant of the enclosing `atomic` frame — throws afterwards);
+ * [TransactionStatus.RolledBack] means the error hook fired. With the profiler
+ * registered last (outermost, the recommended order) the attribution is exact
+ * for plain sync actions.
+ *
  * [modifiedStates] holds the property names of the states this transaction
  * staged writes for. For a savepoint sample, only the savepoint's own writes;
  * a committed savepoint's writes merge into the parent and so surface again in
@@ -40,6 +48,11 @@ data class TransactionSample(
  * transactions that staged a write for it, regardless of outcome — it measures
  * mutation activity, not committed results (check [rolledBackCount] to see how
  * much activity was discarded).
+ *
+ * `derived()` recomputations run in their own post-commit transactions, so a
+ * store with derived states shows extra samples (one per recompute) and
+ * synthetic `__derived_N` entries here for the derived backing states. That is
+ * real transaction activity, not a bug.
  */
 data class StoreProfile(
     val transactionCount: Long,
@@ -67,8 +80,12 @@ data class StoreProfile(
  * transaction (e.g. into a metrics pipeline or a test fixture).
  *
  * Purely observational: it never throws from its own bookkeeping, so attaching
- * it cannot change a transaction's outcome. (An [onSample] callback that throws
- * DOES propagate and roll back, like any middleware hook — keep it passive.)
+ * it cannot change a transaction's outcome. An [onSample] callback that throws
+ * is NOT isolated, and what happens depends on the action flavor: under sync
+ * `action` it propagates and rolls the transaction back (like any middleware
+ * hook), while under `:holdfast-coroutines.suspendAction` the per-hook
+ * `runCatching` isolation swallows it and the commit proceeds. Keep the
+ * callback passive either way.
  *
  * State-name attribution reads [com.vynatix.holdfast.Transaction.modifiedStates],
  * which is owner-thread-confined. Under `:holdfast-coroutines.suspendAction` a
@@ -76,9 +93,19 @@ data class StoreProfile(
  * the sample is still recorded but with empty [TransactionSample.modifiedStates]
  * rather than failing the transaction.
  *
+ * [TransactionSample.status] is hook-level attribution: `Committed` means the
+ * completed hook fired BEFORE the commit applied (see [TransactionSample]),
+ * so a hook that throws later — an outer middleware, or another store of an
+ * `atomic` frame vetoing the frame — leaves a durable `Committed` count for a
+ * transaction that actually rolled back. Each transaction is recorded at most
+ * once (the completed hook consumes the start mark, so a subsequent error
+ * hook for the same transaction — sync re-fire or an `atomic` frame's error
+ * fanout — does not double-count).
+ *
  * Register LAST in `store.middlewares(...)` to profile the full chain
- * (last-registered is outermost, so its clock brackets inner middleware);
- * register first to profile the bare action body.
+ * (last-registered is outermost, so its clock brackets inner middleware and
+ * sync outcome attribution is exact); registering first profiles the bare
+ * action body at the cost of that outcome accuracy.
  *
  * Example:
  * ```
@@ -118,22 +145,29 @@ class ProfilingMiddleware<V : Store<V>>(
     }
 
     /** Snapshot of everything profiled since construction or the last [reset]. */
-    fun profile(): StoreProfile =
-        lock.withLock {
-            StoreProfile(
-                transactionCount = transactionCount,
-                committedCount = committedCount,
-                rolledBackCount = rolledBackCount,
-                savepointCount = savepointCount,
-                totalDuration = totalDuration,
-                slowest = slowest,
-                stateWriteCounts = stateWriteCounts.toMap(),
-            )
-        }
+    fun profile(): StoreProfile = lock.withLock { snapshotLocked() }
 
-    /** Zero all aggregates. Does not detach the middleware; profiling continues. */
-    fun reset() {
+    /** Build an immutable snapshot of the aggregates. Callers must hold [lock]. */
+    private fun snapshotLocked(): StoreProfile =
+        StoreProfile(
+            transactionCount = transactionCount,
+            committedCount = committedCount,
+            rolledBackCount = rolledBackCount,
+            savepointCount = savepointCount,
+            totalDuration = totalDuration,
+            slowest = slowest,
+            stateWriteCounts = stateWriteCounts.toMap(),
+        )
+
+    /**
+     * Atomically zero all aggregates and return the final snapshot. Nothing
+     * recorded between the snapshot and the zeroing can be lost, so periodic
+     * scrape-into-a-metrics-pipeline collection is lossless. Does not detach
+     * the middleware; profiling continues.
+     */
+    fun reset(): StoreProfile =
         lock.withLock {
+            val drained = snapshotLocked()
             transactionCount = 0L
             committedCount = 0L
             rolledBackCount = 0L
@@ -141,14 +175,19 @@ class ProfilingMiddleware<V : Store<V>>(
             totalDuration = Duration.ZERO
             slowest = null
             stateWriteCounts.clear()
+            drained
         }
-    }
 
     private fun record(
         context: MiddlewareContext<V>,
         status: TransactionStatus,
     ) {
-        val mark = context.metadata[KEY_START_MARK] as? TimeSource.Monotonic.ValueTimeMark ?: return
+        // CONSUME the mark (remove, not read): the same context serves both the
+        // completed and error hooks, and both can fire for one transaction — a
+        // sync onSample throw re-enters via the error hook, and an atomic
+        // frame's error fanout re-fires every hook. The second record() must
+        // bail here or every aggregate double-counts.
+        val mark = context.metadata.remove(KEY_START_MARK) as? TimeSource.Monotonic.ValueTimeMark ?: return
         val transaction = context.transaction
         val sample =
             TransactionSample(
@@ -167,7 +206,11 @@ class ProfilingMiddleware<V : Store<V>>(
             }
             if (sample.isSavepoint) savepointCount++
             totalDuration += sample.duration
-            if (sample.duration > (slowest?.duration ?: Duration.ZERO)) slowest = sample
+            // The null check must win even at Duration.ZERO: on coarse monotonic
+            // clocks every duration can be exactly ZERO, and slowest must still
+            // be non-null once anything was profiled.
+            val prior = slowest
+            if (prior == null || sample.duration > prior.duration) slowest = sample
             sample.modifiedStates.forEach { name ->
                 stateWriteCounts[name] = (stateWriteCounts[name] ?: 0L) + 1L
             }

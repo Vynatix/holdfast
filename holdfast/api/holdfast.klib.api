@@ -212,7 +212,7 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.middleware
     constructor <init>(kotlin/Function1<com.vynatix.holdfast.middleware/TransactionSample, kotlin/Unit>? = ...) // com.vynatix.holdfast.middleware/ProfilingMiddleware.<init>|<init>(kotlin.Function1<com.vynatix.holdfast.middleware.TransactionSample,kotlin.Unit>?){}[0]
 
     final fun profile(): com.vynatix.holdfast.middleware/StoreProfile // com.vynatix.holdfast.middleware/ProfilingMiddleware.profile|profile(){}[0]
-    final fun reset() // com.vynatix.holdfast.middleware/ProfilingMiddleware.reset|reset(){}[0]
+    final fun reset(): com.vynatix.holdfast.middleware/StoreProfile // com.vynatix.holdfast.middleware/ProfilingMiddleware.reset|reset(){}[0]
 }
 
 final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.middleware/TimingMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.middleware/TimingMiddleware|null[0]

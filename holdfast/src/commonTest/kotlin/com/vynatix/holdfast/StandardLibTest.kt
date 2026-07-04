@@ -202,10 +202,59 @@ class ProfilingMiddlewareTest {
 
         val profile = profiler.profile()
         assertEquals(2L, profile.transactionCount)
-        assertNotNull(profile.slowest)
-        assertEquals(profile.slowest!!.duration, profile.maxDuration)
+        val slowest = assertNotNull(profile.slowest)
+        assertEquals(slowest.duration, profile.maxDuration)
         assertTrue(profile.maxDuration >= profile.averageDuration)
         assertTrue(profile.totalDuration >= profile.maxDuration)
+    }
+
+    @Test
+    fun profilingMiddlewareRecordsOnceWhenOnSampleThrows() {
+        val v = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault> { error("sink failure") }
+        v.middlewares(profiler)
+        val r = v action { n mutate 1 }
+
+        // Sync path: the onSample throw propagates out of the completed hook and
+        // rolls the transaction back...
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(0, v.n.value, "rolled back to initial")
+        // ...and the subsequent error-hook re-entry must NOT record a second
+        // sample (the start mark was consumed by the first record).
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount, "one transaction, one sample")
+        assertEquals(1L, profile.committedCount, "hook-level attribution: completed fired first")
+        assertEquals(0L, profile.rolledBackCount)
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
+    }
+
+    @Test
+    fun profilingMiddlewareRecordsOnceWhenAtomicFrameIsVetoedByAnotherStore() {
+        val a = StdLibVault()
+        val b = StdLibVault()
+        val profiler = ProfilingMiddleware<StdLibVault>()
+        a.middlewares(profiler)
+        b.middlewares(ValidationMiddleware<StdLibVault> { error("veto") })
+
+        val r =
+            atomic(a, b) {
+                a { n mutate 1 }
+                b { n mutate 2 }
+            }
+
+        // The frame rolls back everywhere; the frame's error fanout re-fires
+        // every participant's hooks, so without mark consumption A's profiler
+        // would double-record.
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(0, a.n.value, "frame rolled back on A")
+        val profile = profiler.profile()
+        assertEquals(1L, profile.transactionCount, "one frame transaction, one sample")
+        assertEquals(
+            1L,
+            profile.committedCount + profile.rolledBackCount,
+            "attribution depends on cross-store hook order, but only one record exists",
+        )
+        assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
     }
 
     @Test
@@ -214,7 +263,9 @@ class ProfilingMiddlewareTest {
         val profiler = ProfilingMiddleware<StdLibVault>()
         v.middlewares(profiler)
         v action { n mutate 1 }
-        profiler.reset()
+        val drained = profiler.reset()
+        assertEquals(1L, drained.transactionCount, "reset returns the final snapshot (lossless drain)")
+        assertEquals(mapOf("n" to 1L), drained.stateWriteCounts)
 
         val cleared = profiler.profile()
         assertEquals(0L, cleared.transactionCount)
