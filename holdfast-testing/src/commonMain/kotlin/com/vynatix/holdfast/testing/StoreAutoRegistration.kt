@@ -9,13 +9,13 @@ import kotlin.reflect.KProperty1
 
 /**
  * Member-extension surface that lets tests skip explicit [StoreTestScope.track]
- * and call action / read / timeline / emissions / etc. directly on a
+ * and call act / read / timeline / emissions / etc. directly on a
  * [Store] instance inside a [storeTest] block:
  *
  * ```
  * @Test fun implicit() = storeTest {
  *     val v = MyStore()
- *     v.action { count mutate 1 }                  // member of Store, sees recorder if installed
+ *     v.act { count mutate 1 }                     // auto-registers, tracked action
  *     assertEquals(1, v.read { count.value })      // extension — auto-registers on first touch
  * }
  * ```
@@ -44,23 +44,18 @@ import kotlin.reflect.KProperty1
  * extension-call site so the registry's idempotent-by-identity rule attaches
  * the right [Capture] to the handle.
  *
- * **Important caveat — `v.action {}` does NOT auto-register**. [com.vynatix.holdfast.Store]
- * declares `action` as a member infix function, and Kotlin's resolution rules
- * always prefer a class member over an extension of the same shape. The
- * auto-registration extension `V.action` declared here is therefore shadowed
- * by `Store.action` whenever the call site is `v.action { ... }`. The
- * extension is still kept in the API surface — it routes through
- * [StoreHandle.action] for explicit-receiver call paths and is the natural
- * spec-compliant declaration — but in practice the recorder fires for
- * `v.action {}` only when one of the **other** extensions has already
- * triggered auto-registration (or the user has called [track] explicitly).
- * The same caveat does NOT apply to [V.suspendAction]: `Store` has no
+ * **Important caveat — never call `v.action {}` expecting tracking.**
+ * [com.vynatix.holdfast.Store] declares `action` as a member infix function,
+ * and Kotlin resolution always prefers a class member over any extension of
+ * the same shape — so no `V.action` extension can ever intercept that call
+ * (an earlier one existed here and was dead code; it has been removed). On an
+ * untracked store, `v.action {}` records nothing and its errors bypass the
+ * pending-error guard. Use [act] (`v.act { ... }`), `track(v)` upfront, or
+ * `handle.action { ... }` instead; once the store is tracked, plain
+ * `v.action {}` calls DO reach the recorder through the middleware chain, but
+ * their results still skip [StoreHandle.lastResult] and the pending-error
+ * guard. The caveat does not apply to [V.suspendAction]: `Store` has no
  * matching member, so the member-extension wins.
- *
- * Practical pattern: trigger auto-registration once via any non-action
- * extension (`v.read { }`, `v.timeline`, etc.) BEFORE the first
- * `v.action { }`, OR call `track(v)` upfront. Once the recorder is installed,
- * subsequent `v.action {}` calls fire it through `Store`'s middleware chain.
  *
  * The single exception to "all extensions live in this interface" is
  * [middlewareEventsOf] with a reified type parameter — declared on
@@ -83,18 +78,20 @@ interface StoreAutoRegistration {
     ): StoreHandle<V>
 
     /**
-     * Auto-registering wrapper around [StoreHandle.action]. Calls
-     * [track] on `this` first (idempotent), then forwards to the handle's
+     * Auto-registering, tracked action. Calls [track] on `this` first
+     * (idempotent), then forwards to the handle's
      * [com.vynatix.holdfast.testing.StoreHandle.action]. Returns the
-     * [TransactionResult] verbatim; pending-error tracking applies.
+     * [TransactionResult] verbatim; the result feeds
+     * [StoreHandle.lastResult] and — for [TransactionResult.Error] — the
+     * scope-exit pending-error guard, exactly like `handle.action { }`.
      *
-     * **Caveat**: This extension is shadowed by [com.vynatix.holdfast.Store.action],
-     * the member infix function on `Store`, whenever the call site is
-     * `v.action { ... }`. The shadow rule is Kotlin's standard member-vs-
-     * extension precedence and cannot be overridden. See the
-     * [StoreAutoRegistration] file-level KDoc for the practical pattern.
+     * Named `act` (not `action`) deliberately: [com.vynatix.holdfast.Store.action]
+     * is a member infix function and Kotlin resolution always prefers a class
+     * member over an extension of the same shape, so a `V.action` extension
+     * here could never be called. `v.act { ... }` cannot collide and always
+     * routes through the tracked handle.
      */
-    fun <V : Store<V>, R> V.action(body: V.() -> R): TransactionResult<R> = track(this).action(body)
+    fun <V : Store<V>, R> V.act(body: V.() -> R): TransactionResult<R> = track(this).action(body)
 
     /**
      * Auto-registering wrapper around [StoreHandle.suspendAction]. Calls

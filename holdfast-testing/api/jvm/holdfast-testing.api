@@ -124,7 +124,7 @@ public final class com/vynatix/holdfast/testing/MiddlewareStarted : com/vynatix/
 }
 
 public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistration {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public fun act (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun getLastResult (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -139,7 +139,7 @@ public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistrati
 }
 
 public final class com/vynatix/holdfast/testing/StoreAutoRegistration$DefaultImpls {
-	public static fun action (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public static fun act (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public static fun bridgeEvents (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun emissions (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun getLastResult (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -181,7 +181,7 @@ public final class com/vynatix/holdfast/testing/StoreTestKt {
 }
 
 public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/holdfast/testing/StoreAutoRegistration, kotlinx/coroutines/CoroutineScope {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public fun act (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun autoTrackTimeline (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;

@@ -23,15 +23,15 @@ private class AutoRegNoopMiddleware : Middleware<AutoRegVault>()
 
 /**
  * Self-tests for the [StoreAutoRegistration] member-extension surface that
- * lets tests skip explicit [StoreTestScope.track] and call action / read /
+ * lets tests skip explicit [StoreTestScope.track] and call act / read /
  * timeline / etc. directly on a [Store] instance.
  */
 class AutoRegistrationTest {
     @Test
-    fun actionAutoRegistersAndCommits() =
+    fun actAutoRegistersAndCommits() =
         storeTest {
             val v = AutoRegVault()
-            val result = v.action { n mutate 5 }
+            val result = v.act { n mutate 5 }
             result.shouldBeSuccess()
             assertEquals(5, v.read { n.value })
         }
@@ -46,27 +46,43 @@ class AutoRegistrationTest {
         }
 
     @Test
-    fun timelineReflectsAutoRegisteredAction() =
+    fun timelineReflectsActWithoutWarmUp() =
         storeTest {
             val v = AutoRegVault()
-            // Trigger auto-registration FIRST via a non-conflicting extension so
-            // the recorder is in place when v.action runs. Store.action is a
-            // member function and shadows the V.action extension — the extension
-            // never auto-registers; see StoreAutoRegistration's file KDoc.
-            v.read { } // installs the recorder via auto-registration
-            v.action { n mutate 5 }.shouldBeSuccess()
+            // act auto-registers the store and routes through the handle, so no
+            // warm-up read is needed — the recorder is installed before the
+            // transaction runs.
+            v.act { n mutate 5 }.shouldBeSuccess()
 
-            // Auto-registered handle's timeline should reflect the action.
             assertTrue(v.timeline.isNotEmpty(), "expected timeline to record events, got empty")
             assertNotNull(v.lastTransaction)
+        }
+
+    @Test
+    fun rawStoreActionOnUntrackedStoreBypassesTracking() =
+        storeTest {
+            // REGRESSION PIN for the member-shadow trap: Store.action is a member
+            // infix function and always wins resolution, so calling it on an
+            // UNTRACKED store cannot auto-register — nothing is recorded and its
+            // errors bypass the pending-error guard. Use act/track/handle.action.
+            val v = AutoRegVault()
+            (v action { n mutate 5 }).shouldBeSuccess()
+
+            // The store committed (production behavior is unchanged)...
+            assertEquals(5, v.read { n.value })
+            // ...but the action ran BEFORE tracking, so the timeline is empty and
+            // no transaction/result was captured. (The v.timeline read itself
+            // auto-registered the store just now — too late for the action.)
+            assertTrue(v.timeline.none { it is TransactionEvent }, "expected no recorded transactions, got ${v.timeline}")
+            assertNull(v.lastTransaction)
+            assertNull(v.lastResult)
         }
 
     @Test
     fun emissionsAutoRegistersAndFiltersByProperty() =
         storeTest {
             val v = AutoRegVault()
-            v.read { } // install recorder via auto-registration before the action
-            v.action { n mutate 7 }.shouldBeSuccess()
+            v.act { n mutate 7 }.shouldBeSuccess()
 
             // emissions(::prop) should work on the auto-registered handle.
             val em = v.emissions(AutoRegVault::n)
@@ -82,9 +98,8 @@ class AutoRegistrationTest {
     fun transactionsAutoRegistersAndFiltersToTransactionEvents() =
         storeTest {
             val v = AutoRegVault()
-            v.read { } // install recorder via auto-registration before the actions
-            v.action { n mutate 1 }.shouldBeSuccess()
-            v.action { n mutate 2 }.shouldBeSuccess()
+            v.act { n mutate 1 }.shouldBeSuccess()
+            v.act { n mutate 2 }.shouldBeSuccess()
 
             // 2 starts + 2 commits = 4 transaction events.
             val tx = v.transactions
@@ -97,8 +112,7 @@ class AutoRegistrationTest {
     fun bridgeEventsAutoRegistersAndIsEmptyInV1() =
         storeTest {
             val v = AutoRegVault()
-            v.read { } // install recorder via auto-registration before the action
-            v.action { n mutate 1 }.shouldBeSuccess()
+            v.act { n mutate 1 }.shouldBeSuccess()
             // No bridge attached, so this view is empty for both states.
             assertTrue(v.bridgeEvents(AutoRegVault::n).isEmpty())
             assertTrue(v.bridgeEvents(AutoRegVault::label).isEmpty())
@@ -108,8 +122,7 @@ class AutoRegistrationTest {
     fun middlewareEventsOfReifiedAutoRegisters() =
         storeTest {
             val v = AutoRegVault()
-            v.read { } // install recorder via auto-registration before the action
-            v.action { n mutate 1 }.shouldBeSuccess()
+            v.act { n mutate 1 }.shouldBeSuccess()
 
             // The recorder pushes self-events for itself, so the typed view for any
             // user class is empty in v1 (see StoreEvent KDoc).
@@ -122,8 +135,7 @@ class AutoRegistrationTest {
             val v = AutoRegVault()
             val m = AutoRegNoopMiddleware()
             v.middlewares(m)
-            v.read { } // install recorder via auto-registration before the action
-            v.action { n mutate 1 }.shouldBeSuccess()
+            v.act { n mutate 1 }.shouldBeSuccess()
 
             // The instance overload returns empty for user-installed middlewares —
             // matches the v1 caveat documented on StoreHandle.middlewareEventsOf.
@@ -148,11 +160,10 @@ class AutoRegistrationTest {
     fun multipleAutoRegisteringCallsShareSameHandle() =
         storeTest {
             val v = AutoRegVault()
-            v.read { } // install recorder via auto-registration before the actions
             // Three different extension types — all should resolve through the same
             // handle, so the timeline accumulates across them.
-            v.action { n mutate 1 }.shouldBeSuccess()
-            v.action { n mutate 2 }.shouldBeSuccess()
+            v.act { n mutate 1 }.shouldBeSuccess()
+            v.act { n mutate 2 }.shouldBeSuccess()
             val readBack = v.read { n.value }
             assertEquals(2, readBack)
 
@@ -170,8 +181,9 @@ class AutoRegistrationTest {
             assertNull(explicit.lastTransaction, "no action ran yet")
 
             // Store.action goes through the middleware chain (recorder is installed),
-            // so events are captured even though Store.action shadows the extension.
-            v.action { n mutate 5 }.shouldBeSuccess()
+            // so events are captured even though the member function bypasses the
+            // handle's result bookkeeping.
+            (v action { n mutate 5 }).shouldBeSuccess()
 
             // The explicit handle should reflect the action.
             assertNotNull(explicit.lastTransaction)
@@ -185,9 +197,8 @@ class AutoRegistrationTest {
     fun implicitThenExplicitTrackReturnsSameHandle() =
         storeTest {
             val v = AutoRegVault()
-            // Auto-register first via the read extension (installs recorder).
-            v.read { }
-            v.action { n mutate 3 }.shouldBeSuccess()
+            // Auto-register first via act (installs the recorder and runs the action).
+            v.act { n mutate 3 }.shouldBeSuccess()
 
             // Now ask for the handle explicitly — registry should be idempotent.
             val explicit = track(v)
@@ -203,7 +214,7 @@ class AutoRegistrationTest {
             // Pre-register with Capture.None — the registry's idempotency rule means
             // a later auto-reg call reuses this handle, so the capture mode sticks.
             track(v, Capture.None)
-            v.action { n mutate 4 }.shouldBeSuccess()
+            v.act { n mutate 4 }.shouldBeSuccess()
 
             // Capture.None records nothing; verify via the auto-registered view too.
             assertTrue(v.timeline.isEmpty(), "expected empty timeline for Capture.None, got ${v.timeline}")
@@ -223,8 +234,7 @@ class AutoRegistrationTest {
         val outerVault = AutoRegVault()
 
         storeTest {
-            outerVault.read { } // installs recorder via auto-reg
-            outerVault.action { n mutate 5 }.shouldBeSuccess()
+            outerVault.act { n mutate 5 }.shouldBeSuccess()
             assertTrue(outerVault.timeline.isNotEmpty())
         }
 
@@ -236,6 +246,20 @@ class AutoRegistrationTest {
             assertNull(outerVault.lastResult)
         }
     }
+
+    @Test
+    fun actErrorIsRecordedInPendingErrors() =
+        storeTest {
+            val v = AutoRegVault()
+            // act routes through StoreHandle.action — feeding the per-handle
+            // pendingErrors list and the lastResult slot. The shouldBeError
+            // matcher consumes the pending mark so the scope-exit guard
+            // doesn't fire.
+            val ise = IllegalStateException("boom")
+            val result: TransactionResult<Unit> = v.act { throw ise }
+            assertSame(result as TransactionResult<*>, v.lastResult)
+            result.shouldBeError<IllegalStateException> { assertSame(ise, exception) }
+        }
 
     @Test
     fun suspendActionErrorIsRecordedInPendingErrorsViaAutoRegistration() =
@@ -256,10 +280,9 @@ class AutoRegistrationTest {
         storeTest {
             val v = AutoRegVault()
             // Use the explicit handle for the action so StoreHandle.action records
-            // the result — Store.action (the member, the shadowing function) does
-            // not feed the handle's lastResult slot. The auto-reg view of
-            // lastResult routes through the SAME handle, so it sees the same
-            // result.
+            // the result — Store.action (the member function) does not feed the
+            // handle's lastResult slot. The auto-reg view of lastResult routes
+            // through the SAME handle, so it sees the same result.
             val handle = track(v)
             val ok = handle.action { n mutate 1 }
             assertSame(ok as TransactionResult<*>, v.lastResult)
