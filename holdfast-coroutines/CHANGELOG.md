@@ -40,6 +40,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holder thread id (safe on single-threaded wasmJs, where every caller
   reports id 0). This is also the prerequisite for core's new
   `atomic`-acquires-the-serializer bracket (see `:holdfast`'s changelog).
+- **`SuspendingKvBridge.publishAwaited` no longer swallows persistence
+  failures** (F13). It emits the throwable on `errors` (existing collectors
+  keep working) and then rethrows, so a failed `store.put` under
+  `suspendAction`/`suspendAtomic` surfaces as `TransactionResult.Error`
+  instead of a false success. The contract is ordering plus a surfaced
+  error — not rollback: the in-memory commit and observer fanout have
+  already applied when the bridge-publish phase fails. Fire-and-forget
+  paths (sync `action { }` via the conflated drainer) still report only
+  via the `errors` flow, since a rethrow inside `scope.launch` would crash
+  the scope instead of reporting.
+
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
   outer root; a failed nested frame discards only its own writes.

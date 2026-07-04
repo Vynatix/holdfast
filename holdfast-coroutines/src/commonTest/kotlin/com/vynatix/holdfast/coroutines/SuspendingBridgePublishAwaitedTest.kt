@@ -10,6 +10,7 @@ import com.vynatix.holdfast.bridge.StringCodec
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -242,6 +244,77 @@ class SuspendingBridgePublishAwaitedTest {
         }
 
     /**
+     * F13: a failing `store.put` under `suspendAction` surfaces as
+     * `TransactionResult.Error` (publishAwaited emits on `errors`, then
+     * rethrows) — AND the in-memory commit has already applied. The contract
+     * is a surfaced error, not rollback.
+     */
+    @Test
+    fun failingPutUnderSuspendActionSurfacesErrorAndKeepsMemoryCommit() =
+        runBlocking {
+            val boom = RuntimeException("disk full")
+            val store = FailingPutSuspendingKvStore(boom)
+            val awaiting = store.suspendingBridge("k", IntCodec, scope = testScope)
+
+            val v = TwoFieldVault()
+            v.action { n bridge awaiting }
+
+            val seen = mutableListOf<Throwable>()
+            val collector =
+                testScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    awaiting.errors.collect { seen.add(it) }
+                }
+
+            val r = v.suspendAction { n mutate 7 }
+
+            assertIs<TransactionResult.Error>(r)
+            assertSame(boom, r.exception)
+            // In-memory commit already applied — observers fired, state visible.
+            assertEquals(7, v.n.value)
+            // The errors flow saw the same throwable (emit-then-throw).
+            withTimeoutOrNull(2_000) {
+                while (seen.isEmpty()) delay(10)
+            }
+            assertSame(boom, seen.single())
+            collector.cancel()
+            Unit
+        }
+
+    /**
+     * F13 counterpart: under sync `action { }` the same failing put stays
+     * fire-and-forget — the action reports `Success`, and the failure surfaces
+     * only on the `errors` flow (rethrowing inside the drainer's scope.launch
+     * would crash the scope's uncaught handler instead of reporting).
+     */
+    @Test
+    fun failingPutUnderSyncActionStaysSuccessAndReportsOnErrorsFlow() =
+        runBlocking {
+            val boom = RuntimeException("disk full")
+            val store = FailingPutSuspendingKvStore(boom)
+            val awaiting = store.suspendingBridge("k", IntCodec, scope = testScope)
+
+            val v = TwoFieldVault()
+            v.action { n bridge awaiting }
+
+            val seen = mutableListOf<Throwable>()
+            val collector =
+                testScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    awaiting.errors.collect { seen.add(it) }
+                }
+
+            val r = v.action { n mutate 7 }
+
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(7, v.n.value)
+            withTimeoutOrNull(2_000) {
+                while (seen.isEmpty()) delay(10)
+            }
+            assertSame(boom, seen.firstOrNull(), "drainer failure must land on errors; saw $seen")
+            collector.cancel()
+            Unit
+        }
+
+    /**
      * A plain `Bridge` over a `SuspendingKvStore` retains fire-and-forget
      * semantics under `suspendAction` too — only `SuspendingBridge` triggers
      * the await interpose. This guards against an over-eager `is`-check.
@@ -343,6 +416,22 @@ class SuspendingBridgeDedupTest {
             // Exact: one put for the first apply, none for the deduped second.
             assertEquals(1, store.puts["myKey"], "expected exactly one put; saw ${store.puts}")
         }
+}
+
+/** Always throws [boom] on `put` — feeds the F13 error-surfacing tests. */
+private class FailingPutSuspendingKvStore(
+    private val boom: Throwable,
+) : SuspendingKvStore {
+    override suspend fun get(key: String): String? = null
+
+    override suspend fun put(
+        key: String,
+        value: String,
+    ): Unit = throw boom
+
+    override suspend fun remove(key: String) = Unit
+
+    override suspend fun snapshot(): Map<String, String> = emptyMap()
 }
 
 /**

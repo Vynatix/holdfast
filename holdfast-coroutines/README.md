@@ -54,6 +54,14 @@ channel (rapid publishes coalesce — only the latest value is guaranteed to
 land). The old `bridge(...)` factory is a WARNING-level deprecated alias that
 returns the same type.
 
+The awaited path's failure contract is **ordering plus a surfaced error, not
+rollback**: when `store.put` throws, the in-memory commit has already applied
+and observers have already fired — the `suspendAction` returns
+`TransactionResult.Error` naming the persistence exception, and the same
+throwable is emitted on the bridge's `errors: SharedFlow<Throwable>`.
+Fire-and-forget failures (sync `action { }`) surface only on `errors`; attach
+a collector if you care about persistence reliability.
+
 ## Examples
 
 ### Cold Flow over a state

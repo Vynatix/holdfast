@@ -1369,6 +1369,15 @@ rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
 cancels mid-commit.
 
+`suspendingBridge(...)`'s product is awaited by `suspendAction`'s commit
+phase; under sync `action { }` it saves fire-and-forget through a conflated
+channel (rapid publishes coalesce). The awaited path's failure contract is
+ordering plus a surfaced error, not rollback: a `publishAwaited` throw
+surfaces as `TransactionResult.Error` after the in-memory commit and
+observer fanout have already applied, and the same throwable is emitted on
+the bridge's `errors` flow. Fire-and-forget failures surface only on
+`errors`.
+
 `Middleware<V>` sync hooks fire on `suspendAction` as well as `action`
 (2.0; was a documented no-op limitation in 1.1). Concentric-ring ordering:
 `onTransactionStarted` runs in chain order before the body, `onTransactionCompleted`
@@ -1847,8 +1856,11 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
 
 `suspendAtomic` follows the same phases with the suspending machinery: the
 per-store `AsyncSerializer` mutex instead of the blocking lock, commit under
-`withContext(NonCancellable)`, `SuspendingBridge.publishAwaited` awaited, and
-the event drain honoring `BufferOverflow.SUSPEND` back-pressure.
+`withContext(NonCancellable)`, `SuspendingBridge.publishAwaited` awaited —
+a `publishAwaited` throw surfaces as `TransactionResult.Error` with the
+in-memory commit and observer fanout already applied (surfaced error, not
+rollback) — and the event drain honoring `BufferOverflow.SUSPEND`
+back-pressure.
 (One caveat: `SuspendingMiddlewareHooks` async hooks do not fire for frame
 roots yet — sync hooks do.)
 

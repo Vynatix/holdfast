@@ -32,11 +32,17 @@ interface SuspendingBridge<T : Any> : Bridge<T> {
      * wraps every call in `withContext(NonCancellable)` so a caller's
      * cancellation cannot abandon the write midway.
      *
-     * Throwing surfaces as a failed transaction commit
-     * ([com.vynatix.holdfast.TransactionResult.Error]). Implementations that
-     * also publish failures on a hot `errors` flow (e.g. [SuspendingKvBridge])
-     * may emit there in addition to throwing — the contract is that **either
-     * the value was accepted or an error was surfaced**.
+     * **Failure contract — ordering plus a surfaced error, NOT rollback.**
+     * A throw from this method surfaces the surrounding `suspendAction` /
+     * `suspendAtomic` as [com.vynatix.holdfast.TransactionResult.Error]. By
+     * the time the bridge-publish phase runs, the in-memory commit has already
+     * applied and observers have already fired — a persistence failure does
+     * not (and cannot) roll that back. What the caller gets is the fanout
+     * ordering guarantee (observers → bridge publish → event drain) and an
+     * `Error` result naming the persistence exception; memory and the external
+     * store may legitimately disagree at that point. Implementations that also
+     * publish failures on a hot `errors` flow (e.g. [SuspendingKvBridge]) emit
+     * there in addition to throwing.
      */
     suspend fun publishAwaited(value: T)
 
@@ -129,7 +135,10 @@ fun <T : Any> SuspendingKvStore.bridge(
  * is forwarded to [errors]. The flow is configured `replay = 0`,
  * `extraBufferCapacity = 16`, with no implicit collection — callers MUST
  * attach a collector if they care about persistence failures on the
- * fire-and-forget path.
+ * fire-and-forget path. On the awaited path, [publishAwaited] additionally
+ * **rethrows** after emitting, so the surrounding `suspendAction` returns
+ * [com.vynatix.holdfast.TransactionResult.Error]; the in-memory commit and
+ * observer fanout have already applied by then (surfaced error, not rollback).
  */
 class SuspendingKvBridge<T : Any> internal constructor(
     private val store: SuspendingKvStore,
@@ -178,14 +187,24 @@ class SuspendingKvBridge<T : Any> internal constructor(
 
     /**
      * Persists [value] sequentially: encode + `store.put`, suspending until
-     * the store accepts it. Errors surface on [errors] (same as the
-     * fire-and-forget path); the call itself returns normally.
+     * the store accepts it. On failure the throwable is emitted on [errors]
+     * (so existing flow collectors keep working) and then **rethrown** — the
+     * surrounding `suspendAction`/`suspendAtomic` reports
+     * [com.vynatix.holdfast.TransactionResult.Error] instead of a false
+     * success. Per the [SuspendingBridge.publishAwaited] contract, the
+     * in-memory commit and observer fanout have already applied when this
+     * runs; the error is surfaced, not rolled back.
      *
      * Wrapped in `withContext(NonCancellable)` by the calling commit phase
      * so cancellation cannot leave the store in an inconsistent state.
      */
     override suspend fun publishAwaited(value: T) {
-        putOrEmit(value)
+        try {
+            store.put(key, codec.encode(value))
+        } catch (t: Throwable) {
+            _errors.tryEmit(t)
+            throw t
+        }
     }
 
     override fun observe(observer: (T) -> Unit): Disposable {
