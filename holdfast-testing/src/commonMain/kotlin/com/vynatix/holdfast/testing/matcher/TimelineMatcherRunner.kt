@@ -13,9 +13,12 @@ import com.vynatix.holdfast.testing.StoreEvent
  * Set-membership runner. For each predicate in [matcher], require at least
  * one matching event in the timeline. Events that no predicate matches are
  * ignored (lenient — only the asserted set has to be covered).
+ *
+ * Throws [IllegalArgumentException] for vacuous matchers (empty predicate
+ * list or dangling `middleware<M>()` builder) — see [TimelineMatcher.validate].
  */
 internal fun List<StoreEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
-    if (matcher.predicates.isEmpty()) return
+    matcher.validate("shouldFire")
     val unsatisfied = matcher.predicates.filter { p -> none { e -> p.matches(e) } }
     if (unsatisfied.isNotEmpty()) {
         throw AssertionError(buildShouldFireMessage(unsatisfied))
@@ -28,7 +31,7 @@ internal fun List<StoreEvent>.runShouldFire(matcher: TimelineMatcher<*>) {
  * unmatched events between matched ones.
  */
 internal fun List<StoreEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) {
-    if (matcher.predicates.isEmpty()) return
+    matcher.validate("shouldFireInOrder")
     var startIdx = 0
     for ((i, p) in matcher.predicates.withIndex()) {
         var matchIdx = -1
@@ -55,7 +58,7 @@ internal fun List<StoreEvent>.runShouldFireInOrder(matcher: TimelineMatcher<*>) 
  * succeeds.
  */
 internal fun List<StoreEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher<*>) {
-    if (matcher.predicates.isEmpty()) return
+    matcher.validate("shouldFireInExactOrder")
     val first = matcher.predicates[0]
     val candidates = indices.filter { idx -> first.matches(this[idx]) }
     if (candidates.isEmpty()) {
@@ -79,9 +82,23 @@ internal fun List<StoreEvent>.runShouldFireInExactOrder(matcher: TimelineMatcher
 /**
  * Negation runner. Collect every predicate-event pair where the predicate
  * matches; any non-empty result is a failure listing the unwanted matches.
+ *
+ * Additionally rejects middleware predicates on a real-handle receiver
+ * ([TimelineMatcher.vaultRef] non-null) with [UnsupportedOperationException]:
+ * user middleware lifecycle events are not captured in v1, so
+ * `shouldNotFire { middleware<UserMw>().errored }` would pass vacuously
+ * forever. Synthetic `List<StoreEvent>` receivers stay permissive — matcher
+ * self-tests build their own timelines and CAN contain middleware events.
  */
 internal fun List<StoreEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
-    if (matcher.predicates.isEmpty()) return
+    matcher.validate("shouldNotFire")
+    if (matcher.vaultRef != null && matcher.predicates.any { it.isMiddlewarePredicate() }) {
+        throw UnsupportedOperationException(
+            "shouldNotFire { middleware<...> }: user middleware lifecycle events are not captured " +
+                "in v1, so this assertion would pass vacuously. Assert positively on recorder " +
+                "self-events, or match middleware events on a synthetic List<StoreEvent> timeline.",
+        )
+    }
     val matched: List<Pair<EventPredicate, StoreEvent>> =
         matcher.predicates.flatMap { p ->
             filter { e -> p.matches(e) }.map { e -> p to e }
@@ -94,6 +111,9 @@ internal fun List<StoreEvent>.runShouldNotFire(matcher: TimelineMatcher<*>) {
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
+
+private fun EventPredicate.isMiddlewarePredicate(): Boolean =
+    this is MiddlewareStartedPredicate || this is MiddlewareCompletedPredicate || this is MiddlewareErroredPredicate
 
 private fun List<StoreEvent>.matchExactRunAt(
     anchor: Int,

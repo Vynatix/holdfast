@@ -60,28 +60,69 @@ class TimelineMatcher<V : Store<V>> internal constructor(
      */
     internal val predicates: MutableList<EventPredicate> = mutableListOf()
 
+    /**
+     * Builders opened via [middleware] that have not yet registered a
+     * predicate, keyed by builder identity with the user-facing label as
+     * value. A dangling entry at match time means the user wrote
+     * `middleware<M>()` without accessing `.started` / `.completed` /
+     * `.errored` — which registers NOTHING and would make the assertion
+     * vacuous. [validate] turns that into a hard failure.
+     */
+    private val openBuilders: MutableMap<Any, String> = mutableMapOf()
+
     private fun <P : EventPredicate> register(predicate: P): P {
         predicates.add(predicate)
         return predicate
     }
 
     /**
+     * Fail fast on vacuous matcher configurations. Called by every combinator
+     * runner BEFORE matching:
+     *  - a [middleware] builder that never registered a predicate (dangling
+     *    `middleware<M>()` with no `.started`/`.completed`/`.errored` access);
+     *  - an empty predicate list (the builder body registered nothing, so
+     *    `shouldFire { }` would pass against any timeline and
+     *    `shouldNotFire { }` could never fail).
+     */
+    internal fun validate(surface: String) {
+        if (openBuilders.isNotEmpty()) {
+            val dangling = openBuilders.values.joinToString(", ") { "middleware<$it>()" }
+            throw IllegalArgumentException(
+                "$surface: $dangling registered no predicate — a bare middleware<M>() call matches " +
+                    "nothing. Access .started, .completed, or .errored on it to declare what should fire.",
+            )
+        }
+        require(predicates.isNotEmpty()) {
+            "$surface: no predicates declared — the builder body registered nothing, so the " +
+                "assertion is vacuous (did you call middleware<M>() without accessing " +
+                ".started/.completed/.errored, or leave the block empty?)"
+        }
+    }
+
+    internal fun noteBuilderOpened(
+        builder: Any,
+        label: String,
+    ) {
+        openBuilders[builder] = label
+    }
+
+    /**
      * Match any [TransactionStarted] event. Accessing this property registers
-     * the predicate; declared as a `get()` so each access creates a fresh
+     * a predicate; declared as a `get()` so each access creates a fresh
      * predicate instance (so `started; started` declares two predicates).
      */
     val started: TransactionStartedPredicate
         get() = register(TransactionStartedPredicate(id = null))
 
-    /** Match any [TransactionCommitted] event. */
+    /** Match any [TransactionCommitted] event. Accessing this property registers a predicate. */
     val committed: TransactionCommittedPredicate
         get() = register(TransactionCommittedPredicate(id = null))
 
-    /** Match any [TransactionRolledBack] event. */
+    /** Match any [TransactionRolledBack] event. Accessing this property registers a predicate. */
     val rolledBack: TransactionRolledBackPredicate
         get() = register(TransactionRolledBackPredicate(id = null))
 
-    /** Match any [TransactionErrored] event. */
+    /** Match any [TransactionErrored] event. Accessing this property registers a predicate. */
     val errored: TransactionErroredPredicate
         get() = register(TransactionErroredPredicate(id = null))
 
@@ -100,12 +141,17 @@ class TimelineMatcher<V : Store<V>> internal constructor(
     /**
      * Open a [MiddlewareBuilder] scoped to middleware instances of type [M].
      * Member predicates ([MiddlewareBuilder.started], `.completed`, `.errored`)
-     * register against this matcher when accessed.
+     * register against this matcher when accessed. A bare `middleware<M>()`
+     * call that never accesses one of those properties registers NOTHING —
+     * the combinator throws [IllegalArgumentException] at match time instead
+     * of passing vacuously.
      *
      * **v1 caveat**: see [StoreHandle.middlewareEventsOf] — only the recorder's
      * own self-events are captured. User middlewares pass through with no
      * lifecycle events, so a `middleware<UserClass>()` block will never match
-     * anything in v1. This is documented and tested via the recorder.
+     * anything in v1. This is documented and tested via the recorder;
+     * `shouldNotFire` on a real handle rejects middleware predicates outright
+     * for the same reason.
      */
     inline fun <reified M : Middleware<*>> middleware(): MiddlewareBuilder<V> =
         MiddlewareBuilder(
@@ -191,9 +237,16 @@ class TimelineMatcher<V : Store<V>> internal constructor(
 
     /**
      * Internal handle for a [MiddlewareBuilder] to register a predicate
-     * constructed in its own scope.
+     * constructed in its own scope. Also marks the builder as satisfied so
+     * [validate] no longer reports it as dangling.
      */
-    internal fun <P : EventPredicate> registerFromBuilder(predicate: P): P = register(predicate)
+    internal fun <P : EventPredicate> registerFromBuilder(
+        builder: Any,
+        predicate: P,
+    ): P {
+        openBuilders.remove(builder)
+        return register(predicate)
+    }
 }
 
 /**
@@ -215,24 +268,44 @@ class MiddlewareBuilder<V : Store<V>>
         private val instanceMatch: Middleware<*>?,
         private val label: String,
     ) {
-        /** Match a [MiddlewareStarted] event for this builder's middleware scope. */
+        init {
+            // Track this builder as "opened but unsatisfied" until one of the
+            // predicate getters registers. A builder left dangling makes the
+            // matcher fail fast in TimelineMatcher.validate instead of
+            // silently matching nothing.
+            owner.noteBuilderOpened(this, label)
+        }
+
+        /**
+         * Accessing this property registers a predicate: match a
+         * [MiddlewareStarted] event for this builder's middleware scope.
+         */
         val started: MiddlewareStartedPredicate
             get() =
                 owner.registerFromBuilder(
+                    this,
                     MiddlewareStartedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
                 )
 
-        /** Match a [MiddlewareCompleted] event for this builder's middleware scope. */
+        /**
+         * Accessing this property registers a predicate: match a
+         * [MiddlewareCompleted] event for this builder's middleware scope.
+         */
         val completed: MiddlewareCompletedPredicate
             get() =
                 owner.registerFromBuilder(
+                    this,
                     MiddlewareCompletedPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
                 )
 
-        /** Match a [MiddlewareErrored] event for this builder's middleware scope. */
+        /**
+         * Accessing this property registers a predicate: match a
+         * [MiddlewareErrored] event for this builder's middleware scope.
+         */
         val errored: MiddlewareErroredPredicate
             get() =
                 owner.registerFromBuilder(
+                    this,
                     MiddlewareErroredPredicate(classMatch = classMatch, instanceMatch = instanceMatch, label = label),
                 )
     }

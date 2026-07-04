@@ -105,9 +105,14 @@ class TimelineMatcherTest {
     }
 
     @Test
-    fun shouldFireAcceptsEmptyBuilderAsNoOp() {
-        // Vacuously true — no predicates means nothing to match.
-        emptyList<StoreEvent>() shouldFire { }
+    fun shouldFireRejectsEmptyBuilder() {
+        // An empty builder registered nothing — passing silently would make the
+        // assertion vacuous, so the runner throws instead.
+        val err =
+            assertFailsWith<IllegalArgumentException> {
+                emptyList<StoreEvent>() shouldFire { }
+            }
+        assertContains(err.message.orEmpty(), "no predicates declared")
     }
 
     // -------- shouldFireInOrder (loose order) --------
@@ -577,15 +582,73 @@ class TimelineMatcherTest {
             assertContains(msg, "TransactionCommitted")
         }
 
-    // -------- Empty-builder edge cases --------
+    // -------- Vacuous-matcher guards --------
 
     @Test
-    fun emptyBuilderForAllCombinatorsIsNoOp() {
+    fun emptyBuilderThrowsForAllCombinators() {
         val timeline = listOf<StoreEvent>(started("a"))
-        timeline shouldFire { }
-        timeline shouldFireInOrder { }
-        timeline shouldFireInExactOrder { }
-        timeline shouldNotFire { }
+        assertFailsWith<IllegalArgumentException> { timeline shouldFire { } }
+        assertFailsWith<IllegalArgumentException> { timeline shouldFireInOrder { } }
+        assertFailsWith<IllegalArgumentException> { timeline shouldFireInExactOrder { } }
+        assertFailsWith<IllegalArgumentException> { timeline shouldNotFire { } }
+    }
+
+    @Test
+    fun danglingMiddlewareBuilderThrows() {
+        val mw = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val timeline =
+            listOf<StoreEvent>(
+                MiddlewareStarted(middleware = mw, transaction = txn("a"), timestamp = 0L),
+            )
+        // middleware(mw) with no .started/.completed/.errored access registers
+        // ZERO predicates — the runner must reject the dangling builder.
+        val err =
+            assertFailsWith<IllegalArgumentException> {
+                timeline shouldFire {
+                    middleware(mw)
+                }
+            }
+        assertContains(err.message.orEmpty(), "registered no predicate")
+    }
+
+    @Test
+    fun danglingReifiedMiddlewareBuilderThrowsEvenWithOtherPredicates() {
+        val timeline = listOf<StoreEvent>(started("a"), committed("a"))
+        val err =
+            assertFailsWith<IllegalArgumentException> {
+                timeline shouldFire {
+                    started
+                    middleware<Recorder<TimelineCountVault>>()
+                }
+            }
+        assertContains(err.message.orEmpty(), "middleware<Recorder>()")
+    }
+
+    @Test
+    fun shouldNotFireWithMiddlewarePredicateOnRealHandleThrows() =
+        storeTest {
+            // User middleware lifecycle events are never captured in v1, so this
+            // negation could only ever pass vacuously — reject it outright.
+            val ctr = track(TimelineCountVault())
+            ctr.action { count mutate 1 }.shouldBeSuccess()
+            val err =
+                assertFailsWith<UnsupportedOperationException> {
+                    ctr shouldNotFire {
+                        middleware<Recorder<TimelineCountVault>>().errored
+                    }
+                }
+            assertContains(err.message.orEmpty(), "not captured")
+        }
+
+    @Test
+    fun shouldNotFireWithMiddlewarePredicateOnSyntheticTimelineStaysPermissive() {
+        // The synthetic-list receiver has no capture gap — self-built timelines
+        // can contain middleware events, so negation stays allowed there.
+        val mw = Recorder<TimelineCountVault>(com.vynatix.holdfast.testing.Capture.All)
+        val timeline = listOf<StoreEvent>(started("a"), committed("a"))
+        timeline shouldNotFire {
+            middleware(mw).errored
+        }
     }
 
     @Test
