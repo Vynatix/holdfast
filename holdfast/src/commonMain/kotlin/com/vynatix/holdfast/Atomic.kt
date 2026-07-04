@@ -36,6 +36,14 @@ import kotlin.uuid.Uuid
  * before acquisition, giving a deadlock-safe global order across any store
  * combination. Each store's blocking `transactionLock` is held for the whole
  * frame — keep bodies small and free of I/O, same rule as `action { }`.
+ * For stores that have ever run a `:holdfast-coroutines.suspendAction`, the
+ * store's [Store.AsyncSerializer] is acquired (blocking, per store, in the
+ * same lock order) BEFORE its transaction lock — so an `atomic` overlapping
+ * an in-flight `suspendAction` waits for it to commit instead of opening a
+ * root that clobbers the suspending transaction. Residual first-install race:
+ * the serializer installs lazily on a store's first-ever `suspendAction`; an
+ * `atomic` racing that exact first call has the same (absent) guarantee as
+ * `action` racing it — every later overlap is serialized.
  *
  * Commit fanout order (the cross-store consistency contract):
  *  1. per-store middleware `onTransactionStarted`, in lock order (before body);
@@ -126,9 +134,17 @@ private class FrameRoot(
 )
 
 /**
- * Tail-recursive helper that acquires each store's transactionLock in order
- * via [Store.runUnderLock], then opens a root [Transaction] per store, then
- * runs [body], then commits/rollbacks all roots, then unwinds.
+ * Tail-recursive helper that acquires each store's [Store.asyncSerializer]
+ * (when one is installed) and transactionLock in order via
+ * [Store.runUnderLock], then opens a root [Transaction] per store, then runs
+ * [body], then commits/rollbacks all roots, then unwinds.
+ *
+ * The serializer bracket wraps the WHOLE per-store lock scope (including the
+ * post-commit drain in `runUnderLock`'s finally), matching the bracket
+ * `Store.action` uses — so blocking frames and suspending actions see a
+ * serial stream of transactions per store. The serializer's blocking side is
+ * thread-reentrant, so nested `action`/`atomic` calls inside the body
+ * re-acquire it without deadlocking.
  *
  * A store whose thread already has an active transaction (an enclosing
  * `action` or `atomic` on this thread) gets a SAVEPOINT root — commit merges
@@ -148,6 +164,27 @@ private fun <R> acquireAndRun(
     if (index == sorted.size) {
         return executeBody(roots, marker, body)
     }
+    val v = sorted[index]
+    val serializer = v.asyncSerializer
+    serializer?.blockingAcquire()
+    return try {
+        acquireStoreLockAndRun(sorted, index, roots, id, ownerThreadId, marker, body)
+    } finally {
+        serializer?.blockingRelease()
+    }
+}
+
+/** The per-store transactionLock scope of [acquireAndRun], split out for readability. */
+@Suppress("LongParameterList")
+private fun <R> acquireStoreLockAndRun(
+    sorted: List<Store<*>>,
+    index: Int,
+    roots: MutableList<FrameRoot>,
+    id: String,
+    ownerThreadId: Long,
+    marker: FrameMarker,
+    body: () -> R,
+): TransactionResult<R> {
     val v = sorted[index]
     return v.runUnderLock {
         val priorActive = v.activeTransaction

@@ -125,6 +125,48 @@ class AtomicMixedTypesTest {
     }
 }
 
+@OptIn(StoreInternalApi::class)
+class AtomicSerializerBracketTest {
+    private class RecordingSerializer(
+        private val label: String,
+        private val log: MutableList<String>,
+    ) : Store.AsyncSerializer {
+        override fun blockingAcquire() {
+            log += "acquire:$label"
+        }
+
+        override fun blockingRelease() {
+            log += "release:$label"
+        }
+    }
+
+    @Test fun atomicBracketsEachStoresSerializerInLockOrder() {
+        val a = AccountVault()
+        val b = AccountVault()
+        val log = mutableListOf<String>()
+        a.asyncSerializer = RecordingSerializer("a", log)
+        b.asyncSerializer = RecordingSerializer("b", log)
+
+        // Pass the stores out of order; acquisition must still follow lockOrderKey.
+        val r = atomic(b, a) { log += "body" }
+        assertIs<TransactionResult.Success<*>>(r)
+        assertEquals(
+            listOf("acquire:a", "acquire:b", "body", "release:b", "release:a"),
+            log,
+            "serializer acquire wraps the whole per-store lock scope, in lock order, released in reverse",
+        )
+    }
+
+    @Test fun atomicReleasesSerializersOnRollbackToo() {
+        val a = AccountVault()
+        val log = mutableListOf<String>()
+        a.asyncSerializer = RecordingSerializer("a", log)
+        val r = atomic(a) { error("boom") }
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(listOf("acquire:a", "release:a"), log)
+    }
+}
+
 class AtomicConcurrencyTest {
     @Test fun concurrentAtomicTransfersHaveNoLostUpdates() =
         runBlocking {

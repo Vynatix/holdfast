@@ -31,6 +31,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The serializer's blocking side is now thread-reentrant (F1).** Once a
+  `suspendAction` has installed a store's `MutexSerializer`, nested blocking
+  entries on one thread — `action { action { } }`, an `action` inside an
+  `atomic` body, or an `atomic` nested inside an `action` — re-acquire it
+  instead of re-`tryLock`ing the mutex with the shared spin owner, which made
+  kotlinx throw a raw `IllegalStateException`. Reentrancy is tracked by
+  holder thread id (safe on single-threaded wasmJs, where every caller
+  reports id 0). This is also the prerequisite for core's new
+  `atomic`-acquires-the-serializer bracket (see `:holdfast`'s changelog).
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
   outer root; a failed nested frame discards only its own writes.

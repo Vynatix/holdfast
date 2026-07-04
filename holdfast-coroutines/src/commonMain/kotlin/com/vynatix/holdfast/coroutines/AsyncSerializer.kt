@@ -5,34 +5,68 @@ package com.vynatix.holdfast.coroutines
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.threadYield
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 
 /**
- * AsyncSerializer impl backed by a coroutine [Mutex]. Blocking `action` callers
- * spin via `tryLock` + platform yield; suspending [suspendAction] / [suspendAtomic]
- * callers use the natural `Mutex.lock(owner)` suspending wait. Shared between
- * the two suspending entry points so a suspendAtomic and a suspendAction on
- * the same store block each other.
+ * AsyncSerializer impl backed by a coroutine [Mutex]. Blocking `action` /
+ * `atomic` callers spin via `tryLock` + platform yield; suspending
+ * [suspendAction] / [suspendAtomic] callers use the natural `Mutex.lock(owner)`
+ * suspending wait. Shared between the two suspending entry points so a
+ * suspendAtomic and a suspendAction on the same store block each other.
+ *
+ * The blocking side is THREAD-REENTRANT: the thread that holds the mutex via
+ * [blockingAcquire] may re-acquire it (nested `action { action { } }`, an
+ * `action` inside an `atomic` body, or an `atomic` nested inside an `action`)
+ * without deadlocking — kotlinx's [Mutex] is not owner-reentrant, and a raw
+ * re-`tryLock` with the shared spin owner would throw its
+ * IllegalStateException. Reentrancy is tracked with a volatile holder-thread
+ * id plus a holder-confined depth counter; on wasmJs every caller reports
+ * thread id 0, which is correct there because wasmJs is single-threaded.
  */
 internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
 
+    /**
+     * Thread currently holding [mutex] via the BLOCKING side, or [NO_HOLDER].
+     * Volatile so a non-holder thread reliably sees "someone else holds it"
+     * and takes the spin path. Suspending holders never set this — a blocking
+     * caller racing a suspending holder spins until the mutex frees.
+     */
+    @kotlin.concurrent.Volatile
+    private var holderThreadId: Long = NO_HOLDER
+
+    /** Reentry depth. Only ever touched by the holder thread. */
+    private var holdDepth: Int = 0
+
     override fun blockingAcquire() {
-        while (!mutex.tryLock(SPIN_OWNER)) {
-            com.vynatix.holdfast.platform
-                .threadYield()
+        val me = currentThreadId()
+        if (holderThreadId == me) {
+            holdDepth++
+            return
         }
+        while (!mutex.tryLock(SPIN_OWNER)) {
+            threadYield()
+        }
+        holderThreadId = me
+        holdDepth = 1
     }
 
     override fun blockingRelease() {
+        if (holderThreadId != currentThreadId()) return
+        holdDepth--
+        if (holdDepth > 0) return
+        holderThreadId = NO_HOLDER
         runCatching { mutex.unlock(SPIN_OWNER) }
     }
 
     private companion object {
         private val SPIN_OWNER = Any()
+        private const val NO_HOLDER = Long.MIN_VALUE
     }
 }
 

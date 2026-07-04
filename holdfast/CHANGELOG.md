@@ -57,6 +57,17 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **Blocking `atomic(...)` now serializes against in-flight suspending work
+  (F1).** For each participant (in lock order), `atomic` acquires the store's
+  `AsyncSerializer` — the same hook `:holdfast-coroutines.suspendAction`
+  installs — before taking the transaction lock, and releases it after the
+  per-store scope (including the post-commit drain) exits. Previously an
+  `atomic` overlapping an in-flight `suspendAction` on a shared store opened
+  a root that clobbered the suspending transaction's active slot, silently
+  cross-contaminating the two transactions' writes. Residual (documented in
+  `atomic`'s KDoc): the serializer installs lazily on a store's first-ever
+  `suspendAction`; an `atomic` racing that exact first call is unserialized,
+  same as `action`.
 - **Nested `atomic` no longer commits shared stores prematurely.** A nested
   frame overlapping an enclosing action/frame on the same thread now opens
   savepoints: its commit merges into the enclosing scope, and the enclosing
