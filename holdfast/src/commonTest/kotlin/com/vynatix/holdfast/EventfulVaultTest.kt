@@ -1,6 +1,7 @@
 package com.vynatix.holdfast
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -9,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
@@ -50,6 +52,31 @@ class EventfulVaultTest {
         assertTrue(
             ex.message!!.contains("outside of an action"),
             "expected diagnostic mentioning 'outside of an action', got: ${ex.message}",
+        )
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    @Test
+    fun emitFromNonOwnerThreadDuringActionThrows() {
+        // P1-emit-owner: emit() from a thread that does not own the active
+        // transaction would stage onto another action's transaction — reject it,
+        // mirroring mutate's ownership check.
+        val v = FixtureEventfulVault()
+        val emitterCtx = newSingleThreadContext("evt-emitter")
+        var caught: Throwable? = null
+        v action {
+            s mutate "x"
+            // Emit on a DIFFERENT thread while this transaction is still active.
+            caught =
+                runCatching {
+                    runBlocking(emitterCtx) { v.emit(FixtureEvent.A) }
+                }.exceptionOrNull()
+        }
+        emitterCtx.close()
+        assertIs<IllegalStateException>(caught)
+        assertTrue(
+            caught!!.message!!.contains("non-owner"),
+            "expected the non-owner-thread diagnostic, got: ${caught?.message}",
         )
     }
 

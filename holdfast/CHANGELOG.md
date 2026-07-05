@@ -171,6 +171,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   itself threw — and metric consumers keying on the enum may see the new
   `Failed` value. The elapsed time now includes fanout, not just the body.
 
+- **`emit()` gains the ownership check `mutate` has (P1-emit-owner).**
+  `EventfulStore.emit` / `EventfulSupport.emit` from a thread that does not own
+  the active transaction (and is not the in-flight suspending body) now throws
+  `IllegalStateException` instead of staging an event onto another action's
+  transaction — matching `mutate`'s contract. `Transaction.stagePendingEvent`'s
+  owner-thread requirement is now enforced, not just documented.
+
 - **`atomic`, `derived`, and `computed` now enforce the disposed-store
   contract (P1-disposed-gaps).** `atomic` checks every participant before
   acquiring any lock; `derived`/`computed` check at entry. Calling them on a

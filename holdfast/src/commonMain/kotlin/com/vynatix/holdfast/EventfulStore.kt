@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -92,6 +93,14 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
                 "emit(event) called outside of an action / suspendAction. " +
                     "Events must be staged inside a transaction so rollback can discard them.",
             )
+        // Mirror mutate's ownership check: emitting from a non-owner thread would
+        // stage onto another action's transaction. Allowed on the owner thread, or
+        // on the thread currently resuming an in-flight suspending body.
+        check(txn.ownerThreadId == currentThreadId() || suspendingOwner != null) {
+            "emit() from a non-owner thread would stage onto another action's transaction. " +
+                "Emit from the action body itself (the thread that opened the action), or from " +
+                "your own action / suspendAction."
+        }
         txn.stagePendingEvent(_events, event)
     }
 
