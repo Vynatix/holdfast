@@ -52,7 +52,8 @@ public final class com/vynatix/holdfast/coroutines/SuspendingFileSystemKvStore :
 	public fun snapshot (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
-public final class com/vynatix/holdfast/coroutines/SuspendingKvBridge : com/vynatix/holdfast/coroutines/SuspendingBridge {
+public final class com/vynatix/holdfast/coroutines/SuspendingKvBridge : com/vynatix/holdfast/Disposable, com/vynatix/holdfast/coroutines/SuspendingBridge {
+	public fun dispose ()V
 	public final fun getErrors ()Lkotlinx/coroutines/flow/SharedFlow;
 	public fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 	public fun publish (Ljava/lang/Object;)Z

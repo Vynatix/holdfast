@@ -1379,7 +1379,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
 
 interface SuspendingKvStore                          // suspend get / put / remove / snapshot
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
-class SuspendingKvBridge<T : Any> : SuspendingBridge<T>   // exposes errors: SharedFlow<Throwable>
+class SuspendingKvBridge<T : Any> : SuspendingBridge<T>, Disposable  // errors: SharedFlow<Throwable>; dispose()
 fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
 // Deprecated WARNING-level alias returning the same type: SuspendingKvStore.bridge(key, codec, scope)
 ```
@@ -1414,7 +1414,19 @@ ordering plus a surfaced error, not rollback: a `publishAwaited` throw
 surfaces as `TransactionResult.Error` after the in-memory commit and
 observer fanout have already applied, and the same throwable is emitted on
 the bridge's `errors` flow. Fire-and-forget failures surface only on
-`errors`.
+`errors`. `SuspendingKvBridge` also owns a long-lived drainer coroutine, so it
+is `Disposable`: call `dispose()` when done to close the save channel (its last
+conflated value still drains), cancel in-flight loads, and shut down (`publish`
+then returns `false`, `observe` is a no-op). Detaching via `state bridge null`
+releases only the inbound subscription, not the drainer.
+
+`suspendDerived` has two overloads. Prefer the **`initial`-seeded** one: it
+holds `initial` until the first async `compute` lands and uses no `runBlocking`,
+so it runs on every target including wasmJs. The **seedless** overload seeds
+eagerly with `runBlocking` for a computed-value-at-construction contract, but
+that crashes on wasmJs and can deadlock on single-threaded dispatchers. Both
+share source-driven recompute, later-wins semantics, and a `dispose()` that
+stops recomputes and unregisters the synthetic backing state.
 
 `Middleware<V>` sync hooks fire on `suspendAction` as well as `action`
 (2.0; was a documented no-op limitation in 1.1). Concentric-ring ordering:

@@ -35,7 +35,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
 // Async persistence: suspend KvStore + a bridge over it.
 interface SuspendingKvStore                          // suspend get / put / remove / snapshot
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
-class SuspendingKvBridge<T : Any> : SuspendingBridge<T>   // exposes errors: SharedFlow<Throwable>
+class SuspendingKvBridge<T : Any> : SuspendingBridge<T>, Disposable  // errors: SharedFlow<Throwable>; dispose()
 fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
 // Deprecated WARNING-level alias returning the same type: SuspendingKvStore.bridge(key, codec, scope)
 ```
@@ -61,6 +61,20 @@ and observers have already fired — the `suspendAction` returns
 throwable is emitted on the bridge's `errors: SharedFlow<Throwable>`.
 Fire-and-forget failures (sync `action { }`) surface only on `errors`; attach
 a collector if you care about persistence reliability.
+
+`SuspendingKvBridge` owns a long-lived drainer coroutine, so it is
+`Disposable`. Detaching with `state bridge null` releases only the inbound
+subscription; call `dispose()` to shut the bridge down — it closes the save
+channel (the last conflated value still drains), cancels in-flight loads, and
+after that `publish` returns `false` and `observe` is a no-op. `dispose()` is
+idempotent.
+
+`suspendDerived` has two overloads. Prefer the **`initial`-seeded** one: it
+holds `initial` until the first async `compute` lands and uses no `runBlocking`,
+so it runs on every target including wasmJs. The **seedless** overload seeds
+eagerly with `runBlocking` (computed value at construction), but that crashes on
+wasmJs and can deadlock on single-threaded dispatchers. Disposing either handle
+stops recomputes and unregisters the synthetic backing state.
 
 ## Examples
 

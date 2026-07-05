@@ -28,6 +28,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once, at frame commit) — previously it deadlocked on the already-held
   mutex despite the KDoc's savepoint claim. Its `Error` results escalate per
   the frame's `FramePolicy`.
+- **`SuspendingKvBridge` now implements `Disposable`** (F15). It owns a
+  long-lived drainer coroutine (plus in-flight load-on-attach jobs) that a
+  `state bridge null` detach does not stop. Call `dispose()` when done: it
+  closes the save channel so the drainer persists its last conflated value
+  and exits (backstopped by a job cancel), cancels outstanding load jobs, and
+  shuts the bridge down — `publish` then returns `false` and `observe` is a
+  no-op. `dispose()` is idempotent.
+- **`suspendDerived(vararg sources, initial, compute)`** (F16) — a new,
+  recommended overload that seeds the derived state with an explicit `initial`
+  value and launches the first compute asynchronously on `store.scope`, using
+  **no `runBlocking`**. Unlike the seedless overload it runs on every target
+  (including wasmJs) and never risks a single-thread-dispatcher deadlock.
+  Disposing the returned handle now also **unregisters the synthetic backing
+  state** (best-effort `removeState`) so it no longer leaks in the store's
+  registry; this applies to both overloads.
 
 ### Fixed
 

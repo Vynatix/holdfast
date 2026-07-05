@@ -4,12 +4,17 @@ import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.Codec
+import kotlinx.atomicfu.atomic
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Bridge variant that extends [Bridge] with await-completion persistence semantics.
@@ -139,13 +144,26 @@ fun <T : Any> SuspendingKvStore.bridge(
  * **rethrows** after emitting, so the surrounding `suspendAction` returns
  * [com.vynatix.holdfast.TransactionResult.Error]; the in-memory commit and
  * observer fanout have already applied by then (surfaced error, not rollback).
+ *
+ * **Lifecycle — [dispose] the bridge, don't just detach it.** This bridge owns
+ * a long-lived drainer coroutine (launched on [scope] at construction) plus any
+ * in-flight load-on-attach jobs. Setting `state bridge null` detaches the
+ * *inbound* subscription only (the [Disposable] returned by [observe]); it does
+ * NOT stop the drainer, which lives until [scope] is cancelled or [dispose] is
+ * called. When you are done with the bridge, call [dispose]: it closes the save
+ * channel so the drainer persists its last conflated value and then exits
+ * (backstopped by a job cancel), cancels any outstanding load jobs, and puts the
+ * bridge into a shut-down state where [publish] returns `false` and [observe] is
+ * a no-op. [dispose] is idempotent. A bridge whose [scope] is externally
+ * cancelled is effectively dead already; [dispose] on top of that is harmless.
  */
 class SuspendingKvBridge<T : Any> internal constructor(
     private val store: SuspendingKvStore,
     private val key: String,
     private val codec: Codec<T>,
     private val scope: CoroutineScope,
-) : SuspendingBridge<T> {
+) : SuspendingBridge<T>,
+    Disposable {
     private val saves = Channel<T>(Channel.CONFLATED)
 
     private val _errors = MutableSharedFlow<Throwable>(replay = 0, extraBufferCapacity = 16)
@@ -161,15 +179,29 @@ class SuspendingKvBridge<T : Any> internal constructor(
      */
     val errors: SharedFlow<Throwable> = _errors.asSharedFlow()
 
-    init {
+    /** Set once by [dispose]; gates [publish]/[observe]/[dispose] idempotence. */
+    private val disposed = atomic(false)
+
+    /** Guards [loadJobs] against concurrent [observe]/completion/[dispose]. */
+    private val loadJobsLock = SynchronizedObject()
+
+    /** In-flight load-on-attach jobs, removed on completion; cancelled by [dispose]. */
+    private val loadJobs = mutableSetOf<Job>()
+
+    /**
+     * The drainer job, captured so [dispose] can cancel it as a backstop after
+     * [saves] is closed (a hung `store.put` would otherwise keep it alive).
+     */
+    private val drainer: Job =
         // One drainer per bridge: pulls conflated values and persists them.
         // Conflation is structural (Channel.CONFLATED); we do not rate-limit here.
+        // Closing `saves` (in dispose) lets the for-loop drain the last value and
+        // then exit cleanly; the backstop cancel covers a wedged put.
         scope.launch {
             for (value in saves) {
                 putOrEmit(value)
             }
         }
-    }
 
     /**
      * Encode + put + emit on error, used by the channel drainer
@@ -208,6 +240,8 @@ class SuspendingKvBridge<T : Any> internal constructor(
     }
 
     override fun observe(observer: (T) -> Unit): Disposable {
+        // A disposed bridge launches nothing and hands back a no-op handle.
+        if (disposed.value) return Disposable { /* bridge disposed */ }
         // Async load-on-attach: read the persisted value (if any) on `scope` and push
         // it to the observer when it arrives. State remains at its initializer until
         // then — the suspending nature of the store is preserved.
@@ -229,13 +263,57 @@ class SuspendingKvBridge<T : Any> internal constructor(
                     }
                 observer(decoded)
             }
+        // Track the load job so dispose() can cancel it; drop it on completion.
+        synchronized(loadJobsLock) { loadJobs.add(job) }
+        job.invokeOnCompletion { synchronized(loadJobsLock) { loadJobs.remove(job) } }
         return Disposable { job.cancel() }
     }
 
     override fun publish(value: T): Boolean {
+        // After dispose the save channel is closed — report shutdown per contract.
+        if (disposed.value) return false
         // Conflated channel: trySend always succeeds for CONFLATED unless closed.
         // We swallow the result intentionally — fire-and-forget is the contract.
         saves.trySend(value)
         return true
     }
+
+    /**
+     * Shut the bridge down: close the save channel (letting the drainer persist
+     * its last conflated value and exit on its own), cancel any in-flight
+     * load-on-attach jobs, and arm a backstop that cancels the drainer if it
+     * fails to finish (e.g. a `store.put` wedged forever). Idempotent — the
+     * second call is a no-op. After dispose [publish] returns `false` and
+     * [observe] is a no-op.
+     *
+     * The backstop is *deferred*, not immediate: cancelling the drainer inline
+     * would preempt the drain of the last conflated value (the drainer is parked
+     * at `saves.receive()` when dispose runs). We instead let the closed channel
+     * drive the drainer to completion and only cancel if it overruns
+     * [DRAIN_BACKSTOP_MILLIS]. If [scope] is already cancelled the drainer is
+     * dead anyway and the backstop launch is inert.
+     */
+    override fun dispose() {
+        if (!disposed.compareAndSet(expect = false, update = true)) return
+        // Close first so the drainer's for-loop drains the last conflated value
+        // and terminates on its own.
+        saves.close()
+        // Cancel in-flight loads — nobody is waiting on their observers anymore.
+        val jobs = synchronized(loadJobsLock) { loadJobs.toList().also { loadJobs.clear() } }
+        jobs.forEach { it.cancel() }
+        // Deferred backstop: give the drainer a bounded window to drain-and-exit
+        // gracefully, then hard-cancel so a wedged put can't leak it forever.
+        scope.launch {
+            withTimeoutOrNull(DRAIN_BACKSTOP_MILLIS) { drainer.join() }
+            drainer.cancel()
+        }
+    }
 }
+
+/**
+ * How long [SuspendingKvBridge.dispose] waits for the drainer to persist its
+ * last conflated value after the save channel is closed, before hard-cancelling
+ * it. Private top-level const so it stays out of the public ABI (a `const val`
+ * in a companion object would surface as a public static field).
+ */
+private const val DRAIN_BACKSTOP_MILLIS = 5_000L

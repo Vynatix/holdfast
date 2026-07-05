@@ -24,10 +24,11 @@ abstract interface com.vynatix.holdfast.coroutines/SuspendingKvStore { // com.vy
     abstract suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.coroutines/SuspendingKvStore.snapshot|snapshot(){}[0]
 }
 
-final class <#A: kotlin/Any> com.vynatix.holdfast.coroutines/SuspendingKvBridge : com.vynatix.holdfast.coroutines/SuspendingBridge<#A> { // com.vynatix.holdfast.coroutines/SuspendingKvBridge|null[0]
+final class <#A: kotlin/Any> com.vynatix.holdfast.coroutines/SuspendingKvBridge : com.vynatix.holdfast.coroutines/SuspendingBridge<#A>, com.vynatix.holdfast/Disposable { // com.vynatix.holdfast.coroutines/SuspendingKvBridge|null[0]
     final val errors // com.vynatix.holdfast.coroutines/SuspendingKvBridge.errors|{}errors[0]
         final fun <get-errors>(): kotlinx.coroutines.flow/SharedFlow<kotlin/Throwable> // com.vynatix.holdfast.coroutines/SuspendingKvBridge.errors.<get-errors>|<get-errors>(){}[0]
 
+    final fun dispose() // com.vynatix.holdfast.coroutines/SuspendingKvBridge.dispose|dispose(){}[0]
     final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.coroutines/SuspendingKvBridge.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
     final fun publish(#A): kotlin/Boolean // com.vynatix.holdfast.coroutines/SuspendingKvBridge.publish|publish(1:0){}[0]
     final suspend fun publishAwaited(#A) // com.vynatix.holdfast.coroutines/SuspendingKvBridge.publishAwaited|publishAwaited(1:0){}[0]
