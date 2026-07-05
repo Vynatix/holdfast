@@ -7,6 +7,7 @@ public abstract interface class com/vynatix/holdfast/Bridge : com/vynatix/holdfa
 }
 
 public final class com/vynatix/holdfast/ContractKt {
+	public static final fun provideDelegate (Lcom/vynatix/holdfast/StateDelegate;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
 	public static final fun then (Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Transformer;)Lcom/vynatix/holdfast/Transformer;
 }
 

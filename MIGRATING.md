@@ -169,6 +169,40 @@ enrolled store during `atomic`/`suspendAtomic`. A standalone single `mutate`/
 method, or `with(store) { count update { it + 1 } }` — where it wraps itself in
 an implicit atomic action.
 
+## Behavior change: `by state { }` registers eagerly at construction (`:holdfast`)
+
+State delegates now register (and run their initializer) when the store is
+constructed, not lazily on first read — so `snapshot()` and `properties` see
+every declared state without a preliminary read. Two consequences to migrate:
+
+1. **A throwing initializer fails at construction**, not on first read. If you
+   relied on constructing a store whose state initializer might throw and only
+   failing when that state was first read, move the fallible work out of the
+   initializer.
+
+2. **Forward-referencing initializers must be reordered.** Initializers run in
+   declaration order, so a state that reads a later-declared state now fails at
+   construction:
+
+   ```kotlin
+   // Before (worked lazily — `total` was only read after `items`):
+   class Cart : Store<Cart>() {
+       val total by state { items.value.size }   // reads items…
+       val items by state { emptyList<Item>() }  // …declared later
+   }
+
+   // After — declare dependencies first:
+   class Cart : Store<Cart>() {
+       val items by state { emptyList<Item>() }
+       val total by state { items.value.size }
+   }
+   // …or make `total` a read-time derivation instead:
+   //   val total = computed { items.value.size }
+   ```
+
+Binaries compiled against the previous release keep the lazy behavior; only
+code recompiled against this release registers eagerly.
+
 ## Behavior change: the CRTP `Self` type is enforced at construction (`:holdfast`)
 
 A `Store` subclass must parameterize `Self` with its own class. A

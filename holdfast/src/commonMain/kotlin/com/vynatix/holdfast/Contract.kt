@@ -52,6 +52,33 @@ fun interface StateDelegate<T : Any> {
 }
 
 /**
+ * Register a `by state { … }` property EAGERLY, at the owner's construction
+ * time, instead of lazily on first read. Kotlin calls this `provideDelegate`
+ * operator when the delegate is created (during the owner's constructor); it
+ * invokes [StateDelegate.getValue] once to create the backing state, then
+ * returns the same delegate for normal reads.
+ *
+ * Why: previously `snapshot()` and [Store.properties] missed any state whose
+ * delegate had never been read. Eager registration closes that surprise — a
+ * freshly-constructed store already has every declared state registered.
+ *
+ * Trade-off (semantic break vs. the old lazy behavior): the `{ init }`
+ * initializer lambdas now run at construction, in declaration order. A
+ * forward-referencing initializer — `val y by state { x.value }` where `x` is
+ * declared LATER — will now fail at construction instead of on first read.
+ * Reorder such declarations so a state's dependencies are declared before it,
+ * or compute the dependency inside a `computed { }` / `derived(...)` instead.
+ */
+operator fun <T : Any> StateDelegate<T>.provideDelegate(
+    thisRef: Any?,
+    property: KProperty<*>,
+): StateDelegate<T> {
+    // Force registration now (idempotent — a later read returns the same state).
+    getValue(thisRef, property)
+    return this
+}
+
+/**
  * Pure transformation applied symmetrically on read and write of a [State].
  *
  *  - [set] runs once per `mutate` to compute the value to store. Use it for

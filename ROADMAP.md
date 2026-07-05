@@ -51,7 +51,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - Enforce the CRTP self-type at construction — **delivered** (P1-crtp): `class Foo : Store<Bar>()` throws at init with a two-type teaching message (JVM/Android; iOS/wasmJs no-op) (S)
 - Defuse `store { }` vs `store action { }` — **delivered** (P1-invoke-nonatomic): a bare `store { }` is non-mutating; `mutate`/`update` directly inside it throws a teaching `IllegalStateException` (M)
 - Flip `distinct` default to `true` (matches the StateFlow dedup contract users carry in — and what the GUIDE already claims) (S)
-- Eager state registration via `provideDelegate` — kills the snapshot/restore-on-untouched-store surprise class (M)
+- Eager state registration via `provideDelegate` — **delivered** (P1-lazy-registration): states register at construction, so snapshot/properties see every declared state; a throwing/forward-referencing initializer now fails at construction (MIGRATING recipe) (M)
 - `suspendAction` disposed-store check matches blocking `action`; `emit()` gains the ownership check `mutate` has (S)
 - Observer-exception default: log loudly instead of silent swallow; document `uncaughtObserverHandler` where users will find it — **delivered** (P1-observer-swallow): null handler routes to a loud built-in logger; assign a no-op lambda to silence (S)
 - Remove the 0.2.0 deprecated aliases (the one-minor promise) (S)

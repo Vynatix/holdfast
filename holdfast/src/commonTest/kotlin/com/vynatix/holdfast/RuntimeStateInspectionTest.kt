@@ -29,18 +29,17 @@ class RuntimeStateInspectionTest {
     }
 
     @Test
-    fun hasStateReturnsTrueAfterStateDelegateAccess() {
+    fun declaredStatesAreRegisteredAtConstruction() {
+        // Eager registration (P1-lazy-registration): every declared state is
+        // present immediately, with no explicit read.
         val v = InspectionVault()
-        assertFalse(v.hasState("a"), "before first access, no state is registered")
-        v.a
         assertTrue(v.hasState("a"))
+        assertTrue(v.hasState("b"))
     }
 
     @Test
-    fun hasStateReturnsFalseBeforeAnyDelegateAccess() {
+    fun hasStateReturnsFalseForUndeclaredNames() {
         val v = InspectionVault()
-        assertFalse(v.hasState("a"))
-        assertFalse(v.hasState("b"))
         assertFalse(v.hasState("anything"))
     }
 

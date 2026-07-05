@@ -70,9 +70,11 @@ class StoreSnapshot internal constructor(
 /**
  * Capture the current raw value of every registered state on this store.
  *
- * Only states that have been touched (delegate-initialized) at least once are
- * included; states whose delegate has not been read yet are absent from the
- * snapshot. Touch them explicitly first if you need them included.
+ * With eager registration (`by state { }` registers at construction via
+ * `provideDelegate`), every declared state is present, so a snapshot of a
+ * freshly-constructed store captures all of them — no explicit "touch first"
+ * step is needed. (A state removed via `removeState`, or one registered
+ * dynamically via an internal API, follows the registry as usual.)
  *
  * The returned snapshot is detached from the store — mutations after `snapshot()`
  * do not affect previously-captured snapshots.

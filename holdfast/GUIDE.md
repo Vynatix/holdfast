@@ -171,9 +171,14 @@ That is the complete day-one usage. Everything after this is depth.
 
 ### 4.1 `state(transformer?, init)` — Declare
 
-Registers a `MutableState` keyed by the property name. The first read creates
-it; subsequent reads of the same property return the same `State` (delegate
-identity is preserved across reads).
+Registers a `MutableState` keyed by the property name. Registration is eager:
+a `provideDelegate` operator runs the initializer at the store's construction
+(in declaration order), so `snapshot()`/`properties` see every declared state
+and a throwing initializer fails at construction. Subsequent reads of the same
+property return the same `State` (delegate identity is preserved). Caveat:
+because initializers run in declaration order, a forward-referencing
+initializer (`val y by state { x.value }` where `x` is declared later) fails at
+construction — declare dependencies first, or use `computed`/`derived`.
 
 ```kotlin
 class Profile : Store<Profile>() {
@@ -1174,11 +1179,11 @@ fun <V : Store<V>> V.restore(
 ): TransactionResult<Unit>
 ```
 
-`snapshot` captures the raw stored value of every state that has been
-delegate-initialized at least once, along with its runtime type. `restore`
-writes them back inside a single top-level `action`, bypassing
-`transformer.set` so asymmetric transformers (encryption, JSON codecs)
-round-trip losslessly.
+`snapshot` captures the raw stored value of every registered state, along with
+its runtime type. With eager registration that is every declared state on a
+constructed store. `restore` writes them back inside a single top-level
+`action`, bypassing `transformer.set` so asymmetric transformers (encryption,
+JSON codecs) round-trip losslessly.
 
 By default `restore` validates each value's captured runtime type against the
 destination state's current type and fails the whole restore (naming the

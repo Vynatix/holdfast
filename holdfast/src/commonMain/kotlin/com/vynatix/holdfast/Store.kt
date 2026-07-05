@@ -252,6 +252,11 @@ abstract class Store<Self : Store<Self>> {
      * The contained `State<*>` references are LIVE — reading `.value` reflects the
      * current state. Callers MUST NOT cast these back to `MutableState` to bypass
      * the transactional API; doing so leads to undefined behavior.
+     *
+     * With eager registration (`by state { }` registers at construction via
+     * `provideDelegate`), this contains every declared state on a
+     * freshly-constructed store. States added dynamically or removed via
+     * `removeState` follow the registry.
      */
     val properties: Map<String, State<*>>
         get() {

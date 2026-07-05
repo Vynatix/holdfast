@@ -43,11 +43,13 @@ class SnapshotCaptureTest {
         assertEquals(1, snap.entries["n"]?.rawValue, "snapshot pinned the captured value")
     }
 
-    @Test fun untouchedStatesAreAbsentFromSnapshot() {
+    @Test fun allDeclaredStatesArePresentAfterConstruction() {
+        // Eager registration (P1-lazy-registration): every `by state { }` property
+        // is registered at construction, so a snapshot of a freshly-built store —
+        // with no explicit reads — contains all of them.
         val v = SnapshotVault()
-        v.n // touch only n
         val snap = v.snapshot()
-        assertEquals(setOf("n"), snap.stateNames)
+        assertEquals(setOf("n", "s", "items"), snap.stateNames)
     }
 }
 

@@ -122,6 +122,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **BREAKING (behavior): `by state { }` now registers eagerly at construction
+  (P1-lazy-registration).** A new `provideDelegate` operator runs each state's
+  initializer when the owning store is constructed, in declaration order,
+  instead of lazily on first read. `snapshot()` and `properties` now see every
+  declared state on a freshly-constructed store — closing the
+  snapshot/restore-on-untouched-store surprise. Consequences: a throwing
+  initializer fails at construction (not on first read), and a
+  forward-referencing initializer (`val y by state { x.value }` where `x` is
+  declared later) now fails at construction — reorder declarations, or use
+  `computed`/`derived`. Migration in `MIGRATING.md`. (Binaries compiled before
+  this change stay lazy; only code recompiled against the new artifact registers
+  eagerly.)
+
 - **The CRTP `Self` type is enforced at construction (P1-crtp).** A
   mis-parameterized store — `class Foo : Store<Bar>()` instead of
   `class Foo : Store<Foo>()` — now throws an `IllegalStateException` naming both
