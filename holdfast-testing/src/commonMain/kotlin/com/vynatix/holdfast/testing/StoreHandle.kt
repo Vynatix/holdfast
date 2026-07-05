@@ -39,7 +39,8 @@ import kotlin.reflect.KProperty1
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
  * known limits (commit-time errors after the body returns, user middlewares
- * not auto-wrapped, suspendAction not running middleware in 1.1).
+ * not auto-wrapped). `suspendAction` runs the middleware chain, so the recorder
+ * captures suspending actions on the same timeline as blocking ones.
  */
 class StoreHandle<V : Store<V>> internal constructor(
     val store: V,
@@ -197,20 +198,26 @@ class StoreHandle<V : Store<V>> internal constructor(
      * [com.vynatix.holdfast.bridge.KvBridge]) only the wrapper-tracked publishes
      * are visible — but only if the bridge was wrapped at install time.
      *
+     * The returned view is typed by the property's state type — no
+     * `as BridgeView<T>` cast is needed at the call site. The internal
+     * unchecked cast from the wrapper map is sound: the map is keyed by the
+     * `State<T>` instance itself, so the wrapper stored under `prop`'s state
+     * carries the same `T`.
+     *
      * @throws IllegalStateException if the state has no bridge attached.
      */
-    fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
+    @Suppress("UNCHECKED_CAST")
+    fun <T : Any> bridge(prop: KProperty1<V, State<T>>): BridgeView<T> {
         val state = prop.get(store)
         val wrapper = bridgeWrappers[state]
         if (wrapper != null) {
-            return BridgeView(BridgeView.WrappedSource(wrapper))
+            return BridgeView(BridgeView.WrappedSource(wrapper as RecordingBridgeWrapper<T>))
         }
         // Fallback: no install-time wrapper, but the state may have a bridge
         // attached after track(v). Probe the MutableState.bridge directly and
         // try to construct a view from a known test-bridge type.
-        @Suppress("UNCHECKED_CAST")
         val mutable =
-            (state as? MutableState<Any>)
+            (state as? MutableState<T>)
                 ?: error("bridge(${prop.name}): state was not created by this store — cannot inspect its bridge")
         val attached =
             mutable.bridge ?: error(
@@ -220,11 +227,11 @@ class StoreHandle<V : Store<V>> internal constructor(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun adaptBridge(attached: Bridge<*>): BridgeView<*> =
+    private fun <T : Any> adaptBridge(attached: Bridge<T>): BridgeView<T> =
         when (attached) {
-            is RecordingBridge<*> -> BridgeView(BridgeView.RecordingSource(attached as RecordingBridge<Any>))
-            is LatchedBridge<*> -> BridgeView(BridgeView.LatchedSource(attached as LatchedBridge<Any>))
-            is RecordingBridgeWrapper<*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper<Any>))
+            is RecordingBridge<*> -> BridgeView(BridgeView.RecordingSource(attached as RecordingBridge<T>))
+            is LatchedBridge<*> -> BridgeView(BridgeView.LatchedSource(attached as LatchedBridge<T>))
+            is RecordingBridgeWrapper<*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper<T>))
             else ->
                 error(
                     "bridge(...): underlying bridge is a ${attached::class.simpleName} which does not " +

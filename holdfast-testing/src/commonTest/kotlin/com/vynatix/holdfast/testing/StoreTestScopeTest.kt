@@ -1,10 +1,14 @@
 package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Store
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 private class TinyVault : Store<TinyVault>() {
     val n by state { 0 }
@@ -67,5 +71,33 @@ class StoreTestScopeTest {
         storeTest {
             val h = track(TinyVault(), Capture.RingBuffer(size = 16))
             assertEquals(Capture.RingBuffer(size = 16), h.captureMode)
+        }
+
+    // -------- runTest time-control forwarders (F24) --------
+
+    @Test
+    fun timeControlWorksUnprefixed() =
+        storeTest {
+            // The runTest vocabulary must work without a testScope./testScheduler.
+            // prefix: runCurrent, advanceTimeBy, advanceUntilIdle, currentTime.
+            var immediate = false
+            var afterDelay = false
+            launch { immediate = true }
+            launch {
+                delay(75.milliseconds)
+                afterDelay = true
+            }
+
+            runCurrent()
+            assertTrue(immediate, "runCurrent() must run tasks scheduled at the current time")
+            assertFalse(afterDelay, "the delayed task must not have run yet")
+
+            val before = currentTime
+            advanceTimeBy(50.milliseconds)
+            assertEquals(before + 50, currentTime)
+            assertFalse(afterDelay, "75ms task must not run after only 50ms")
+
+            advanceUntilIdle()
+            assertTrue(afterDelay, "advanceUntilIdle() must drain the remaining scheduled work")
         }
 }

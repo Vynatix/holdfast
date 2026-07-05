@@ -182,11 +182,14 @@ public final class com/vynatix/holdfast/testing/StoreTestKt {
 
 public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/holdfast/testing/StoreAutoRegistration, kotlinx/coroutines/CoroutineScope {
 	public fun act (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public final fun advanceTimeBy-LRDsOJo (J)V
+	public final fun advanceUntilIdle ()V
 	public final fun autoTrackTimeline (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public final fun getBackgroundScope ()Lkotlinx/coroutines/CoroutineScope;
 	public fun getCoroutineContext ()Lkotlin/coroutines/CoroutineContext;
+	public final fun getCurrentTime ()J
 	public fun getLastResult (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
 	public fun getLastTransaction (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/Transaction;
 	public final fun getTestScheduler ()Lkotlinx/coroutines/test/TestCoroutineScheduler;
@@ -195,6 +198,7 @@ public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/hol
 	public fun getTransactions (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 	public fun middlewareEventsOf (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Middleware;)Ljava/util/List;
 	public fun read (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun runCurrent ()V
 	public fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun track (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;)Lcom/vynatix/holdfast/testing/StoreHandle;
 }
@@ -297,7 +301,7 @@ public final class com/vynatix/holdfast/testing/bridge/FakeKvStore : com/vynatix
 }
 
 public final class com/vynatix/holdfast/testing/bridge/LatchedBridge : com/vynatix/holdfast/Bridge {
-	public fun <init> (Ljava/lang/Object;)V
+	public fun <init> ()V
 	public final fun awaitPublishAttempt (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun getLastPublished ()Ljava/lang/Object;
 	public final fun getPublished ()Ljava/util/List;

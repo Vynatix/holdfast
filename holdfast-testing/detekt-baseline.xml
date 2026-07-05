@@ -6,7 +6,6 @@
     <ID>MaxLineLength:ResultMatchers.kt:"Expected TransactionResult.Error rolled back with ${exceptionType.simpleName}, but got Success: $result"</ID>
     <ID>MaxLineLength:ResultMatchers.kt:inline</ID>
     <ID>MaxLineLength:StoreAutoRegistration.kt:StoreAutoRegistration$suspend</ID>
-    <ID>MaxLineLength:StoreHandle.kt:StoreHandle$is RecordingBridgeWrapper&lt;*> -> BridgeView(BridgeView.WrappedSource(attached as RecordingBridgeWrapper&lt;Any>))</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionCommittedPredicate$override fun matches: Boolean</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionErroredPredicate$override fun matches: Boolean</ID>
     <ID>MaxLineLength:TimelineMatcher.kt:TransactionRolledBackPredicate$override fun matches: Boolean</ID>
@@ -14,6 +13,7 @@
     <ID>TooGenericExceptionCaught:PrivilegedHooks.kt:PrivilegedHooks$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:StoreTest.kt:t: Throwable</ID>
     <ID>TooManyFunctions:StoreHandle.kt:StoreHandle&lt;V : Store&lt;V>></ID>
+    <ID>TooManyFunctions:StoreTestScope.kt:StoreTestScope : CoroutineScopeStoreAutoRegistration</ID>
     <ID>TooManyFunctions:TimelineMatcher.kt:TimelineMatcher&lt;V : Store&lt;V>></ID>
   </CurrentIssues>
 </SmellBaseline>

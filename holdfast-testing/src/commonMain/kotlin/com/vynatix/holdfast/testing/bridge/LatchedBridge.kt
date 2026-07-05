@@ -24,22 +24,24 @@ import kotlinx.coroutines.CompletableDeferred
  *  - [awaitPublishAttempt] is a suspending hook that resumes on the **next**
  *    publish call after subscription. Tests use it to gate coroutines on a
  *    publish having occurred.
- *  - [releasePublish] is kept for API parity with the spec; it is a no-op in
- *    v1 because publish never suspends. Calling it is harmless.
+ *  - [releasePublish] is deprecated: it was kept for API parity with the
+ *    spec but has always been a no-op because publish never suspends.
  *
  * If a future revision of [Bridge] gains a suspending publish overload, the
  * spec's literal "publish suspends" semantics could be honoured by switching
- * the implementation; the test-author-facing API ([awaitPublishAttempt],
- * [releasePublish]) is stable across that change.
+ * the implementation; the test-author-facing API ([awaitPublishAttempt]) is
+ * stable across that change.
+ *
+ * Unlike [RecordingBridge] there is no `initial` value: this bridge never
+ * replays anything on attach (see [observe]), so construct it with an
+ * explicit type argument — `LatchedBridge<String>()`.
  *
  * Concurrency: every internal mutation runs under a single
  * [SynchronizedObject]. The pending-deferred list is drained under the lock
  * so a publish completes its waiters atomically with respect to a concurrent
  * `awaitPublishAttempt` call.
  */
-class LatchedBridge<T : Any>(
-    @Suppress("unused") private val initial: T,
-) : Bridge<T> {
+class LatchedBridge<T : Any> : Bridge<T> {
     private val lock = SynchronizedObject()
     private val publishedList: MutableList<T> = mutableListOf()
     private val pendingAttemptWaiters: MutableList<CompletableDeferred<T>> = mutableListOf()
@@ -128,8 +130,13 @@ class LatchedBridge<T : Any>(
     }
 
     /**
-     * No-op in v1 — kept for API parity with the spec. See class KDoc.
+     * No-op — [publish] never suspends in v1, so there is nothing to release.
+     * See the class KDoc for the spec-deviation rationale.
      */
+    @Deprecated(
+        message = "No-op: publish never suspends in v1; remove the call.",
+        level = DeprecationLevel.WARNING,
+    )
     fun releasePublish() {
         // Intentionally empty.
     }

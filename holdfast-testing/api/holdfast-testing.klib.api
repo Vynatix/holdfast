@@ -107,11 +107,11 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.testing.ma
         final fun <get-started>(): com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.started.<get-started>|<get-started>(){}[0]
 
     final fun <#A1: com.vynatix.holdfast/Middleware<*>> middleware(#A1): com.vynatix.holdfast.testing.matcher/MiddlewareBuilder<#A> // com.vynatix.holdfast.testing.matcher/TimelineMatcher.middleware|middleware(0:0){0§<com.vynatix.holdfast.Middleware<*>>}[0]
+    final fun <#A1: kotlin/Any> emitted(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<#A1>>, #A1?): com.vynatix.holdfast.testing.matcher/EmissionPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.emitted|emitted(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<0:0>>;0:0?){0§<kotlin.Any>}[0]
     final fun bridgeObserved(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/BridgeObservedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.bridgeObserved|bridgeObserved(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
     final fun bridgePublished(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/BridgePublishedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.bridgePublished|bridgePublished(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
     final fun committed(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionCommittedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.committed|committed(kotlin.String){}[0]
     final fun emitted(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.matcher/EmissionPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.emitted|emitted(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
-    final fun emitted(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>, kotlin/Any?): com.vynatix.holdfast.testing.matcher/EmissionPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.emitted|emitted(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>;kotlin.Any?){}[0]
     final fun errored(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionErroredPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.errored|errored(kotlin.String){}[0]
     final fun rolledBack(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionRolledBackPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.rolledBack|rolledBack(kotlin.String){}[0]
     final fun started(kotlin/String): com.vynatix.holdfast.testing.matcher/TransactionStartedPredicate // com.vynatix.holdfast.testing.matcher/TimelineMatcher.started|started(kotlin.String){}[0]
@@ -133,9 +133,9 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.testing/St
         final fun <get-transactions>(): kotlin.collections/List<com.vynatix.holdfast.testing/TransactionEvent> // com.vynatix.holdfast.testing/StoreHandle.transactions.<get-transactions>|<get-transactions>(){}[0]
 
     final fun <#A1: com.vynatix.holdfast/Middleware<#A>> middlewareEventsOf(#A1): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/StoreHandle.middlewareEventsOf|middlewareEventsOf(0:0){0§<com.vynatix.holdfast.Middleware<1:0>>}[0]
+    final fun <#A1: kotlin/Any> bridge(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<#A1>>): com.vynatix.holdfast.testing.bridge/BridgeView<#A1> // com.vynatix.holdfast.testing/StoreHandle.bridge|bridge(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<0:0>>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast.testing/StoreHandle.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> read(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast.testing/StoreHandle.read|read(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
-    final fun bridge(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): com.vynatix.holdfast.testing.bridge/BridgeView<*> // com.vynatix.holdfast.testing/StoreHandle.bridge|bridge(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
     final fun bridgeEvents(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/BridgeEvent> // com.vynatix.holdfast.testing/StoreHandle.bridgeEvents|bridgeEvents(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
     final fun consumeAllPendingErrors() // com.vynatix.holdfast.testing/StoreHandle.consumeAllPendingErrors|consumeAllPendingErrors(){}[0]
     final fun emissions(kotlin.reflect/KProperty1<#A, com.vynatix.holdfast/State<*>>): kotlin.collections/List<com.vynatix.holdfast.testing/EmissionEvent> // com.vynatix.holdfast.testing/StoreHandle.emissions|emissions(kotlin.reflect.KProperty1<1:0,com.vynatix.holdfast.State<*>>){}[0]
@@ -177,7 +177,7 @@ final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/FailingBridge :
 }
 
 final class <#A: kotlin/Any> com.vynatix.holdfast.testing.bridge/LatchedBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.testing.bridge/LatchedBridge|null[0]
-    constructor <init>(#A) // com.vynatix.holdfast.testing.bridge/LatchedBridge.<init>|<init>(1:0){}[0]
+    constructor <init>() // com.vynatix.holdfast.testing.bridge/LatchedBridge.<init>|<init>(){}[0]
 
     final val lastPublished // com.vynatix.holdfast.testing.bridge/LatchedBridge.lastPublished|{}lastPublished[0]
         final fun <get-lastPublished>(): #A? // com.vynatix.holdfast.testing.bridge/LatchedBridge.lastPublished.<get-lastPublished>|<get-lastPublished>(){}[0]
@@ -429,13 +429,18 @@ final class com.vynatix.holdfast.testing/StoreTestScope : com.vynatix.holdfast.t
         final fun <get-backgroundScope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast.testing/StoreTestScope.backgroundScope.<get-backgroundScope>|<get-backgroundScope>(){}[0]
     final val coroutineContext // com.vynatix.holdfast.testing/StoreTestScope.coroutineContext|{}coroutineContext[0]
         final fun <get-coroutineContext>(): kotlin.coroutines/CoroutineContext // com.vynatix.holdfast.testing/StoreTestScope.coroutineContext.<get-coroutineContext>|<get-coroutineContext>(){}[0]
+    final val currentTime // com.vynatix.holdfast.testing/StoreTestScope.currentTime|{}currentTime[0]
+        final fun <get-currentTime>(): kotlin/Long // com.vynatix.holdfast.testing/StoreTestScope.currentTime.<get-currentTime>|<get-currentTime>(){}[0]
     final val testScheduler // com.vynatix.holdfast.testing/StoreTestScope.testScheduler|{}testScheduler[0]
         final fun <get-testScheduler>(): kotlinx.coroutines.test/TestCoroutineScheduler // com.vynatix.holdfast.testing/StoreTestScope.testScheduler.<get-testScheduler>|<get-testScheduler>(){}[0]
     final val testScope // com.vynatix.holdfast.testing/StoreTestScope.testScope|{}testScope[0]
         final fun <get-testScope>(): kotlinx.coroutines.test/TestScope // com.vynatix.holdfast.testing/StoreTestScope.testScope.<get-testScope>|<get-testScope>(){}[0]
 
     final fun <#A1: com.vynatix.holdfast/Store<#A1>> track(#A1, com.vynatix.holdfast.testing/Capture): com.vynatix.holdfast.testing/StoreHandle<#A1> // com.vynatix.holdfast.testing/StoreTestScope.track|track(0:0;com.vynatix.holdfast.testing.Capture){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+    final fun advanceTimeBy(kotlin.time/Duration) // com.vynatix.holdfast.testing/StoreTestScope.advanceTimeBy|advanceTimeBy(kotlin.time.Duration){}[0]
+    final fun advanceUntilIdle() // com.vynatix.holdfast.testing/StoreTestScope.advanceUntilIdle|advanceUntilIdle(){}[0]
     final fun autoTrackTimeline(com.vynatix.holdfast/Store<*>): kotlin.collections/List<com.vynatix.holdfast.testing/StoreEvent> // com.vynatix.holdfast.testing/StoreTestScope.autoTrackTimeline|autoTrackTimeline(com.vynatix.holdfast.Store<*>){}[0]
+    final fun runCurrent() // com.vynatix.holdfast.testing/StoreTestScope.runCurrent|runCurrent(){}[0]
     final inline fun <#A1: reified com.vynatix.holdfast/Middleware<*>> (com.vynatix.holdfast/Store<*>).middlewareEventsOf(): kotlin.collections/List<com.vynatix.holdfast.testing/MiddlewareEvent> // com.vynatix.holdfast.testing/StoreTestScope.middlewareEventsOf|middlewareEventsOf@com.vynatix.holdfast.Store<*>(){0§<com.vynatix.holdfast.Middleware<*>>}[0]
 }
 

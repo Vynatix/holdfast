@@ -1,5 +1,7 @@
 package com.vynatix.holdfast.testing
 
+import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FrameObservers
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
@@ -9,8 +11,10 @@ import com.vynatix.holdfast.testing.internal.HandleRegistry
 import com.vynatix.holdfast.testing.internal.OpenTransactionRegistry
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
+import kotlin.time.Duration
 
 /**
  * Test scope produced by [storeTest]. Wraps the underlying [TestScope] (so the
@@ -20,9 +24,10 @@ import kotlinx.coroutines.test.TestScope
  * Implementation note: `TestScope` is a sealed interface and cannot be
  * implemented directly outside its module, so the wrapper delegates
  * [CoroutineScope] (its non-sealed supertype) and forwards [testScheduler] and
- * [backgroundScope] manually. The full [TestScope] is also exposed as
- * [testScope] so extension helpers like `runCurrent()`, `advanceUntilIdle()`,
- * `advanceTimeBy()`, and `currentTime` can be invoked against it directly.
+ * [backgroundScope] manually. The `runTest` time-control vocabulary is
+ * forwarded as members — [runCurrent], [advanceUntilIdle], [advanceTimeBy],
+ * and [currentTime] work unprefixed inside a [storeTest] body — and the full
+ * [TestScope] is also exposed as [testScope] for anything else.
  *
  * Implements [StoreAutoRegistration] — the member-extension surface that lets
  * tests call `myStore.action { … }`, `myStore.read { … }`, `myStore.timeline`,
@@ -46,6 +51,31 @@ class StoreTestScope internal constructor(
 
     /** Background scope whose work is not awaited at test end. */
     val backgroundScope: CoroutineScope get() = testScope.backgroundScope
+
+    /** Virtual time elapsed on [testScheduler], in milliseconds. Forwarder for `runTest` muscle memory. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentTime: Long get() = testScheduler.currentTime
+
+    /** Run tasks scheduled at the current virtual time, without advancing it. Forwards to [testScheduler]. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun runCurrent() {
+        testScheduler.runCurrent()
+    }
+
+    /** Advance virtual time until no scheduled task remains. Forwards to [testScheduler]. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun advanceUntilIdle() {
+        testScheduler.advanceUntilIdle()
+    }
+
+    /**
+     * Advance virtual time by [delay], running every task scheduled inside the
+     * window. Forwards to [testScheduler].
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun advanceTimeBy(delay: Duration) {
+        testScheduler.advanceTimeBy(delay)
+    }
 
     private val registry = HandleRegistry()
     private val barriers = BarrierRegistry()
@@ -164,7 +194,14 @@ class StoreTestScope internal constructor(
      * subscriber refs); then the handle registry's pending-error bookkeeping
      * is cleared. Recorder disposal swallows exceptions to keep teardown
      * robust even when [bodyAlreadyFailed] is `true`.
+     *
+     * Finally the process-global [FrameObservers] registry is cleared. That
+     * registry is process-wide, so a [com.vynatix.holdfast.FrameObserver]
+     * registered inside one `storeTest` would otherwise keep firing across
+     * every later test in the same process; clearing it at teardown gives each
+     * `storeTest` a clean frame-observer slate.
      */
+    @OptIn(ExperimentalStoreApi::class)
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
         barriers.cancelAll()
         awaitings.cancelAll()
@@ -183,6 +220,10 @@ class StoreTestScope internal constructor(
             handle.clearPendingErrorsInternal()
         }
         registry.clear()
+
+        // Frame observers are process-global; drop any registered by this test
+        // so they cannot fire during subsequent tests in the same process.
+        FrameObservers.clear()
 
         if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
             val msg =

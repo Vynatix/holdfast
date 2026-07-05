@@ -153,7 +153,8 @@ class RecordingBridgeTest {
                 )
 
             ctr.action { theme mutate "dark" }.shouldBeSuccess()
-            val view: BridgeView<*> = ctr.bridge(ThemeVault::theme)
+            // Typed lookup (F24): the view is BridgeView<String>, no star projection.
+            val view: BridgeView<String> = ctr.bridge(ThemeVault::theme)
             // The published list comes from the wrapper, which intercepted the
             // single commit-time publish.
             assertEquals(listOf("dark"), view.published)

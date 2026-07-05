@@ -30,7 +30,7 @@ class BridgeViewTest {
 
     @Test
     fun bridgeViewOverLatchedBridgeReadsPublished() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         bridge.publish("x")
         bridge.publish("y")
 
@@ -63,7 +63,7 @@ class BridgeViewTest {
 
     @Test
     fun receivingFeedsObserverThroughLatchedBridge() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         val received = mutableListOf<String>()
         bridge.observe { received.add(it) }
 
@@ -112,8 +112,8 @@ class BridgeViewTest {
                     },
                 )
 
-            @Suppress("UNCHECKED_CAST")
-            val view = ctr.bridge(TextVault::text) as BridgeView<String>
+            // Typed lookup (F24): no cast needed — the view is BridgeView<String>.
+            val view: BridgeView<String> = ctr.bridge(TextVault::text)
             view receiving "external"
             assertEquals("external", ctr.read { text.value })
         }

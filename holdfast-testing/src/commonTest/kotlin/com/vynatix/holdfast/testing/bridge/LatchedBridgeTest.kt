@@ -19,14 +19,14 @@ private class LatchVault : Store<LatchVault>() {
 class LatchedBridgeTest {
     @Test
     fun publishedListInitiallyEmpty() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         assertTrue(bridge.published.isEmpty())
         assertNull(bridge.lastPublished)
     }
 
     @Test
     fun publishRecordsValueAndReturnsTrue() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         assertTrue(bridge.publish("v1"))
         assertTrue(bridge.publish("v2"))
         assertEquals(listOf("v1", "v2"), bridge.published)
@@ -35,7 +35,7 @@ class LatchedBridgeTest {
 
     @Test
     fun observeDoesNotReplayInitialOnAttach() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         val received = mutableListOf<String>()
         bridge.observe { received.add(it) }
         // Unlike RecordingBridge, LatchedBridge does NOT replay initial.
@@ -44,7 +44,7 @@ class LatchedBridgeTest {
 
     @Test
     fun simulateInboundFeedsAttachedObserver() {
-        val bridge = LatchedBridge<String>(initial = "init")
+        val bridge = LatchedBridge<String>()
         val received = mutableListOf<String>()
         bridge.observe { received.add(it) }
         bridge.simulateInbound("incoming")
@@ -52,9 +52,11 @@ class LatchedBridgeTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun releasePublishIsNoOp() {
-        val bridge = LatchedBridge<String>(initial = "init")
-        // Should not throw, should not affect state.
+        val bridge = LatchedBridge<String>()
+        // Deprecated no-op kept at WARNING for one minor: should not throw,
+        // should not affect state.
         bridge.releasePublish()
         bridge.releasePublish()
         assertTrue(bridge.published.isEmpty())
@@ -63,7 +65,7 @@ class LatchedBridgeTest {
     @Test
     fun awaitPublishAttemptResumesOnNextPublish() =
         storeTest {
-            val bridge = LatchedBridge<String>(initial = "init")
+            val bridge = LatchedBridge<String>()
 
             // Schedule a publish a few virtual ticks from now.
             val publishJob =
@@ -80,7 +82,7 @@ class LatchedBridgeTest {
     @Test
     fun awaitPublishAttemptIgnoresPastPublishes() =
         storeTest {
-            val bridge = LatchedBridge<String>(initial = "init")
+            val bridge = LatchedBridge<String>()
             // Past publishes do NOT satisfy a subsequent awaitPublishAttempt.
             bridge.publish("past1")
             bridge.publish("past2")
@@ -99,7 +101,7 @@ class LatchedBridgeTest {
     @Test
     fun multipleConcurrentAwaitersAllResumeOnSinglePublish() =
         storeTest {
-            val bridge = LatchedBridge<Int>(initial = 0)
+            val bridge = LatchedBridge<Int>()
 
             // Use backgroundScope so the awaiters participate in the test
             // scheduler's virtual time; that lets us deterministically advance
@@ -121,7 +123,7 @@ class LatchedBridgeTest {
     @Test
     fun integrationWithVaultRecordsPublish() =
         storeTest {
-            val bridge = LatchedBridge<String>(initial = "init")
+            val bridge = LatchedBridge<String>()
             val ctr =
                 track(
                     LatchVault().also { v ->

@@ -66,10 +66,14 @@ import kotlin.time.Clock
  *    is `final`). Their lifecycle events are therefore absent from the timeline.
  *    The recorder pushes self-events for itself so [com.vynatix.holdfast.testing.StoreHandle.middlewareEventsOf]
  *    is non-empty, but for any user-class M the typed view returns empty.
- *  - **suspendAction** does not run the middleware chain at all (see
- *    `:holdfast-coroutines.SuspendAction` — middlewares are documented as "NOT
- *    invoked for 1.1"). The recorder therefore sees no events for suspending
- *    actions. This matches the production contract.
+ *
+ * Note on **suspendAction**: unlike earlier revisions, the suspending path in
+ * `:holdfast-coroutines.SuspendAction` DOES run the `Middleware<V>` sync hooks
+ * (`onTransactionStarted` / `onTransactionCompleted` / `onTransactionError`) in
+ * concentric order. Since this recorder is an ordinary middleware, it captures
+ * suspending actions too — a `suspendAction` produces the same
+ * TransactionStarted → EmissionEvent → TransactionCommitted (or
+ * TransactionErrored → TransactionRolledBack) sequence as the blocking path.
  *
  * The buffer is guarded by an [atomicfu][SynchronizedObject] lock so concurrent
  * `parallel { … }` tests don't corrupt it. The recorder only writes to the

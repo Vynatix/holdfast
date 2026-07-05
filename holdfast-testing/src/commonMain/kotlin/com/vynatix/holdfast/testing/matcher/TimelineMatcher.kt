@@ -195,10 +195,15 @@ class TimelineMatcher<V : Store<V>> internal constructor(
     /**
      * Match any [EmissionEvent] for [prop] whose `newValue` equals [value]
      * (`==`). [value] may be `null` to match emissions whose `newValue` is null.
+     *
+     * Typed: [value] must be a [T] (the property's state type), so
+     * `emitted(MyStore::count, "42")` fails at compile time instead of
+     * silently never matching. The JVM erasure is unchanged from the old
+     * `Any?` form.
      */
-    fun emitted(
-        prop: KProperty1<V, State<*>>,
-        value: Any?,
+    fun <T : Any> emitted(
+        prop: KProperty1<V, State<T>>,
+        value: T?,
     ): EmissionPredicate =
         register(
             EmissionPredicate(
