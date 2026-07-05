@@ -1,63 +1,87 @@
-// Convention plugin: Sonatype/Central publication with GPG signing.
+// Convention plugin: Maven Central (Central Portal) publication with GPG signing,
+// via the vanniktech `com.vanniktech.maven.publish` plugin.
 //
-// Layers on top of `holdfast.publish` to add:
-//  - signing of all artifacts via GPG (key + password from env or gradle.properties)
-//  - Sonatype OSSRH staging repository (`publishToSonatype` task)
+// We apply the *base* variant (`com.vanniktech.maven.publish.base`) so the POM,
+// coordinates, host, and signing are configured entirely from this DSL rather
+// than from `gradle.properties` (`POM_*` / `SONATYPE_HOST` keys). The base
+// plugin auto-creates the per-target KMP/Android publications for us.
 //
-// Pre-flight (manual, NOT scripted here):
-//  1. Group `com.vynatix` claimed on Maven Central via Sonatype JIRA / Central Portal.
-//  2. GPG key pair generated; public key uploaded to keys.openpgp.org (and ideally
-//     keyserver.ubuntu.com).
-//  3. Credentials in `~/.gradle/gradle.properties` OR env vars:
-//        signing.keyId             — short GPG key id (last 8 hex)
-//        signing.password          — GPG passphrase
-//        signing.secretKeyRingFile — path to secret keyring (or use signing.key for in-memory)
-//        ossrhUsername             — Sonatype Central / OSSRH username
-//        ossrhPassword             — Sonatype Central / OSSRH password
+// Tasks this exposes (used by `.github/workflows/publish.yml`):
+//  - `publishToMavenLocal`               — smoke test; unsigned unless a signing
+//                                           key is present (see guard below).
+//  - `publishAllPublicationsToMavenCentralRepository` — upload a bundle to the
+//                                           Central Portal.
+//  - `publishAndReleaseToMavenCentral`   — upload AND automatically release.
 //
-// Verification (without uploading): `./gradlew publishToMavenLocal` produces
-// `.asc` signature files alongside each artifact when signing credentials are
-// present. `./gradlew publishToSonatype` uploads to Central staging.
+// Credentials (Central Portal user token + in-memory GPG key) are read by the
+// plugin from these Gradle properties, conventionally supplied as
+// `ORG_GRADLE_PROJECT_*` env vars in CI:
+//        mavenCentralUsername / mavenCentralPassword
+//        signingInMemoryKey / signingInMemoryKeyPassword / signingInMemoryKeyId
 //
-// Note: `holdfast.publish.sonatype` does NOT auto-release; staging is a manual
-// step in the Central UI for 1.x releases. A `closeAndReleaseSonatypeStagingRepository`
-// task can be wired in via the `io.github.gradle-nexus.publish-plugin` for full
-// automation in a future plan; we keep this minimal for 1.1.
+// Signing is only wired when key material is actually present, so
+// `./gradlew publishToMavenLocal -Pholdfast.version=<v>` succeeds UNSIGNED for
+// local verification; CI (which sets `signingInMemoryKey`) publishes signed.
+
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinMultiplatform
 
 plugins {
     id("holdfast.publish")
-    signing
+    id("com.vanniktech.maven.publish.base")
 }
 
-publishing {
-    repositories {
-        maven {
-            name = "sonatype"
-            // Central Portal API endpoint; OSSRH legacy endpoint is being retired.
-            // Switch to https://oss.sonatype.org/service/local/staging/deploy/maven2/
-            // for legacy projects until their migration window closes.
-            val releasesUrl = "https://central.sonatype.com/api/v1/publisher/upload"
-            val snapshotsUrl = "https://central.sonatype.com/repository/maven-snapshots/"
-            val versionString = version.toString()
-            url = uri(if (versionString.endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl)
-            credentials {
-                username = (findProperty("ossrhUsername") as String?) ?: System.getenv("OSSRH_USERNAME")
-                password = (findProperty("ossrhPassword") as String?) ?: System.getenv("OSSRH_PASSWORD")
+// Present when `signingInMemoryKey` is supplied via -P or the
+// `ORG_GRADLE_PROJECT_signingInMemoryKey` env var (Gradle maps the latter to a
+// project property). Absent for a plain local `publishToMavenLocal`.
+val hasSigningKey = providers.gradleProperty("signingInMemoryKey").isPresent
+
+mavenPublishing {
+    // No-arg: Central Portal host. Release is driven by the
+    // `publishAndReleaseToMavenCentral` task (used by publish.yml).
+    publishToMavenCentral()
+
+    if (hasSigningKey) {
+        signAllPublications()
+    }
+
+    // Base plugin: we must opt each publishable module (all KMP) into the
+    // platform's publication wiring. `JavadocJar.Empty()` attaches the
+    // Central-required javadoc jar without coupling the publish path to a full
+    // Dokka run (API docs are generated separately via `dokkaGenerate`).
+    configure(KotlinMultiplatform(javadocJar = JavadocJar.Empty()))
+
+    coordinates(group.toString(), project.name, version.toString())
+
+    pom {
+        name.set(project.name)
+        description.set("Transactional state containers for Kotlin Multiplatform.")
+        inceptionYear.set("2025")
+        url.set("https://github.com/vynatix/holdfast")
+        licenses {
+            license {
+                name.set("Apache-2.0")
+                url.set("https://opensource.org/licenses/Apache-2.0")
+                distribution.set("https://opensource.org/licenses/Apache-2.0")
             }
         }
-    }
-}
-
-signing {
-    val signingKey = (findProperty("signing.key") as String?) ?: System.getenv("SIGNING_KEY")
-    val signingPassword = (findProperty("signing.password") as String?) ?: System.getenv("SIGNING_PASSWORD")
-    if (signingKey != null && signingPassword != null) {
-        useInMemoryPgpKeys(signingKey, signingPassword)
-        sign(publishing.publications)
-    } else {
-        // Fall back to gradle.properties-driven config (signing.keyId etc.) — the
-        // `signing` plugin auto-discovers these and applies them per publication.
-        // No-op block; presence of credentials is checked at sign-task time.
-        @Suppress("EmptyFunctionBlock") {}
+        developers {
+            developer {
+                id.set("vynatix")
+                name.set("Vynatix")
+                organization.set("Vynatix")
+                organizationUrl.set("https://vynatix.com")
+            }
+            developer {
+                id.set("osama-raddad")
+                name.set("Osama Raddad")
+                email.set("front.desk@vynatix.com")
+            }
+        }
+        scm {
+            url.set("https://github.com/vynatix/holdfast")
+            connection.set("scm:git:git://github.com/vynatix/holdfast.git")
+            developerConnection.set("scm:git:ssh://git@github.com/vynatix/holdfast.git")
+        }
     }
 }

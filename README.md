@@ -112,7 +112,15 @@ is **experimental** with these limitations:
 
 ## Install
 
+> **Not on Maven Central yet.** Nothing has been published — the first Central
+> release will be **0.2.0** (see [`ROADMAP.md`](ROADMAP.md)). Until then, build
+> from source or `./gradlew publishToMavenLocal` and depend on `mavenLocal()`.
+> The snippet below is the shape the published coordinates will take; the
+> `0.1.0` version is a local/source-build placeholder.
+
 ```kotlin
+// NOTE: not yet published to Maven Central — first Central release is 0.2.0.
+//       Until then: `./gradlew publishToMavenLocal` and depend on mavenLocal().
 // settings.gradle.kts
 dependencyResolutionManagement {
     repositories {

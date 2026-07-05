@@ -12,4 +12,5 @@ dependencies {
     implementation(libs.gradle.ktlint)
     implementation(libs.gradle.dokka)
     implementation(libs.gradle.binary.compatibility.validator)
+    implementation(libs.gradle.maven.publish)
 }

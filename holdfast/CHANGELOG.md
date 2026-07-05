@@ -157,6 +157,20 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   KDoc and GUIDE §14.4 spell this out; a pinning test in `CryptoTest` locks the
   behavior. Docs + test only; no code or API change.
 
+### Infrastructure
+
+- **Real Maven Central publishing pipeline.** The `holdfast.publish.sonatype`
+  convention plugin now applies the vanniktech `com.vanniktech.maven.publish.base`
+  plugin and configures `mavenPublishing { publishToMavenCentral(); pom { … } }`,
+  replacing the hand-rolled `maven-publish` repository block that pointed at the
+  Central Portal upload URL (a bundle-POST endpoint `maven-publish` cannot speak).
+  `.github/workflows/publish.yml`'s `publishAndReleaseToMavenCentral` task and its
+  `ORG_GRADLE_PROJECT_*` env vars are now the plugin's real contract. Signing is
+  wired only when a `signingInMemoryKey` is present, so
+  `./gradlew publishToMavenLocal -Pholdfast.version=<v>` still succeeds UNSIGNED
+  for local verification. No artifact has been published to Central yet — the
+  first Central release will be 0.2.0.
+
 ## 0.1.0 — Initial public release
 
 First public release on Maven Central as `com.vynatix:holdfast` (plus the
