@@ -105,6 +105,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **`TimingMiddleware` now reports the transaction's real outcome and includes
+  commit fanout in the elapsed time (F31).** `onTransactionCompleted` fires
+  before the commit, so the success report is deferred via `Store.postCommit`
+  until after the commit's observer/bridge/event fanout. The reported
+  `TransactionStatus` is now truthful — `Committed`, or `Failed` if the commit
+  itself threw — and metric consumers keying on the enum may see the new
+  `Failed` value. The elapsed time now includes fanout, not just the body.
+
 - **`atomic`, `derived`, and `computed` now enforce the disposed-store
   contract (P1-disposed-gaps).** `atomic` checks every participant before
   acquiring any lock; `derived`/`computed` check at entry. Calling them on a

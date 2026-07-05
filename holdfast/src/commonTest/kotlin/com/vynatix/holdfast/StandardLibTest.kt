@@ -91,6 +91,56 @@ class TimingMiddlewareTest {
         assertEquals(1, results.size)
         assertEquals(TransactionStatus.RolledBack, results[0].second)
     }
+
+    @Test
+    fun timingMiddlewareElapsedIncludesCommitFanout() {
+        // F31: the success report is deferred past commit fanout, so a slow
+        // observer's time is included in the elapsed measurement.
+        val v = StdLibVault()
+        val results = mutableListOf<Triple<String, TransactionStatus, Long>>()
+        v.middlewares(TimingMiddleware { id, status, ms -> results.add(Triple(id, status, ms)) })
+        val sub =
+            v {
+                n effect {
+                    // Busy-wait ~40ms during fanout so it dominates the elapsed time.
+                    val until = kotlin.time.Clock.System.now().toEpochMilliseconds() + 40
+                    @Suppress("ControlFlowWithEmptyBody")
+                    while (kotlin.time.Clock.System.now().toEpochMilliseconds() < until) {
+                        // spin
+                    }
+                }
+            }
+        v action { n mutate 1 }
+        assertEquals(1, results.size)
+        assertEquals(TransactionStatus.Committed, results[0].second)
+        assertTrue(results[0].third >= 30, "elapsed includes commit fanout; got ${results[0].third}")
+        sub.dispose()
+    }
+
+    @Test
+    fun timingMiddlewareReportsFailedWhenCommitItselfThrows() {
+        // F31: onTransactionCompleted fires before commit; the deferred report
+        // reads the transaction's real terminal state — Failed when the commit's
+        // apply throws (here a transformer.get failure during fanout).
+        val v = FailingGetVault()
+        val results = mutableListOf<Triple<String, TransactionStatus, Long>>()
+        v.middlewares(TimingMiddleware { id, status, ms -> results.add(Triple(id, status, ms)) })
+        val r = v action { x mutate 99 }
+        assertIs<TransactionResult.Error>(r)
+        assertEquals(1, results.size)
+        assertEquals(TransactionStatus.Failed, results[0].second)
+    }
+}
+
+private class FailingGetVault : Store<FailingGetVault>() {
+    val x by state(
+        transformer =
+            object : Transformer<Int> {
+                override fun set(value: Int): Int = value
+
+                override fun get(value: Int): Int = if (value == 99) error("get boom") else value
+            },
+    ) { 0 }
 }
 
 class ValidationMiddlewareTest {
