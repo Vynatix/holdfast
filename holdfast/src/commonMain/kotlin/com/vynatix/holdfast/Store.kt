@@ -995,6 +995,14 @@ abstract class Store<Self : Store<Self>> {
          * `SupervisorJob() + Dispatchers.Default` process scope. Reading the lazy
          * default does NOT prevent a subsequent assignment — only an explicit
          * assignment freezes the value.
+         *
+         * **Testing hazard:** the once-per-process CAS is not reset between tests.
+         * Assigning `Store.defaultScope` inside a test freezes it for EVERY later
+         * test in the same JVM/process — a second assignment throws, and other
+         * tests silently inherit the first test's scope. Do not set it in tests;
+         * pass an explicit per-call `scope`, or use each store's `bindToScope`
+         * instead. There is deliberately no public reset hook (it would weaken the
+         * settable-once contract).
          */
         var defaultScope: CoroutineScope
             get() = customDefaultScope.value ?: processScope

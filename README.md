@@ -198,6 +198,11 @@ documented residual (single-threaded dispatcher). See [`ROADMAP.md`](ROADMAP.md)
   `store action { … }` for mutations. Non-mutating wiring (`effect`, `bridge`,
   `observeFrom`, reads) inside `store { }` stays legal, as does a nested
   `action { }`.
+- **`Store.defaultScope` is settable once per process (CAS).** This is by
+  design, but it is a testing gotcha: assigning it inside a test freezes it for
+  every later test in the same JVM (a second assignment throws; other tests
+  inherit the first one's scope). In tests, pass a per-call `scope` or use each
+  store's `bindToScope` instead of setting `Store.defaultScope`.
 
 ## Contributing
 
