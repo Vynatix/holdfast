@@ -27,6 +27,14 @@ suspend fun <R> suspendAtomic(
 ): TransactionResult<R>
 
 // Push-recomputed derived state with a suspending compute.
+// Recommended: seed with `initial`, first compute runs async — no runBlocking,
+// wasmJs-safe.
+fun <V : Store<V>, T : Any> V.suspendDerived(
+    vararg sources: State<*>,
+    initial: T,
+    compute: suspend V.() -> T,
+): Pair<State<T>, Disposable>
+// Seedless: seeds eagerly via runBlocking (crashes wasmJs, can deadlock single-thread).
 fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,

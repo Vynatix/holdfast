@@ -212,4 +212,74 @@ class SuspendDerivedTest {
             assertTrue(seen.contains(11), "observer should see the recomputed value 11; saw=$seen")
             sub.dispose()
         }
+
+    // --- F16: the `initial`-seeded overload (no runBlocking) ---
+
+    @Test
+    fun initial_overload_shows_seed_before_first_compute_then_computes() =
+        runBlocking {
+            val scope = newScope()
+            val v = SuspendDerivedVault(scope)
+            val (derived, d) =
+                v.suspendDerived(v.n, initial = -1) {
+                    delay(30)
+                    n.value + 100
+                }
+            disposables += d
+
+            // Before the first async compute lands, the caller's seed is visible —
+            // no runBlocking, no wasmJs hazard.
+            assertEquals(-1, derived.value, "seed visible before first async compute")
+
+            // First compute lands (n = 0 -> 100).
+            withTimeout(2_000) { while (derived.value != 100) delay(10) }
+            // Source change recomputes, same as the seedless overload.
+            v action { n mutate 5 }
+            withTimeout(2_000) { while (derived.value != 105) delay(10) }
+            assertEquals(105, derived.value)
+        }
+
+    @Test
+    fun disposing_initial_overload_unregisters_backing_state() =
+        runBlocking {
+            val scope = newScope()
+            val v = SuspendDerivedVault(scope)
+            val (derived, d) =
+                v.suspendDerived(v.n, initial = 0) {
+                    delay(10)
+                    n.value + 1
+                }
+            withTimeout(2_000) { while (derived.value != 1) delay(10) }
+
+            // A synthetic backing state is registered while the derived is live.
+            assertTrue(
+                v.properties.keys.any { it.startsWith("__suspendDerived_") },
+                "backing state registered while live; keys=${v.properties.keys}",
+            )
+
+            d.dispose()
+
+            // After dispose it's unregistered — no synthetic entry leaks.
+            assertTrue(
+                v.properties.keys.none { it.startsWith("__suspendDerived_") },
+                "backing state unregistered on dispose; keys=${v.properties.keys}",
+            )
+        }
+
+    @Test
+    fun disposing_after_store_dispose_does_not_throw() =
+        runBlocking {
+            val scope = newScope()
+            val v = SuspendDerivedVault(scope)
+            val (_, d) =
+                v.suspendDerived(v.n, initial = 0) {
+                    delay(10)
+                    n.value + 1
+                }
+
+            v.dispose()
+
+            // removeState throws once the store is disposed; dispose swallows it.
+            d.dispose()
+        }
 }

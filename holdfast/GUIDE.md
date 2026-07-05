@@ -1372,6 +1372,13 @@ suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
 suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): TransactionResult<R>
+// Seeded overload (recommended; wasmJs-safe, no runBlocking):
+fun <V : Store<V>, T : Any> V.suspendDerived(
+    vararg sources: State<*>,
+    initial: T,
+    compute: suspend V.() -> T,
+): Pair<State<T>, Disposable>
+// Seedless overload (runBlocking seed — crashes wasmJs, can deadlock single-thread):
 fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,

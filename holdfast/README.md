@@ -208,7 +208,8 @@ experimental**: the artifact is still published for downstream consumers, but
   `newSingleThreadContext`, absent on wasm);
 - `FileSystemKvStore` throws `UnsupportedOperationException` (no synchronous
   filesystem API in the browser);
-- `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
+- the seedless `suspendDerived` overload is unusable (its eager initial seed
+  requires `runBlocking`) — use `suspendDerived(..., initial = …) { … }` instead;
 - the platform is single-threaded (`currentThreadId() == 0`), so
   thread-confinement checks trivially pass.
 

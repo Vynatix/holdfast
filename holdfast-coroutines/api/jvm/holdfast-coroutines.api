@@ -26,6 +26,7 @@ public final class com/vynatix/holdfast/coroutines/SuspendAtomicKt {
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendDerivedKt {
+	public static final fun suspendDerived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Ljava/lang/Object;Lkotlin/jvm/functions/Function2;)Lkotlin/Pair;
 	public static final fun suspendDerived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function2;)Lkotlin/Pair;
 }
 

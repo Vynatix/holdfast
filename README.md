@@ -103,9 +103,10 @@ is **experimental** with these limitations:
 - **`FileSystemKvStore` throws `UnsupportedOperationException`** — the browser
   has no synchronous filesystem API; use `InMemoryKvStore` or a
   browser-storage-backed `KvStore` instead.
-- **`suspendDerived` is unusable** — its eager initial seed requires
-  `runBlocking`, which is not available on wasmJs; seed asynchronously via
-  `suspendAction { … }` instead.
+- **The seedless `suspendDerived` overload is unusable** — its eager initial
+  seed requires `runBlocking`, which is not available on wasmJs. Use the
+  seeded `suspendDerived(vararg sources, initial = …) { … }` overload instead
+  (it holds `initial` until the first async compute lands, no `runBlocking`).
 - **Single-threaded model** — `currentThreadId()` returns `0` for every caller,
   so thread-confinement checks trivially pass.
 
