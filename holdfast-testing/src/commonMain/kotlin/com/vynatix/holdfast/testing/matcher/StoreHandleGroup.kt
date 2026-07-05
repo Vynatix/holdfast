@@ -16,7 +16,7 @@ import com.vynatix.holdfast.testing.TransactionCommitted
  * storeTest {
  *     val a = track(AccountA); val b = track(AccountB)
  *     atomic(AccountA, AccountB) { /* transfer */ }
- *     (a and b) shouldCommitTogether ()
+ *     (a and b).shouldCommitTogether()
  * }
  * ```
  */

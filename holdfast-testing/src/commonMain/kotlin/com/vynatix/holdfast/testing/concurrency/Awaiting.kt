@@ -32,6 +32,13 @@ import kotlin.time.Duration.Companion.seconds
  * scheduler's virtual time: under `storeTest`, a 200 ms timeout completes in
  * near-zero wall time when no match arrives.
  *
+ * **Mixing with [parallel]**: [parallel] runs its workers on real
+ * [kotlinx.coroutines.Dispatchers.Default] threads while this timeout burns
+ * virtual time — the scheduler advances to expiry the moment the test thread
+ * idles, so a short `awaiting` racing real-thread workers is a flake by
+ * construction. Use a generous timeout (seconds, not milliseconds) for
+ * events produced by `parallel` work, or poll with [eventually] instead.
+ *
  * Example — wait for the next [com.vynatix.holdfast.testing.TransactionCommitted]:
  * ```
  * val ctr = track(MyStore())

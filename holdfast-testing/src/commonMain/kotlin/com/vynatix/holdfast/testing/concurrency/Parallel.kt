@@ -25,6 +25,13 @@ import kotlinx.coroutines.coroutineScope
  * cancelled cooperatively via [coroutineScope]'s structured-concurrency
  * semantics.
  *
+ * **Mixing with [awaiting]**: workers run on REAL threads while `awaiting`'s
+ * timeout burns VIRTUAL time — the test scheduler advances to expiry the
+ * moment the test thread idles, so a short `awaiting` racing `parallel`
+ * workers is a flake by construction. When waiting on events produced by
+ * `parallel` work, use a generous `awaiting` timeout (seconds, not
+ * milliseconds) or poll with [eventually] instead.
+ *
  * @param n number of workers to spawn; `0` returns an empty list immediately.
  * @param on dispatcher each worker runs on; defaults to [Dispatchers.Default].
  * @param body suspend block invoked once per worker with its zero-based index.
