@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asSharedFlow
  *     data class Failed(val cause: Throwable) : CounterEvent()
  * }
  *
- * class CounterVault : EventfulStore<CounterVault, CounterEvent>() {
+ * class CounterStore : EventfulStore<CounterStore, CounterEvent>() {
  *     val count by state { 0 }
  *
  *     fun increment() = action {

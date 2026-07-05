@@ -253,7 +253,8 @@ private fun <R> executeBody(
 ): TransactionResult<R> {
     val observers = FrameObservers.snapshot()
     val resultTxn = roots.last().txn
-    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, roots.map(FrameRoot::store)) } }
+    val participants = roots.map(FrameRoot::store)
+    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, participants) } }
     return try {
         // Phase 1: middleware `started` per store, in lock order. A throw here
         // aborts the frame before the body runs.
@@ -285,7 +286,7 @@ private fun <R> executeBody(
                 )
             }
         }
-        observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
+        observers.forEach { runCatching { it.onFrameCommitted(marker.frameId, participants) } }
         TransactionResult.Success(resultTxn, value)
     } catch (e: Throwable) {
         // Reverse lock-order unwind: per-store error hooks, then rollback.
@@ -296,7 +297,7 @@ private fun <R> executeBody(
             runCatching { entry.session.fireError(e) }
             runCatching { entry.txn.rollback() }
         }
-        observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, e) } }
+        observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, participants, e) } }
         // Contract violations are programming errors — fail loud instead of
         // folding into an ignorable Error result.
         if (e is FrameContractException) throw e

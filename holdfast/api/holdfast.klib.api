@@ -82,14 +82,14 @@ abstract interface com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast
     abstract fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.bridge/KvStore.snapshot|snapshot(){}[0]
 }
 
-abstract interface com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.crypto/Cipher|null[0]
-    abstract fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.decrypt|decrypt(kotlin.String){}[0]
-    abstract fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/Cipher.encrypt|encrypt(kotlin.String){}[0]
+abstract interface com.vynatix.holdfast.crypto/StoreCipher { // com.vynatix.holdfast.crypto/StoreCipher|null[0]
+    abstract fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/StoreCipher.decrypt|decrypt(kotlin.String){}[0]
+    abstract fun encrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/StoreCipher.encrypt|encrypt(kotlin.String){}[0]
 }
 
 abstract interface com.vynatix.holdfast/FrameObserver { // com.vynatix.holdfast/FrameObserver|null[0]
-    open fun onFrameCommitted(kotlin/String) // com.vynatix.holdfast/FrameObserver.onFrameCommitted|onFrameCommitted(kotlin.String){}[0]
-    open fun onFrameRolledBack(kotlin/String, kotlin/Throwable) // com.vynatix.holdfast/FrameObserver.onFrameRolledBack|onFrameRolledBack(kotlin.String;kotlin.Throwable){}[0]
+    open fun onFrameCommitted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameCommitted|onFrameCommitted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
+    open fun onFrameRolledBack(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>, kotlin/Throwable) // com.vynatix.holdfast/FrameObserver.onFrameRolledBack|onFrameRolledBack(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>;kotlin.Throwable){}[0]
     open fun onFrameStarted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameStarted|onFrameStarted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
 }
 
@@ -175,6 +175,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun <#A1: kotlin/Any> registerInternalState(kotlin/String, #A1, com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Store.registerInternalState|registerInternalState(kotlin.String;0:0;com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> state(com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/Initializer<#A1>): com.vynatix.holdfast/StateDelegate<#A1> // com.vynatix.holdfast/Store.state|state(com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean;com.vynatix.holdfast.Initializer<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Store.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun <#A1: kotlin/Any?> action(kotlin/String, kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Store.action|action(kotlin.String;kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast/Store.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/Store.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
     final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.holdfast/Store.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
@@ -189,6 +190,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun internalSetActiveTransaction(com.vynatix.holdfast/Transaction?) // com.vynatix.holdfast/Store.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.holdfast.Transaction?){}[0]
     final fun middlewares(kotlin/Array<out com.vynatix.holdfast/Middleware<#A>>...) // com.vynatix.holdfast/Store.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.Middleware<1:0>>...){}[0]
     final fun postCommit(kotlin/Function0<kotlin/Unit>) // com.vynatix.holdfast/Store.postCommit|postCommit(kotlin.Function0<kotlin.Unit>){}[0]
+    final fun removeMiddleware(com.vynatix.holdfast/Middleware<#A>): kotlin/Boolean // com.vynatix.holdfast/Store.removeMiddleware|removeMiddleware(com.vynatix.holdfast.Middleware<1:0>){}[0]
     final fun removeState(kotlin/String) // com.vynatix.holdfast/Store.removeState|removeState(kotlin.String){}[0]
     final fun reportUncaughtObserverError(kotlin/Throwable) // com.vynatix.holdfast/Store.reportUncaughtObserverError|reportUncaughtObserverError(kotlin.Throwable){}[0]
     final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.holdfast/Middleware<#A>> // com.vynatix.holdfast/Store.snapshotMiddleware|snapshotMiddleware(){}[0]
@@ -280,13 +282,13 @@ final class com.vynatix.holdfast.bridge/InMemoryKvStore : com.vynatix.holdfast.b
 }
 
 final class com.vynatix.holdfast.crypto/EncryptingTransformer : com.vynatix.holdfast/Transformer<kotlin/String> { // com.vynatix.holdfast.crypto/EncryptingTransformer|null[0]
-    constructor <init>(com.vynatix.holdfast.crypto/Cipher) // com.vynatix.holdfast.crypto/EncryptingTransformer.<init>|<init>(com.vynatix.holdfast.crypto.Cipher){}[0]
+    constructor <init>(com.vynatix.holdfast.crypto/StoreCipher) // com.vynatix.holdfast.crypto/EncryptingTransformer.<init>|<init>(com.vynatix.holdfast.crypto.StoreCipher){}[0]
 
     final fun get(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/EncryptingTransformer.get|get(kotlin.String){}[0]
     final fun set(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/EncryptingTransformer.set|set(kotlin.String){}[0]
 }
 
-final class com.vynatix.holdfast.crypto/XorCipher : com.vynatix.holdfast.crypto/Cipher { // com.vynatix.holdfast.crypto/XorCipher|null[0]
+final class com.vynatix.holdfast.crypto/XorCipher : com.vynatix.holdfast.crypto/StoreCipher { // com.vynatix.holdfast.crypto/XorCipher|null[0]
     constructor <init>(kotlin/ByteArray) // com.vynatix.holdfast.crypto/XorCipher.<init>|<init>(kotlin.ByteArray){}[0]
 
     final fun decrypt(kotlin/String): kotlin/String // com.vynatix.holdfast.crypto/XorCipher.decrypt|decrypt(kotlin.String){}[0]

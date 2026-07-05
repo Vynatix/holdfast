@@ -223,12 +223,25 @@ interface FrameObserver {
     ) {
     }
 
-    /** Every participant's root transaction committed. */
-    fun onFrameCommitted(frameId: String) {}
+    /**
+     * Every participant's root transaction committed. [participants] is the same
+     * lock-ordered list passed to [onFrameStarted], so a telemetry observer can
+     * correlate the committed frame with its stores without stashing state
+     * between callbacks.
+     */
+    fun onFrameCommitted(
+        frameId: String,
+        participants: List<Store<*>>,
+    ) {
+    }
 
-    /** The frame rolled back; [cause] is what aborted it. */
+    /**
+     * The frame rolled back; [cause] is what aborted it. [participants] is the
+     * same lock-ordered list passed to [onFrameStarted].
+     */
     fun onFrameRolledBack(
         frameId: String,
+        participants: List<Store<*>>,
         cause: Throwable,
     ) {
     }

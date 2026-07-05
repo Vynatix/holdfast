@@ -7,10 +7,14 @@ package com.vynatix.holdfast.crypto
  *
  * Implementations must round-trip: `decrypt(encrypt(x)) == x` for all valid `x`.
  *
- * The library does NOT ship a production-grade [Cipher]. [XorCipher] is provided
- * as an educational stand-in. Production users should plug their own cipher
- * backed by `javax.crypto` (JVM) or `CryptoKit` (iOS) — typically AES-GCM with
- * a per-state IV embedded in the encoded output.
+ * The library does NOT ship a production-grade [StoreCipher]. [XorCipher] is
+ * provided as an educational stand-in. Production users should plug their own
+ * cipher backed by `javax.crypto` (JVM) or `CryptoKit` (iOS) — typically AES-GCM
+ * with a per-state IV embedded in the encoded output.
+ *
+ * Named `StoreCipher` (not `Cipher`) to avoid colliding with `javax.crypto.Cipher`
+ * when both are imported on the JVM. The old `Cipher` name survives as a
+ * deprecated typealias for one minor.
  *
  * ### Non-deterministic ciphers make `distinct = true` inert
  *
@@ -27,8 +31,20 @@ package com.vynatix.holdfast.crypto
  * commit would break the asymmetric-transformer / no-double-decrypt invariants.
  * If you need logical dedup, dedup upstream before mutating the state.
  */
-interface Cipher {
+interface StoreCipher {
     fun encrypt(plaintext: String): String
 
     fun decrypt(ciphertext: String): String
 }
+
+/**
+ * Deprecated alias for [StoreCipher]. The interface was renamed to avoid
+ * colliding with `javax.crypto.Cipher` on the JVM. Kept for one minor so
+ * existing `Cipher` references keep compiling; migrate to [StoreCipher].
+ */
+@Deprecated(
+    message = "Renamed to StoreCipher to avoid colliding with javax.crypto.Cipher.",
+    replaceWith = ReplaceWith("StoreCipher"),
+    level = DeprecationLevel.WARNING,
+)
+typealias Cipher = StoreCipher

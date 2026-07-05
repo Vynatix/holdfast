@@ -449,15 +449,19 @@ class FrameObserverTest {
                     events += "started:${participants.size}"
                 }
 
-                override fun onFrameCommitted(frameId: String) {
-                    events += "committed"
+                override fun onFrameCommitted(
+                    frameId: String,
+                    participants: List<Store<*>>,
+                ) {
+                    events += "committed:${participants.size}"
                 }
 
                 override fun onFrameRolledBack(
                     frameId: String,
+                    participants: List<Store<*>>,
                     cause: Throwable,
                 ) {
-                    events += "rolledBack:${cause.message}"
+                    events += "rolledBack:${participants.size}:${cause.message}"
                 }
             },
         )
@@ -465,7 +469,7 @@ class FrameObserverTest {
             a { balance mutate 1L }
         }
         atomic(a, b) { error("boom") }
-        assertEquals(listOf("started:2", "committed", "started:2", "rolledBack:boom"), events)
+        assertEquals(listOf("started:2", "committed:2", "started:2", "rolledBack:2:boom"), events)
     }
 }
 

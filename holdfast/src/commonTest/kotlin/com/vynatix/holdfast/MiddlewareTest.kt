@@ -200,6 +200,23 @@ class MiddlewareChainTest {
     }
 
     @Test
+    fun removeMiddlewareDropsOnlyTheGivenInstanceByIdentity() {
+        val v = MiddlewareTestVault()
+        val events = mutableListOf<String>()
+        val keep = GlobalRecordingMiddleware("KEEP", events)
+        val drop = GlobalRecordingMiddleware("DROP", events)
+        v.middlewares(keep, drop)
+
+        assertTrue(v.removeMiddleware(drop), "removeMiddleware must report true when the instance was registered")
+        assertTrue(!v.removeMiddleware(drop), "a second removal of the same instance must report false")
+
+        events.clear()
+        v action { n mutate 1 }
+        assertTrue(events.any { it.startsWith("KEEP:") }, "KEEP must still fire; events=$events")
+        assertTrue(events.none { it.startsWith("DROP:") }, "DROP must be gone; events=$events")
+    }
+
+    @Test
     fun clearMiddlewareDropsAllRegisteredMiddlewaresForFutureActions() {
         val v = MiddlewareTestVault()
         val events = mutableListOf<String>()

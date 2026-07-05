@@ -18,8 +18,8 @@ import kotlinx.coroutines.flow.SharedFlow
  * Implementations:
  *  - [EventfulStore] — base class wiring an internal `MutableSharedFlow<E>` and the
  *    [emit] DSL that stages onto the active transaction's pendingEvents buffer.
- *  - Issue 15 will add `EventfulSupport<E>` — a delegate so a store can mix this
- *    capability in alongside another base class.
+ *  - [EventfulSupport] — a delegate so a store can mix this capability in
+ *    alongside another base class, instead of extending [EventfulStore].
  *
  * The single event type per store is intentional. Multiple kinds of events are
  * expressed via a `sealed class E` hierarchy in user code.

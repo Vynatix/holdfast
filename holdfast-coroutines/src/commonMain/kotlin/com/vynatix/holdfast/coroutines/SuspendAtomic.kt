@@ -326,7 +326,8 @@ private suspend fun <R> executeBody(
     // Pick the LAST entry's txn for the TransactionResult's `transaction`
     // handle — a stable terminal-state reference.
     val resultTxn: Transaction = roots.last().txn
-    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, roots.map { r -> r.store }) } }
+    val participants = roots.map { r -> r.store }
+    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, participants) } }
 
     val value: R =
         try {
@@ -368,7 +369,7 @@ private suspend fun <R> executeBody(
                     )
                 }
             }
-            observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
+            observers.forEach { runCatching { it.onFrameCommitted(marker.frameId, participants) } }
             TransactionResult.Success(resultTxn, value)
         } catch (e: Throwable) {
             // Commit/completed failure: unwind in reverse. Entries that already
@@ -381,7 +382,7 @@ private suspend fun <R> executeBody(
                     runCatching { entry.txn.rollback() }
                 }
             }
-            observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, e) } }
+            observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, participants, e) } }
             rethrowFrameContractViolation(e)
             TransactionResult.Error(e, resultTxn)
         }
@@ -414,7 +415,7 @@ private suspend fun rollbackAll(
             runCatching { entry.txn.rollback() }
         }
     }
-    observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, cause) } }
+    observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, roots.map { it.store }, cause) } }
 }
 
 /**

@@ -17,7 +17,7 @@ import com.vynatix.holdfast.Transformer
  *
  * Example:
  * ```
- * class CredentialsVault : Store<CredentialsVault>() {
+ * class CredentialsStore : Store<CredentialsStore>() {
  *     val token by state(EncryptingTransformer(SystemAesCipher())) { "" }
  * }
  * store action { token mutate "secret-jwt" }
@@ -35,11 +35,11 @@ import com.vynatix.holdfast.Transformer
  * ciphertext each time, so equal logical values never compare equal and dedup
  * never fires; observers and bridges publish on every commit. This is by design
  * (dedup must not run [get]/decrypt per commit — that would break the
- * asymmetric-transformer / no-double-decrypt invariants). See [Cipher] for the
- * full rationale; dedup upstream if you need logical-value dedup.
+ * asymmetric-transformer / no-double-decrypt invariants). See [StoreCipher] for
+ * the full rationale; dedup upstream if you need logical-value dedup.
  */
 class EncryptingTransformer(
-    private val cipher: Cipher,
+    private val cipher: StoreCipher,
 ) : Transformer<String> {
     override fun set(value: String): String = cipher.encrypt(value)
 

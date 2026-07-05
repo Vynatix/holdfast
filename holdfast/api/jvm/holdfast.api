@@ -94,14 +94,14 @@ public final class com/vynatix/holdfast/FrameMiddlewareSession {
 }
 
 public abstract interface class com/vynatix/holdfast/FrameObserver {
-	public fun onFrameCommitted (Ljava/lang/String;)V
-	public fun onFrameRolledBack (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public fun onFrameCommitted (Ljava/lang/String;Ljava/util/List;)V
+	public fun onFrameRolledBack (Ljava/lang/String;Ljava/util/List;Ljava/lang/Throwable;)V
 	public fun onFrameStarted (Ljava/lang/String;Ljava/util/List;)V
 }
 
 public final class com/vynatix/holdfast/FrameObserver$DefaultImpls {
-	public static fun onFrameCommitted (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;)V
-	public static fun onFrameRolledBack (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/lang/Throwable;)V
+	public static fun onFrameCommitted (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/util/List;)V
+	public static fun onFrameRolledBack (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/util/List;Ljava/lang/Throwable;)V
 	public static fun onFrameStarted (Lcom/vynatix/holdfast/FrameObserver;Ljava/lang/String;Ljava/util/List;)V
 }
 
@@ -198,6 +198,7 @@ public abstract interface class com/vynatix/holdfast/StateDelegate {
 public abstract class com/vynatix/holdfast/Store {
 	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
 	public fun <init> ()V
+	public final fun action (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
 	public final fun bridge (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Bridge;)V
@@ -227,6 +228,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
 	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
 	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
+	public final fun removeMiddleware (Lcom/vynatix/holdfast/Middleware;)Z
 	public final fun removeState (Ljava/lang/String;)V
 	public final fun reportUncaughtObserverError (Ljava/lang/Throwable;)V
 	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
@@ -431,13 +433,8 @@ public final class com/vynatix/holdfast/bridge/StringCodec : com/vynatix/holdfas
 	public fun encode (Ljava/lang/String;)Ljava/lang/String;
 }
 
-public abstract interface class com/vynatix/holdfast/crypto/Cipher {
-	public abstract fun decrypt (Ljava/lang/String;)Ljava/lang/String;
-	public abstract fun encrypt (Ljava/lang/String;)Ljava/lang/String;
-}
-
 public final class com/vynatix/holdfast/crypto/EncryptingTransformer : com/vynatix/holdfast/Transformer {
-	public fun <init> (Lcom/vynatix/holdfast/crypto/Cipher;)V
+	public fun <init> (Lcom/vynatix/holdfast/crypto/StoreCipher;)V
 	public synthetic fun get (Ljava/lang/Object;)Ljava/lang/Object;
 	public fun get (Ljava/lang/String;)Ljava/lang/String;
 	public synthetic fun set (Ljava/lang/Object;)Ljava/lang/Object;
@@ -446,7 +443,12 @@ public final class com/vynatix/holdfast/crypto/EncryptingTransformer : com/vynat
 	public fun shouldTransform (Ljava/lang/String;)Z
 }
 
-public final class com/vynatix/holdfast/crypto/XorCipher : com/vynatix/holdfast/crypto/Cipher {
+public abstract interface class com/vynatix/holdfast/crypto/StoreCipher {
+	public abstract fun decrypt (Ljava/lang/String;)Ljava/lang/String;
+	public abstract fun encrypt (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/crypto/XorCipher : com/vynatix/holdfast/crypto/StoreCipher {
 	public fun <init> ([B)V
 	public fun decrypt (Ljava/lang/String;)Ljava/lang/String;
 	public fun encrypt (Ljava/lang/String;)Ljava/lang/String;

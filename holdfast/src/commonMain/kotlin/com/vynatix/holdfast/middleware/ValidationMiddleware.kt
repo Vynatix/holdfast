@@ -15,7 +15,7 @@ import com.vynatix.holdfast.Store
  *
  * Example: enforcing a non-negative balance.
  * ```
- * store.middlewares(ValidationMiddleware<AccountVault> {
+ * store.middlewares(ValidationMiddleware<AccountStore> {
  *     require(balanceCents.value >= 0) { "balance cannot go negative" }
  * })
  * ```

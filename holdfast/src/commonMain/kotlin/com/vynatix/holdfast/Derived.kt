@@ -15,7 +15,7 @@ import kotlinx.atomicfu.atomic
  *
  * Example:
  * ```
- * class CartVault : Store<CartVault>() {
+ * class CartStore : Store<CartStore>() {
  *     val items by state { emptyList<Line>() }
  *     val total: State<Money> = computed { items.value.sumOf { it.price * it.qty } }
  * }

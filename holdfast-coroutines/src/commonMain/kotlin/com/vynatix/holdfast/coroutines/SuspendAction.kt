@@ -79,11 +79,20 @@ import kotlin.uuid.Uuid
  *     saved
  * }
  * ```
+ *
+ * When [name] is non-null it becomes the resulting [Transaction.id] verbatim,
+ * instead of the lambda-derived `body::class.simpleName`/random-UUID fallback —
+ * use it when a suspending transaction needs a stable, human-readable id for
+ * middleware logs, the testing harness timeline, or frame diagnostics. Mirrors
+ * the blocking `Store.action(name, body)` overload.
  */
 @OptIn(ExperimentalUuidApi::class)
 // Single-sourced middleware ordering + frame-gate setup — splitting it would scatter the contract.
 @Suppress("LongMethod", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
-suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+suspend fun <V : Store<V>, R> V.suspendAction(
+    name: String? = null,
+    body: suspend V.() -> R,
+): TransactionResult<R> {
     // Disposed-store contract: match blocking `action`'s entry check.
     internalCheckNotDisposed()
     // Frame policing (body-only: the marker travels with the frame's coroutine
@@ -93,7 +102,7 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
     // unenrolled store is an escape unless the frame's policy allows it.
     val frame = FrameMarkers.current()
     if (frame != null && frameGateAllowsOnlySavepoint(frame)) {
-        return suspendActionInFrame(frame, body)
+        return suspendActionInFrame(frame, name, body)
     }
     val serializer = ensureSerializer(this)
     val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
@@ -103,7 +112,7 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         internalCheckNotDisposed()
         val txn =
             Transaction.createForExternal(
-                id = body::class.simpleName ?: Uuid.random().toString(),
+                id = name ?: body::class.simpleName ?: Uuid.random().toString(),
                 ownerThreadId = currentThreadId(),
             )
         // We own the serializer; no other action can run on this store until we
@@ -302,6 +311,7 @@ private fun <V : Store<V>> V.frameGateAllowsOnlySavepoint(frame: FrameMarker): B
 @OptIn(ExperimentalUuidApi::class)
 private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
     frame: FrameMarker,
+    name: String?,
     body: suspend V.() -> R,
 ): TransactionResult<R> {
     val parentTxn =
@@ -312,7 +322,7 @@ private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
             )
     val txn =
         Transaction.createSavepointForExternal(
-            id = body::class.simpleName ?: Uuid.random().toString(),
+            id = name ?: body::class.simpleName ?: Uuid.random().toString(),
             ownerThreadId = currentThreadId(),
             parent = parentTxn,
             frameId = parentTxn.frameId,

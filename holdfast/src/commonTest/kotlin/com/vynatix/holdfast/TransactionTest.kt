@@ -443,3 +443,22 @@ class TransactionStatusGuardsTest {
         )
     }
 }
+
+class NamedActionTest {
+    @Test
+    fun actionWithNameThreadsTheNameIntoTheTransactionId() {
+        val v = TxTestVault()
+        val result = v.action("apply-discount") { count mutate 1 }
+        assertIs<TransactionResult.Success<*>>(result)
+        assertEquals("apply-discount", result.transaction.id)
+    }
+
+    @Test
+    fun unnamedActionFallsBackToLambdaDerivedId() {
+        val v = TxTestVault()
+        val result = v action { count mutate 1 }
+        assertIs<TransactionResult.Success<*>>(result)
+        // Not the explicit name — the lambda-class / random-UUID fallback.
+        assertNotNull(result.transaction.id)
+    }
+}

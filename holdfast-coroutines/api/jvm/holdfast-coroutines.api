@@ -17,7 +17,8 @@ public final class com/vynatix/holdfast/coroutines/StateFlowsKt {
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendActionKt {
-	public static final fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun suspendAction (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun suspendAction$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendAtomicKt {

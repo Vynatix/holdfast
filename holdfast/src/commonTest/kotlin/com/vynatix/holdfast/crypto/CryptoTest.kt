@@ -143,11 +143,11 @@ class EncryptingTransformerTest {
 }
 
 /**
- * Non-deterministic [Cipher]: encrypting the same plaintext yields different
+ * Non-deterministic [StoreCipher]: encrypting the same plaintext yields different
  * ciphertext each time (a monotonic prefix stands in for a random IV), while
  * decrypt still round-trips. Models a secure AES-GCM-with-per-value-IV cipher.
  */
-private class NonDeterministicCipher : Cipher {
+private class NonDeterministicCipher : StoreCipher {
     private var counter = 0
 
     override fun encrypt(plaintext: String): String = "${counter++}:$plaintext"

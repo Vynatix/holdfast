@@ -8,8 +8,8 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *
  * Provided so the [com.vynatix.holdfast.crypto] package is runnable without
  * pulling in a platform crypto dependency. For real use cases:
- *  - JVM: implement [Cipher] using `javax.crypto` (AES-GCM with a random IV).
- *  - iOS: implement [Cipher] using `CryptoKit` via cinterop.
+ *  - JVM: implement [StoreCipher] using `javax.crypto` (AES-GCM with a random IV).
+ *  - iOS: implement [StoreCipher] using `CryptoKit` via cinterop.
  *
  * Limitations of XOR with a fixed key:
  *  - No integrity (no MAC): an attacker can flip bits without detection.
@@ -17,12 +17,12 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *  - Trivially broken if the key is shorter than the longest plaintext.
  *
  * This implementation deliberately uses base64 over the raw XOR'd bytes so the
- * ciphertext is a printable String (round-tripping through any [Cipher] consumer).
+ * ciphertext is a printable String (round-tripping through any [StoreCipher] consumer).
  */
 @OptIn(ExperimentalEncodingApi::class)
 class XorCipher(
     seed: ByteArray,
-) : Cipher {
+) : StoreCipher {
     init {
         require(seed.isNotEmpty()) { "XorCipher seed must be non-empty" }
     }

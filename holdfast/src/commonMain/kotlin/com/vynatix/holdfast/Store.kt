@@ -408,6 +408,28 @@ abstract class Store<Self : Store<Self>> {
         }
     }
 
+    /**
+     * Remove a single [middleware] by identity (reference equality). Returns
+     * `true` if it was registered (and is now gone), `false` if it was not in
+     * the chain. Removal is done under the same lock that guards
+     * [middlewares]/[clearMiddleware], so it is safe to call concurrently with
+     * registration; an in-flight [action] uses a snapshot taken at its start, so
+     * a mid-action removal takes effect on the NEXT action. If the same instance
+     * was registered more than once, only the first occurrence is removed.
+     */
+    fun removeMiddleware(middleware: Middleware<Self>): Boolean {
+        checkNotDisposed()
+        return middlewareLock.withLock {
+            val index = middlewareList.indexOfFirst { it === middleware }
+            if (index >= 0) {
+                middlewareList.removeAt(index)
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     /** Drop every registered middleware. */
     fun clearMiddleware() {
         checkNotDisposed()
@@ -447,7 +469,28 @@ abstract class Store<Self : Store<Self>> {
      * escalates, regardless of policy.
      */
     @OptIn(ExperimentalUuidApi::class)
-    infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
+    infix fun <R> action(body: Self.() -> R): TransactionResult<R> = runAction(name = null, body = body)
+
+    /**
+     * Named variant of [action]: [name] becomes the resulting
+     * [Transaction.id] verbatim, instead of the lambda-derived
+     * `body::class.simpleName`/random-UUID fallback the infix form uses. Use it
+     * when a transaction needs a stable, human-readable id — middleware logs,
+     * the testing harness timeline, and frame diagnostics all surface the id, so
+     * a fixed name makes an action greppable across runs. All other semantics
+     * (buffering, savepoint nesting, frame enrollment, result contract) are
+     * identical to the infix [action].
+     */
+    fun <R> action(
+        name: String,
+        body: Self.() -> R,
+    ): TransactionResult<R> = runAction(name = name, body = body)
+
+    @OptIn(ExperimentalUuidApi::class)
+    private fun <R> runAction(
+        name: String?,
+        body: Self.() -> R,
+    ): TransactionResult<R> {
         checkNotDisposed()
         // Frame policing (body-only: the marker is cleared before commit fanout,
         // so observer-triggered actions never land here). Ordered BEFORE the
@@ -460,7 +503,7 @@ abstract class Store<Self : Store<Self>> {
         serializer?.blockingAcquire()
         val result =
             try {
-                runBlockingActionUnderLock(body)
+                runBlockingActionUnderLock(name, body)
             } finally {
                 serializer?.blockingRelease()
             }
@@ -527,12 +570,15 @@ abstract class Store<Self : Store<Self>> {
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
+    private fun <R> runBlockingActionUnderLock(
+        name: String?,
+        body: Self.() -> R,
+    ): TransactionResult<R> =
         transactionLock.withLock {
             val parent = _activeTransaction
             val txn =
                 Transaction(
-                    id = body::class.simpleName ?: Uuid.random().toString(),
+                    id = name ?: body::class.simpleName ?: Uuid.random().toString(),
                     parent = parent,
                     ownerThreadId = currentThreadId(),
                 )
@@ -974,7 +1020,7 @@ abstract class Store<Self : Store<Self>> {
          * fallback in the resolution chain.
          */
         private val processScope: CoroutineScope by lazy {
-            CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("VaultProcessScope"))
+            CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("StoreProcessScope"))
         }
 
         private val customDefaultScope = atomic<CoroutineScope?>(null)
