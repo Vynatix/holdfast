@@ -1,8 +1,10 @@
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FrameInteropException
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -14,10 +16,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -103,6 +107,103 @@ class SuspendActionBasicsTest {
             }
             assertEquals(listOf(3), seen, "observer fires once with the final committed value")
             sub.dispose()
+        }
+}
+
+class SuspendActionNestingTest {
+    @Test fun nestedSuspendActionOnTheSameStoreJoinsAsASavepoint() =
+        runBlocking {
+            val v = SuspendVault()
+            val seen = mutableListOf<Int>()
+            val sub = v { n effect { seen.add(this) } }
+            seen.clear()
+            val r =
+                v.suspendAction {
+                    n mutate 1
+                    // Pre-F4 this deadlocked / threw kotlinx's raw "already locked
+                    // by the specified owner" ISE. Now: savepoint of this txn.
+                    val inner = v.suspendAction { n mutate 2 }
+                    assertIs<TransactionResult.Success<*>>(inner)
+                    assertEquals(2, n.value, "merged savepoint write visible via RYOW")
+                    n mutate n.value + 10
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(12, v.n.value)
+            assertEquals(listOf(12), seen, "one observer fanout, at the OUTER commit")
+            sub.dispose()
+        }
+
+    @Test fun nestedSuspendActionErrorDiscardsOnlyInnerWrites() =
+        runBlocking {
+            val v = SuspendVault()
+            val r =
+                v.suspendAction {
+                    n mutate 1
+                    // The suspendAction scope tolerates inner errors (nested
+                    // blocking actions behave the same way): the caller owns
+                    // checking the inner result.
+                    val inner =
+                        v.suspendAction {
+                            n mutate 99
+                            error("inner boom")
+                        }
+                    assertIs<TransactionResult.Error>(inner)
+                    s mutate "outer"
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(1, v.n.value, "inner rollback discarded only the savepoint write")
+            assertEquals("outer", v.s.value)
+        }
+}
+
+class SuspendActionFrameInteropTest {
+    @Test fun blockingActionInsideTheBodyFailsFastInsteadOfLivelocking() =
+        runBlocking {
+            val v = SuspendVault()
+            val r =
+                withTimeout(10_000) {
+                    v.suspendAction {
+                        // Pre-F4 this busy-spun forever on the serializer this
+                        // suspendAction already holds (the P1 livelock).
+                        val e = assertFailsWith<FrameInteropException> { v.action { n mutate 1 } }
+                        assertTrue("mutate" in (e.message ?: ""), "message names the working alternative: ${e.message}")
+                        n mutate 2
+                    }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(2, v.n.value)
+        }
+
+    @Test fun blockingAtomicEnrollingTheStoreInsideTheBodyFailsFast() =
+        runBlocking {
+            val v = SuspendVault()
+            val r =
+                withTimeout(10_000) {
+                    v.suspendAction {
+                        assertFailsWith<FrameInteropException> {
+                            atomic(v) { v { n mutate 1 } }
+                        }
+                        n mutate 3
+                    }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(3, v.n.value)
+        }
+
+    @Test fun blockingActionOnAnUnrelatedStoreInsideTheBodyStaysLegal() =
+        runBlocking {
+            val v = SuspendVault()
+            val other = SuspendVault()
+            val r =
+                v.suspendAction {
+                    // The suspendAction scope is AllowUnenrolled: independent
+                    // transactions on OTHER stores keep working exactly as before.
+                    assertIs<TransactionResult.Success<*>>(other.action { n mutate 7 })
+                    n mutate 1
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(1, v.n.value)
+            assertEquals(7, other.n.value)
         }
 }
 

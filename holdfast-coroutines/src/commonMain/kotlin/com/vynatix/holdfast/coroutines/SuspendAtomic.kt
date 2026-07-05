@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.FrameContractException
+import com.vynatix.holdfast.FrameInteropException
 import com.vynatix.holdfast.FrameMarker
 import com.vynatix.holdfast.FrameMarkers
 import com.vynatix.holdfast.FrameMiddlewareSession
@@ -108,11 +109,30 @@ suspend fun <R> suspendAtomic(
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
 
-    // Nested-frame safety (interop flavor + lock order), BEFORE any lock is
-    // acquired. The enclosing marker is coherent on this thread because the
-    // enclosing frame's ThreadContextElement re-installs it on every resume.
+    // Nested-frame safety (interop flavor + lock order + enrollment), BEFORE
+    // any lock is acquired. The enclosing marker is coherent on this thread
+    // because the enclosing frame's ThreadContextElement re-installs it on
+    // every resume.
     val enclosingMarker = FrameMarkers.current()
     verifyFrameNesting(enclosingMarker, sorted, suspending = true)
+    // A store whose serializer mutex is held by an enclosing suspendAction
+    // (its single-store pseudo-frame, not a real suspendAtomic frame) cannot
+    // be enrolled: adopting it would split the frame's atomicity between this
+    // frame's exit and the suspendAction's own commit. Fail fast with the
+    // hoist recipe instead.
+    if (enclosingMarker != null) {
+        for (store in sorted) {
+            val enrolling = enclosingMarker.enrollingFrame(store)
+            if (enrolling != null && enrolling.frameId.startsWith(SUSPEND_ACTION_FRAME_ID_PREFIX)) {
+                throw FrameInteropException(
+                    "suspendAtomic cannot enroll ${store.frameIdentity()}: its serializer mutex is " +
+                        "already held by the enclosing suspendAction ('${enrolling.frameId}'). Hoist " +
+                        "the frame — call suspendAtomic(...) first and run store.suspendAction { } " +
+                        "(or bare mutate/update) inside its body.",
+                )
+            }
+        }
+    }
 
     // Resolve the suspending owner: prefer the parent frame's owner so a
     // nested suspendAtomic in the same coroutine sees the same owner key.

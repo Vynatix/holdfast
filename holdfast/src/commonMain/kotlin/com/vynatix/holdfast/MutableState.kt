@@ -81,19 +81,45 @@ class MutableState<T : Any>(
      * (innermost → outermost) for any pending write and returns post-`transformer.get`
      * of it. Otherwise returns post-`transformer.get` of the committed `currentValue`.
      *
-     * Off-owner-thread reads only see the committed value, never another thread's
-     * uncommitted pending writes.
+     * Suspending bodies (`suspendAction` / `suspendAtomic`) keep read-your-own-writes
+     * across dispatcher hops: while [Store.suspendingOwner] is set AND the calling
+     * thread carries the body's frame marker enrolling this store
+     * (`FrameMarkers.current()?.isEnrolled`), pending writes are visible even though
+     * the resuming thread differs from the transaction's owner thread. The marker is
+     * installed exactly on the thread currently resuming the single-flight body, so
+     * this never widens visibility to concurrent readers. Platform caveat: on
+     * iOS/wasmJs the marker rides a delegating interceptor, so a nested
+     * `withContext(otherDispatcher)` section inside a suspending body loses both
+     * enforcement and this relaxed view (same documented gap as GUIDE §15.1).
+     *
+     * Any other off-owner-thread read only sees the committed value, never another
+     * thread's uncommitted pending writes.
      */
     override val value: T
         get() =
             stateLock.withLock {
                 val txn = owningStore.activeTransaction
-                if (txn != null && txn.ownerThreadId == currentThreadId()) {
+                if (txn != null && callerOwnsTransactionView(txn)) {
                     val pending = txn.findPendingValue(this)
                     if (pending != null) return@withLock afterGet(pending)
                 }
                 afterGet(currentValue)
             }
+
+    /**
+     * Whether the calling thread is entitled to the read-your-own-writes view of
+     * [txn]. True on the transaction's owner thread; also true on the thread
+     * currently resuming an in-flight suspending body — detected by the
+     * suspending-owner handshake PLUS the thread-local frame marker enrolling
+     * [owningStore]. Never relax on [Store.suspendingOwner] alone: that would leak
+     * uncommitted staged values to arbitrary reader threads (UI, observers) while
+     * a suspending body is in flight.
+     */
+    private fun callerOwnsTransactionView(txn: Transaction): Boolean {
+        if (txn.ownerThreadId == currentThreadId()) return true
+        return owningStore.suspendingOwner != null &&
+            FrameMarkers.current()?.isEnrolled(owningStore) == true
+    }
 
     private fun afterGet(rawValue: T): T = transformer?.takeIf { it.shouldTransform(rawValue) }?.get(rawValue) ?: rawValue
 

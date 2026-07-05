@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -69,5 +70,88 @@ class FrameMarkerDispatchTest {
             assertIs<TransactionResult.Success<*>>(frame.await())
             assertEquals(7L, c.balance.value)
             assertEquals(1L, a.balance.value)
+        }
+}
+
+/**
+ * JVM-specific F5 regression suite: read-your-own-writes must follow a
+ * suspending body across dispatcher hops (the marker gate in
+ * `MutableState.value`), and must NOT widen visibility for concurrent plain
+ * readers while a suspending body is in flight.
+ */
+class RyowAcrossDispatchTest {
+    @Test fun suspendActionRyowSurvivesADispatcherHop() =
+        runBlocking {
+            val v = HopAccount(initial = 100)
+            // The lost-update transfer repro: pre-F5, the update inside the
+            // hopped section read the COMMITTED 100 (not the staged 70) and
+            // committed 105, silently dropping the -30.
+            val r =
+                v.suspendAction {
+                    balance update { it - 30 }
+                    withContext(Dispatchers.Default) {
+                        balance update { it + 5 }
+                    }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(75L, v.balance.value, "staged write visible across the hop")
+        }
+
+    @Test fun suspendAtomicRyowSurvivesADispatcherHop() =
+        runBlocking {
+            val a = HopAccount(initial = 100)
+            val b = HopAccount()
+            val r =
+                suspendAtomic(a, b) {
+                    a { balance update { it - 30 } }
+                    withContext(Dispatchers.Default) {
+                        a { balance update { it + 5 } }
+                        b { balance mutate 30L }
+                    }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(75L, a.balance.value)
+            assertEquals(30L, b.balance.value)
+        }
+
+    @Test fun nestedSuspendActionAcrossADispatcherHopSavepoints() =
+        runBlocking {
+            val v = HopAccount()
+            val r =
+                v.suspendAction {
+                    balance mutate 1L
+                    withContext(Dispatchers.Default) {
+                        v.suspendAction { balance update { it + 10 } }.getOrThrow()
+                    }
+                    balance update { it + 100 }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(111L, v.balance.value)
+        }
+
+    @Test fun concurrentPlainReaderStillSeesOnlyCommittedValues() =
+        runBlocking {
+            val v = HopAccount()
+            val staged = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val job =
+                async(Dispatchers.Default) {
+                    v.suspendAction {
+                        balance mutate 42L
+                        staged.complete(Unit)
+                        release.await()
+                    }
+                }
+            staged.await()
+            // A dedicated raw thread (never a coroutine worker, so it cannot
+            // coincide with the transaction's owner thread) must see only the
+            // committed value while the suspending body is in flight.
+            var readerValue = -1L
+            val reader = thread { readerValue = v.balance.value }
+            reader.join()
+            release.complete(Unit)
+            assertIs<TransactionResult.Success<*>>(job.await())
+            assertEquals(0L, readerValue, "uncommitted staged value must not leak to plain readers")
+            assertEquals(42L, v.balance.value)
         }
 }

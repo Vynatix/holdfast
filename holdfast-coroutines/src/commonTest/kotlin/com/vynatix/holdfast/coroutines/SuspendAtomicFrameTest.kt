@@ -252,6 +252,60 @@ class SuspendFrameNestingTest {
         }
 }
 
+class SuspendActionAtomicInteropTest {
+    @Test fun suspendAtomicEnrollingTheHoldingStoreInsideSuspendActionFailsFast() =
+        runBlocking {
+            val a = SuspendFrameAccount()
+            val r =
+                a.suspendAction {
+                    // Pre-F4 this threw kotlinx's raw "already locked by the
+                    // specified owner" ISE (or deadlocked across coroutines).
+                    val e = assertFailsWith<FrameInteropException> { suspendAtomic(a) { } }
+                    assertTrue("Hoist" in (e.message ?: ""), "message teaches the hoist: ${e.message}")
+                    balance mutate 1L
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(1L, a.balance.value)
+        }
+
+    @Test fun disjointSuspendAtomicInsideSuspendActionStillWorks() =
+        runBlocking {
+            val a = SuspendFrameAccount()
+            val b = SuspendFrameAccount()
+            val c = SuspendFrameAccount()
+            val r =
+                a.suspendAction {
+                    val inner =
+                        suspendAtomic(b, c) {
+                            b { balance mutate 10L }
+                            c { balance mutate 20L }
+                        }
+                    assertIs<TransactionResult.Success<*>>(inner)
+                    balance mutate 1L
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(1L, a.balance.value)
+            assertEquals(10L, b.balance.value)
+            assertEquals(20L, c.balance.value)
+        }
+
+    @Test fun suspendActionOnAParticipantInsideSuspendAtomicStillSavepoints() =
+        runBlocking {
+            // Regression guard: the F4 pseudo-frame must not change the real
+            // frame's savepoint path for enrolled participants.
+            val a = SuspendFrameAccount()
+            val b = SuspendFrameAccount()
+            val r =
+                suspendAtomic(a, b) {
+                    a.suspendAction { balance mutate 5L }
+                    b { balance mutate 6L }
+                }
+            assertIs<TransactionResult.Success<*>>(r)
+            assertEquals(5L, a.balance.value)
+            assertEquals(6L, b.balance.value)
+        }
+}
+
 class SuspendFrameMiddlewareTest {
     @Test fun middlewareSeesFrameTransactionsWithASharedFrameId() =
         runBlocking {

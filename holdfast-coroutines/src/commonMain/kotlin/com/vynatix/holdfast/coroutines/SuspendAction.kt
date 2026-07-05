@@ -6,6 +6,7 @@ import com.vynatix.holdfast.FrameContractException
 import com.vynatix.holdfast.FrameInteropException
 import com.vynatix.holdfast.FrameMarker
 import com.vynatix.holdfast.FrameMarkers
+import com.vynatix.holdfast.FramePolicy
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.coroutineContext
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -29,15 +31,34 @@ import kotlin.uuid.Uuid
  * fire then. On throw, pending writes are dropped — same semantics as the
  * blocking [Store.action].
  *
- * Concurrency contract for 1.1:
+ * Concurrency contract:
  *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
- *    blocking `action` will block until the in-flight `suspendAction` completes,
- *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
- *    lazily on first use.
- *  - **Cancellation**: a `CancellationException` thrown from the body rolls back
- *    the transaction. Cancellation BETWEEN body return and commit is suppressed
- *    via [NonCancellable] on the commit phase — once the body completes, the
- *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
+ *    blocking `action` on ANOTHER thread will block until the in-flight
+ *    `suspendAction` completes, and vice versa. Coordination is via an internal
+ *    coroutine [Mutex] installed lazily on first use. A blocking `action` (or
+ *    blocking `atomic` enrolling this store) called from INSIDE the body throws
+ *    [FrameInteropException] immediately — it would self-deadlock on the mutex
+ *    this suspendAction already holds.
+ *  - **The body runs inside a single-store suspending scope.** A relaxed frame
+ *    marker (`AllowUnenrolled + TolerateInnerErrors`, so it never polices
+ *    writes to OTHER stores or escalates their errors) travels with the body
+ *    across dispatcher hops (JVM/Android: `ThreadContextElement`; iOS/wasmJs:
+ *    a delegating interceptor — there a nested `withContext(otherDispatcher)`
+ *    section is not covered). It gives the body:
+ *     - **nesting**: a nested `suspendAction` on the SAME store joins as a
+ *       savepoint (inner commit merges into this transaction; inner rollback
+ *       discards only inner writes; one observer fanout, at the outer commit);
+ *     - **read-your-own-writes across hops**: `state.value` sees this
+ *       transaction's pending writes on whatever thread resumes the body;
+ *     - **fail-fast interop**: `suspendAtomic` enrolling THIS store inside the
+ *       body throws [FrameInteropException] (hoist the frame: call
+ *       `suspendAtomic` first and `suspendAction` inside it). Disjoint-store
+ *       `suspendAtomic`/`atomic` calls inside the body remain legal, subject
+ *       to the global lock-order rule.
+ *  - **Cancellation**: a `CancellationException` thrown from (or observed at
+ *    the end of) the body rolls back the transaction. Once the body scope
+ *    completes normally, the commit runs under [NonCancellable] so
+ *    observer/bridge fanout completes even if the surrounding scope cancels.
  *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
  *    in concentric-ring order — last-registered middleware is outermost (its
  *    `onTransactionStarted` fires first), matching `Store.middlewares`'s
@@ -60,6 +81,8 @@ import kotlin.uuid.Uuid
  * ```
  */
 @OptIn(ExperimentalUuidApi::class)
+// Single-sourced middleware ordering + frame-gate setup — splitting it would scatter the contract.
+@Suppress("LongMethod", "CyclomaticComplexMethod")
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic
@@ -84,6 +107,27 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         // mutate() inside the body recognizes us as the owner.
         internalSetActiveTransaction(txn)
         suspendingOwner = owner
+
+        // Single-store suspending scope installed around the BODY only (F4).
+        // The relaxed policy (AllowUnenrolled + TolerateInnerErrors) means the
+        // marker never polices writes to other stores or escalates their
+        // errors — it exists so the existing frame gates recognize this scope:
+        // nested suspendAction on this store savepoints instead of
+        // re-locking the mutex; blocking action/atomic on this store fails
+        // fast instead of self-deadlocking; and the RYOW getter follows the
+        // body across dispatcher hops.
+        val marker =
+            FrameMarker(
+                frameId = "$SUSPEND_ACTION_FRAME_ID_PREFIX${Uuid.random()}",
+                participants = setOf(this),
+                policy = FramePolicy.AllowUnenrolled + FramePolicy.TolerateInnerErrors,
+                suspending = true,
+                parent = frame,
+            )
+        // Held-stores element: a nested suspendAtomic inside the body reuses
+        // this owner key and sees this store as already held (its own gate
+        // rejects enrolling it; adoption is the safe fallback).
+        val heldFrame = SuspendAtomicFrame(owner).also { it.heldVaults += this }
 
         // Snapshot the middleware chain once at the start of the action — same
         // semantics as the blocking path. Concurrent middleware registration
@@ -114,7 +158,12 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             try {
                 val value: R =
                     try {
-                        selfForExternal.body()
+                        // The marker context installs the thread-local marker on
+                        // every resume and restores the prior value on suspend —
+                        // same mechanism as suspendAtomic's body wrapper.
+                        withContext(heldFrame + frameMarkerContext(marker, coroutineContext[ContinuationInterceptor])) {
+                            selfForExternal.body()
+                        }
                     } catch (ce: CancellationException) {
                         // Concentric forward (innermost-first) on the error path so the
                         // outermost middleware that ran `started` first sees `error` last —
@@ -334,6 +383,14 @@ private suspend fun <V : Store<V>> fireErrorHooks(
 
 /** Owner sentinel for suspendAction calls that have no enclosing Job. */
 private object SuspendActionFallbackOwner
+
+/**
+ * FrameMarker.frameId prefix identifying the single-store pseudo-frame a
+ * [suspendAction] installs around its body — as opposed to a real
+ * `suspendAtomic-` frame. [suspendAtomic] uses it to reject enrolling a store
+ * whose mutex the enclosing suspendAction already holds.
+ */
+internal const val SUSPEND_ACTION_FRAME_ID_PREFIX = "suspendAction-"
 
 /**
  * Stable human-readable store identity for frame diagnostics, mirroring the
