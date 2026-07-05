@@ -96,6 +96,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **Observer/effect exceptions during commit fanout are now loud by default
+  (P1-observer-swallow).** Previously a `null`
+  `Store.uncaughtObserverHandler` swallowed a throwing observer silently.
+  It now routes to a built-in fallback that prints the store identity and
+  stack trace. Set your own handler to reroute, or assign a no-op lambda
+  `{ }` to opt back into silence. The exception is still contained — other
+  observers on the same commit continue to fire.
+
 - **BREAKING (behavior): a nested `atomic` may no longer introduce an
   unenrolled store under `FramePolicy.Strict` (F2).** `verifyFrameNesting`
   now throws `UnenrolledStoreException` at entry when a nested frame enrolls

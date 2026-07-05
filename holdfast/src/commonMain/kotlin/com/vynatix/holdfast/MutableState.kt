@@ -213,7 +213,10 @@ class MutableState<T : Any>(
                 try {
                     observer(value)
                 } catch (e: Throwable) {
-                    handler?.invoke(e)
+                    // Null handler no longer means silence: a swallowed observer
+                    // exception is invisible commit corruption. Fall back to a loud
+                    // default logger; assign a no-op lambda to opt back into silence.
+                    if (handler != null) handler.invoke(e) else defaultLogUncaughtObserverError(owningStore, e)
                 }
             }
         }
@@ -288,6 +291,26 @@ class MutableState<T : Any>(
             currentBridge = null
         }
     }
+}
+
+/**
+ * Loud built-in fallback for an observer/effect callback that throws during
+ * commit fanout, used when [Store.uncaughtObserverHandler] is null. Prints the
+ * store identity and the full stack trace so the failure is visible instead of
+ * silently swallowed. Assign any handler (including a no-op `{ }`) to
+ * [Store.uncaughtObserverHandler] to take over — that is the explicit opt-out
+ * of this default.
+ */
+private fun defaultLogUncaughtObserverError(
+    store: Store<*>,
+    error: Throwable,
+) {
+    println(
+        "Holdfast: an observer/effect callback threw during commit fanout on " +
+            "${store::class.simpleName ?: "Store"} and was swallowed to protect the commit. " +
+            "Set Store.uncaughtObserverHandler to route these; assign a no-op lambda to silence.\n" +
+            error.stackTraceToString(),
+    )
 }
 
 /**

@@ -10,6 +10,10 @@ package com.vynatix.holdfast
  *
  * Returns a [Disposable] that removes the observer when called. Double-dispose is safe.
  *
+ * If [handler] throws during a commit's fanout (not the initial fire), the
+ * exception is routed to [Store.uncaughtObserverHandler] — which defaults to a
+ * loud built-in logger. Set that handler to reroute or silence these.
+ *
  * Resolution detail: the cast to [MutableState] stays inside this function — it never
  * leaks into the published signature. Calling `effect` on a foreign `State` (not produced
  * by `store.state { … }`) throws — every observable state in this library is a

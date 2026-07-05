@@ -230,9 +230,10 @@ class MemoryLifecycleTest {
 
     @Test
     fun uncaughtObserverHandlerReceivesObserverExceptionsOnCommitFire() {
-        // A10 contract: observer exceptions on commit-fire are silently swallowed by
-        // default; a non-null uncaughtObserverHandler captures them. Initial-subscribe
-        // fires propagate to the caller (observe is synchronous from their POV).
+        // A10 contract: observer exceptions on commit-fire are routed to the loud
+        // built-in logger by default; a non-null uncaughtObserverHandler captures them
+        // instead. Initial-subscribe fires propagate to the caller (observe is
+        // synchronous from their POV).
         val v = LifecycleVault()
         val captured = mutableListOf<Throwable>()
         v.uncaughtObserverHandler = { captured.add(it) }
@@ -253,10 +254,11 @@ class MemoryLifecycleTest {
     }
 
     @Test
-    fun uncaughtObserverHandlerNullPreservesSilentSwallow() {
-        // Default behavior: null handler swallows silently; other observers continue
-        // to fire even when one throws on commit. (The existing contract — see
-        // EffectTest.effectThatThrowsExceptionDoesNotPreventOtherSubscribersFromBeingNotified.)
+    fun uncaughtObserverHandlerNullRoutesToLoudFallbackWithoutDisruptingFanout() {
+        // P1-observer-swallow: a null handler no longer swallows silently — it routes
+        // to a loud built-in logger. Either way the throw is contained: other
+        // observers continue to fire on the same commit. (See EffectTest.
+        // effectThatThrowsExceptionDoesNotPreventOtherSubscribersFromBeingNotified.)
         val v = LifecycleVault()
         val seen = mutableListOf<Int>()
         val first = atomic(true)

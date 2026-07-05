@@ -233,13 +233,15 @@ abstract class Store<Self : Store<Self>> {
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * Optional handler invoked when a commit-fire observer callback throws. If null
-     * (the default), exceptions thrown from observer bodies during commit are
-     * swallowed silently — matching the original library contract. Set to a non-null
-     * handler to surface them (e.g. a logger or a test fixture's failure list).
+     * Handler invoked when a commit-fire observer/effect callback throws. When
+     * null (the default), thrown exceptions are routed to a **loud built-in
+     * fallback** that prints the store identity and stack trace — swallowing them
+     * silently hid real commit corruption, so silence is no longer the default.
+     * Assign your own handler (a logger, a test fixture's failure list) to take
+     * over, or assign a no-op lambda `{ }` to explicitly opt back into silence.
      *
      * Note: this handler does NOT capture exceptions thrown from the initial-fire
-     * call inside [State.effect]/[MutableState.observe]. Those propagate to the
+     * call inside [effect]/[MutableState.observe]. Those propagate to the
      * caller (subscribing is synchronous from the caller's perspective; their bug
      * shouldn't be silently suppressed).
      */
