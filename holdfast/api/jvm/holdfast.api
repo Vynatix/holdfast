@@ -402,7 +402,8 @@ public final class com/vynatix/holdfast/bridge/IntCodec : com/vynatix/holdfast/b
 }
 
 public final class com/vynatix/holdfast/bridge/KvBridge : com/vynatix/holdfast/Bridge {
-	public fun <init> (Lcom/vynatix/holdfast/bridge/KvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;)V
+	public fun <init> (Lcom/vynatix/holdfast/bridge/KvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlin/jvm/functions/Function2;)V
+	public synthetic fun <init> (Lcom/vynatix/holdfast/bridge/KvStore;Ljava/lang/String;Lcom/vynatix/holdfast/bridge/Codec;Lkotlin/jvm/functions/Function2;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 	public fun publish (Ljava/lang/Object;)Z
 }

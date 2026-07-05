@@ -1329,11 +1329,23 @@ object IntCodec    : Codec<Int>
 object BooleanCodec: Codec<Boolean>
 
 class InMemoryKvStore : KvStore                     // tests + dev
-class KvBridge<T : Any>(kv: KvStore, key: String, codec: Codec<T>) : Bridge<T>
+class KvBridge<T : Any>(
+    kv: KvStore, key: String, codec: Codec<T>,
+    onDecodeError: ((encoded: String, cause: Throwable) -> Unit)? = null,
+) : Bridge<T>
 ```
 
 Generic save-on-commit + load-on-attach. Combine with any `KvStore`
 implementation (in-memory, file system, MultiplatformSettings, …).
+
+If the persisted payload fails to decode on attach (corrupt bytes, schema
+change), `KvBridge` **silently drops** it by default — the state stays at its
+initializer, and the next commit **overwrites the un-decodable bytes** before
+you can inspect them. Pass `onDecodeError` to observe the raw payload and cause
+at the moment of the drop (so you can quarantine or migrate it first); it does
+not change the drop behavior. A save failure (`encode`/`put` throw) surfaces the
+surrounding transaction as `TransactionResult.Error` — after the in-memory
+commit and observer fanout have already applied — not a rollback.
 
 ### 14.8 `:holdfast-coroutines`
 

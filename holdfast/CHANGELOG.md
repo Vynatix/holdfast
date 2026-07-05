@@ -131,6 +131,16 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `onSuccess { }` / `onError { }` extensions — so fire-and-forget `action`
   callers can surface rollbacks instead of silently dropping them.
 
+- **`KvBridge` gains an optional `onDecodeError: ((encoded, cause) -> Unit)?`
+  constructor parameter (F12).** Load-on-attach decode failures are still
+  dropped silently by default (state stays at its initializer, and the next
+  commit overwrites the un-decodable payload) — the hook lets you observe the
+  raw payload and cause at the moment of the drop so you can quarantine or
+  migrate it first. The KDoc now documents both this overwrite hazard and the
+  save-failure contract: a throwing `encode`/`put` surfaces the transaction as
+  `TransactionResult.Error` (after the in-memory commit and observer fanout have
+  already applied), not a rollback.
+
 - Documented platform support tiers in the root and module READMEs:
   Android/JVM/iOS are supported (tests run in CI); wasmJs is **experimental** —
   the artifact is still published, but tests are disabled on wasmJs,
