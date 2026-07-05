@@ -19,12 +19,12 @@ import kotlinx.atomicfu.locks.synchronized
  * store { theme bridge bridge }
  * store action { theme mutate "dark" }
  *
- * bridge.published shouldBe listOf("dark")
- * bridge.lastPublished shouldBe "dark"
+ * assertEquals(listOf("dark"), bridge.published)
+ * assertEquals("dark", bridge.lastPublished)
  *
  * // Simulate an inbound update from the external system:
  * bridge.simulateInbound("light")
- * store.read { theme.value } shouldBe "light"
+ * assertEquals("light", store.read { theme.value })
  * ```
  *
  * On attach (when the store calls [observe] from `MutableState.bridge` setter),

@@ -179,9 +179,9 @@ class OpenTransaction internal constructor(
  * ```
  * val ctr = track(CountStore())
  * val open = transaction(on = ctr) { count mutate 999 }   // pending, not committed
- * parallel(1) { ctr.read { count.value } shouldBe 0 }     // off-thread sees committed
+ * parallel(1) { assertEquals(0, ctr.read { count.value }) }  // off-thread sees committed
  * open.commit().shouldBeSuccess()
- * ctr.read { count.value } shouldBe 999
+ * assertEquals(999, ctr.read { count.value })
  * ```
  */
 @Suppress("RedundantSuspendModifier")

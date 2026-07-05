@@ -10,8 +10,8 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  *
  * Construct in three ways:
  *  - [com.vynatix.holdfast.testing.StoreHandle.bridge] — looks up the bridge
- *    attached to a state on the tracked store, returning a `BridgeView<*>`
- *    backed by the recorder's wrapper. Throws if no bridge is attached.
+ *    attached to a state on the tracked store, returning a `BridgeView<T>`
+ *    typed by the property's state type. Throws if no bridge is attached.
  *  - [BridgeView] (with a [RecordingBridge]) — wraps a test
  *    bridge for assertions on the publish/inbound contract.
  *  - [BridgeView] (with a [LatchedBridge]) — wraps a latched
@@ -24,22 +24,22 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * store action { theme mutate "dark" }
  *
  * val view = BridgeView(bridge)
- * view.published shouldBe listOf("dark")
- * view.lastPublished shouldBe "dark"
+ * assertEquals(listOf("dark"), view.published)
+ * assertEquals("dark", view.lastPublished)
  *
  * view receiving "light"
- * store.read { theme.value } shouldBe "light"
+ * assertEquals("light", store.read { theme.value })
  * ```
  *
- * Or, using [com.vynatix.holdfast.testing.StoreHandle.bridge]:
+ * Or, using [com.vynatix.holdfast.testing.StoreHandle.bridge] (typed — no cast):
  * ```
  * val ctr = track(SettingsVault().also { v ->
  *     v { theme bridge RecordingBridge<String>("") }
  * })
  * ctr.action { theme mutate "dark" }
  *
- * val view = ctr.bridge(SettingsVault::theme)
- * (view.published as List<String>) shouldBe listOf("dark")
+ * val view: BridgeView<String> = ctr.bridge(SettingsVault::theme)
+ * assertEquals(listOf("dark"), view.published)
  * ```
  */
 class BridgeView<T : Any> internal constructor(
