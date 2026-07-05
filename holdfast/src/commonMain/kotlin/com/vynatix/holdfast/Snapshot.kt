@@ -1,5 +1,43 @@
 package com.vynatix.holdfast
 
+import kotlin.reflect.KClass
+
+/**
+ * One captured state in a [StoreSnapshot]: the raw (post-`transformer.set`)
+ * value plus the runtime [KClass] it had at capture time. The class is used by
+ * [restore] to reject a cross-store restore that would commit a type-mismatched
+ * value into a state.
+ */
+internal class SnapshotEntry(
+    val rawValue: Any,
+    val valueClass: KClass<*>,
+)
+
+/**
+ * Container interfaces whose sibling concrete implementations are the same
+ * declared type. `listOf("x")` and `listOf("y", "z")` have different runtime
+ * classes (a singleton list vs an array-backed list) but are both `List` — a
+ * strict class-identity check would spuriously reject restoring one over the
+ * other. Element-type correctness across these is the caller's responsibility.
+ */
+private val CONTAINER_KINDS: List<KClass<*>> =
+    listOf(Collection::class, Map::class)
+
+/**
+ * Whether a snapshot [entry]'s captured value may be restored over a
+ * [destination] value of the destination state's current type. Compatible when
+ * either runtime type is assignable to the other, or both are instances of a
+ * common [CONTAINER_KINDS] interface (sibling collection/map impls).
+ */
+private fun snapshotTypeIsCompatible(
+    entry: SnapshotEntry,
+    destination: Any,
+): Boolean {
+    if (entry.valueClass.isInstance(destination)) return true
+    if (destination::class.isInstance(entry.rawValue)) return true
+    return CONTAINER_KINDS.any { it.isInstance(entry.rawValue) && it.isInstance(destination) }
+}
+
 /**
  * Captured raw state of every registered property of a [Store] at the moment
  * [Store.snapshot] was called. Stored values are RAW — post-`transformer.set`
@@ -7,7 +45,9 @@ package com.vynatix.holdfast
  *
  * Snapshots are NOT typed against any particular store instance. Restoring a
  * snapshot from one store into a different store is permitted as long as the
- * destination has states with matching names; foreign state names are rejected.
+ * destination has states with matching names; foreign state names are rejected,
+ * and (by default) so are name matches whose runtime types are incompatible —
+ * see [restore]'s `validateTypes` parameter.
  *
  * For symmetric transformers and untransformed states, the snapshot's stored
  * value is the same as `state.value`. For asymmetric transformers (e.g.
@@ -16,13 +56,13 @@ package com.vynatix.holdfast
  * re-encrypting.
  */
 class StoreSnapshot internal constructor(
-    internal val rawValues: Map<String, Any>,
+    internal val entries: Map<String, SnapshotEntry>,
 ) {
     /** Names of every state captured in this snapshot. */
-    val stateNames: Set<String> get() = rawValues.keys
+    val stateNames: Set<String> get() = entries.keys
 
     /** Number of states in this snapshot. */
-    val size: Int get() = rawValues.size
+    val size: Int get() = entries.size
 }
 
 /**
@@ -36,13 +76,14 @@ class StoreSnapshot internal constructor(
  * do not affect previously-captured snapshots.
  */
 fun <V : Store<V>> V.snapshot(): StoreSnapshot {
-    val raw = mutableMapOf<String, Any>()
+    val entries = mutableMapOf<String, SnapshotEntry>()
     properties.forEach { (name, state) ->
         @Suppress("UNCHECKED_CAST")
         val ms = state as MutableState<Any>
-        raw[name] = ms.rawCurrentValue
+        val raw = ms.rawCurrentValue
+        entries[name] = SnapshotEntry(raw, raw::class)
     }
-    return StoreSnapshot(raw.toMap())
+    return StoreSnapshot(entries.toMap())
 }
 
 /**
@@ -55,16 +96,30 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
  * [TransactionResult.Error]) if the snapshot contains a state name not
  * registered on this store.
  *
+ * When [validateTypes] is true (the default), each snapshot value's captured
+ * runtime type is checked against the destination state's current runtime type
+ * before staging; an incompatible pair (neither type assignable to the other)
+ * fails the whole restore with an [IllegalStateException] naming the state, the
+ * snapshot type, and the destination type — nothing is mutated and no observer
+ * fires. Pass `validateTypes = false` for polymorphic states whose value may
+ * legitimately change subtype across snapshot/restore (a documented limitation:
+ * you then own type-correctness). The type check runs BEFORE staging and uses
+ * `stagePendingRaw`, so the "rollback never re-runs `Transformer.set`" contract
+ * is untouched.
+ *
  * Bridges that were attached when restore is called WILL receive the restored
  * value via their `publish` (commit-time bridge fanout). To avoid this,
  * detach bridges before calling restore.
  */
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
+fun <V : Store<V>> V.restore(
+    snapshot: StoreSnapshot,
+    validateTypes: Boolean = true,
+): TransactionResult<Unit> =
     action {
         val txn =
             activeTransaction
                 ?: error("restore must run inside an action — this should never happen since restore wraps in action")
-        snapshot.rawValues.forEach { (name, rawValue) ->
+        snapshot.entries.forEach { (name, entry) ->
             val state =
                 getState(name)
                     ?: error("snapshot contains state '$name' not registered on this store")
@@ -73,6 +128,17 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
             val ms =
                 state as? MutableState<Any>
                     ?: error("snapshot state '$name' is not a MutableState")
-            txn.stagePendingRaw(ms, rawValue)
+            if (validateTypes) {
+                val destination = ms.rawCurrentValue
+                if (!snapshotTypeIsCompatible(entry, destination)) {
+                    error(
+                        "snapshot state '$name' has type ${entry.valueClass.simpleName} but the " +
+                            "destination state currently holds ${destination::class.simpleName} — " +
+                            "restoring it would commit a type-mismatched value. Pass " +
+                            "validateTypes = false if this state is intentionally polymorphic.",
+                    )
+                }
+            }
+            txn.stagePendingRaw(ms, entry.rawValue)
         }
     }

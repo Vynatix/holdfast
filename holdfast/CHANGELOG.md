@@ -57,6 +57,15 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **`restore` no longer commits type-mismatched values (F11).** A snapshot now
+  captures each state's runtime type; `restore` validates it against the
+  destination state's current type and fails the whole restore (naming the
+  state, atomically, mutating nothing) instead of silently committing an
+  incompatible value into a same-named state — the hazard when restoring across
+  differently-shaped stores. Sibling collection/map implementations are treated
+  as compatible. New `restore(snapshot, validateTypes: Boolean = true)`
+  parameter opts out for intentionally polymorphic (sealed-type) states.
+
 - **`derived` recompute failures are no longer swallowed (F10).** Previously a
   throwing recompute `compute` (or a failing recompute commit) was discarded
   silently and the derived value froze. The failure now routes to a new

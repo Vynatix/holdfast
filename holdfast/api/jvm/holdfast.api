@@ -183,7 +183,8 @@ public abstract interface class com/vynatix/holdfast/Publisher {
 }
 
 public final class com/vynatix/holdfast/SnapshotKt {
-	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Z)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;
 }
 
@@ -495,7 +496,6 @@ public final class com/vynatix/holdfast/middleware/StoreProfile {
 }
 
 public final class com/vynatix/holdfast/middleware/TimingMiddleware : com/vynatix/holdfast/Middleware {
-	public static final field KEY_START_MS Ljava/lang/String;
 	public fun <init> (Lkotlin/jvm/functions/Function3;)V
 }
 

@@ -1153,19 +1153,31 @@ capability is independently usable; pick the ones you need.
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
 ```kotlin
-class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
+class StoreSnapshot {              // internal constructor; captures name -> (rawValue, runtime type)
     val stateNames: Set<String>
     val size: Int
 }
 
 fun <V : Store<V>> V.snapshot(): StoreSnapshot
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>
+fun <V : Store<V>> V.restore(
+    snapshot: StoreSnapshot,
+    validateTypes: Boolean = true,
+): TransactionResult<Unit>
 ```
 
 `snapshot` captures the raw stored value of every state that has been
-delegate-initialized at least once. `restore` writes them back inside a
-single top-level `action`, bypassing `transformer.set` so asymmetric
-transformers (encryption, JSON codecs) round-trip losslessly.
+delegate-initialized at least once, along with its runtime type. `restore`
+writes them back inside a single top-level `action`, bypassing
+`transformer.set` so asymmetric transformers (encryption, JSON codecs)
+round-trip losslessly.
+
+By default `restore` validates each value's captured runtime type against the
+destination state's current type and fails the whole restore (naming the
+state) rather than committing a type-mismatched value — the hazard when
+restoring a snapshot from a differently-shaped store that happens to share a
+state name. Sibling collection/map implementations count as compatible. Pass
+`validateTypes = false` for intentionally polymorphic (e.g. sealed-type)
+states, where you own type-correctness.
 
 ```kotlin
 val snap = holdfast.snapshot()

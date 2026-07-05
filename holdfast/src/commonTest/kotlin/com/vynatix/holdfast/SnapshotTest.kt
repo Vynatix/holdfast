@@ -30,9 +30,9 @@ class SnapshotCaptureTest {
         }
         val snap = v.snapshot()
         assertEquals(setOf("n", "s", "items"), snap.stateNames)
-        assertEquals(5, snap.rawValues["n"])
-        assertEquals("hello", snap.rawValues["s"])
-        assertEquals(listOf("a", "b"), snap.rawValues["items"])
+        assertEquals(5, snap.entries["n"]?.rawValue)
+        assertEquals("hello", snap.entries["s"]?.rawValue)
+        assertEquals(listOf("a", "b"), snap.entries["items"]?.rawValue)
     }
 
     @Test fun snapshotIsDetachedFromSubsequentMutations() {
@@ -40,7 +40,7 @@ class SnapshotCaptureTest {
         v action { n mutate 1 }
         val snap = v.snapshot()
         v action { n mutate 99 }
-        assertEquals(1, snap.rawValues["n"], "snapshot pinned the captured value")
+        assertEquals(1, snap.entries["n"]?.rawValue, "snapshot pinned the captured value")
     }
 
     @Test fun untouchedStatesAreAbsentFromSnapshot() {
@@ -104,7 +104,7 @@ class SnapshotRestoreTest {
 
     @Test fun restoreOfUnknownStateNameRollsBack() {
         val v = SnapshotVault()
-        val foreign = StoreSnapshot(mapOf("not-here" to 42))
+        val foreign = StoreSnapshot(mapOf("not-here" to SnapshotEntry(42, Int::class)))
         val r = v.restore(foreign)
         assertIs<TransactionResult.Error>(r)
         assertEquals(0, v.n.value, "no states changed; transaction rolled back")
@@ -118,7 +118,7 @@ class SnapshotRestoreTest {
         }
         // Capture the encrypted ciphertext.
         val snap = v.snapshot()
-        val ciphertext = snap.rawValues["token"]
+        val ciphertext = snap.entries["token"]?.rawValue
         assertTrue(ciphertext is String && ciphertext != "secret-1", "snapshot pinned ciphertext, not plaintext")
 
         v action {
@@ -151,4 +151,68 @@ class SnapshotRestoreTest {
         assertEquals(7, b.n.value)
         assertEquals("from-a", b.s.value)
     }
+
+    @Test fun restoreOfTypeMismatchedStateFailsNamingTheStateAndMutatesNothing() {
+        // F11: a cross-store restore where a same-named state holds an incompatible
+        // type is rejected before staging — Error names the state, nothing mutates,
+        // no observer fires.
+        val a = TypeAVault()
+        a action { field mutate 123 }
+        val snap = a.snapshot()
+
+        val b = TypeBVault()
+        b.field // register
+        b action { field mutate "keep" }
+        val seen = mutableListOf<String>()
+        val sub = b { field effect { seen.add(this) } }
+        seen.clear()
+
+        val r = b.restore(snap)
+        val err = assertIs<TransactionResult.Error>(r)
+        assertTrue(err.exception.message?.contains("field") == true, "message names the state")
+        assertEquals("keep", b.field.value, "destination unchanged after rejected restore")
+        assertEquals(emptyList(), seen, "no observer fired for the rolled-back restore")
+        sub.dispose()
+    }
+
+    @Test fun restoreWithValidateTypesFalseAllowsPolymorphicSubtypeChange() {
+        // F11: opt-out lets a polymorphic state accept a different subtype.
+        val a = ShapeVault()
+        a action { shape mutate Circle(2.0) }
+        val snap = a.snapshot()
+
+        val b = ShapeVault()
+        b.shape
+        b action { shape mutate Square(1.0) }
+
+        val strict = b.restore(snap)
+        assertIs<TransactionResult.Error>(strict, "strict restore rejects Circle into a Square-holding state")
+        assertTrue(b.shape.value is Square, "strict rejection left the Square in place")
+
+        val lenient = b.restore(snap, validateTypes = false)
+        assertIs<TransactionResult.Success<Unit>>(lenient)
+        assertTrue(b.shape.value is Circle, "validateTypes=false restored the Circle")
+    }
+}
+
+private class TypeAVault : Store<TypeAVault>() {
+    val field by state { 0 }
+}
+
+private class TypeBVault : Store<TypeBVault>() {
+    val field by state { "" }
+}
+
+private sealed interface Shape
+
+private data class Circle(
+    val r: Double,
+) : Shape
+
+private data class Square(
+    val side: Double,
+) : Shape
+
+private class ShapeVault : Store<ShapeVault>() {
+    val shape by state<Shape> { Circle(1.0) }
 }
