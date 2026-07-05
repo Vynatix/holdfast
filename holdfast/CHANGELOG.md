@@ -57,6 +57,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **Standalone `state.update { }` is now atomic (P1-update-rmw).** Outside an
+  action, the read-modify-write is wrapped in an implicit `action` so the read
+  and write happen together under the store's `transactionLock`; concurrent
+  standalone `update`s no longer lose increments (10,000/10,000 survive).
+  Inside an owned transaction the behavior is unchanged (read-your-own-writes,
+  stages into that transaction). The KDoc, which previously already claimed an
+  implicit single-shot transaction wrapped the operation, is now accurate.
+
 - **`restore` no longer commits type-mismatched values (F11).** A snapshot now
   captures each state's runtime type; `restore` validates it against the
   destination state's current type and fails the whole restore (naming the

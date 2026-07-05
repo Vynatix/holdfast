@@ -66,6 +66,37 @@ class ParallelActionTest {
         }
 
     @Test
+    fun concurrentStandaloneUpdatesHaveNoLostUpdates() =
+        runBlocking {
+            // P1-update-rmw regression: standalone `update { it + 1 }` outside an
+            // action must be atomic. Previously ~50% of increments were lost.
+            val v = ParallelVault()
+            val workers = 8
+            val incrementsPerWorker = 1250 // 8 * 1250 = 10_000
+            val jobs =
+                List(workers) {
+                    async(Dispatchers.Default) {
+                        repeat(incrementsPerWorker) {
+                            v { count update { it + 1 } }
+                        }
+                    }
+                }
+            jobs.awaitAll()
+            assertEquals(workers * incrementsPerWorker, v.count.value, "no lost standalone updates")
+        }
+
+    @Test
+    fun updateInsideActionStillReadsStagedValue() {
+        // The RYOW path: update inside an action sees prior staged writes.
+        val v = ParallelVault()
+        v action {
+            count mutate 10
+            count update { it + 5 } // must read the staged 10, not committed 0
+        }
+        assertEquals(15, v.count.value)
+    }
+
+    @Test
     fun concurrentMultiStateMutationsStayAtomicallyInLockstep() =
         runBlocking {
             val v = ParallelVault()

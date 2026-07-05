@@ -183,11 +183,12 @@ see [`ROADMAP.md`](ROADMAP.md).
   the only dispatcher thread can starve the `suspendAction` trying to resume on
   it — *workaround:* keep blocking `action` and `suspendAction` on separate
   stores there, or give the suspending work its own dispatcher.
-- **Standalone `state.update { }` outside an action is not atomic.** It is a
-  read-modify-write, so concurrent callers overwrite each other — measured,
-  about 50% of 10,000 concurrent increments are lost. *Workaround:* wrap the
-  update in `action { }`, which serializes it under the store's transaction
-  lock. Standalone `update` becomes atomic in 0.3.0.
+- **Standalone `state.update { }` outside an action is now atomic (fixed).**
+  The read-modify-write is wrapped in an implicit `action`, so the read and
+  the write happen together under the store's transaction lock — concurrent
+  standalone `update`s serialize and none are lost (10,000/10,000 concurrent
+  increments survive). Inside an action, `update` still reads your own staged
+  writes and stages into that transaction.
 - **`store { }` (plain invoke) does not open a transaction — `store action { }`
   does.** Writes inside a bare invoke commit one by one, with observers firing
   between them, so observers can see intermediate states. *Workaround:* use

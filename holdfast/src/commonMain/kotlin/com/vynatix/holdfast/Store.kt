@@ -652,11 +652,16 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Read-modify-write convenience. Equivalent to `mutate(block(value))` but reads
-     * the current value once and threads it through [block]. Inside an active
-     * transaction owned by this thread, the read sees pending writes
-     * (read-your-own-writes); outside, an implicit single-shot transaction wraps
-     * the operation.
+     * Read-modify-write convenience. Reads the current value once and threads it
+     * through [block]. Inside an active transaction owned by this thread (or the
+     * in-flight suspending body), the read sees pending writes
+     * (read-your-own-writes) and stages directly into that transaction.
+     *
+     * Outside any owned transaction, the read AND the write are wrapped in a
+     * single implicit `action` so the whole read-modify-write runs under the
+     * store's `transactionLock` — concurrent standalone `update`s serialize and
+     * no increment is lost. (Previously only the write was transactional; the
+     * read happened outside the lock, so concurrent callers clobbered each other.)
      *
      * ```
      * store action {
@@ -667,7 +672,18 @@ abstract class Store<Self : Store<Self>> {
      */
     infix fun <T : Any> State<T>.update(block: (T) -> T) {
         checkNotDisposed()
-        this mutate block(this.value)
+        val txn = _activeTransaction
+        val onOwnerThread = txn != null && txn.ownerThreadId == currentThreadId()
+        val onOwnerCoroutine = txn != null && suspendingOwner != null
+        if (txn != null && (onOwnerThread || onOwnerCoroutine)) {
+            // Owned transaction: RYOW read is correct; stage into the same txn.
+            this mutate block(this.value)
+        } else {
+            // Standalone: wrap the read-modify-write in a one-shot action so the
+            // read and the write are atomic under the store's transactionLock.
+            val state = this
+            action { state mutate block(state.value) }
+        }
     }
 
     /**
