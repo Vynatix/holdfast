@@ -20,7 +20,7 @@ import com.vynatix.holdfast.platform.currentThreadId
  * notifies observers under another, avoiding the AB-BA risk that nested acquisition
  * would create.
  */
-class MutableState<T : Any>(
+class MutableState<T : Any> internal constructor(
     initialValue: T,
     private val transformer: Transformer<T>? = null,
     @property:StoreInternalApi
@@ -266,6 +266,13 @@ class MutableState<T : Any>(
         get() = bridgeLock.withLock { currentBridge }
         set(value) =
             bridgeLock.withLock {
+                // Attaching/replacing a bridge on a disposed store must fail loudly —
+                // the same rule mutate/action enforce (`shutdownSilently` writes the
+                // fields directly, so dispose itself still works).
+                check(!owningStore.isDisposed) {
+                    "${owningStore::class.simpleName ?: "Store"} is disposed — dispose() is " +
+                        "terminal; create a new instance."
+                }
                 // Dispose the previous inbound observer registration so the previous
                 // bridge does not keep driving applyFromBridge after replacement/null.
                 currentBridgeSubscription?.dispose()

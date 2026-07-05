@@ -140,6 +140,20 @@ class StoreDisposeTest {
     }
 
     @Test
+    fun bridge_setter_after_dispose_throws() {
+        // F29 item 4: the raw MutableState.bridge setter must also enforce the
+        // disposed contract (shutdownSilently writes fields directly, so dispose
+        // itself still works).
+        val v = CountVault()
+
+        @Suppress("UNCHECKED_CAST")
+        val ms = v.n as MutableState<Int>
+        v.dispose()
+        val ex = assertFailsWith<IllegalStateException> { ms.bridge = null }
+        assertTrue(ex.message?.contains("disposed") == true, "was: ${ex.message}")
+    }
+
+    @Test
     fun atomic_on_disposed_store_throws() {
         // P1-disposed-gaps: atomic must enforce the disposed contract for every
         // participant before acquiring any lock.

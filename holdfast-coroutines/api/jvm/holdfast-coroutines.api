@@ -43,9 +43,6 @@ public final class com/vynatix/holdfast/coroutines/SuspendingBridgeKt {
 }
 
 public final class com/vynatix/holdfast/coroutines/SuspendingFileSystemKvStore : com/vynatix/holdfast/coroutines/SuspendingKvStore {
-	public static final field HEX_DIGITS I
-	public static final field HEX_RADIX I
-	public static final field TMP_PREFIX Ljava/lang/String;
 	public fun <init> (Ljava/lang/String;)V
 	public fun get (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun put (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;

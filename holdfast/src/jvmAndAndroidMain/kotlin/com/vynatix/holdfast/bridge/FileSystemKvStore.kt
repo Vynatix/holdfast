@@ -68,8 +68,8 @@ actual class FileSystemKvStore actual constructor(
     private fun isSafeKeyChar(ch: Char): Boolean = ch.isLetterOrDigit() || ch == '-' || ch == '_' || ch == '.'
 
     private companion object {
-        const val TMP_PREFIX = ".tmp-"
-        const val HEX_RADIX = 16
-        const val HEX_DIGITS = 2
+        private const val TMP_PREFIX = ".tmp-"
+        private const val HEX_RADIX = 16
+        private const val HEX_DIGITS = 2
     }
 }

@@ -1,3 +1,5 @@
+@file:OptIn(StoreInternalApi::class)
+
 package com.vynatix.holdfast
 
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -384,6 +386,14 @@ class TransactionException(
  * Don't fire-and-forget: an [Error] you never look at is a rollback you never
  * hear about. Either branch on the result with `when`, surface failures with
  * [onError], or rethrow them with [getOrThrow].
+ *
+ * API-honesty note: [Success] and [Error] are `data class`es, so their generated
+ * `copy()` can synthesize a result whose [Success.transaction] / [Error.transaction]
+ * did not actually run. Treat a `TransactionResult` you produced yourself as a
+ * value, not as proof that a transaction committed — only a result returned by
+ * `action`/`atomic`/`suspendAction` carries that guarantee. The forgeable `copy()`
+ * is scheduled to be locked down (`@ConsistentCopyVisibility` + internal ctor) in
+ * the pre-1.0 breaking window.
  */
 sealed interface TransactionResult<out R> {
     data class Success<R>(

@@ -1,3 +1,5 @@
+@file:OptIn(com.vynatix.holdfast.StoreInternalApi::class)
+
 package com.vynatix.holdfast.middleware
 
 import com.vynatix.holdfast.Middleware

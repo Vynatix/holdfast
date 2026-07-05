@@ -5,6 +5,12 @@ import com.vynatix.holdfast.platform.threadYield
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
+/**
+ * Reentrant spin-yield lock used internally to serialize a store's transactional
+ * work. `@StoreInternalApi` — it is an implementation detail of the store kernel
+ * (and companion modules that build on it), never a user-facing type.
+ */
+@StoreInternalApi
 class StoreLock : SynchronizedObject() {
     @kotlin.concurrent.Volatile
     private var locked = false

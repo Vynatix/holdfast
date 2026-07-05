@@ -14,6 +14,12 @@ fun interface Observable<T : Any> {
 /**
  * Write-only side of a two-way external sync. The store calls [publish] on every
  * successful commit that includes a state attached via [Bridge].
+ *
+ * API-honesty note: the [Boolean] return is currently NOT read by the store —
+ * commit-time publish is fire-and-forget, so returning `false` does not fail or
+ * retry the commit. The return type is retained for a future
+ * publish-acknowledgement contract and will be reconsidered (likely narrowed to
+ * `Unit`) in the pre-1.0 breaking window; do not rely on the caller observing it.
  */
 fun interface Publisher<T : Any> {
     fun publish(value: T): Boolean

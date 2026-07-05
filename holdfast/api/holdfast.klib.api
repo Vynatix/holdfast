@@ -244,8 +244,6 @@ final class <#A: kotlin/Any> com.vynatix.holdfast/EventfulSupport : com.vynatix.
 }
 
 final class <#A: kotlin/Any> com.vynatix.holdfast/MutableState : com.vynatix.holdfast/State<#A> { // com.vynatix.holdfast/MutableState|null[0]
-    constructor <init>(#A, com.vynatix.holdfast/Transformer<#A>? = ..., com.vynatix.holdfast/Store<*>, kotlin/Boolean = ...) // com.vynatix.holdfast/MutableState.<init>|<init>(1:0;com.vynatix.holdfast.Transformer<1:0>?;com.vynatix.holdfast.Store<*>;kotlin.Boolean){}[0]
-
     final val observerCount // com.vynatix.holdfast/MutableState.observerCount|{}observerCount[0]
         final fun <get-observerCount>(): kotlin/Int // com.vynatix.holdfast/MutableState.observerCount.<get-observerCount>|<get-observerCount>(){}[0]
     final val owningStore // com.vynatix.holdfast/MutableState.owningStore|{}owningStore[0]

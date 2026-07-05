@@ -159,8 +159,6 @@ public final class com/vynatix/holdfast/Middleware$MiddlewareContext {
 }
 
 public final class com/vynatix/holdfast/MutableState : com/vynatix/holdfast/State {
-	public fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Store;Z)V
-	public synthetic fun <init> (Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Lcom/vynatix/holdfast/Store;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun applyCommittedRaw (Ljava/lang/Object;)Z
 	public final fun getBridge ()Lcom/vynatix/holdfast/Bridge;
 	public final fun getObserverCount ()I
@@ -380,9 +378,6 @@ public abstract interface class com/vynatix/holdfast/bridge/Codec {
 }
 
 public final class com/vynatix/holdfast/bridge/FileSystemKvStore : com/vynatix/holdfast/bridge/KvStore {
-	public static final field HEX_DIGITS I
-	public static final field HEX_RADIX I
-	public static final field TMP_PREFIX Ljava/lang/String;
 	public fun <init> (Ljava/lang/String;)V
 	public fun get (Ljava/lang/String;)Ljava/lang/String;
 	public fun put (Ljava/lang/String;Ljava/lang/String;)V

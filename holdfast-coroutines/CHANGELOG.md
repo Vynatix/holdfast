@@ -151,6 +151,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exists; both factories return the same awaited-under-`suspendAction`
   `SuspendingKvBridge`. Kept for one minor release.
 
+### Removed (ABI)
+
+- **ABI hygiene (F29).** The `SuspendingFileSystemKvStore` companion constants
+  `HEX_DIGITS`/`HEX_RADIX`/`TMP_PREFIX` (JVM/Android and iOS) are now `private`,
+  removing them from the module ABI. They were implementation details.
+
 ### Removed
 
 - **BREAKING: the K2 `context(scope: CoroutineScope)` overloads of

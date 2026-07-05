@@ -209,6 +209,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `MutableState.owningVault` is now `owningStore`. The testing harness entry
   point `vaultTest { }` (in `:holdfast-testing`) is now `storeTest { }`.
 
+### Removed (ABI)
+
+- **ABI hygiene (F29).** Removed accidentally-public members that were never
+  intended as API: the `FileSystemKvStore` companion constants
+  (`HEX_DIGITS`/`HEX_RADIX`/`TMP_PREFIX`) and `TimingMiddleware.KEY_START_MS`
+  are now `private`; `MutableState`'s constructor is now `internal` (construct
+  states via `store.state { }`). `StoreLock` is annotated `@StoreInternalApi`
+  (it remains in the ABI but now requires opt-in to reference). Also:
+  `MutableState.bridge`'s setter now enforces the disposed-store check; and the
+  KDoc of `Publisher.publish(): Boolean` and `TransactionResult.Success`/`Error`
+  `copy()` now document their known API-shape caveats (return-value ignored;
+  forgeable copy) ahead of the pre-1.0 breaking window.
+
 ### Deprecated
 
 - `EventfulSupport.bindVault`, `MutableState.owningVault`, and `vaultTest`

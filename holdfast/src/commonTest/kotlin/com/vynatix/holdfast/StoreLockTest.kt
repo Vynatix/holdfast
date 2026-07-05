@@ -1,3 +1,5 @@
+@file:OptIn(StoreInternalApi::class)
+
 package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic

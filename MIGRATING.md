@@ -223,6 +223,23 @@ Generic intermediate bases whose `Self` is a type variable (e.g. a custom
 reflection can't recover the erased type argument), but the JVM/Android dev
 loop catches it.
 
+## Removed (ABI): accidentally-public internals (`:holdfast`, `:holdfast-coroutines`)
+
+Members that were never intended as API were removed from the binary surface.
+None are expected to be referenced by application code:
+
+- `FileSystemKvStore` / `SuspendingFileSystemKvStore` companion constants
+  (`HEX_DIGITS`, `HEX_RADIX`, `TMP_PREFIX`) are now `private`.
+- `TimingMiddleware.KEY_START_MS` is now `private`.
+- `MutableState`'s constructor is now `internal` — construct states with
+  `store.state { … }` (the only supported path). Reading/using `MutableState`
+  as a type is unchanged.
+- `StoreLock` is annotated `@StoreInternalApi` — referencing it now requires
+  opting in to the internal-API marker (it was never a user-facing type).
+
+If you were (accidentally) depending on any of these, switch to the public
+`state { }` / bridge APIs.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history
