@@ -1252,6 +1252,16 @@ Production users implement `Cipher` over `javax.crypto` (JVM) or
 CryptoKit (iOS) — typically AES-GCM with a per-state IV embedded in
 the encoded output.
 
+**Caveat — `distinct = true` is inert on an encrypted state backed by a
+non-deterministic cipher.** State dedup compares post-`set` raw values, which
+for an `EncryptingTransformer` are ciphertext. A secure AES-GCM-with-per-value-IV
+cipher encrypts the same plaintext to different ciphertext each time, so equal
+logical values never compare equal and dedup never fires — observers and
+`KvBridge` publish on every commit regardless. This is by design: dedup does not
+decrypt to compare (running `transformer.get` per commit would break the
+asymmetric-transformer / no-double-decrypt invariants). Dedup upstream if you
+need logical-value dedup.
+
 ### 14.5 `FileSystemKvStore` (`com.vynatix.holdfast.bridge`)
 
 ```kotlin

@@ -141,3 +141,49 @@ class EncryptingTransformerTest {
         val unused = reborn
     }
 }
+
+/**
+ * Non-deterministic [Cipher]: encrypting the same plaintext yields different
+ * ciphertext each time (a monotonic prefix stands in for a random IV), while
+ * decrypt still round-trips. Models a secure AES-GCM-with-per-value-IV cipher.
+ */
+private class NonDeterministicCipher : Cipher {
+    private var counter = 0
+
+    override fun encrypt(plaintext: String): String = "${counter++}:$plaintext"
+
+    override fun decrypt(ciphertext: String): String = ciphertext.substringAfter(':')
+}
+
+private class NonDeterministicVault : Store<NonDeterministicVault>() {
+    val token by state(EncryptingTransformer(NonDeterministicCipher()), distinct = true) { "seed" }
+}
+
+/**
+ * F30 — pins the documented interaction: `distinct = true` is INERT when the
+ * state is wrapped in an [EncryptingTransformer] over a non-deterministic
+ * cipher. Dedup compares post-`set` raw values (ciphertext); a per-value-IV
+ * cipher encrypts equal logical values to different ciphertext, so dedup never
+ * fires and observers see every commit.
+ */
+class DistinctWithNonDeterministicCipherTest {
+    @Test fun distinctTrueIsInertUnderNonDeterministicCipher() {
+        val v = NonDeterministicVault()
+        val seen = mutableListOf<String>()
+        val sub = v { token effect { seen.add(this) } }
+        seen.clear()
+
+        // Commit the SAME logical value twice.
+        v action { token mutate "same" }
+        v action { token mutate "same" }
+
+        // distinct=true would dedup the second on value equality — but it compares
+        // ciphertext, which differs each encrypt, so both commits fan out.
+        assertEquals(
+            listOf("same", "same"),
+            seen,
+            "distinct=true is inert for a non-deterministic cipher; observers see every commit",
+        )
+        sub.dispose()
+    }
+}

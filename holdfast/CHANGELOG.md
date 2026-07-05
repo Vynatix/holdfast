@@ -144,9 +144,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 - Documented platform support tiers in the root and module READMEs:
   Android/JVM/iOS are supported (tests run in CI); wasmJs is **experimental** —
   the artifact is still published, but tests are disabled on wasmJs,
-  `FileSystemKvStore` throws `UnsupportedOperationException`, `suspendDerived`
-  is unusable (`runBlocking` initial seed), and the platform is single-threaded
-  (`currentThreadId() == 0`). Doc-only; no code changes.
+  `FileSystemKvStore` throws `UnsupportedOperationException`, the seedless
+  `suspendDerived` overload is unusable (`runBlocking` initial seed — use the
+  new `suspendDerived(..., initial = ...)` overload instead), and the platform
+  is single-threaded (`currentThreadId() == 0`). Doc-only; no code changes.
+
+- **Documented that `distinct = true` is inert on an `EncryptingTransformer`
+  state backed by a non-deterministic cipher (F30).** Dedup compares
+  post-`Transformer.set` raw values (ciphertext); a secure per-value-IV cipher
+  encrypts equal plaintext to different ciphertext, so dedup never fires and
+  observers/bridges publish on every commit. `Cipher` / `EncryptingTransformer`
+  KDoc and GUIDE §14.4 spell this out; a pinning test in `CryptoTest` locks the
+  behavior. Docs + test only; no code or API change.
 
 ## 0.1.0 — Initial public release
 

@@ -28,6 +28,15 @@ import com.vynatix.holdfast.Transformer
  *
  * Combine with [com.vynatix.holdfast.bridge.KvBridge] for at-rest encryption: the
  * persisted bytes are ciphertext.
+ *
+ * **`distinct = true` does not work with a non-deterministic cipher.** State
+ * dedup compares post-`set` raw values — here, ciphertext. A secure cipher
+ * (AES-GCM with a per-value IV) encrypts the same plaintext to different
+ * ciphertext each time, so equal logical values never compare equal and dedup
+ * never fires; observers and bridges publish on every commit. This is by design
+ * (dedup must not run [get]/decrypt per commit — that would break the
+ * asymmetric-transformer / no-double-decrypt invariants). See [Cipher] for the
+ * full rationale; dedup upstream if you need logical-value dedup.
  */
 class EncryptingTransformer(
     private val cipher: Cipher,
