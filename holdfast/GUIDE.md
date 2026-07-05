@@ -971,6 +971,37 @@ never T1's pending writes.
 
 ## 11. Testing Patterns
 
+### 11.0 The `storeTest` harness
+
+The patterns in §11.1–§11.5 use raw `kotlin.test` so they have no dependency
+beyond the core library. When you add `com.vynatix:holdfast-testing`, the same
+assertions get a purpose-built harness: `storeTest { }` opens a virtual-time
+scope, `track(store)` installs a recorder and returns a `StoreHandle` whose
+`timeline` of `StoreEvent`s you assert against with infix matchers. The
+observability check of §11.1 becomes:
+
+<!-- Not a compiled snippet (needs :holdfast-testing on the classpath); the
+     module README's quickstart is the compiled source of truth. -->
+
+```
+import com.vynatix.holdfast.testing.storeTest
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
+
+@Test fun mutationFiresObserverOnce() = storeTest {
+    val ctr = track(CounterStore())              // StoreHandle
+    ctr.action { count mutate 5 }.shouldBeSuccess()
+    ctr shouldFireInOrder { started(); committed() }   // subsequence, in order
+}
+```
+
+Other matchers: `shouldHavePublished` / `shouldHavePublishedInOrder` (bridge
+output), `shouldBeError` / `shouldRollbackWith` (each **consumes** the pending
+error — an unconsumed `TransactionResult.Error` fails the scope at teardown, and
+`consumeAllPendingErrors()` clears the rest). `storeTest` also clears the
+process-global `FrameObservers` registry between scopes, and `shouldBeBoxedAs`
+lives in `:holdfast-hallmark` (not `:holdfast-testing`). Full quickstart and the
+matcher list: [`holdfast-testing/README.md`](../holdfast-testing/README.md).
+
 ### 11.1 Asserting commit observability
 
 ```kotlin
