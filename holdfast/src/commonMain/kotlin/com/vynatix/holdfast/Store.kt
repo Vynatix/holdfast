@@ -540,6 +540,7 @@ abstract class Store<Self : Store<Self>> {
                     existing as MutableState<T>
                 } else {
                     MutableState(initialize(), transformer, owningStore, distinct).also { state ->
+                        state.debugName = property.name
                         _properties[property.name] = state
                     }
                 }
@@ -570,6 +571,7 @@ abstract class Store<Self : Store<Self>> {
                 existing as MutableState<T>
             } else {
                 MutableState(initial, transformer, this, distinct).also {
+                    it.debugName = name
                     _properties[name] = it
                 }
             }

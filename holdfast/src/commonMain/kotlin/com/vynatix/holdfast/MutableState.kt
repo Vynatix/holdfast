@@ -37,6 +37,14 @@ class MutableState<T : Any>(
     val owningVault: Store<*>
         get() = owningStore
 
+    /**
+     * The property name this state was registered under, set once at registration
+     * by [Store.state] / [Store.registerInternalState]. Used only to name the state
+     * in diagnostic messages (ownership mismatch, restore type mismatch, commit
+     * failure phase). `null` for a state that was constructed but never registered.
+     */
+    internal var debugName: String? = null
+
     private val stateLock = StoreLock()
     private val observersLock = StoreLock()
     private val bridgeLock = StoreLock()
