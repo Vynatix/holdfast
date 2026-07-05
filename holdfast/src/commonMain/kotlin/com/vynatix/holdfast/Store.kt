@@ -2,7 +2,9 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.bareInvokeDepth
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.setBareInvokeDepth
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -562,8 +564,34 @@ abstract class Store<Self : Store<Self>> {
      * Plain context block — runs `block(self)` with no locks and no transaction.
      * Provides the `Self` receiver so member-extensions like [effect] and [bridge]
      * can be called fluently: `store { count effect { … } }`.
+     *
+     * A bare `store { }` opens NO transaction. Non-mutating wiring (`effect`,
+     * `bridge`, `observeFrom`, reads) belongs here; direct mutation does NOT.
+     * `store { count mutate 1 }` / `store { count update { … } }` would each
+     * synthesize a separate one-shot transaction and fire observers between
+     * writes — so they now throw a teaching [IllegalStateException]. Wrap
+     * mutations in `store action { … }`. A nested `action { }` (on this or any
+     * store) inside the block is unaffected — it opens its own transaction, so
+     * mutations there are legal.
      */
-    operator fun <R> invoke(block: Self.() -> R): R = block(self)
+    operator fun <R> invoke(block: Self.() -> R): R {
+        // Track bare-invoke depth on this thread so mutate/update can distinguish a
+        // bare-invoke mutation (must fail loudly) from a legitimate direct
+        // top-level call (`store.state.update { }` outside any invoke).
+        setBareInvokeDepth(bareInvokeDepth() + 1)
+        try {
+            return block(self)
+        } finally {
+            setBareInvokeDepth(bareInvokeDepth() - 1)
+        }
+    }
+
+    /** Teaching message for a mutation attempted directly inside a bare `store { }`. */
+    private fun bareInvokeMutationMessage(via: String): String =
+        "$via inside a bare `store { }` block: `store { }` provides the receiver context only " +
+            "and opens no transaction, so each write would commit its own one-shot transaction " +
+            "with observers firing between writes. Use `store action { }` for mutations " +
+            "(or move non-mutating wiring like effect/bridge — which is still allowed here)."
 
     /**
      * Declare a state property. The first read of the delegate creates a
@@ -679,6 +707,13 @@ abstract class Store<Self : Store<Self>> {
             // Owned transaction: RYOW read is correct; stage into the same txn.
             this mutate block(this.value)
         } else {
+            // Frame policing first, so an unenrolled write inside a frame is
+            // reported as the enrollment violation, not the bare-invoke guard.
+            val fallbackFrame = FrameMarkers.current()
+            if (fallbackFrame != null) checkFrameAllowsBlockingAction(fallbackFrame, via = "update")
+            // Bare `store { count update { … } }` is a mutation inside a
+            // no-transaction context — fail loudly rather than committing piecemeal.
+            check(bareInvokeDepth() == 0) { bareInvokeMutationMessage("update { }") }
             // Standalone: wrap the read-modify-write in a one-shot action so the
             // read and the write are atomic under the store's transactionLock.
             val state = this
@@ -730,9 +765,16 @@ abstract class Store<Self : Store<Self>> {
         // fires and observers see only the committed value. The recursive call lands
         // in the branch above on the second pass. Frame policing runs HERE first so a
         // bare `mutate` inside a frame body is reported as "via mutate", not
-        // misattributed to the synthesized action.
+        // misattributed to the synthesized action — and so an unenrolled write inside
+        // a frame is reported as the (more specific) enrollment violation rather than
+        // the bare-invoke guard below.
         val fallbackFrame = FrameMarkers.current()
         if (fallbackFrame != null) checkFrameAllowsBlockingAction(fallbackFrame, via = "mutate")
+        // Bare `store { count mutate 1 }` is a mutation inside a no-transaction
+        // context — fail loudly rather than synthesizing a piecemeal commit. A
+        // mutate reached from inside an `action { }` never lands here (it takes the
+        // owned-transaction branch above), so action-wrapped writes stay legal.
+        check(bareInvokeDepth() == 0) { bareInvokeMutationMessage("mutate") }
         action { this@mutate mutate that }
     }
 

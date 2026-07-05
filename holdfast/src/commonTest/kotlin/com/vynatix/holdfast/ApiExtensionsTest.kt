@@ -35,7 +35,9 @@ class UpdateExtensionTest {
     @Test
     fun updateOutsideActionWrapsInImplicitTransaction() {
         val v = ApiVault()
-        v { n update { it + 5 } }
+        // Standalone update via the store receiver (a bare `store { }` invoke no
+        // longer permits mutation); the RMW still wraps in an implicit action.
+        with(v) { n update { it + 5 } }
         assertEquals(5, v.n.value)
     }
 

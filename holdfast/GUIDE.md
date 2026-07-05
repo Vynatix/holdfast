@@ -237,9 +237,11 @@ value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
-see only the committed value. This means standalone `holdfast { x mutate v }`
-is equivalent to `holdfast action { x mutate v }` — never a "raw" write that
-skips observers, middleware, or commit semantics.
+see only the committed value — never a "raw" write that skips observers,
+middleware, or commit semantics. This applies to a standalone `mutate`/`update`
+reached with the store as receiver (a store method, or `with(store) { x mutate
+v }`). A **bare `store { x mutate v }` throws** (§4.5): a bare `store { }` opens
+no transaction, so use `store action { x mutate v }` for mutations.
 
 ### 4.4 `effect { … }` — Observe
 
@@ -329,9 +331,13 @@ val d = holdfast { count effect { … } }      // effect is an extension on Stor
 val v = holdfast { count.value }             // plain read
 ```
 
-`holdfast { x mutate y }` is a special case — `mutate` itself synthesizes an
-implicit action when there is no active transaction. So this form still
-goes through middleware and observers.
+A bare `holdfast { x mutate y }` / `holdfast { x update { … } }` now **throws**
+a teaching `IllegalStateException`: a bare `store { }` opens no transaction, so
+piecemeal writes would each commit their own one-shot transaction with
+observers firing between them. Use `holdfast action { x mutate y }` for
+mutations. A nested `action { }` inside the block is fine (it opens its own
+transaction), as is a standalone `mutate`/`update` reached with the store as
+receiver directly (e.g. inside a store method, or via `with(store) { … }`).
 
 ---
 
@@ -975,7 +981,7 @@ never T1's pending writes.
     v.middlewares(object : Middleware<CounterStore>() {
         override fun onTransactionStarted(c: MiddlewareContext<CounterStore>) { calls++ }
     })
-    v { count mutate 42 }
+    with(v) { count mutate 42 } // standalone mutate via the store receiver
     assertEquals(1, calls)
 }
 ```

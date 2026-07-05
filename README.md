@@ -169,8 +169,10 @@ pin to exact versions. SemVer guarantees apply once 1.0 is declared.
 
 ## Known issues
 
-Three open hazards in 0.1.0, named honestly. All three fixes land in 0.3.0 —
-see [`ROADMAP.md`](ROADMAP.md).
+The three 0.1.0 hazards, named honestly. Two are now fixed (standalone
+`update` atomicity and the `store { }`-vs-`store action { }` mutation trap);
+the blocking/suspending interaction has a fixed self-spin case and one
+documented residual (single-threaded dispatcher). See [`ROADMAP.md`](ROADMAP.md).
 
 - **Mixing blocking `action { }` with `suspendAction { }` on the same store.**
   The self-spin case — a blocking `action { }` (or an `atomic`/`suspendAtomic`
@@ -189,11 +191,13 @@ see [`ROADMAP.md`](ROADMAP.md).
   standalone `update`s serialize and none are lost (10,000/10,000 concurrent
   increments survive). Inside an action, `update` still reads your own staged
   writes and stages into that transaction.
-- **`store { }` (plain invoke) does not open a transaction — `store action { }`
-  does.** Writes inside a bare invoke commit one by one, with observers firing
-  between them, so observers can see intermediate states. *Workaround:* use
-  `store action { }` for any mutation. In 0.3.0 mutating inside a bare invoke
-  fails loudly instead of silently committing piecemeal.
+- **`store { }` (plain invoke) does not open a transaction — mutating inside it
+  now throws (fixed).** A bare `store { count mutate 1 }` /
+  `store { count update { … } }` used to commit piecemeal with observers firing
+  between writes; it now throws a teaching `IllegalStateException`. Use
+  `store action { … }` for mutations. Non-mutating wiring (`effect`, `bridge`,
+  `observeFrom`, reads) inside `store { }` stays legal, as does a nested
+  `action { }`.
 
 ## Contributing
 

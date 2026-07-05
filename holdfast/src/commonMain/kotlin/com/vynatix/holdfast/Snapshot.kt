@@ -33,9 +33,11 @@ private fun snapshotTypeIsCompatible(
     entry: SnapshotEntry,
     destination: Any,
 ): Boolean {
-    if (entry.valueClass.isInstance(destination)) return true
-    if (destination::class.isInstance(entry.rawValue)) return true
-    return CONTAINER_KINDS.any { it.isInstance(entry.rawValue) && it.isInstance(destination) }
+    val eitherAssignable =
+        entry.valueClass.isInstance(destination) || destination::class.isInstance(entry.rawValue)
+    val sameContainerKind =
+        CONTAINER_KINDS.any { it.isInstance(entry.rawValue) && it.isInstance(destination) }
+    return eitherAssignable || sameContainerKind
 }
 
 /**

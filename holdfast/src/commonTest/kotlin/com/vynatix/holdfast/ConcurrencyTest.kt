@@ -77,7 +77,9 @@ class ParallelActionTest {
                 List(workers) {
                     async(Dispatchers.Default) {
                         repeat(incrementsPerWorker) {
-                            v { count update { it + 1 } }
+                            // Standalone update via the store receiver (not a bare
+                            // `store { }` invoke, which no longer permits mutation).
+                            with(v) { count update { it + 1 } }
                         }
                     }
                 }

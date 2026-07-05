@@ -259,7 +259,8 @@ class MiddlewareImplicitTransactionTest {
         val events = mutableListOf<String>()
         v.middlewares(GlobalRecordingMiddleware("M", events))
 
-        v { n mutate 42 }
+        // Standalone mutate via the store receiver (not a bare `store { }` invoke).
+        with(v) { n mutate 42 }
 
         assertEquals(42, v.n.value)
         assertTrue("M:started" in events, "middleware must fire for implicit transaction; events=$events")

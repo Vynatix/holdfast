@@ -140,6 +140,35 @@ fire-and-forget through the conflated channel. Callers who explicitly relied
 on `Awaiting`'s direct-launch sync publish now get the conflated-channel path
 instead; use `suspendAction` if every intermediate value must persist.
 
+## Behavior change: a bare `store { }` no longer permits mutation (`:holdfast`)
+
+A bare `store { }` invoke opens no transaction — it exists to provide the
+store as receiver for non-mutating wiring (`effect`, `bridge`, `observeFrom`,
+reads). Mutating directly inside it used to synthesize a separate one-shot
+transaction per write, so observers fired between writes. That now throws a
+teaching `IllegalStateException`.
+
+```kotlin
+// Before (piecemeal — two commits, observers fired between):
+store {
+    count mutate 1
+    label mutate "x"
+}
+
+// After — group the writes in one transaction:
+store action {
+    count mutate 1
+    label mutate "x"
+}
+```
+
+Still legal inside `store { }`: `effect`/`bridge`/`observeFrom` wiring, reads,
+a nested `action { }` (opens its own transaction), and an in-frame write on an
+enrolled store during `atomic`/`suspendAtomic`. A standalone single `mutate`/
+`update` is still available with the store as receiver directly — from a store
+method, or `with(store) { count update { it + 1 } }` — where it wraps itself in
+an implicit atomic action.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

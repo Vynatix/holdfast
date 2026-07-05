@@ -122,6 +122,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **BREAKING (behavior): a bare `store { }` no longer permits mutation
+  (P1-invoke-nonatomic).** `store { count mutate 1 }` and
+  `store { count update { … } }` now throw a teaching `IllegalStateException`:
+  a bare `store { }` provides the receiver context only and opens no
+  transaction, so each write would commit its own one-shot transaction with
+  observers firing between them. Migration (see `MIGRATING.md`): use
+  `store action { … }` for mutations. Non-mutating uses inside `store { }`
+  (`effect`, `bridge`, `observeFrom`, reads) are unchanged, as is a nested
+  `action { }`, an in-frame write on an enrolled store, and a standalone
+  `mutate`/`update` reached with the store as receiver (a store method or
+  `with(store) { … }`).
+
 - **`TimingMiddleware` now reports the transaction's real outcome and includes
   commit fanout in the elapsed time (F31).** `onTransactionCompleted` fires
   before the commit, so the success report is deferred via `Store.postCommit`

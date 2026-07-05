@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -222,7 +223,7 @@ class MutateOutsideActionTest {
             },
         )
 
-        v { count mutate 42 }
+        with(v) { count mutate 42 }
 
         assertEquals(42, v.count.value)
         assertEquals(
@@ -235,9 +236,9 @@ class MutateOutsideActionTest {
     @Test
     fun mutateOutsideActionAppliedValueIsObservableAfterCall() {
         val v = TxTestVault()
-        v { count mutate 99 }
+        with(v) { count mutate 99 }
         assertEquals(99, v.count.value)
-        v { label mutate "set-via-implicit-tx" }
+        with(v) { label mutate "set-via-implicit-tx" }
         assertEquals("set-via-implicit-tx", v.label.value)
     }
 
@@ -248,7 +249,7 @@ class MutateOutsideActionTest {
         val d = v { count effect { seen.add(this) } }
         seen.clear()
 
-        v { count mutate 42 }
+        with(v) { count mutate 42 }
 
         assertEquals(listOf(42), seen, "implicit txn must fire observers post-commit")
         d.dispose()
@@ -259,10 +260,36 @@ class MutateOutsideActionTest {
         runBlocking {
             val v = TxTestVault()
             async(Dispatchers.Default) {
-                v { count mutate 7 }
+                with(v) { count mutate 7 }
             }.await()
             assertEquals(7, v.count.value)
         }
+
+    @Test
+    fun mutateInsideBareInvokeThrows() {
+        // P1-invoke-nonatomic: a bare `store { }` opens no transaction; a direct
+        // mutation there fails loudly instead of committing piecemeal.
+        val v = TxTestVault()
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v { count mutate 1 }
+            }
+        assertTrue(ex.message?.contains("bare") == true, "teaching message mentions bare invoke; was: ${ex.message}")
+        // The context-only, non-mutating uses stay legal.
+        val d = v { count effect { } }
+        // And the action form works.
+        v action { count mutate 5 }
+        assertEquals(5, v.count.value)
+        d.dispose()
+    }
+
+    @Test
+    fun updateInsideBareInvokeThrows() {
+        val v = TxTestVault()
+        assertFailsWith<IllegalStateException> {
+            v { count update { it + 1 } }
+        }
+    }
 }
 
 class TransactionStatusGuardsTest {

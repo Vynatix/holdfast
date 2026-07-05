@@ -47,13 +47,13 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 **Theme:** kill every silent-failure footgun a newcomer hits in hour one; turn the analysis's empirical probes into permanent regression tests.
 
 - Fail fast on blocking `action {}` inside/concurrent with `suspendAction` — **largely delivered** (F1/F4): the same-coroutine self-spin (a blocking `action`/`atomic` enrolling the store inside a `suspendAction` body) now throws `FrameInteropException` immediately, and a cross-thread blocking `action` overlapping an in-flight `suspendAction` is serialized by the shared `AsyncSerializer` rather than cross-contaminating. Residual (per the two-phase plan): single-threaded-dispatcher starvation stays a documented caveat pending the pre-RC ADR (M)
-- Make standalone `update` atomic — regression test: 10,000/10,000 concurrent increments survive (currently 5,049) (M)
+- Make standalone `update` atomic — **delivered** (P1-update-rmw): the standalone read-modify-write wraps in an implicit action, regression test asserts 10,000/10,000 concurrent increments survive (M)
 - Enforce the CRTP self-type at construction — `class Foo : Store<Bar>()` fails at init with a two-type teaching message (S)
-- Defuse `store { }` vs `store action { }` — bare invoke becomes non-mutating; mutate outside an action via invoke fails loudly (M)
+- Defuse `store { }` vs `store action { }` — **delivered** (P1-invoke-nonatomic): a bare `store { }` is non-mutating; `mutate`/`update` directly inside it throws a teaching `IllegalStateException` (M)
 - Flip `distinct` default to `true` (matches the StateFlow dedup contract users carry in — and what the GUIDE already claims) (S)
 - Eager state registration via `provideDelegate` — kills the snapshot/restore-on-untouched-store surprise class (M)
 - `suspendAction` disposed-store check matches blocking `action`; `emit()` gains the ownership check `mutate` has (S)
-- Observer-exception default: log loudly instead of silent swallow; document `uncaughtObserverHandler` where users will find it (S)
+- Observer-exception default: log loudly instead of silent swallow; document `uncaughtObserverHandler` where users will find it — **delivered** (P1-observer-swallow): null handler routes to a loud built-in logger; assign a no-op lambda to silence (S)
 - Remove the 0.2.0 deprecated aliases (the one-minor promise) (S)
 
 **Success criteria:** every footgun from USABILITY-ANALYSIS Theme 2 has a named regression test; the empirical probes (increment loss, rollback verification, overload resolution) run in CI; zero silent-failure paths for the misuse cases in the error-experience lens.

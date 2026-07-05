@@ -56,7 +56,7 @@ class GuideTestingPatternsTwin {
         v.middlewares(object : Middleware<CounterStore>() {
             override fun onTransactionStarted(c: MiddlewareContext<CounterStore>) { calls++ }
         })
-        v { count mutate 42 }
+        with(v) { count mutate 42 } // standalone mutate via the store receiver
         assertEquals(1, calls)
     }
     // DOC-SNIPPET-END

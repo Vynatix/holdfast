@@ -99,7 +99,8 @@ fun <V : Store<V>, T : Any> V.derived(
                     // simply left at its previous value and recovers on the next source
                     // commit (F10).
                     if (result is TransactionResult.Error) {
-                        if (onError != null) onError(result.exception) else self.reportUncaughtObserverError(result.exception)
+                        val ex = result.exception
+                        if (onError != null) onError(ex) else self.reportUncaughtObserverError(ex)
                     }
                 }
             }

@@ -17,7 +17,10 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 import kotlin.time.Duration
+
+private fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
 
 private class StdLibVault : Store<StdLibVault>() {
     val n by state { 0 }
@@ -103,9 +106,9 @@ class TimingMiddlewareTest {
             v {
                 n effect {
                     // Busy-wait ~40ms during fanout so it dominates the elapsed time.
-                    val until = kotlin.time.Clock.System.now().toEpochMilliseconds() + 40
+                    val until = nowMs() + 40
                     @Suppress("ControlFlowWithEmptyBody")
-                    while (kotlin.time.Clock.System.now().toEpochMilliseconds() < until) {
+                    while (nowMs() < until) {
                         // spin
                     }
                 }
@@ -343,7 +346,9 @@ class ProfilingMiddlewareTest {
         val v = StdLibVault()
         val profiler = ProfilingMiddleware<StdLibVault>()
         v.middlewares(profiler)
-        v { n mutate 7 }
+        // Standalone mutate via the store receiver (not a bare `store { }` invoke,
+        // which no longer permits mutation) still synthesizes a one-shot action.
+        with(v) { n mutate 7 }
         val profile = profiler.profile()
         assertEquals(1L, profile.transactionCount, "bare mutate synthesizes a one-shot action")
         assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)
