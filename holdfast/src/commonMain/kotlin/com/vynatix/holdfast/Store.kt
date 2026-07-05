@@ -5,6 +5,7 @@ package com.vynatix.holdfast
 import com.vynatix.holdfast.platform.bareInvokeDepth
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.setBareInvokeDepth
+import com.vynatix.holdfast.platform.validateCrtpSelfType
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +73,13 @@ class FrameMiddlewareSession internal constructor(
 @StoreActionDsl
 @Suppress("TooManyFunctions") // The Store DSL is intentionally broad; each member is a single primitive.
 abstract class Store<Self : Store<Self>> {
+    init {
+        // Fail fast at construction if a subclass mis-parameterizes the CRTP Self
+        // type (`class Foo : Store<Bar>()`) — otherwise it degrades to a swallowed
+        // ClassCastException deep in the DSL. JVM/Android-only; no-op on iOS/wasmJs.
+        validateCrtpSelfType(this)
+    }
+
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
      * sorts its store arguments by this key before acquiring locks, giving

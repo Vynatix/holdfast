@@ -48,7 +48,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 
 - Fail fast on blocking `action {}` inside/concurrent with `suspendAction` — **largely delivered** (F1/F4): the same-coroutine self-spin (a blocking `action`/`atomic` enrolling the store inside a `suspendAction` body) now throws `FrameInteropException` immediately, and a cross-thread blocking `action` overlapping an in-flight `suspendAction` is serialized by the shared `AsyncSerializer` rather than cross-contaminating. Residual (per the two-phase plan): single-threaded-dispatcher starvation stays a documented caveat pending the pre-RC ADR (M)
 - Make standalone `update` atomic — **delivered** (P1-update-rmw): the standalone read-modify-write wraps in an implicit action, regression test asserts 10,000/10,000 concurrent increments survive (M)
-- Enforce the CRTP self-type at construction — `class Foo : Store<Bar>()` fails at init with a two-type teaching message (S)
+- Enforce the CRTP self-type at construction — **delivered** (P1-crtp): `class Foo : Store<Bar>()` throws at init with a two-type teaching message (JVM/Android; iOS/wasmJs no-op) (S)
 - Defuse `store { }` vs `store action { }` — **delivered** (P1-invoke-nonatomic): a bare `store { }` is non-mutating; `mutate`/`update` directly inside it throws a teaching `IllegalStateException` (M)
 - Flip `distinct` default to `true` (matches the StateFlow dedup contract users carry in — and what the GUIDE already claims) (S)
 - Eager state registration via `provideDelegate` — kills the snapshot/restore-on-untouched-store surprise class (M)

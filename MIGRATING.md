@@ -169,6 +169,26 @@ enrolled store during `atomic`/`suspendAtomic`. A standalone single `mutate`/
 method, or `with(store) { count update { it + 1 } }` — where it wraps itself in
 an implicit atomic action.
 
+## Behavior change: the CRTP `Self` type is enforced at construction (`:holdfast`)
+
+A `Store` subclass must parameterize `Self` with its own class. A
+mis-parameterization that previously ran until it hit a swallowed
+`ClassCastException` now throws at construction (JVM/Android):
+
+```kotlin
+// Before (compiled; failed later with an opaque ClassCastException):
+class Foo : Store<Bar>()
+
+// After — Self is the declaring class:
+class Foo : Store<Foo>()
+```
+
+Generic intermediate bases whose `Self` is a type variable (e.g. a custom
+`abstract class Base<S : Base<S>> : Store<S>()`, or the built-in
+`EventfulStore`) are unaffected. iOS/wasmJs do not enforce this (native
+reflection can't recover the erased type argument), but the JVM/Android dev
+loop catches it.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

@@ -74,7 +74,10 @@ visibility and atomicity come from a transaction boundary.
 A store subclass declares its state using delegated properties. The base
 class is generic in `Self` (the curiously-recurring-template pattern) so
 extensions like `infix fun State<T>.mutate(T)` resolve against the concrete
-holdfast type.
+holdfast type. `Self` must be the declaring class itself
+(`class Foo : Store<Foo>()`); getting it wrong (`class Foo : Store<Bar>()`)
+now throws at construction with a two-type teaching message on JVM/Android
+(a no-op on iOS/wasmJs, where the dev loop's JVM check already catches it).
 
 ```kotlin
 class CounterStore : Store<CounterStore>() {

@@ -122,6 +122,15 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **The CRTP `Self` type is enforced at construction (P1-crtp).** A
+  mis-parameterized store — `class Foo : Store<Bar>()` instead of
+  `class Foo : Store<Foo>()` — now throws an `IllegalStateException` naming both
+  types at construction, instead of degrading to a swallowed
+  `ClassCastException` deep inside the DSL. Enforcement is JVM/Android-only
+  (generic-superclass reflection); iOS/wasmJs are no-ops (documented). Generic
+  intermediate bases whose `Self` is a type variable (e.g. `EventfulStore`) are
+  skipped.
+
 - **BREAKING (behavior): a bare `store { }` no longer permits mutation
   (P1-invoke-nonatomic).** `store { count mutate 1 }` and
   `store { count update { … } }` now throw a teaching `IllegalStateException`:
