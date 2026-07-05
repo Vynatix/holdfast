@@ -59,12 +59,16 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  * // …later:
  * disposable.dispose()
  * ```
+ *
+ * The result is a [DerivedState]; it destructures into `(state, disposable)`
+ * exactly as the former `Pair` return did, so existing call sites are
+ * source-compatible.
  */
 fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
     onError: ((Throwable) -> Unit)? = null,
     compute: V.() -> T,
-): Pair<State<T>, Disposable> {
+): DerivedState<T> {
     internalCheckNotDisposed()
     require(sources.isNotEmpty()) {
         "derived requires at least one source state — with no sources it would never recompute. " +
@@ -121,7 +125,24 @@ fun <V : Store<V>, T : Any> V.derived(
         Disposable {
             subs.forEach { it.dispose() }
         }
-    return backingState to composite
+    return DerivedState(backingState, composite)
+}
+
+/**
+ * The result of [derived]: the observable derived [state] and the [disposable]
+ * that tears down its source subscriptions.
+ *
+ * Destructures into `(state, disposable)` via [component1]/[component2], so it
+ * is a drop-in replacement for the `Pair<State<T>, Disposable>` this used to
+ * return.
+ */
+class DerivedState<T : Any>(
+    val state: State<T>,
+    val disposable: Disposable,
+) {
+    operator fun component1(): State<T> = state
+
+    operator fun component2(): Disposable = disposable
 }
 
 /**

@@ -13,8 +13,16 @@ public final class com/vynatix/holdfast/ContractKt {
 
 public final class com/vynatix/holdfast/DerivedKt {
 	public static final fun computed (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/State;
-	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
-	public static synthetic fun derived$default (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlin/Pair;
+	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/DerivedState;
+	public static synthetic fun derived$default (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/DerivedState;
+}
+
+public final class com/vynatix/holdfast/DerivedState {
+	public fun <init> (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Disposable;)V
+	public final fun component1 ()Lcom/vynatix/holdfast/State;
+	public final fun component2 ()Lcom/vynatix/holdfast/Disposable;
+	public final fun getDisposable ()Lcom/vynatix/holdfast/Disposable;
+	public final fun getState ()Lcom/vynatix/holdfast/State;
 }
 
 public abstract interface class com/vynatix/holdfast/Disposable {

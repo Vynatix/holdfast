@@ -163,6 +163,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **`derived(...)` returns `DerivedState<T>` instead of `Pair<State<T>,
+  Disposable>` (F33).** `DerivedState` destructures into `(state, disposable)`
+  via `component1`/`component2`, so existing `val (state, disp) = store.derived
+  { … }` call sites are source-compatible; only code that used the result as a
+  `Pair` (`.first`/`.second`, or passing it where a `Pair` is expected) needs
+  updating. Binary-incompatible; source-compatible for the idiomatic form.
+
 - **Breaking (behavioral): `atomic(...)` / `suspendAtomic(...)` now enforce
   frame enrollment and escalate inner errors (F8).** Two behaviors that
   previously let a partial commit slip past the all-or-nothing promise are now
