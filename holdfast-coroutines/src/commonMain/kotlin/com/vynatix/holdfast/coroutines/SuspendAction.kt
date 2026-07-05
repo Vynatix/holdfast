@@ -82,7 +82,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 // Single-sourced middleware ordering + frame-gate setup — splitting it would scatter the contract.
-@Suppress("LongMethod", "CyclomaticComplexMethod")
+@Suppress("LongMethod", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic
@@ -156,13 +156,24 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
 
         val outcome: TransactionResult<R> =
             try {
+                // Capture the body's throwable where it is thrown, before it crosses
+                // the withContext coroutine boundary — kotlinx stacktrace recovery
+                // hands the outer catch a *copy* otherwise, and callers (mirroring
+                // blocking `action`) rely on the exact instance surviving into
+                // TransactionResult.Error and getOrThrow.
+                var bodyError: Throwable? = null
                 val value: R =
                     try {
                         // The marker context installs the thread-local marker on
                         // every resume and restores the prior value on suspend —
                         // same mechanism as suspendAtomic's body wrapper.
                         withContext(heldFrame + frameMarkerContext(marker, coroutineContext[ContinuationInterceptor])) {
-                            selfForExternal.body()
+                            try {
+                                selfForExternal.body()
+                            } catch (t: Throwable) {
+                                bodyError = t
+                                throw t
+                            }
                         }
                     } catch (ce: CancellationException) {
                         // Concentric forward (innermost-first) on the error path so the
@@ -184,17 +195,19 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
                         runCatching { txn.rollback() }
                         throw ce
                     } catch (e: Throwable) {
+                        // Prefer the pre-recovery instance captured inside the body.
+                        val original = bodyError ?: e
                         for (i in middlewareChain.indices) {
                             val mw = middlewareChain[i]
                             if (mw is SuspendingMiddlewareHooks<*>) {
                                 @Suppress("UNCHECKED_CAST")
                                 val async = mw as SuspendingMiddlewareHooks<V>
-                                runCatching { async.onTransactionErrorAsync(contexts[i], e) }
+                                runCatching { async.onTransactionErrorAsync(contexts[i], original) }
                             }
-                            runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
+                            runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], original) }
                         }
                         runCatching { txn.rollback() }
-                        return@withLock TransactionResult.Error(e, txn)
+                        return@withLock TransactionResult.Error(original, txn)
                     }
                 // Body returned. Commit under NonCancellable so observer/bridge
                 // fanout completes even if the surrounding scope cancels here.
