@@ -3,6 +3,7 @@ package com.vynatix.holdfast
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -113,6 +114,25 @@ class DerivedTest {
         val r = v action { items mutate listOf(1) }
         assertIs<TransactionResult.Success<*>>(r)
         assertEquals(1, captured.size)
+    }
+
+    @Test fun derivedWithNoSourcesThrows() {
+        // F17: zero sources would never recompute — reject with a teaching message.
+        val v = DerivedVault()
+        val ex = assertFailsWith<IllegalArgumentException> { v.derived<DerivedVault, Int> { 0 } }
+        assertTrue(ex.message?.contains("at least one source") == true, "was: ${ex.message}")
+    }
+
+    @Test fun derivedFromComputedSourceThrowsWithTeachingMessage() {
+        // F17: a computed{}/hand-rolled State has no observer fanout — reject the
+        // blind cast with a teaching IllegalArgumentException instead of a bare CCE.
+        val v = DerivedVault()
+        val computedSource = v.computed { items.value.size }
+        val ex =
+            assertFailsWith<IllegalArgumentException> {
+                v.derived(computedSource) { items.value.sum() }
+            }
+        assertTrue(ex.message?.contains("state { }") == true, "teaching message mentions state { }: ${ex.message}")
     }
 
     @Test fun derivedRecomputesOnAnyOfMultipleSources() {

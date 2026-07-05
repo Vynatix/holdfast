@@ -57,6 +57,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **`derived` rejects invalid sources with teaching messages (F17).** Passing
+  zero sources now throws `IllegalArgumentException` ("derived requires at least
+  one source state…") instead of silently producing a state that never
+  recomputes; passing a `computed{}` / hand-rolled `State` (which has no
+  observer fanout) throws a teaching `IllegalArgumentException` instead of a
+  bare `ClassCastException` deep inside the wiring.
+
 - **Standalone `state.update { }` is now atomic (P1-update-rmw).** Outside an
   action, the read-modify-write is wrapped in an implicit `action` so the read
   and write happen together under the store's `transactionLock`; concurrent

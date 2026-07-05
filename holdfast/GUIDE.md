@@ -1231,6 +1231,11 @@ If a recompute's `compute` throws (or its commit fails), the exception is
 the store's `uncaughtObserverHandler` (loud by default). The derived value
 keeps its last value and recovers on the next source commit.
 
+Sources must be `state { }` properties: passing zero sources, or a
+`computed { }` / hand-rolled `State` (which has no observer fanout), throws an
+`IllegalArgumentException` at the `derived(...)` call. Derive from the
+underlying `state { }` properties instead.
+
 ### 14.3 `atomic(vararg stores) { body }`
 
 ```kotlin

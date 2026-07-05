@@ -66,6 +66,10 @@ fun <V : Store<V>, T : Any> V.derived(
     compute: V.() -> T,
 ): Pair<State<T>, Disposable> {
     internalCheckNotDisposed()
+    require(sources.isNotEmpty()) {
+        "derived requires at least one source state — with no sources it would never recompute. " +
+            "Pass the state { } properties this derivation reads."
+    }
     val self = this
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"
@@ -75,7 +79,14 @@ fun <V : Store<V>, T : Any> V.derived(
     val subs =
         sources.mapIndexed { idx, src ->
             @Suppress("UNCHECKED_CAST")
-            (src as MutableState<Any>).observe {
+            val ms =
+                (src as? MutableState<Any>)
+                    ?: throw IllegalArgumentException(
+                        "derived source must be a `state { }` property — a computed{}/hand-rolled " +
+                            "State has no observer fanout, so this derivation could never be notified " +
+                            "of its changes. Derive from the underlying `state { }` properties instead.",
+                    )
+            ms.observe {
                 // Skip the initial-fire callback so we don't double-recompute.
                 if (!initialFireFlags[idx]) {
                     initialFireFlags[idx] = true
