@@ -183,6 +183,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun dispose() // com.vynatix.holdfast/Store.dispose|dispose(){}[0]
     final fun getState(kotlin/String): com.vynatix.holdfast/State<*>? // com.vynatix.holdfast/Store.getState|getState(kotlin.String){}[0]
     final fun hasState(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/Store.hasState|hasState(kotlin.String){}[0]
+    final fun internalCheckNotDisposed() // com.vynatix.holdfast/Store.internalCheckNotDisposed|internalCheckNotDisposed(){}[0]
     final fun internalDrainPostCommitTasks() // com.vynatix.holdfast/Store.internalDrainPostCommitTasks|internalDrainPostCommitTasks(){}[0]
     final fun internalFrameMiddlewareSession(com.vynatix.holdfast/Transaction): com.vynatix.holdfast/FrameMiddlewareSession // com.vynatix.holdfast/Store.internalFrameMiddlewareSession|internalFrameMiddlewareSession(com.vynatix.holdfast.Transaction){}[0]
     final fun internalSetActiveTransaction(com.vynatix.holdfast/Transaction?) // com.vynatix.holdfast/Store.internalSetActiveTransaction|internalSetActiveTransaction(com.vynatix.holdfast.Transaction?){}[0]

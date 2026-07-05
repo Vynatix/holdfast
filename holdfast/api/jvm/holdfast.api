@@ -213,6 +213,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun getSuspendingOwner ()Ljava/lang/Object;
 	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
 	public final fun hasState (Ljava/lang/String;)Z
+	public final fun internalCheckNotDisposed ()V
 	public final fun internalDrainPostCommitTasks ()V
 	public final fun internalFrameMiddlewareSession (Lcom/vynatix/holdfast/Transaction;)Lcom/vynatix/holdfast/FrameMiddlewareSession;
 	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V

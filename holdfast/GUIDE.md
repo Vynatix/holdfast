@@ -1020,9 +1020,10 @@ never T1's pending writes.
 |---|---|---|
 | Observer fires twice for one logical event | Subscribed via `effect` AND wired through a bridge | Pick one |
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
-| `IllegalStateException: State must be created by this Store instance` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
+| `IllegalStateException: State '…' is owned by OtherStore, not ThisStore` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
+| `IllegalStateException: This State was not produced by store.state { }` | Passing a `computed{}` / hand-rolled `State` to `mutate`/`bridge` | Only `by state { }` properties are mutable; derive read-only views from those instead |
 | `IllegalStateException: Cannot mutate state on a Committed transaction` | Mutating after manually calling `commit()`/`rollback()` on the active transaction inside the action body | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
-| `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
+| `IllegalStateException: <StoreClass> is disposed — dispose() is terminal` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
 | `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
 | Effect callbacks leak after a Composable disappears | `Disposable` not captured | Use `DisposableEffect` and call `.dispose()` in `onDispose` |
@@ -1046,7 +1047,7 @@ never T1's pending writes.
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
-| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
+| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException` naming the store class |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
@@ -1469,7 +1470,7 @@ composition entry and again when any of `keys` changes (the lambda itself
 is not a key); the returned `Disposable` is disposed on key change or
 composition exit. Neither entry point survives `Store.dispose()`: composing
 against an already-disposed store throws `IllegalStateException`
-("store disposed"), while disposing mid-composition silently freezes
+(naming the disposed store class), while disposing mid-composition silently freezes
 `collectAsState` values at the last commit — dispose the store only after
 its dependent Composables have left the composition.
 

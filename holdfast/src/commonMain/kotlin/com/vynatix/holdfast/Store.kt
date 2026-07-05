@@ -128,7 +128,8 @@ abstract class Store<Self : Store<Self>> {
      * Atomic disposed flag. CAS'd to `true` exactly once on the first [dispose] call;
      * subsequent calls observe `true` and return without throwing (idempotent contract).
      * Every public entry point reads this — when `true`, they throw
-     * `IllegalStateException("store disposed")`.
+     * `IllegalStateException` naming the store class (e.g.
+     * `"CounterStore is disposed — dispose() is terminal; create a new instance."`).
      */
     private val disposedFlag = atomic(false)
 
@@ -146,7 +147,7 @@ abstract class Store<Self : Store<Self>> {
      * Terminally tear down this store. Idempotent.
      *
      * After `dispose()`:
-     *  - Every state-mutation API throws `IllegalStateException("store disposed")`.
+     *  - Every state-mutation API throws `IllegalStateException` naming the store class.
      *  - Every state-registry read API throws.
      *  - All registered observers are dropped; all bridges are detached.
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
@@ -196,7 +197,25 @@ abstract class Store<Self : Store<Self>> {
     protected open fun onDispose() {}
 
     private fun checkNotDisposed() {
-        if (disposedFlag.value) error("store disposed")
+        if (disposedFlag.value) error(disposedMessage())
+    }
+
+    /** Identity-bearing message for a disposed-store access. Centralized so every
+     *  call site (in-file, [Effect.effect], and the companion-module entrypoints
+     *  reached via [internalCheckNotDisposed]) reads the same way. */
+    private fun disposedMessage(): String =
+        "${this::class.simpleName ?: "Store"} is disposed — dispose() is terminal; create a new instance."
+
+    /**
+     * `@StoreInternalApi` bridge to the private disposed check, so out-of-file and
+     * out-of-module entrypoints (`atomic`, `derived`, `:holdfast-coroutines`'
+     * `suspendAction`/`suspendAtomic`/`suspendDerived`) can enforce the
+     * disposed-store contract with the same identity-bearing message. Throws
+     * [IllegalStateException] when this store has been disposed.
+     */
+    @StoreInternalApi
+    fun internalCheckNotDisposed() {
+        checkNotDisposed()
     }
 
     private val transactionLock = StoreLock()
@@ -679,8 +698,22 @@ abstract class Store<Self : Store<Self>> {
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
         @Suppress("UNCHECKED_CAST")
-        val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
-        if (ms.owningStore !== this@Store) error("State must be created by this Store instance")
+        val ms =
+            (this as? MutableState<T>)
+                ?: error(
+                    "This State was not produced by store.state { } — a hand-rolled or computed{} " +
+                        "State cannot be mutated/bridged. Declare it as a `by state { }` property " +
+                        "on ${this@Store::class.simpleName ?: "this Store"}.",
+                )
+        if (ms.owningStore !== this@Store) {
+            val stateName = ms.debugName ?: "<unregistered>"
+            val ownerName = (ms.owningStore::class.simpleName ?: "another Store")
+            error(
+                "State '$stateName' is owned by $ownerName, not " +
+                    "${this@Store::class.simpleName ?: "this Store"} — a state may only be mutated " +
+                    "through the store that declared it.",
+            )
+        }
         return ms
     }
 

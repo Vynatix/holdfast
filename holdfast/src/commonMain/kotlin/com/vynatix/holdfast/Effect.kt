@@ -30,6 +30,11 @@ package com.vynatix.holdfast
 infix fun <T : Any> State<T>.effect(handler: T.() -> Unit): Disposable {
     @Suppress("UNCHECKED_CAST")
     val mutable = (this as? MutableState<T>) ?: error("effect is only defined for State produced by store.state { ... }")
-    if (mutable.owningStore.isDisposed) error("store disposed")
+    if (mutable.owningStore.isDisposed) {
+        error(
+            "${mutable.owningStore::class.simpleName ?: "Store"} is disposed — dispose() is " +
+                "terminal; create a new instance.",
+        )
+    }
     return mutable.observe(handler::invoke)
 }

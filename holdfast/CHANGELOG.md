@@ -96,6 +96,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **Sharper diagnostic messages for disposed-store and cross-store-state
+  errors (F32).** The disposed-store `IllegalStateException` now names the
+  store class (`"CounterStore is disposed — dispose() is terminal; …"`), and
+  the ownership check separates its two failures: a `computed{}`/hand-rolled
+  `State` passed to `mutate`/`bridge` reports "not produced by store.state { }",
+  while a state owned by another store names the state property and both store
+  classes. Message text only — no API change.
+
 - **Observer/effect exceptions during commit fanout are now loud by default
   (P1-observer-swallow).** Previously a `null`
   `Store.uncaughtObserverHandler` swallowed a throwing observer silently.

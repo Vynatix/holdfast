@@ -53,6 +53,20 @@ class StoreDisposeTest {
     }
 
     @Test
+    fun disposed_message_names_the_store_class() {
+        val v = CountVault()
+        v.dispose()
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                v action { n mutate 1 }
+            }
+        assertTrue(
+            ex.message?.contains("CountVault") == true,
+            "expected the store class name in the disposed message; was: ${ex.message}",
+        )
+    }
+
+    @Test
     fun mutate_after_dispose_throws_with_disposed_message() {
         val v = CountVault()
         v.dispose()

@@ -177,6 +177,20 @@ class CrossVaultMutationTest {
     }
 
     @Test
+    fun crossStoreMutationErrorMessageNamesStateAndBothStores() {
+        val vaultA = StateOwnerA()
+        val vaultB = StateOwnerB()
+        val foreignState = vaultA.a
+
+        val result = vaultB action { foreignState mutate 99 }
+        val error = result as TransactionResult.Error
+        val message = error.exception.message ?: ""
+        assertTrue(message.contains("'a'"), "message names the state property: $message")
+        assertTrue(message.contains("StateOwnerA"), "message names the owning store: $message")
+        assertTrue(message.contains("StateOwnerB"), "message names the acting store: $message")
+    }
+
+    @Test
     fun failedTransactionInOneVaultDoesNotMutateAnotherVaultsState() {
         val vaultA = StateOwnerA()
         val vaultB = StateOwnerB()
