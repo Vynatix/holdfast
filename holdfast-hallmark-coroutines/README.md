@@ -6,6 +6,13 @@ Bridges the `SuspendValidator` from [Hallmark](https://github.com/vynatix/hallma
 remote feature gate, moderation API call) and you want the result mutated
 into a Holdfast state atomically.
 
+For synchronous, in-memory refinement-type validation (`boxed` / `boxedHandle`
+/ `ValidatingTransformer` / `BoxedCodec`, and the `assign` infix), see the
+sibling [`:holdfast-hallmark`](../holdfast-hallmark/README.md). Unlike that
+module's `assign` — which needs `-Xcontext-parameters` in the consumer —
+`suspendValidateAndMutate` here is a plain suspend function and needs no
+compiler flag.
+
 ## Quick start
 
 ```kotlin

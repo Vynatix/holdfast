@@ -1726,9 +1726,14 @@ holdfast {
   `state(transformer = ValidatingTransformer(v)) { v of initial() }`.
   Property type is `State<O>`; mutate with the explicit validator.
 - **`boxedHandle(validator) { initial }`** — same wiring, but the property
-  is a `BoxedHandle<P, O>` bundling state + validator. Enables the
-  `assign` infix (powered by Kotlin context parameters) for one-line
-  civilize-and-mutate at the call site.
+  is a `BoxedHandle<V, P, O>` (typed to its owning store `V`) bundling state +
+  validator. Enables the `assign` infix for one-line civilize-and-mutate at the
+  call site. `assign` is powered by Kotlin context parameters, so consuming
+  modules must add `-Xcontext-parameters` to their `freeCompilerArgs`; without
+  that flag use the two-step `handle.state mutate handle.civilize(...)` instead.
+  `assign` is gated — typed to the owning store (wrong-store use is a compile
+  error) and refuses at runtime unless called inside that store's own open
+  `action { }` on the action's thread.
 - **`ValidatingTransformer`** — re-validates on every write, so
   constructor bypass (`data class copy`) is rejected.
 - **`BoxedCodec`** — round-trips `Boxed<P>` through any `Codec<P>`.
