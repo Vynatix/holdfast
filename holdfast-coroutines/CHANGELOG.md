@@ -20,12 +20,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   JVM/Android and a delegating `ContinuationInterceptor` on iOS/wasmJs (on those
   two platforms a nested `withContext(otherDispatcher)` section inside the body
   is not policed).
-- **`suspendAction(name = null, body)` (F33).** A `name` becomes the resulting
-  `Transaction.id` verbatim (else the lambda-derived / random-UUID fallback), so
-  a suspending action has a stable, greppable id in middleware logs, the
-  testing-harness timeline, and frame diagnostics. Mirrors the blocking
-  `Store.action(name, body)` overload. Source-compatible: `store.suspendAction { }`
-  is unchanged.
+- **`suspendAction(name, body)` overload (F33).** The `name` becomes the
+  resulting `Transaction.id` verbatim (else the lambda-derived / random-UUID
+  fallback), so a suspending action has a stable, greppable id in middleware
+  logs, the testing-harness timeline, and frame diagnostics. Mirrors the
+  blocking `Store.action(name, body)` overload; the existing `suspendAction(body)`
+  form is unchanged (purely additive).
 - **Blocking `action { }` on a `suspendAtomic` participant now throws
   `FrameInteropException` immediately** instead of deadlocking on the
   store's suspend mutex; the message names the working alternatives

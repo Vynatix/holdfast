@@ -21,7 +21,7 @@ package com.vynatix.holdfast
  *
  * ```
  * val v = MyStore()
- * val d = v.count effect { println(it) }   // top-level, no `v { … }` wrapping
+ * val d = v.count effect { println(this) }  // handler receiver is the new value
  * v action { count mutate 7 }              // prints 7
  * d.dispose()
  * ```

@@ -1058,8 +1058,10 @@ never T1's pending writes.
 |---|---|---|
 | `state` | `fun <T> state(transformer: Transformer<T>? = null, distinct: Boolean = false, init: Initializer<T>): StateDelegate<T>` | Declares a state property; `distinct=true` opts into same-value commit dedup |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
+| `action` (named) | `fun <R> action(name: String, body: Self.() -> R): TransactionResult<R>` | As `action`, but `name` becomes the `Transaction.id` verbatim (stable, greppable id) |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
+| `removeMiddleware` | `fun removeMiddleware(middleware: Middleware<Self>): Boolean` | Removes one middleware by identity; returns whether it was registered |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
 | `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for commit-fire observer/effect exceptions; `null` (default) routes to a loud built-in logger — assign a no-op lambda to silence |
@@ -1272,16 +1274,16 @@ the full contract (enrollment enforcement, error escalation, `FramePolicy`,
 middleware phases, frame observability) lives in
 [§15 Cross-Store Transactions](#15-cross-store-transactions).
 
-### 14.4 `EncryptingTransformer` + `Cipher` (`com.vynatix.holdfast.crypto`)
+### 14.4 `EncryptingTransformer` + `StoreCipher` (`com.vynatix.holdfast.crypto`)
 
 ```kotlin
-interface Cipher {
-    fun encrypt(plaintext: String): String
+interface StoreCipher {                          // renamed from Cipher (F33);
+    fun encrypt(plaintext: String): String       // `Cipher` is a deprecated alias
     fun decrypt(ciphertext: String): String
 }
 
-class EncryptingTransformer(cipher: Cipher) : Transformer<String>
-class XorCipher(seed: ByteArray) : Cipher       // educational only
+class EncryptingTransformer(cipher: StoreCipher) : Transformer<String>
+class XorCipher(seed: ByteArray) : StoreCipher   // educational only
 ```
 
 Use `state(EncryptingTransformer(cipher)) { initial }` to make a state
@@ -1291,7 +1293,7 @@ are plaintext. Asymmetric-rollback safe (the library records raw
 ciphertext and writes raw on restore — never re-runs `transformer.set`).
 
 `XorCipher` is **NOT production-grade** — it's a KMP-pure stand-in.
-Production users implement `Cipher` over `javax.crypto` (JVM) or
+Production users implement `StoreCipher` over `javax.crypto` (JVM) or
 CryptoKit (iOS) — typically AES-GCM with a per-state IV embedded in
 the encoded output.
 
@@ -1413,8 +1415,12 @@ fun <T : Any> State<T>.asStateFlow(
 suspend fun <T : Any> State<T>.first(predicate: (T) -> Boolean): T
 suspend fun <T : Any> State<T>.awaitValue(target: T): T
 
-suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R>
-suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): TransactionResult<R>
+suspend fun <V : Store<V>, R> V.suspendAction(name: String? = null, body: suspend V.() -> R): TransactionResult<R>
+suspend fun <R> suspendAtomic(
+    vararg stores: Store<*>,
+    policy: FramePolicy = FramePolicy.Strict,
+    body: suspend () -> R,
+): TransactionResult<R>
 // Seeded overload (recommended; wasmJs-safe, no runBlocking):
 fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
@@ -2032,8 +2038,8 @@ app-level audit/telemetry that wants the frame as ONE event, register a
 @OptIn(ExperimentalStoreApi::class)
 FrameObservers.register(object : FrameObserver {
     override fun onFrameStarted(frameId: String, participants: List<Store<*>>) { … }
-    override fun onFrameCommitted(frameId: String) { … }
-    override fun onFrameRolledBack(frameId: String, cause: Throwable) { … }
+    override fun onFrameCommitted(frameId: String, participants: List<Store<*>>) { … }
+    override fun onFrameRolledBack(frameId: String, participants: List<Store<*>>, cause: Throwable) { … }
 })
 ```
 
@@ -2071,7 +2077,7 @@ val v = V()
 val sub = v { x effect { println("x=$this") } }       // initial: x=0
 
 // Atomic single-holdfast mutation; body return flows into Success.
-val r = v action { x update { it + 1 }; "$x.value done" }  // 1.1: update + <R>
+val r = v action { x update { it + 1 }; "${x.value} done" }  // 1.1: update + <R>
 
 // Failed atomic mutation.
 v action { x mutate 99; error("nope") }                // (no fire)

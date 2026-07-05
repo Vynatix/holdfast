@@ -52,7 +52,7 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `middlewares`/`clearMiddleware`; returns whether it was registered. Fills the
   gap between "add one" and "clear all".
 
-- **`Store.action(name, body)` and `suspendAction(name = null, body)` (F33).**
+- **`Store.action(name, body)` and `suspendAction(name, body)` (F33).**
   A named overload threads `name` verbatim into `Transaction.id` instead of the
   lambda-derived `body::class.simpleName`/random-UUID fallback, so an action has
   a stable, greppable id in middleware logs, the testing-harness timeline, and

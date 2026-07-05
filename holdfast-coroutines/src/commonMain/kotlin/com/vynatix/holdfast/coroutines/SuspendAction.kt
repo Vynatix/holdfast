@@ -80,17 +80,37 @@ import kotlin.uuid.Uuid
  * }
  * ```
  *
- * When [name] is non-null it becomes the resulting [Transaction.id] verbatim,
- * instead of the lambda-derived `body::class.simpleName`/random-UUID fallback —
- * use it when a suspending transaction needs a stable, human-readable id for
- * middleware logs, the testing harness timeline, or frame diagnostics. Mirrors
- * the blocking `Store.action(name, body)` overload.
+ * (Block bodies below, not `= suspendActionImpl(...)`: with no configured
+ * max_line_length ktlint would inline the long signature+body onto one line
+ * that exceeds detekt's MaxLineLength; the block form keeps both linters happy,
+ * hence the `function-expression-body` suppressions.)
  */
+@Suppress("ktlint:standard:function-expression-body")
+suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+    return suspendActionImpl(name = null, body = body)
+}
+
+/**
+ * Named variant of [suspendAction]: [name] becomes the resulting
+ * [Transaction.id] verbatim, instead of the lambda-derived
+ * `body::class.simpleName`/random-UUID fallback — use it when a suspending
+ * transaction needs a stable, human-readable id for middleware logs, the
+ * testing-harness timeline, or frame diagnostics. Mirrors the blocking
+ * `Store.action(name, body)` overload.
+ */
+@Suppress("ktlint:standard:function-expression-body")
+suspend fun <V : Store<V>, R> V.suspendAction(
+    name: String,
+    body: suspend V.() -> R,
+): TransactionResult<R> {
+    return suspendActionImpl(name = name, body = body)
+}
+
 @OptIn(ExperimentalUuidApi::class)
 // Single-sourced middleware ordering + frame-gate setup — splitting it would scatter the contract.
 @Suppress("LongMethod", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
-suspend fun <V : Store<V>, R> V.suspendAction(
-    name: String? = null,
+private suspend fun <V : Store<V>, R> V.suspendActionImpl(
+    name: String?,
     body: suspend V.() -> R,
 ): TransactionResult<R> {
     // Disposed-store contract: match blocking `action`'s entry check.
