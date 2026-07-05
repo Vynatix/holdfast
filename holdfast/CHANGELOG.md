@@ -77,6 +77,22 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 - **`derived` recomputes queued during an `atomic` frame now run at frame
   exit.** Previously the frame never drained the post-commit queue, so
   recomputes were deferred until the next unrelated action on that store.
+- **A frame's commit-failure error now names the offending store (F7).** When
+  a per-store commit throws inside `atomic` (phase 5), the returned `Error`
+  wraps `TransactionException("Commit failed for <Store>#<lockOrderKey> in
+  frame <frameId>", …)` — previously the message was an unattributed "Commit
+  failed". `TransactionResult.transaction` still points at the last
+  participant root in lock order (now documented as such); correlate per-store
+  outcomes via `Transaction.frameId`.
+
+### Documentation
+
+- Clarified frame semantics in `atomic`/`action` KDoc and GUIDE §15: inner
+  errors under `Strict` never *return* their `Error` to the inner call site —
+  escalation rethrows to unwind the frame (F6); and `atomic`'s
+  savepoint-vs-fresh-root distinction (an INTRODUCED store does not roll back
+  with the enclosing scope, and the un-policed `c.action { atomic(a, b, c) }`
+  torn-commit shape) is now spelled out (F3).
 
 ### Changed
 

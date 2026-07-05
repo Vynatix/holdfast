@@ -60,9 +60,37 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the store's mutex releases.** Previously the drain ran while the frame
   still held the mutex, so a recompute (a blocking `action`) could spin
   forever.
+- **A `suspendAtomic` commit-failure error now names the offending store
+  (F7).** A per-store `suspendingCommit` throw (e.g. a failing
+  `SuspendingBridge.publishAwaited`) is wrapped as `TransactionException("Commit
+  failed for <Store>#<lockOrderKey> in frame <frameId>", …)`;
+  `TransactionResult.transaction` remains the last participant root in lock
+  order (now documented) — correlate per-store outcomes via
+  `Transaction.frameId`.
 
 ### Changed
 
+- **BREAKING (behavior): `suspendAction` now runs its body inside a
+  single-store suspending scope (F4, F5, P1-livelock).** The body carries a
+  relaxed frame marker (`AllowUnenrolled + TolerateInnerErrors` — it never
+  polices writes to other stores) plus a held-stores context element,
+  changing three previously broken shapes:
+  - a **nested `suspendAction` on the SAME store** now joins as a savepoint
+    (inner commit merges into the transaction, inner rollback discards only
+    inner writes, one observer fanout at the outer commit) instead of
+    self-deadlocking on the store's serializer mutex;
+  - **read-your-own-writes follows the body across dispatcher hops** — after
+    `withContext(Dispatchers.X)`, `state.value` sees this transaction's staged
+    writes on whichever thread resumes it (JVM/Android; on iOS/wasmJs a nested
+    `withContext(otherDispatcher)` section loses this, same gap as enrollment).
+    The relaxation is gated on the thread-local frame marker, so concurrent
+    plain readers still see only committed values;
+  - a **blocking `action { }`, or a `suspendAtomic`/`atomic` enrolling this
+    store, called from INSIDE the body now throws `FrameInteropException`
+    immediately** (the message names the hoist: run `suspendAtomic` first and
+    `suspendAction` inside it) instead of livelocking on the held serializer.
+    Disjoint-store frames inside the body stay legal, subject to the global
+    lock-order rule.
 - **BREAKING (behavior): a nested `suspendAtomic` may no longer introduce an
   unenrolled store under `FramePolicy.Strict` (F2).** Same rule as core
   `atomic` (the check is shared `verifyFrameNesting`): introducing a store

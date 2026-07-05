@@ -81,6 +81,40 @@ atomic(a, b, policy = FramePolicy.AllowUnenrolled) {
 ```
 
 The same rule applies to `suspendAtomic` (the entry check is shared).
+
+## Behavior change: nesting inside a `suspendAction` body (`:holdfast-coroutines`)
+
+`suspendAction` now runs its body inside a single-store suspending scope, so
+shapes that used to deadlock, livelock, or throw a raw kotlinx
+`IllegalStateException` are now well-defined:
+
+- A nested `store.suspendAction { }` on the **same** store joins as a
+  savepoint (inner commit merges, inner rollback discards only inner writes).
+  No change needed — it just works now.
+- A blocking `store.action { }`, or a `suspendAtomic`/`atomic` **enrolling this
+  store**, called from inside the body now throws `FrameInteropException`
+  immediately (previously it hung on the held serializer mutex). Hoist the
+  frame: run the frame first and put `suspendAction` inside it.
+
+```kotlin
+// Before (hung on the serializer this suspendAction already holds):
+store.suspendAction {
+    suspendAtomic(store, other) { … }   // now throws FrameInteropException
+}
+
+// After — hoist the frame; run suspendAction (or bare mutate/update) inside:
+suspendAtomic(store, other) {
+    store.suspendAction { … }           // joins as a savepoint
+}
+```
+
+Disjoint-store frames inside a `suspendAction` body (`suspendAtomic(other) { }`
+where `other` is not the acting store) remain legal, subject to the global
+lock-order rule. Read-your-own-writes now also survives a
+`withContext(Dispatchers.X)` hop inside the body (JVM/Android; on iOS/wasmJs a
+nested `withContext(otherDispatcher)` section still loses it, the same gap that
+applies to enrollment enforcement).
+
 ## Removed: `SuspendingKvBridge.Awaiting` (`:holdfast-coroutines`)
 
 `SuspendingKvBridge` itself now implements `SuspendingBridge` — the nested

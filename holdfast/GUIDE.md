@@ -1369,6 +1369,22 @@ rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
 cancels mid-commit.
 
+The body runs inside a single-store suspending scope (a relaxed frame marker
+that never polices writes to OTHER stores). That scope makes three previously
+broken shapes well-defined: a nested `suspendAction` on the SAME store joins as
+a savepoint (inner commit merges, inner rollback discards only inner writes,
+one observer fanout at the outer commit) instead of self-deadlocking on the
+mutex; read-your-own-writes follows the body across dispatcher hops
+(`withContext(Dispatchers.X)`), so a staged `state.value` is visible on
+whichever thread resumes it (JVM/Android; on iOS/wasmJs a nested
+`withContext(otherDispatcher)` section loses this, the same gap §15.1
+documents for enrollment); and a blocking `action { }` — or a `suspendAtomic`
+enrolling this store — called from INSIDE the body throws
+`FrameInteropException` immediately (hoist the frame: run `suspendAtomic`
+first and `suspendAction` inside it) rather than livelocking on the serializer
+this `suspendAction` already holds. Disjoint-store frames inside the body stay
+legal, subject to the global lock-order rule.
+
 `suspendingBridge(...)`'s product is awaited by `suspendAction`'s commit
 phase; under sync `action { }` it saves fire-and-forget through a conflated
 channel (rapid publishes coalesce). The awaited path's failure contract is
@@ -1813,8 +1829,11 @@ Rules of the enforcement window:
 
 An inner `action { }` / `suspendAction { }` on a participant that returns
 `TransactionResult.Error` **aborts the whole frame** — every participant
-rolls back and the frame returns `Error` carrying the inner exception. The
-pre-0.3 behavior (a failed sub-action commits the other stores anyway) is
+rolls back and the frame returns `Error` carrying the inner exception.
+Consequence for the inner call site: under `Strict`, the inner action does not
+*return* its `Error` — escalation rethrows the original exception to unwind the
+frame, so a `when (innerResult)` around it never reaches the `Error` branch.
+The pre-0.3 behavior (a failed sub-action commits the other stores anyway) is
 reachable per call site with `policy = FramePolicy.TolerateInnerErrors`, and
 then checking each inner result is on you. Frame-contract violations
 (`UnenrolledStoreException`, `FrameLockOrderException`,
@@ -1869,14 +1888,23 @@ process. Bridge/persistence publishes remain per-store post-commit fanout;
 there is no crash-consistency across external stores, and if a commit itself
 throws partway through phase 5, already-committed stores stay committed.
 
+**Result handle:** `Success.transaction` / `Error.transaction` is the LAST
+participant root in lock order (the highest `lockOrderKey`) — a stable
+terminal-state reference, not necessarily the store that failed. To attribute
+per-store outcomes, correlate the roots via `Transaction.frameId` (middleware
+or a `FrameObserver`). When a per-store commit throws in phase 5, the returned
+`Error` message names the offending store even though `transaction` still
+points at the last root.
+
 ### 15.4 Nesting and interop
 
 - A frame nested inside an `action` or another frame on the same
   thread/coroutine opens SAVEPOINTS for shared stores: the nested frame's
-  commit merges into the enclosing scope; the enclosing rollback discards
-  everything, including nested writes. A nested frame's `Error` escalates to
-  the enclosing frame like an inner action's (same `TolerateInnerErrors`
-  opt-out).
+  commit merges into the enclosing scope, and an enclosing rollback discards
+  those merged (shared-store) writes too. Savepoint semantics apply ONLY to
+  shared stores — an INTRODUCED store (next bullet) does NOT roll back with
+  the enclosing scope. A nested frame's `Error` escalates to the enclosing
+  frame like an inner action's (same `TolerateInnerErrors` opt-out).
 - A nested frame may only INTRODUCE a store (one not enrolled anywhere in
   the enclosing chain) when the enclosing frame's policy is
   `FramePolicy.AllowUnenrolled`; under `Strict` the introduction throws
@@ -1893,6 +1921,16 @@ throws partway through phase 5, already-committed stores stay committed.
   deadlocking on the suspend mutex — use `mutate`/`update` or
   `suspendAction { }` inside a suspending body. Inside `suspendAtomic`, a
   participant's `suspendAction { }` joins the frame as a savepoint.
+- **Torn-commit caveat:** the introduce-vs-savepoint distinction above is only
+  enforced when an enclosing FRAME marker exists. Inside a plain `action` body
+  there is no marker, so `c.action { atomic(a, b, c) { … } }` silently mixes
+  flavors: `c` is shared (savepoint — rolls back with the enclosing
+  `c.action`), while `a` and `b` get fresh roots that commit at the `atomic`'s
+  exit. If the enclosing `c.action` then throws, `a`/`b` stay committed while
+  `c` rolls back — a partial commit the frame cannot detect. When you need
+  all-or-nothing across `a`, `b`, `c`, make the OUTER scope the frame
+  (`atomic(a, b, c) { … }`) rather than nesting a frame inside a single-store
+  action.
 
 ### 15.5 Frame observability
 

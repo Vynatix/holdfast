@@ -11,6 +11,7 @@ import com.vynatix.holdfast.FrameObservers
 import com.vynatix.holdfast.FramePolicy
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.TransactionException
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.platform.currentThreadId
@@ -82,6 +83,14 @@ import kotlin.uuid.Uuid
  * [CancellationException], roots roll back in REVERSE lock order under
  * `NonCancellable`, with per-store middleware `onTransactionError` first.
  * Every participant root shares one [Transaction.frameId].
+ *
+ * Result handle: [TransactionResult.Success.transaction] /
+ * [TransactionResult.Error.transaction] is the LAST participant root in lock
+ * order (the highest [Store.lockOrderKey]) — a stable terminal-state reference,
+ * NOT necessarily the store that failed. Correlate per-store outcomes via
+ * [Transaction.frameId]. If a per-store commit throws, the returned `Error`
+ * message names the offending store even though `transaction` still points at
+ * the last root.
  *
  * Middleware caveat: frame-driven hooks are the SYNC `Middleware` hooks;
  * [SuspendingMiddlewareHooks] async siblings do not fire for the frame's
@@ -340,7 +349,17 @@ private suspend fun <R> executeBody(
             // every store back.
             roots.forEach { it.session.fireCompleted() }
             for (entry in roots) {
-                suspendingCommit(entry.txn)
+                // Wrap so a commit failure names the offending store — the
+                // frame's `TransactionResult.transaction` handle is roots.last()
+                // regardless of which store threw (F7).
+                try {
+                    suspendingCommit(entry.txn)
+                } catch (e: Throwable) {
+                    throw TransactionException(
+                        "Commit failed for ${entry.store.frameIdentity()} in frame ${marker.frameId}",
+                        e,
+                    )
+                }
             }
             observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
             TransactionResult.Success(resultTxn, value)

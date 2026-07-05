@@ -1,5 +1,7 @@
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.FrameInteropException
 import com.vynatix.holdfast.FrameLockOrderException
 import com.vynatix.holdfast.FramePolicy
@@ -380,5 +382,28 @@ class SuspendFrameConservationTest {
                 }
             jobs.awaitAll()
             assertEquals(3_000L, stores.sumOf { it.balance.value }, "cross-store invariant holds at quiescence")
+        }
+}
+
+private class ThrowingSuspendBridge<T : Any> : Bridge<T> {
+    override fun observe(observer: (T) -> Unit): Disposable = Disposable { }
+
+    override fun publish(value: T): Boolean = throw RuntimeException("bridge refused")
+}
+
+class SuspendAtomicCommitFailureNamingTest {
+    @Test fun commitFailureNamesTheFailingStore() =
+        runBlocking {
+            // The store's bridge publish throws during suspendingCommit; the
+            // frame's Error must name it even though `transaction` is roots.last (F7).
+            val a = SuspendFrameAccount(initial = 0)
+            a { balance bridge ThrowingSuspendBridge() }
+            val r = suspendAtomic(a) { a { balance mutate 1L } }
+            assertIs<TransactionResult.Error>(r)
+            val message = r.exception.message ?: ""
+            assertTrue(
+                "Commit failed for ${a.frameIdentity()}" in message,
+                "commit-failure error should name the failing store, was: $message",
+            )
         }
 }

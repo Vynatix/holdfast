@@ -46,7 +46,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 
 **Theme:** kill every silent-failure footgun a newcomer hits in hour one; turn the analysis's empirical probes into permanent regression tests.
 
-- Fail fast on blocking `action {}` inside/concurrent with `suspendAction` (via the `suspendingOwner` handshake) — converts the iOS livelock into an immediate teaching exception (M)
+- Fail fast on blocking `action {}` inside/concurrent with `suspendAction` — **largely delivered** (F1/F4): the same-coroutine self-spin (a blocking `action`/`atomic` enrolling the store inside a `suspendAction` body) now throws `FrameInteropException` immediately, and a cross-thread blocking `action` overlapping an in-flight `suspendAction` is serialized by the shared `AsyncSerializer` rather than cross-contaminating. Residual (per the two-phase plan): single-threaded-dispatcher starvation stays a documented caveat pending the pre-RC ADR (M)
 - Make standalone `update` atomic — regression test: 10,000/10,000 concurrent increments survive (currently 5,049) (M)
 - Enforce the CRTP self-type at construction — `class Foo : Store<Bar>()` fails at init with a two-type teaching message (S)
 - Defuse `store { }` vs `store action { }` — bare invoke becomes non-mutating; mutate outside an action via invoke fails loudly (M)
@@ -93,7 +93,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - **HARD GATE — livelock ADR**: the `suspendingOwner` race is root-caused and fixed, *or* a written ADR makes the 0.3.0 fail-fast the permanent contract. Cross-target concurrency soak suite (iOS included) replaces the 10-minute timeout mitigation (L)
 - **Dependency-stability policy**: holdfast-compose currently builds against Compose **beta** and material3 **alpha** — land on stable Compose or explicitly tier `-compose` below core stability at 1.0; same review for AGP/compileSdk (M)
 - **Kotlin-train policy**: written cadence commitment (e.g., track latest stable Kotlin within one minor) so RC soaks can't be invalidated mid-window by a Kotlin release (S)
-- API-shaped P2 triage: `derived()` raw `Pair`, store identity in error messages, middleware metadata typing — fix what touches frozen surface, explicitly waive the rest (M)
+- API-shaped P2 triage: `derived()` raw `Pair`, store identity in error messages, middleware metadata typing, and a **`FrameResult` with per-store transactions** (F7 — today `atomic`/`suspendAtomic` return only the last participant root in lock order; per-store outcomes must be correlated via `Transaction.frameId`) — fix what touches frozen surface, explicitly waive the rest (M)
 - Docs completeness: GUIDE §14 internal-version archaeology rewritten against published versions; pitfalls table quotes real error strings; file-layout maps regenerated (M)
 - Issue burn-down from launch feedback; final `apiDump`; deprecation policy + SemVer policy docs (M)
 

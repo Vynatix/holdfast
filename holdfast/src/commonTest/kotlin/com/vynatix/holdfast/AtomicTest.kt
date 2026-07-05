@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 private class AccountVault(
     initial: Long = 0,
@@ -190,4 +191,26 @@ class AtomicConcurrencyTest {
             assertEquals((workers * perWorker).toLong(), a.balance.value)
             assertEquals((workers * perWorker * 2L), b.balance.value)
         }
+}
+
+private class AtomicThrowingBridge<T : Any> : Bridge<T> {
+    override fun observe(observer: (T) -> Unit): Disposable = Disposable { }
+
+    override fun publish(value: T): Boolean = throw RuntimeException("bridge refused")
+}
+
+class AtomicCommitFailureNamingTest {
+    @Test fun commitFailureNamesTheFailingStore() {
+        // A store whose bridge publish throws makes that store's commit fail; the
+        // frame's Error must name it even though `transaction` is roots.last (F7).
+        val a = AccountVault(initial = 0)
+        a { balance bridge AtomicThrowingBridge() }
+        val r = atomic(a) { a.action { balance mutate 1L } }
+        assertIs<TransactionResult.Error>(r)
+        val message = r.exception.message ?: ""
+        assertTrue(
+            "Commit failed for ${a.frameIdentity()}" in message,
+            "commit-failure error should name the failing store, was: $message",
+        )
+    }
 }

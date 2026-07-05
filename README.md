@@ -163,11 +163,17 @@ pin to exact versions. SemVer guarantees apply once 1.0 is declared.
 Three open hazards in 0.1.0, named honestly. All three fixes land in 0.3.0 —
 see [`ROADMAP.md`](ROADMAP.md).
 
-- **Mixing blocking `action { }` with `suspendAction { }` on the same store can
-  livelock.** The blocking action busy-spins waiting for a lock the suspending
-  action holds across a suspension point, and neither side progresses.
-  *Workaround:* use only `suspendAction` (or only `action`) per store. 0.3.0
-  ships a fail-fast guard that turns the livelock into an immediate exception.
+- **Mixing blocking `action { }` with `suspendAction { }` on the same store.**
+  The self-spin case — a blocking `action { }` (or an `atomic`/`suspendAtomic`
+  enrolling the store) called from *inside* a `suspendAction` body — now throws
+  `FrameInteropException` immediately instead of livelocking; hoist the frame
+  (run it first, `suspendAction` inside). A blocking `action` on **another
+  thread** overlapping an in-flight `suspendAction` is a bounded spin-wait that
+  serializes correctly (the two no longer cross-contaminate). The one residual
+  hazard is a **single-threaded dispatcher**: a blocking `action` that spins on
+  the only dispatcher thread can starve the `suspendAction` trying to resume on
+  it — *workaround:* keep blocking `action` and `suspendAction` on separate
+  stores there, or give the suspending work its own dispatcher.
 - **Standalone `state.update { }` outside an action is not atomic.** It is a
   read-modify-write, so concurrent callers overwrite each other — measured,
   about 50% of 10,000 concurrent increments are lost. *Workaround:* wrap the

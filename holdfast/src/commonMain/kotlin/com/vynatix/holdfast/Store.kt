@@ -372,6 +372,14 @@ abstract class Store<Self : Store<Self>> {
      * outer transaction. Inner.commit merges its pending writes into the outer.
      * Inner.rollback drops just the savepoint. Outer.rollback discards everything,
      * including merged inner writes.
+     *
+     * Result contract inside a frame ([atomic]/`suspendAtomic`): when this store is
+     * enrolled in a Strict frame, an inner-error result is NOT returned here — the
+     * frame's escalation rethrows the original exception to abort every participant,
+     * so a `when (result)` around this call never reaches its `Error` branch. Pass
+     * `policy = FramePolicy.TolerateInnerErrors` on the frame to restore
+     * check-the-result-yourself semantics. A [FrameContractException] always
+     * escalates, regardless of policy.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {

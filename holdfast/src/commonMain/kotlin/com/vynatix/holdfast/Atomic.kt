@@ -63,17 +63,35 @@ import kotlin.uuid.Uuid
  * Every participant root shares one [Transaction.frameId], so middleware and
  * the testing harness can correlate the per-store transactions of one frame.
  *
+ * Result handle: [TransactionResult.Success.transaction] /
+ * [TransactionResult.Error.transaction] is the LAST participant root in lock
+ * order (the highest [Store.lockOrderKey]) — a stable terminal-state reference,
+ * NOT necessarily the store that failed. Correlate per-store outcomes via
+ * [Transaction.frameId] (middleware or a [FrameObserver]). If a per-store commit
+ * throws (step 4), the returned `Error` message names the offending store even
+ * though `transaction` still points at the last root.
+ *
  * Nesting: an `atomic` nested inside an `action` or another `atomic` on the
- * same thread opens SAVEPOINTS of the enclosing transactions for shared
- * stores — inner commit merges into the enclosing scope; enclosing rollback
- * discards everything. A nested frame may only INTRODUCE a store (one not
- * enrolled anywhere in the enclosing chain) when the enclosing frame's policy
- * is [FramePolicy.AllowUnenrolled] — otherwise [UnenrolledStoreException] is
- * thrown at entry, because the introduced store's fresh root would commit at
- * the nested frame's exit and would NOT roll back with the enclosing frame.
- * An introduced store must also sort above every `lockOrderKey` the
- * enclosing frame holds; violating that throws [FrameLockOrderException] at
- * entry (before any lock is taken).
+ * same thread opens a SAVEPOINT for each SHARED store (one that already has an
+ * enclosing transaction on this thread) — the inner commit merges into the
+ * enclosing scope, and an enclosing rollback discards those merged writes too.
+ * SAVEPOINT semantics apply ONLY to shared stores. A store the frame
+ * INTRODUCES (not enrolled anywhere in the enclosing chain) instead gets a
+ * FRESH root that commits at this frame's exit and does NOT roll back with the
+ * enclosing action/frame. Introducing a store is allowed only when the
+ * enclosing frame's policy is [FramePolicy.AllowUnenrolled]; otherwise
+ * [UnenrolledStoreException] is thrown at entry. An introduced store must also
+ * sort above every `lockOrderKey` the enclosing frame holds; violating that
+ * throws [FrameLockOrderException] at entry (before any lock is taken).
+ *
+ * Torn-commit caveat: the introduce-vs-savepoint distinction is only enforced
+ * when an enclosing FRAME marker exists. Inside a PLAIN `action` body there is
+ * no marker, so `c.action { atomic(a, b, c) { … } }` silently mixes flavors:
+ * `c` is shared (savepoint, rolls back with the enclosing `c.action`) while
+ * `a` and `b` get fresh roots that commit at the `atomic`'s exit. If the
+ * enclosing `c.action` then throws, `a`/`b` stay committed while `c` rolls
+ * back — a partial commit the frame cannot detect. Keep the enclosing scope a
+ * frame (`atomic(a, b, c) { … }`) when you need all-or-nothing across them.
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
@@ -251,8 +269,19 @@ private fun <R> executeBody(
         // every store back.
         roots.forEach { it.session.fireCompleted() }
         // Phase 3: commit in lock order. Store A's observer fanout completes
-        // before store B's commit applies.
-        roots.forEach { it.txn.commit() }
+        // before store B's commit applies. Each commit is wrapped so a failure
+        // names the offending store — the frame's `TransactionResult.transaction`
+        // handle is roots.last() regardless of which store threw (F7).
+        for (entry in roots) {
+            try {
+                entry.txn.commit()
+            } catch (e: Throwable) {
+                throw TransactionException(
+                    "Commit failed for ${entry.store.frameIdentity()} in frame ${marker.frameId}",
+                    e,
+                )
+            }
+        }
         observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
         TransactionResult.Success(resultTxn, value)
     } catch (e: Throwable) {
