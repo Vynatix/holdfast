@@ -161,15 +161,28 @@ private fun <V : Store<V>, T : Any> V.wireSuspendDerived(
     val disposed = atomic(false)
 
     fun launchRecompute() {
-        if (disposed.value) return
+        if (disposed.value || self.isDisposed) return
         val job =
             self.scope.launch {
-                // Stage the result via suspendAction. AsyncSerializer in
-                // suspendAction serializes racing recomputes; the LAST commit
-                // wins (see KDoc).
-                self.suspendAction {
-                    @Suppress("UNCHECKED_CAST")
-                    (backingState as State<T>) mutate self.compute()
+                // The store may have been disposed between scheduling and running
+                // this launch; suspendAction throws on a disposed store. Since this
+                // recompute is fire-and-forget, a disposed store simply means the
+                // work is moot — skip/absorb it rather than letting the throw escape
+                // as an uncaught exception on store.scope.
+                if (self.isDisposed) return@launch
+                try {
+                    // Stage the result via suspendAction. AsyncSerializer in
+                    // suspendAction serializes racing recomputes; the LAST commit
+                    // wins (see KDoc).
+                    self.suspendAction {
+                        @Suppress("UNCHECKED_CAST")
+                        (backingState as State<T>) mutate self.compute()
+                    }
+                } catch (e: IllegalStateException) {
+                    // Disposed raced our check (suspendAction's own disposed guard);
+                    // the recompute is moot. Compute errors do NOT land here — they
+                    // are captured inside suspendAction as an Error result.
+                    if (!self.isDisposed) throw e
                 }
             }
         latestJob.value = job
