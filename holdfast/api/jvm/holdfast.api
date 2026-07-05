@@ -12,7 +12,8 @@ public final class com/vynatix/holdfast/ContractKt {
 
 public final class com/vynatix/holdfast/DerivedKt {
 	public static final fun computed (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/State;
-	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
+	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
+	public static synthetic fun derived$default (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlin/Pair;
 }
 
 public abstract interface class com/vynatix/holdfast/Disposable {
@@ -227,6 +228,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
 	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
 	public final fun removeState (Ljava/lang/String;)V
+	public final fun reportUncaughtObserverError (Ljava/lang/Throwable;)V
 	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun setAsyncSerializer (Lcom/vynatix/holdfast/Store$AsyncSerializer;)V
 	public final fun setSuspendingOwner (Ljava/lang/Object;)V

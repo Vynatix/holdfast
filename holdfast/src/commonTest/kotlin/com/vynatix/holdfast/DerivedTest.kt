@@ -64,6 +64,57 @@ class DerivedTest {
         sub.dispose()
     }
 
+    @Test fun derivedRecomputeFailureReachesOnErrorAndValueRecovers() {
+        // F10: a throwing recompute must not be swallowed. With an onError handler
+        // the exception is delivered there, and the derived value recovers on the
+        // next (non-throwing) source commit rather than freezing.
+        val v = DerivedVault()
+        val captured = mutableListOf<Throwable>()
+        val failOnceAt = 2
+        val (total, d) =
+            v.derived(v.items, onError = { captured.add(it) }) {
+                val sum = items.value.sum()
+                if (sum == failOnceAt) error("boom at $sum")
+                sum
+            }
+        disposables += d
+
+        v action { items mutate listOf(2) } // compute -> 2 -> throws
+        assertEquals(1, captured.size, "recompute exception reached onError")
+        assertTrue(captured.first().message?.contains("boom at 2") == true)
+
+        v action { items mutate listOf(3) } // compute -> 3, succeeds
+        assertEquals(3, total.value, "derived recovers on the next source commit, not frozen")
+    }
+
+    @Test fun derivedRecomputeFailureRoutesToStoreHandlerWhenNoOnError() {
+        // F10: with no onError, the failure routes to the store's uncaught handler
+        // (loud default; here captured by an assigned handler).
+        val v = DerivedVault()
+        val captured = mutableListOf<Throwable>()
+        v.uncaughtObserverHandler = { captured.add(it) }
+        val (_, d) = v.derived(v.items) { if (items.value.isNotEmpty()) error("kaboom") else 0 }
+        disposables += d
+
+        v action { items mutate listOf(1) }
+        assertEquals(1, captured.size, "recompute exception routed to store handler")
+        assertTrue(captured.first().message?.contains("kaboom") == true)
+    }
+
+    @Test fun throwingPostCommitTaskDoesNotAffectParentActionResult() {
+        // F10: the post-commit drain must not throw — a failing task is routed to
+        // the uncaught handler and the outer action still reports Success.
+        val v = DerivedVault()
+        val captured = mutableListOf<Throwable>()
+        v.uncaughtObserverHandler = { captured.add(it) }
+        val (_, d) = v.derived(v.items) { if (items.value.isNotEmpty()) error("drain boom") else 0 }
+        disposables += d
+
+        val r = v action { items mutate listOf(1) }
+        assertIs<TransactionResult.Success<*>>(r)
+        assertEquals(1, captured.size)
+    }
+
     @Test fun derivedRecomputesOnAnyOfMultipleSources() {
         val v = DerivedVault()
         val (taxed, d) = v.derived(v.items, v.tax) { items.value.sum() * tax.value }

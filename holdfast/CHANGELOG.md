@@ -57,6 +57,15 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **`derived` recompute failures are no longer swallowed (F10).** Previously a
+  throwing recompute `compute` (or a failing recompute commit) was discarded
+  silently and the derived value froze. The failure now routes to a new
+  optional `onError: ((Throwable) -> Unit)? = null` parameter on `derived`, or
+  — when unset — to the store's `uncaughtObserverHandler` (loud by default);
+  the derived value recovers on the next source commit. The post-commit task
+  drain no longer swallows task exceptions either: a failing task is routed to
+  the same policy and never corrupts the parent action's `Success` result.
+
 - **Blocking `atomic(...)` now serializes against in-flight suspending work
   (F1).** For each participant (in lock order), `atomic` acquires the store's
   `AsyncSerializer` — the same hook `:holdfast-coroutines.suspendAction`

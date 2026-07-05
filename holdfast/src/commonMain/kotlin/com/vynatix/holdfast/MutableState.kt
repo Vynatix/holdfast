@@ -207,16 +207,15 @@ class MutableState<T : Any>(
     }
 
     private fun notifyObservers(value: T) {
-        val handler = owningStore.uncaughtObserverHandler
         observersLock.withLock {
             observers.toSet().forEach { observer ->
                 try {
                     observer(value)
                 } catch (e: Throwable) {
                     // Null handler no longer means silence: a swallowed observer
-                    // exception is invisible commit corruption. Fall back to a loud
-                    // default logger; assign a no-op lambda to opt back into silence.
-                    if (handler != null) handler.invoke(e) else defaultLogUncaughtObserverError(owningStore, e)
+                    // exception is invisible commit corruption. Route through the
+                    // store's policy — loud default, or an assigned handler.
+                    owningStore.reportUncaughtObserverError(e)
                 }
             }
         }
@@ -301,7 +300,7 @@ class MutableState<T : Any>(
  * [Store.uncaughtObserverHandler] to take over — that is the explicit opt-out
  * of this default.
  */
-private fun defaultLogUncaughtObserverError(
+internal fun defaultLogUncaughtObserverError(
     store: Store<*>,
     error: Throwable,
 ) {

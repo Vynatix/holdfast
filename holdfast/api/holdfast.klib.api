@@ -190,6 +190,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun middlewares(kotlin/Array<out com.vynatix.holdfast/Middleware<#A>>...) // com.vynatix.holdfast/Store.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.Middleware<1:0>>...){}[0]
     final fun postCommit(kotlin/Function0<kotlin/Unit>) // com.vynatix.holdfast/Store.postCommit|postCommit(kotlin.Function0<kotlin.Unit>){}[0]
     final fun removeState(kotlin/String) // com.vynatix.holdfast/Store.removeState|removeState(kotlin.String){}[0]
+    final fun reportUncaughtObserverError(kotlin/Throwable) // com.vynatix.holdfast/Store.reportUncaughtObserverError|reportUncaughtObserverError(kotlin.Throwable){}[0]
     final fun snapshotMiddleware(): kotlin.collections/List<com.vynatix.holdfast/Middleware<#A>> // com.vynatix.holdfast/Store.snapshotMiddleware|snapshotMiddleware(){}[0]
     open fun onDispose() // com.vynatix.holdfast/Store.onDispose|onDispose(){}[0]
 
@@ -529,7 +530,7 @@ final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCou
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.holdfast/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
 
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/computed(kotlin/Function1<#A, #B>): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast/computed|computed@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
-final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<kotlin/Throwable, kotlin/Unit>? = ..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<kotlin.Throwable,kotlin.Unit>?;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapshot(): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]

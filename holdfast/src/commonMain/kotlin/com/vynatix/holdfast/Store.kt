@@ -268,6 +268,25 @@ abstract class Store<Self : Store<Self>> {
     var uncaughtObserverHandler: ((Throwable) -> Unit)? = null
 
     /**
+     * Route [error] — thrown by an observer/effect callback, a `derived`
+     * recompute, or a post-commit task — to [uncaughtObserverHandler], falling
+     * back to the loud built-in logger when no handler is set. Never throws
+     * (a misbehaving handler is itself contained), so it is safe to call from
+     * inside commit fanout and the post-commit drain. `@StoreInternalApi`
+     * because it is the shared error-routing policy for the recompute machinery,
+     * not a user-facing knob.
+     */
+    @StoreInternalApi
+    fun reportUncaughtObserverError(error: Throwable) {
+        val handler = uncaughtObserverHandler
+        if (handler != null) {
+            runCatching { handler.invoke(error) }
+        } else {
+            defaultLogUncaughtObserverError(this, error)
+        }
+    }
+
+    /**
      * Hook for an external mutual-exclusion mechanism that needs to coordinate
      * with this store's blocking [action]. Set at most once, by the
      * `:holdfast-coroutines` `suspendAction` extension when it first wraps a
@@ -337,7 +356,17 @@ abstract class Store<Self : Store<Self>> {
         while (postCommitTasks.isNotEmpty()) {
             val drained = postCommitTasks.toList()
             postCommitTasks.clear()
-            drained.forEach { runCatching { it() } }
+            drained.forEach { task ->
+                // Never throw from the drain — it runs at top-level action exit and
+                // must not corrupt the outer action's result. A failing task (e.g. a
+                // derived recompute whose commit threw) is routed to the store's
+                // uncaught-error policy instead of being silently swallowed (F10).
+                try {
+                    task()
+                } catch (e: Throwable) {
+                    reportUncaughtObserverError(e)
+                }
+            }
         }
     }
 

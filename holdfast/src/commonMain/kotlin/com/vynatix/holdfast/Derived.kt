@@ -38,6 +38,11 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  * Pair returns the derived state and a [Disposable] for the upstream
  * subscriptions; dispose to stop recomputation.
  *
+ * If a recompute's [compute] throws (or its commit fails), the failure is NOT
+ * swallowed: it is routed to [onError] when supplied, otherwise to the store's
+ * [Store.uncaughtObserverHandler] (loud by default). The derived value keeps
+ * its previous value and recovers on the next source commit.
+ *
  * Trade-offs:
  *  - Each source commit triggers a derived commit (extra transaction).
  *    Chains of derived states fan out cost-multiplicatively. Document & batch
@@ -57,6 +62,7 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  */
 fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
+    onError: ((Throwable) -> Unit)? = null,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable> {
     internalCheckNotDisposed()
@@ -81,9 +87,19 @@ fun <V : Store<V>, T : Any> V.derived(
                 // queues the recompute to run as a fresh top-level action immediately
                 // after the parent's iteration completes.
                 self.postCommit {
-                    self action {
-                        @Suppress("UNCHECKED_CAST")
-                        (backingState as State<T>) mutate self.compute()
+                    val result =
+                        self action {
+                            @Suppress("UNCHECKED_CAST")
+                            (backingState as State<T>) mutate self.compute()
+                        }
+                    // A throwing `compute` (or a commit failure) surfaces as an Error
+                    // here — `action` catches it rather than throwing. Don't swallow it:
+                    // route to the caller's [onError] if supplied, else to the store's
+                    // uncaught-error policy (loud by default). The derived value is
+                    // simply left at its previous value and recovers on the next source
+                    // commit (F10).
+                    if (result is TransactionResult.Error) {
+                        if (onError != null) onError(result.exception) else self.reportUncaughtObserverError(result.exception)
                     }
                 }
             }

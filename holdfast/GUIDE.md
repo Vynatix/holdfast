@@ -1183,6 +1183,7 @@ name throws (caught by the wrapping action → `TransactionResult.Error`).
 fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T>
 fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
+    onError: ((Throwable) -> Unit)? = null,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable>
 ```
@@ -1198,6 +1199,11 @@ fun <V : Store<V>, T : Any> V.derived(
 The recompute is deferred via `Store.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
 Disposing the `Disposable` stops recomputation.
+
+If a recompute's `compute` throws (or its commit fails), the exception is
+**not** swallowed: it is delivered to `onError` if you pass one, otherwise to
+the store's `uncaughtObserverHandler` (loud by default). The derived value
+keeps its last value and recovers on the next source commit.
 
 ### 14.3 `atomic(vararg stores) { body }`
 
