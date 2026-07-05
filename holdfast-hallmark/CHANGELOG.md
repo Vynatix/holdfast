@@ -15,6 +15,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`BoxedHandle`/`BoxedHandleDelegate` gained a leading store type parameter**
+  (`BoxedHandle<V : Store<V>, P, O>`), and `assign` is now
+  `context(store: V) … BoxedHandle<V, P, O>.assign(P)` instead of
+  `context(store: Store<*>)`. This makes a handle from another store used inside
+  the wrong store's `action { }` a **compile error** (the `@StoreActionDsl`
+  marker leaves only the enclosing store in scope). `assign` also gained a
+  runtime gate: it throws `IllegalStateException` with a teaching message when
+  called outside the owning store's open transaction, on a non-owner thread, or
+  against a foreign store's state — closing the hole where a bare `assign`
+  would silently commit a one-shot transaction. `boxedHandle`'s return type
+  changes to `BoxedHandleDelegate<V, P, O>`. Source-compatible for the common
+  `val x by boxedHandle(...)` + `x assign v` usage; only explicit
+  `BoxedHandle<…>` type annotations need the extra parameter. The module is
+  unreleased (mavenLocal-only), so no deprecation bridge.
+
 - The module is excluded from the default build; opt in with
   `-Pholdfast.includeHallmark=true` after publishing the sibling
   [Hallmark](https://github.com/vynatix/hallmark) repo to `mavenLocal`.

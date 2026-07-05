@@ -11,6 +11,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -33,7 +34,7 @@ class BoxedHandleTest {
     @Test
     fun handleExposesStateAndValidator() {
         val v = HandleVault()
-        // Static type of email is BoxedHandle<String, HandleEmail>; validator and state are accessible.
+        // Static type of email is BoxedHandle<HandleVault, String, HandleEmail>; validator and state are accessible.
         val handle = v.email
         assertEquals(HandleEmailValidator, handle.validator)
         assertEquals("init@example.com", handle.state.value.value)
@@ -85,6 +86,20 @@ class BoxedHandleTest {
             }
         assertIs<TransactionResult.Error>(r)
         assertTrue(r.exception is HallmarkException)
+        assertEquals("init@example.com", v.email.state.value.value)
+    }
+
+    @Test
+    fun assignOutsideAnActionThrowsTeachingError() {
+        val v = HandleVault()
+        // Providing the Store context WITHOUT opening an action: the runtime gate
+        // must refuse rather than let `mutate` synthesize a silent one-shot.
+        val ex =
+            assertFailsWith<IllegalStateException> {
+                with(v) { v.email assign "alice@example.com" }
+            }
+        assertTrue(ex.message!!.contains("action"), "message should teach the action requirement: ${ex.message}")
+        // No silent commit leaked through.
         assertEquals("init@example.com", v.email.state.value.value)
     }
 }
