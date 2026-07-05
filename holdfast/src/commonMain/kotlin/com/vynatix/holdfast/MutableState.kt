@@ -189,7 +189,16 @@ class MutableState<T : Any> internal constructor(
     internal fun applyCommitted(processedValue: T) {
         @OptIn(StoreInternalApi::class)
         if (!applyCommittedRaw(processedValue)) return
-        bridgeLock.withLock { currentBridge?.publish(processedValue) }
+        // Bridge publish is fire-and-forget by contract. A throwing publish (e.g. a
+        // KvBridge encode/persist failure) must NOT abort the commit after the value
+        // and observers have already landed — that would leave a partial commit that
+        // rollback cannot undo. Contain it: route the failure to the store's
+        // uncaught-error policy (loud by default) and let the commit succeed.
+        try {
+            bridgeLock.withLock { currentBridge?.publish(processedValue) }
+        } catch (e: Throwable) {
+            owningStore.reportUncaughtObserverError(e)
+        }
     }
 
     /**

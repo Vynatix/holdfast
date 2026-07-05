@@ -23,6 +23,39 @@ private class FiveStateVault : Store<FiveStateVault>() {
     val e by state { 0 }
 }
 
+private class PartialCommitVault : Store<PartialCommitVault>() {
+    val ok by state { 0 }
+    val bad by
+        state(
+            transformer =
+                object : Transformer<Int> {
+                    override fun set(value: Int): Int = value
+
+                    override fun get(value: Int): Int = if (value != 0) error("bad get") else value
+                },
+        ) { 0 }
+}
+
+class CommitFailureMessageTest {
+    @Test
+    fun commitFailureNamesStateAndListsAppliedStates() {
+        // P1-partial-commit: when a top-level commit apply throws mid-fanout, the
+        // Error message names the failing state and reports the earlier states that
+        // were already applied (and stay committed — rollback never un-applies them).
+        val v = PartialCommitVault()
+        val r =
+            v action {
+                ok mutate 1 // applies cleanly first
+                bad mutate 1 // transformer.get throws during apply
+            }
+        val err = assertIs<TransactionResult.Error>(r)
+        val msg = err.exception.message ?: ""
+        assertTrue(msg.contains("'bad'"), "names the failing state: $msg")
+        assertTrue(msg.contains("already applied"), "reports applied-anyway states: $msg")
+        assertEquals(1, v.ok.value, "the earlier state stayed committed (partial commit is real)")
+    }
+}
+
 class ActionLifecycleTest {
     @Test
     fun successfulActionReturnsSuccessWithCommittedTransaction() {

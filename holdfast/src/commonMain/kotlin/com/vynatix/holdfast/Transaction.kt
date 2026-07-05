@@ -246,6 +246,12 @@ class Transaction internal constructor(
         // calls `tryEmit` or a caller-supplied suspending emit) runs without
         // holding any internal store lock.
         val eventsToDrain = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
+        // Tracked for an identity-bearing failure message (P1-partial-commit): which
+        // phase failed, the offending state, and how many states already committed
+        // (rollback never un-applies them — the partial commit is real).
+        var phase = "state-apply"
+        var failingState: MutableState<*>? = null
+        var appliedStates = 0
         try {
             pendingLock.withLock {
                 val parentTxn = parent
@@ -262,9 +268,14 @@ class Transaction internal constructor(
                     // never mid-action. Pending writes remain readable via findPendingValue
                     // during the iteration so observer callbacks reading sibling states
                     // still see the about-to-be-committed values (read-your-own-writes
-                    // during fanout).
+                    // during fanout). Stop-at-first-failure: a throwing apply (e.g. a bad
+                    // transformer.get) means the value itself is bad; earlier states stay
+                    // applied and the message below records the partial commit.
                     pendingWrites.forEach { (state, value) ->
+                        failingState = state
                         applyTopLevel(state, value)
+                        appliedStates++
+                        failingState = null
                     }
                     // Snapshot the events to drain after we release pendingLock. The drain
                     // itself happens outside the lock — `tryEmit` may suspend or invoke
@@ -275,6 +286,7 @@ class Transaction internal constructor(
                 pendingWrites.clear()
                 pendingEvents.clear()
             }
+            phase = "event-drain"
             // Phase 3 (top-level only): drain events AFTER observer fanout and AFTER
             // bridge publishes. Order matters: a collector subscribed to both
             // `state.asFlow()` and `store.events` will see the state value before
@@ -297,7 +309,7 @@ class Transaction internal constructor(
             updateStatus(TransactionStatus.Committed)
         } catch (e: Exception) {
             runCatching { updateStatus(TransactionStatus.Failed) }
-            throw TransactionException("Commit failed", e)
+            throw TransactionException(commitFailureMessage(phase, failingState, appliedStates), e)
         } finally {
             endTimeLock.withLock {
                 _endTime = Clock.System.now().toEpochMilliseconds()
@@ -329,6 +341,23 @@ class Transaction internal constructor(
                 _endTime = Clock.System.now().toEpochMilliseconds()
             }
         }
+    }
+
+    private fun commitFailureMessage(
+        phase: String,
+        failingState: MutableState<*>?,
+        appliedStates: Int,
+    ): String {
+        val where =
+            failingState?.let { " while applying state '${it.debugName ?: "<unregistered>"}'" } ?: ""
+        val partial =
+            if (appliedStates > 0) {
+                " $appliedStates earlier state(s) in this transaction were already applied and remain " +
+                    "committed (rollback never un-applies state)."
+            } else {
+                ""
+            }
+        return "Commit failed for transaction '$id' during $phase$where.$partial"
     }
 
     private fun updateStatus(newStatus: TransactionStatus) {

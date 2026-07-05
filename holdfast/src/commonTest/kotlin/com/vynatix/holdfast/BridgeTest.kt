@@ -284,8 +284,10 @@ class BridgeErrorPathTest {
         v { count bridge bridge }
 
         // The mutation commits; applyCommitted is what calls bridge.publish.
-        // If publish throws, it should propagate but not corrupt state or leak the txn.
-        runCatching { v action { count mutate 5 } }
+        // A publish throw is fire-and-forget (P1-partial-commit): it is routed to
+        // the uncaught-error handler and must not corrupt state or leak the txn.
+        v.uncaughtObserverHandler = { /* swallow the routed publish failure */ }
+        v action { count mutate 5 }
 
         // _value was set before publish was invoked, so the state's mutation is durable.
         assertEquals(5, v.count.value, "state mutation completes before publish throws")

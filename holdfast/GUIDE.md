@@ -295,7 +295,12 @@ holdfast { items bridge persistence }
 ```
 
 **Outbound** (`publish`) fires only on commit, never during the action body
-or on rollback. **Inbound** (`observe`) updates the state via
+or on rollback. Sync `publish` is **fire-and-forget**: a throwing publish does
+NOT abort the commit — the value and observers have already landed, so the
+commit succeeds and the publish failure is routed to
+`Store.uncaughtObserverHandler` (loud by default). (Under `suspendAction`,
+`SuspendingBridge.publishAwaited` is instead awaited and its failures surface
+as `TransactionResult.Error`.) **Inbound** (`observe`) updates the state via
 `applyFromBridge`, which writes through the transformer's `set`, fires
 observers, but does NOT call `publish` again — preventing publish loops.
 

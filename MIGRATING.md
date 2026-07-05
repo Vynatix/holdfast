@@ -140,6 +140,24 @@ fire-and-forget through the conflated channel. Callers who explicitly relied
 on `Awaiting`'s direct-launch sync publish now get the conflated-channel path
 instead; use `suspendAction` if every intermediate value must persist.
 
+## Behavior change: a synchronous bridge publish is fire-and-forget (`:holdfast`)
+
+A throwing `Bridge.publish` during a commit's fanout no longer aborts the commit
+or surfaces as `TransactionResult.Error`. The in-memory commit succeeds and the
+publish failure is routed to `Store.uncaughtObserverHandler`. If you relied on a
+publish failure rolling back / surfacing an `Error`, either:
+
+- observe failures via `store.uncaughtObserverHandler`, or
+- use `suspendAction` with a `SuspendingBridge` (`publishAwaited`), whose
+  failures **do** surface as `TransactionResult.Error`.
+
+```kotlin
+// Before: a publish throw surfaced as TransactionResult.Error.
+// After: capture it out-of-band.
+store.uncaughtObserverHandler = { logger.error("bridge publish failed", it) }
+val r = store action { setting mutate "v" }   // Success even if publish threw
+```
+
 ## Behavior change: a bare `store { }` no longer permits mutation (`:holdfast`)
 
 A bare `store { }` invoke opens no transaction — it exists to provide the

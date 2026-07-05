@@ -193,18 +193,24 @@ class AtomicConcurrencyTest {
         }
 }
 
-private class AtomicThrowingBridge<T : Any> : Bridge<T> {
-    override fun observe(observer: (T) -> Unit): Disposable = Disposable { }
+private class ThrowingGetAccountVault : Store<ThrowingGetAccountVault>() {
+    val balance by state(
+        transformer =
+            object : Transformer<Long> {
+                override fun set(value: Long): Long = value
 
-    override fun publish(value: T): Boolean = throw RuntimeException("bridge refused")
+                override fun get(value: Long): Long = if (value != 0L) throw RuntimeException("get refused") else value
+            },
+    ) { 0L }
 }
 
 class AtomicCommitFailureNamingTest {
     @Test fun commitFailureNamesTheFailingStore() {
-        // A store whose bridge publish throws makes that store's commit fail; the
-        // frame's Error must name it even though `transaction` is roots.last (F7).
-        val a = AccountVault(initial = 0)
-        a { balance bridge AtomicThrowingBridge() }
+        // A store whose commit apply throws (here a transformer.get failure during
+        // fanout) fails that store's commit; the frame's Error must name it even
+        // though `transaction` is roots.last (F7). Bridge publish is no longer a
+        // commit-failure mechanism (P1-partial-commit) — it is fire-and-forget.
+        val a = ThrowingGetAccountVault()
         val r = atomic(a) { a.action { balance mutate 1L } }
         assertIs<TransactionResult.Error>(r)
         val message = r.exception.message ?: ""

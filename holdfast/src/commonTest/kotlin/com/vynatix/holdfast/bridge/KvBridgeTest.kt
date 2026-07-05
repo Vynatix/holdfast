@@ -13,9 +13,10 @@ import kotlin.test.assertSame
  * By default a payload that fails to decode on attach is silently dropped (state
  * stays at its initializer) and the next commit overwrites it. The optional
  * `onDecodeError` hook observes the raw payload + cause at the moment of the
- * drop without changing that behavior. A save failure (`put` throw) surfaces the
- * transaction as [TransactionResult.Error] after the in-memory commit already
- * applied — not a rollback.
+ * drop without changing that behavior. A save failure (`put` throw) is
+ * fire-and-forget (P1-partial-commit): the in-memory commit succeeds and the
+ * failure is routed to the store's `uncaughtObserverHandler` rather than
+ * surfacing as [TransactionResult.Error].
  */
 private class KvBridgeVault : Store<KvBridgeVault>() {
     val name by state { "init" }
@@ -92,18 +93,24 @@ class KvBridgeTest {
     }
 
     @Test
-    fun publishThrowSurfacesAsErrorNotRollback() {
+    fun publishThrowIsRoutedToHandlerAndCommitSucceeds() {
+        // P1-partial-commit: a sync bridge publish is fire-and-forget. A throwing
+        // publish (e.g. a disk-full `put`) no longer aborts the commit or surfaces
+        // as Error — the in-memory commit succeeds and the publish failure is routed
+        // to the store's uncaughtObserverHandler (avoiding a partial commit that
+        // rollback cannot undo).
         val boom = RuntimeException("disk full")
         val bridge = KvBridge(ThrowingPutKvStore(boom), "k", StringCodec)
         val v = KvBridgeVault()
+        val captured = mutableListOf<Throwable>()
+        v.uncaughtObserverHandler = { captured.add(it) }
         v { name bridge bridge }
 
         val r = v action { name mutate "written" }
 
-        assertIs<TransactionResult.Error>(r)
-        // The publish throw surfaces the commit failure; boom is its cause.
-        assertSame(boom, r.exception.cause)
-        // Not a rollback: the in-memory commit applied before publish threw.
+        assertIs<TransactionResult.Success<*>>(r)
         assertEquals("written", v.name.value)
+        assertEquals(1, captured.size, "publish failure routed to the handler")
+        assertSame(boom, captured.first())
     }
 }

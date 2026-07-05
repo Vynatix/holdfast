@@ -12,12 +12,16 @@ import com.vynatix.holdfast.Disposable
  * ```
  * val ex = IllegalStateException("kv unreachable")
  * val bridge = FailingBridge<String>(initial = "init", failOn = FailureMode.Publish, cause = ex)
+ * val captured = mutableListOf<Throwable>()
  * val ctr = track(SettingsVault().also { v ->
+ *     v.uncaughtObserverHandler = { captured.add(it) }
  *     v { theme bridge bridge }
  * })
  *
+ * // A sync bridge publish is fire-and-forget: the commit SUCCEEDS and the
+ * // publish failure is routed to uncaughtObserverHandler.
  * val result = ctr.action { theme mutate "dark" }
- * result shouldRollbackWith IllegalStateException::class
+ * result.shouldBeSuccess()
  * ```
  *
  * Failure semantics:
@@ -32,10 +36,12 @@ import com.vynatix.holdfast.Disposable
  * site (`store { state bridge bridge }`). Wrap that line in `assertFailsWith`
  * to assert on the attach-time failure.
  *
- * Store's commit path catches [publish] throws inside the transaction's
- * commit-time error handling; the action's [com.vynatix.holdfast.TransactionResult]
- * surfaces the cause. Use [com.vynatix.holdfast.testing.matcher.shouldRollbackWith]
- * to assert.
+ * A commit-phase [publish] throw is fire-and-forget: the store's commit path
+ * catches it and routes it to the store's `uncaughtObserverHandler`, and the
+ * action still returns [com.vynatix.holdfast.TransactionResult.Success]. Assert
+ * on the failure by capturing it in a handler (see the usage example), not via a
+ * rollback matcher. [FailureMode.Observe] / [FailureMode.Both] still propagate at
+ * attach time out of the `state bridge bridge` setter call.
  */
 class FailingBridge<T : Any>(
     private val initial: T,

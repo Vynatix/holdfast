@@ -193,6 +193,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   while a state owned by another store names the state property and both store
   classes. Message text only — no API change.
 
+- **BREAKING (behavior): a synchronous bridge publish is now fire-and-forget
+  (P1-partial-commit).** A throwing `Bridge.publish` during a commit's fanout
+  no longer aborts the commit or surfaces as `TransactionResult.Error` — the
+  in-memory commit succeeds and the publish failure is routed to the store's
+  `uncaughtObserverHandler` (loud by default). This avoids the previous worst
+  outcome (a partial commit that rollback cannot undo, reported as an ignorable
+  `Error`). The awaited `SuspendingBridge.publishAwaited` path under
+  `suspendAction` is unchanged — it still surfaces persistence failures as
+  `Error`. The commit-failure `TransactionException` message now names the
+  transaction id, the failing state, the phase (state-apply / event-drain), and
+  how many earlier states were already applied.
+
 - **Observer/effect exceptions during commit fanout are now loud by default
   (P1-observer-swallow).** Previously a `null`
   `Store.uncaughtObserverHandler` swallowed a throwing observer silently.
