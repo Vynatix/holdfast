@@ -54,10 +54,10 @@ class FramePolicy private constructor(
         /** Enrollment enforced, inner errors escalate. The default. */
         val Strict: FramePolicy = FramePolicy(allowUnenrolled = false, tolerateInnerErrors = false)
 
-        /** Writes to unenrolled stores run as independent transactions (pre-0.3 behavior). */
+        /** Writes to unenrolled stores run as independent transactions (the pre-enforcement behavior). */
         val AllowUnenrolled: FramePolicy = FramePolicy(allowUnenrolled = true, tolerateInnerErrors = false)
 
-        /** Inner action errors do not abort the frame (pre-0.3 behavior); caller checks results. */
+        /** Inner action errors do not abort the frame (the pre-enforcement behavior); caller checks results. */
         val TolerateInnerErrors: FramePolicy = FramePolicy(allowUnenrolled = false, tolerateInnerErrors = true)
 
         private fun of(

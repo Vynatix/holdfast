@@ -34,6 +34,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `-Pholdfast.includeHallmark=true` after publishing the sibling
   [Hallmark](https://github.com/vynatix/hallmark) repo to `mavenLocal`.
 
+---
+
+## Internal-only history (preserved as design archive)
+
+The entries below describe internal versions that were **never published to
+Maven Central**. They predate the rename to Holdfast and refer to the original
+`vault` module names and paths (e.g. `vault/CHANGELOG.md`) in effect at the
+time. Treat them as design history — not a release log any consumer migrated
+against — and do not rewrite them.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

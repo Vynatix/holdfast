@@ -23,6 +23,22 @@ keep the holdfast name; **class and API names use `Store`**.
 There is no `holdfastTest { }` — the testing entry point has always shipped as
 `vaultTest`/`storeTest`.
 
+## Renamed: `crypto.Cipher` → `StoreCipher` (`:holdfast`)
+
+The bidirectional-cipher interface used by `EncryptingTransformer` was renamed
+from `Cipher` to `StoreCipher` so it no longer collides with
+`javax.crypto.Cipher` when both are imported on the JVM. A `WARNING`-level
+deprecated `typealias Cipher = StoreCipher` keeps existing references compiling
+for one minor release.
+
+```kotlin
+// Before
+class MyCipher : Cipher { … }
+
+// After
+class MyCipher : StoreCipher { … }
+```
+
 ## Removed: `asEagerStateFlow()` / `EagerStateFlow` (`:holdfast-coroutines`)
 
 Replaced by the single hot-StateFlow API:
@@ -52,6 +68,51 @@ Only the default-parameter forms remain. Migration:
 - omit it to use the owning store's scope (`asStateFlow`) or
   `Store.defaultScope` (the bridge factories) — which is what the context
   overloads were resolving away from.
+
+## Behavior change: atomic / suspendAtomic frame enforcement (`:holdfast` / `:holdfast-coroutines`)
+
+Under the default `FramePolicy.Strict`, a cross-store frame now enforces two
+rules on its **body** that previously let a partial commit slip past the
+all-or-nothing promise. Both are opt-out-able per call site.
+
+**1. Enrollment enforcement.** Writing to a store that is not in the
+`atomic(...)`/`suspendAtomic(...)` participant list — via `action`, `mutate`, or
+`update`, including through an enclosing action's open transaction — now throws
+`UnenrolledStoreException` instead of committing independently while the frame
+rolls back. (Enforcement covers the frame body only; an observer reacting to the
+commit may still write foreign stores.)
+
+**2. Inner-error escalation.** An inner `action { }` / `suspendAction { }` on a
+participant that returns `TransactionResult.Error` now aborts the whole frame —
+every participant rolls back and the frame returns `Error` carrying the inner
+exception — instead of leaving the failed sub-action's siblings committed.
+`FrameContractException`s (enrollment / lock-order / interop violations) always
+escalate and **rethrow** out of the frame rather than folding into an ignorable
+`Error` result.
+
+```kotlin
+// Before: writing an unenrolled store committed it independently; a failed
+// inner action left the others committed.
+atomic(a, b) {
+    a.action { x update { it + 1 } }
+    c.action { y mutate 1 }          // now throws UnenrolledStoreException
+}
+
+// After — enroll every store you write:
+atomic(a, b, c) {
+    a.action { x update { it + 1 } }
+    c.action { y mutate 1 }
+}
+
+// …or opt out deliberately, per call site:
+atomic(a, b, policy = FramePolicy.AllowUnenrolled) { … }                 // rule 1
+atomic(a, b, policy = FramePolicy.TolerateInnerErrors) { … }            // rule 2
+atomic(a, b, policy = FramePolicy.AllowUnenrolled +
+    FramePolicy.TolerateInnerErrors) { … }                             // both
+```
+
+The same rules apply to `suspendAtomic` (the enforcement is shared). The nested
+case has its own entry check, below.
 
 ## Behavior change: nested frames must enroll their stores (`atomic` / `suspendAtomic`)
 

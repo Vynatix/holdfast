@@ -10,14 +10,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`suspendAtomic` graduated to a first-class cross-store frame**, matching
   the core `atomic` contract (see `:holdfast`'s changelog and GUIDE §15):
-  `policy: FramePolicy = FramePolicy.Strict` parameter, enrollment
-  enforcement (`UnenrolledStoreException`), inner-error escalation, nested
-  lock-order verification (`FrameLockOrderException`), per-store middleware
-  parity, shared `Transaction.frameId`, and `FrameObserver` dispatch. The
-  enforcement marker follows the suspending body across dispatcher hops via
-  `ThreadContextElement` on JVM/Android and a delegating
-  `ContinuationInterceptor` on iOS/wasmJs (on those two platforms a nested
-  `withContext(otherDispatcher)` section inside the body is not policed).
+  `policy: FramePolicy = FramePolicy.Strict` parameter, nested lock-order
+  verification (`FrameLockOrderException`), per-store middleware parity, shared
+  `Transaction.frameId`, and `FrameObserver` dispatch (now receiving the
+  lock-ordered `participants` list, F33). Its two *behavioral* halves —
+  enrollment enforcement and inner-error escalation — are breaking and are
+  documented under **Changed** below. The enforcement marker follows the
+  suspending body across dispatcher hops via `ThreadContextElement` on
+  JVM/Android and a delegating `ContinuationInterceptor` on iOS/wasmJs (on those
+  two platforms a nested `withContext(otherDispatcher)` section inside the body
+  is not policed).
+- **`suspendAction(name = null, body)` (F33).** A `name` becomes the resulting
+  `Transaction.id` verbatim (else the lambda-derived / random-UUID fallback), so
+  a suspending action has a stable, greppable id in middleware logs, the
+  testing-harness timeline, and frame diagnostics. Mirrors the blocking
+  `Store.action(name, body)` overload. Source-compatible: `store.suspendAction { }`
+  is unchanged.
 - **Blocking `action { }` on a `suspendAtomic` participant now throws
   `FrameInteropException` immediately** instead of deadlocking on the
   store's suspend mutex; the message names the working alternatives
@@ -84,6 +92,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Transaction.frameId`.
 
 ### Changed
+
+- **Breaking (behavioral): `suspendAtomic(...)` now enforces frame enrollment
+  and escalates inner errors (F8).** The suspending peer of core's F8 change
+  (shared contract): writing to a store not enrolled in the frame throws
+  `UnenrolledStoreException`, and an inner `suspendAction { }` (or `action { }`
+  savepoint) returning `TransactionResult.Error` aborts the whole frame.
+  `FrameContractException`s always rethrow out of `suspendAtomic` rather than
+  folding into an ignorable `Error`. Opt out per call site with
+  `policy = FramePolicy.AllowUnenrolled` and/or `FramePolicy.TolerateInnerErrors`.
+  Migration: `MIGRATING.md` → "atomic / suspendAtomic frame enforcement".
 
 - **`suspendAction`, `suspendAtomic`, and `suspendDerived` now enforce the
   disposed-store contract (P1-disposed-gaps).** `suspendAction` checks at
@@ -172,6 +190,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   omit it to use the owning store's scope (`asStateFlow`) /
   `Store.defaultScope` (bridge factories) — which is what the context
   overloads were resolving away from.
+
+---
+
+## Internal-only history (preserved as design archive)
+
+The entries below describe internal versions that were **never published to
+Maven Central**. They predate the rename to Holdfast and refer to the original
+`vault` / `:vault-coroutines` module names and paths (e.g. `vault/CHANGELOG.md`)
+in effect at the time. Treat them as design history — not a release log any
+consumer migrated against — and do not rewrite them.
 
 ## 2.0.0 — 2026-05-03
 

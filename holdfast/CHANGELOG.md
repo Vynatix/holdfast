@@ -26,20 +26,9 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 - **Cross-store transaction API graduated to first class.** `atomic(vararg
   stores)` gains a `policy: FramePolicy = FramePolicy.Strict` parameter and a
-  written consistency contract (GUIDE §15):
-  - **Enrollment enforcement** — writing to a store not enrolled in the frame
-    (via `action`, `mutate`, or `update`, including through an enclosing
-    action's open transaction) throws `UnenrolledStoreException` instead of
-    committing independently while the frame rolls back. Enforcement covers
-    the frame body only; observers reacting to the commit may still write to
-    foreign stores. Opt out per call site with
-    `policy = FramePolicy.AllowUnenrolled`.
-  - **Inner-error escalation** — an inner `action { }` on a participant that
-    returns `TransactionResult.Error` now aborts the whole frame (all
-    participants roll back; the frame returns `Error` carrying the inner
-    exception). Opt out with `policy = FramePolicy.TolerateInnerErrors`.
-    Frame-contract violations always escalate and RETHROW out of the frame
-    instead of being folded into an ignorable `Error` result.
+  written consistency contract (GUIDE §15). The two *behavioral* halves of that
+  contract — enrollment enforcement and inner-error escalation — are breaking
+  and are documented under **Changed** below; the additive surface is:
   - **Nested lock-order verification** — a nested frame introducing a store
     whose `lockOrderKey` sorts below an already-held key throws
     `FrameLockOrderException` at entry (always-on O(1) check) instead of
@@ -50,10 +39,55 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     stores before ANY store commits — a throw rolls the whole frame back —
     and `error` on rollback). New experimental (`@ExperimentalStoreApi`)
     `FrameObserver` / `FrameObservers` surface frame-level
-    started/committed/rolledBack events.
+    started/committed/rolledBack events; `FrameObserver.onFrameCommitted` and
+    `onFrameRolledBack` receive the lock-ordered `participants: List<Store<*>>`
+    (F33) so telemetry can correlate a frame with its stores without stashing
+    state between callbacks.
   - New exception hierarchy: `FrameContractException` ←
     `UnenrolledStoreException` / `FrameLockOrderException` /
     `FrameInteropException`.
+
+- **`Store.removeMiddleware(middleware): Boolean` (F33).** Removes a single
+  middleware by identity (reference equality) under the same lock as
+  `middlewares`/`clearMiddleware`; returns whether it was registered. Fills the
+  gap between "add one" and "clear all".
+
+- **`Store.action(name, body)` and `suspendAction(name = null, body)` (F33).**
+  A named overload threads `name` verbatim into `Transaction.id` instead of the
+  lambda-derived `body::class.simpleName`/random-UUID fallback, so an action has
+  a stable, greppable id in middleware logs, the testing-harness timeline, and
+  frame diagnostics. The infix `store action { }` form is unchanged.
+
+- `TransactionResult` ergonomics: `getOrThrow()` (returns the `Success` value
+  or rethrows the original `Error.exception`), `valueOrNull`, and chainable
+  `onSuccess { }` / `onError { }` extensions — so fire-and-forget `action`
+  callers can surface rollbacks instead of silently dropping them.
+
+- **`KvBridge` gains an optional `onDecodeError: ((encoded, cause) -> Unit)?`
+  constructor parameter (F12).** Load-on-attach decode failures are still
+  dropped silently by default (state stays at its initializer, and the next
+  commit overwrites the un-decodable payload) — the hook lets you observe the
+  raw payload and cause at the moment of the drop so you can quarantine or
+  migrate it first. The KDoc now documents both this overwrite hazard and the
+  save-failure contract: a throwing `encode`/`put` surfaces the transaction as
+  `TransactionResult.Error` (after the in-memory commit and observer fanout have
+  already applied), not a rollback.
+
+- Documented platform support tiers in the root and module READMEs:
+  Android/JVM/iOS are supported (tests run in CI); wasmJs is **experimental** —
+  the artifact is still published, but tests are disabled on wasmJs,
+  `FileSystemKvStore` throws `UnsupportedOperationException`, the seedless
+  `suspendDerived` overload is unusable (`runBlocking` initial seed — use the
+  new `suspendDerived(..., initial = ...)` overload instead), and the platform
+  is single-threaded (`currentThreadId() == 0`). Doc-only; no code changes.
+
+- **Documented that `distinct = true` is inert on an `EncryptingTransformer`
+  state backed by a non-deterministic cipher (F30).** Dedup compares
+  post-`Transformer.set` raw values (ciphertext); a secure per-value-IV cipher
+  encrypts equal plaintext to different ciphertext, so dedup never fires and
+  observers/bridges publish on every commit. `StoreCipher` / `EncryptingTransformer`
+  KDoc and GUIDE §14.4 spell this out; a pinning test in `CryptoTest` locks the
+  behavior. Docs + test only; no code or API change.
 
 ### Fixed
 
@@ -128,6 +162,25 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   torn-commit shape) is now spelled out (F3).
 
 ### Changed
+
+- **Breaking (behavioral): `atomic(...)` / `suspendAtomic(...)` now enforce
+  frame enrollment and escalate inner errors (F8).** Two behaviors that
+  previously let a partial commit slip past the all-or-nothing promise are now
+  the default (both opt-out-able per call site):
+  - **Enrollment enforcement** — writing to a store not enrolled in the frame
+    (via `action`, `mutate`, or `update`, including through an enclosing
+    action's open transaction) throws `UnenrolledStoreException` instead of
+    committing independently while the frame rolls back. Enforcement covers the
+    frame body only; observers reacting to the commit may still write to
+    foreign stores. Opt out with `policy = FramePolicy.AllowUnenrolled`.
+  - **Inner-error escalation** — an inner `action { }` on a participant that
+    returns `TransactionResult.Error` now aborts the whole frame (all
+    participants roll back; the frame returns `Error` carrying the inner
+    exception). `FrameContractException`s always escalate and RETHROW out of
+    the frame instead of being folded into an ignorable `Error` result. Opt
+    out with `policy = FramePolicy.TolerateInnerErrors`.
+
+  Migration: `MIGRATING.md` → "atomic / suspendAtomic frame enforcement".
 
 - **BREAKING (behavior): `by state { }` now registers eagerly at construction
   (P1-lazy-registration).** A new `provideDelegate` operator runs each state's
@@ -235,6 +288,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `MutableState.owningVault` is now `owningStore`. The testing harness entry
   point `vaultTest { }` (in `:holdfast-testing`) is now `storeTest { }`.
 
+- **`crypto.Cipher` renamed to `StoreCipher` (F33).** The old name collided
+  with `javax.crypto.Cipher` when both were imported on the JVM. `XorCipher` and
+  `EncryptingTransformer` now reference `StoreCipher`; a `WARNING`-level
+  deprecated `typealias Cipher = StoreCipher` keeps existing references
+  compiling for one minor. Migrate to `StoreCipher`; see `MIGRATING.md`.
+
+- **Deferred API-shape renames (F33, recorded, not done).** Two P2 renames were
+  deliberately left for a later pass and are tracked in `ROADMAP.md`:
+  `TransactionResult.Error`/`Success` → `kotlin.Result`-style naming (churns
+  every consumer, matcher, and doc for marginal gain), and `middlewares()` →
+  `addMiddleware()` (the new `removeMiddleware` closes the functional gap now).
+
 ### Removed (ABI)
 
 - **ABI hygiene (F29).** Removed accidentally-public members that were never
@@ -253,39 +318,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 - `EventfulSupport.bindVault`, `MutableState.owningVault`, and `vaultTest`
   remain as `WARNING`-level deprecated aliases delegating to the new names;
   they will be removed after one minor release.
-
-### Added
-
-- `TransactionResult` ergonomics: `getOrThrow()` (returns the `Success` value
-  or rethrows the original `Error.exception`), `valueOrNull`, and chainable
-  `onSuccess { }` / `onError { }` extensions — so fire-and-forget `action`
-  callers can surface rollbacks instead of silently dropping them.
-
-- **`KvBridge` gains an optional `onDecodeError: ((encoded, cause) -> Unit)?`
-  constructor parameter (F12).** Load-on-attach decode failures are still
-  dropped silently by default (state stays at its initializer, and the next
-  commit overwrites the un-decodable payload) — the hook lets you observe the
-  raw payload and cause at the moment of the drop so you can quarantine or
-  migrate it first. The KDoc now documents both this overwrite hazard and the
-  save-failure contract: a throwing `encode`/`put` surfaces the transaction as
-  `TransactionResult.Error` (after the in-memory commit and observer fanout have
-  already applied), not a rollback.
-
-- Documented platform support tiers in the root and module READMEs:
-  Android/JVM/iOS are supported (tests run in CI); wasmJs is **experimental** —
-  the artifact is still published, but tests are disabled on wasmJs,
-  `FileSystemKvStore` throws `UnsupportedOperationException`, the seedless
-  `suspendDerived` overload is unusable (`runBlocking` initial seed — use the
-  new `suspendDerived(..., initial = ...)` overload instead), and the platform
-  is single-threaded (`currentThreadId() == 0`). Doc-only; no code changes.
-
-- **Documented that `distinct = true` is inert on an `EncryptingTransformer`
-  state backed by a non-deterministic cipher (F30).** Dedup compares
-  post-`Transformer.set` raw values (ciphertext); a secure per-value-IV cipher
-  encrypts equal plaintext to different ciphertext, so dedup never fires and
-  observers/bridges publish on every commit. `Cipher` / `EncryptingTransformer`
-  KDoc and GUIDE §14.4 spell this out; a pinning test in `CryptoTest` locks the
-  behavior. Docs + test only; no code or API change.
+- `crypto.Cipher` is now a `WARNING`-level deprecated `typealias` for
+  `StoreCipher` (F33); it will be removed after one minor release.
 
 ### Infrastructure
 
@@ -301,15 +335,17 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   for local verification. No artifact has been published to Central yet — the
   first Central release will be 0.2.0.
 
-## 0.1.0 — Initial public release
+## 0.1.0 — Initial internal cut (never published)
 
-First public release on Maven Central as `com.vynatix:holdfast` (plus the
-companion modules `:holdfast-coroutines`, `:holdfast-compose`, `:holdfast-testing`,
-`:holdfast-hallmark`, `:holdfast-hallmark-coroutines`).
+The first `holdfast`-named cut of the API. **Never published to Maven Central**
+— no `v0.1.0` tag was ever pushed, and no `com.vynatix:holdfast*` artifact of
+this version exists on Central. The first Central release will be **0.2.0**
+(see `ROADMAP.md` and the Infrastructure note above); until then the library is
+built from source / `mavenLocal()`.
 
 The library was developed internally under the name `vault` (versions 1.x
-through 2.0). No prior version was published to Maven Central; the public
-artifact line begins at 0.1.0 under the `holdfast` name.
+through 2.0). No `vault` version was published to Maven Central either; the
+public artifact line only begins once 0.2.0 ships under the `holdfast` name.
 
 The internal 1.x → 2.0 history is preserved below as design archive — it
 documents the evolution of the API but does not correspond to any published
