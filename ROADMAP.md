@@ -1,6 +1,6 @@
 # Holdfast Product Roadmap
 
-**Date:** 2026-06-12 · **Current version:** 0.1.0 (unpublished) · **Owner:** solo maintainer
+**Date:** 2026-07-05 · **Current version:** 0.1.0 (unpublished) · **Owner:** solo maintainer
 **Inputs:** the 2026-06-12 usability analysis (112 verified findings — see `USABILITY-ANALYSIS.md`), three competing strategy drafts (adoption-first, correctness-first, ecosystem-first) stress-tested by an adversarial release-engineering review, plus repo-verified constraints.
 
 ---
@@ -26,19 +26,19 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 
 **Theme:** make every sentence in the funnel true; spend the breaking-change budget in one cut.
 
-| Deliverable | Size |
-|---|---|
-| **Release engineering rip-and-replace.** The homegrown `holdfast.publish.sonatype` convention points `maven-publish` at the Central Portal upload API, which it cannot speak — replace both publish conventions with the vanniktech plugin (which publish.yml already assumes) end-to-end: namespace verification preflight on the Portal, signing, a scripted **local** release path so releases never depend on CI availability. | M |
-| **Unblock CI: settle the org billing lock.** The repo is already public — Actions (incl. macOS runners) is free for public repos; the lock is org-level. One support/billing action replaces any "migrate CI" project. Fallback if it drags: documented local gate script. | S |
-| **Decouple hallmark from build and publish** (property-gated module inclusion; remove from README module table or mark "unreleased, requires Hallmark"). | S |
-| **Finish the rename in public API**: `vaultTest`→`storeTest`, `bindVault`→`bindStore`, `owningVault`→`owningStore` (7 files in holdfast-testing + core), deprecated aliases for one minor, `apiDump`. | S–M |
-| **Remove the `context(CoroutineScope)` overloads** on `asStateFlow` + bridge factories (bytecode-proven ambient-scope capture; not documentable away). | S |
-| **`TransactionResult` ergonomics**: `getOrThrow()`, `onError {}`, `valueOrNull`; README quick-start rewritten to *surface* its deliberately-failing transaction. | S |
-| **Snippet-test module**: every fenced Kotlin block in README/GUIDE compiles (and asserts claimed output) in `./gradlew check`, on a fresh clone. | M |
-| **Docs-truth sweep**: the five doc/code contradictions, stale `*Holdfast`/`*Vault` sample classes, `holdfastTest` references, `asEagerStateFlow` ghost, `validation*` coordinates, MIGRATING.md links (stub or delete — file doesn't exist), compose-README shadowing bug, toolchain floor (Kotlin 2.3.x / JVM 21) documented in Install. | M |
-| **Known-issues section** naming *all three* open hazards honestly: the action-in-suspendAction livelock (+ workaround), non-atomic standalone `update`, and the `store{}`-vs-`action{}` trap — both are fixed next release; saying so beats shipping silently. | S |
-| **wasmJs → explicit experimental tier** (tests disabled, `FileSystemKvStore` throws, `suspendDerived` unusable — say so; keep the artifact: the build comment indicates an external consumer). | S |
-| **Publish 0.2.0 to Maven Central**: `holdfast`, `-coroutines`, `-compose`, `-testing`. | M |
+| Deliverable | Size | Status |
+|---|---|---|
+| **Release engineering rip-and-replace.** The homegrown `holdfast.publish.sonatype` convention points `maven-publish` at the Central Portal upload API, which it cannot speak — replace both publish conventions with the vanniktech plugin (which publish.yml already assumes) end-to-end: namespace verification preflight on the Portal, signing, a scripted **local** release path so releases never depend on CI availability. | M | ✅ vanniktech `maven.publish.base` applied; signs only when a key is present; unsigned `publishToMavenLocal` verified |
+| **Unblock CI: settle the org billing lock.** The repo is already public — Actions (incl. macOS runners) is free for public repos; the lock is org-level. One support/billing action replaces any "migrate CI" project. Fallback if it drags: documented local gate script. | S | ⏳ org-level action outside the code lane |
+| **Decouple hallmark from build and publish** (property-gated module inclusion; remove from README module table or mark "unreleased, requires Hallmark"). | S | ✅ `-Pholdfast.includeHallmark` gate; module marked unreleased in READMEs |
+| **Finish the rename in public API**: `vaultTest`→`storeTest`, `bindVault`→`bindStore`, `owningVault`→`owningStore` (7 files in holdfast-testing + core), deprecated aliases for one minor, `apiDump`. | S–M | ✅ renamed with `WARNING` aliases; `apiDump` committed |
+| **Remove the `context(CoroutineScope)` overloads** on `asStateFlow` + bridge factories (bytecode-proven ambient-scope capture; not documentable away). | S | ✅ removed (default-param forms only) |
+| **`TransactionResult` ergonomics**: `getOrThrow()`, `onError {}`, `valueOrNull`; README quick-start rewritten to *surface* its deliberately-failing transaction. | S | ✅ `getOrThrow`/`valueOrNull`/`onSuccess`/`onError` shipped |
+| **Snippet-test module**: every fenced Kotlin block in README/GUIDE compiles (and asserts claimed output) in `./gradlew check`, on a fresh clone. | M | ✅ `:doc-snippets` compiles + runs tracked docs |
+| **Docs-truth sweep**: the five doc/code contradictions, stale `*Holdfast`/`*Vault` sample classes, `holdfastTest` references, `asEagerStateFlow` ghost, `validation*` coordinates, MIGRATING.md links (stub or delete — file doesn't exist), compose-README shadowing bug, toolchain floor (Kotlin 2.3.x / JVM 21) documented in Install. | M | ✅ `MIGRATING.md` exists; sample/naming sweep done; phantom versions framed as internal milestones |
+| **Known-issues section** naming *all three* open hazards honestly: the action-in-suspendAction livelock (+ workaround), non-atomic standalone `update`, and the `store{}`-vs-`action{}` trap — both are fixed next release; saying so beats shipping silently. | S | ✅ documented (update-atomicity and invoke-guard since fixed) |
+| **wasmJs → explicit experimental tier** (tests disabled, `FileSystemKvStore` throws, `suspendDerived` unusable — say so; keep the artifact: the build comment indicates an external consumer). | S | ✅ experimental tier documented in READMEs |
+| **Publish 0.2.0 to Maven Central**: `holdfast`, `-coroutines`, `-compose`, `-testing`. | M | ⏳ pipeline ready; not yet fired (nothing on Central) |
 
 **Success criteria:** all four artifacts return HTTP 200 on repo1.maven.org; a scripted fresh-clone consumer project with the README install block + quick-start pasted verbatim compiles and prints the documented output including the surfaced error; `grep -ri vault */api/*.api` returns only deprecated aliases; link checker reports zero broken internal links; `./gradlew check` passes on a fresh clone with no sibling-repo ritual.
 
@@ -93,8 +93,8 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - **HARD GATE — livelock ADR**: the `suspendingOwner` race is root-caused and fixed, *or* a written ADR makes the 0.3.0 fail-fast the permanent contract. Cross-target concurrency soak suite (iOS included) replaces the 10-minute timeout mitigation (L)
 - **Dependency-stability policy**: holdfast-compose currently builds against Compose **beta** and material3 **alpha** — land on stable Compose or explicitly tier `-compose` below core stability at 1.0; same review for AGP/compileSdk (M)
 - **Kotlin-train policy**: written cadence commitment (e.g., track latest stable Kotlin within one minor) so RC soaks can't be invalidated mid-window by a Kotlin release (S)
-- API-shaped P2 triage: `derived()` raw `Pair`, store identity in error messages, middleware metadata typing, and a **`FrameResult` with per-store transactions** (F7 — today `atomic`/`suspendAtomic` return only the last participant root in lock order; per-store outcomes must be correlated via `Transaction.frameId`) — fix what touches frozen surface, explicitly waive the rest (M)
-- Docs completeness: GUIDE §14 internal-version archaeology rewritten against published versions; pitfalls table quotes real error strings; file-layout maps regenerated (M)
+- API-shaped P2 triage: `derived()` raw `Pair`, middleware metadata typing, and a **`FrameResult` with per-store transactions** (F7 — today `atomic`/`suspendAtomic` return only the last participant root in lock order; per-store outcomes must be correlated via `Transaction.frameId`) — fix what touches frozen surface, explicitly waive the rest. Store identity in error messages is **delivered** (F32). Two F33 renames are **deliberately deferred here with rationale**: `TransactionResult.Error`/`Success` → `kotlin.Result`-style naming (would churn every consumer, matcher, and doc for marginal gain), and `middlewares()` → `addMiddleware()` (the new `removeMiddleware` closes the functional gap, so the rename is cosmetic). Decide/waive both at 0.6.0 alongside the rest (M)
+- Docs completeness: GUIDE §14 internal-version archaeology rewritten against published versions (partially done — §14/§14.11 retitled and a framing note now flags the 1.0/1.1/0.3.0 numbers as internal milestones; the per-annotation sweep remains); pitfalls table quotes real error strings; **file-layout maps regenerated (delivered)** — §2 now matches the real tree (Atomic/Frame/Derived/Effect/Eventful\*/Snapshot/StoreActionDsl/StoreInternalApi/ExperimentalStoreApi + bridge/crypto/middleware/platform) (M)
 - Issue burn-down from launch feedback; final `apiDump`; deprecation policy + SemVer policy docs (M)
 
 ### 1.0.0-rc → 1.0.0 — "The renumbering"

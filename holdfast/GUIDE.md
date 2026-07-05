@@ -28,7 +28,9 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 11. [Testing Patterns](#11-testing-patterns)
 12. [Common Pitfalls](#12-common-pitfalls)
 13. [API Reference](#13-api-reference)
-14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
+14. [The Extended Surface](#14-the-extended-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction, validation
+15. [Cross-Store Transactions](#15-cross-store-transactions) — `atomic` / `suspendAtomic`, frame enforcement, `FrameObserver`
+- [Appendix A — One-page cheatsheet](#appendix-a--one-page-cheatsheet)
 
 ---
 
@@ -114,15 +116,31 @@ Disposable                          single dispose() method
 
 ```
 holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
-  Store.kt          base class, action/mutate/effect/bridge/invoke, ownership check
-  MutableState.kt   per-state observers, bridge, transformer, applyCommitted
-  Transaction.kt    pendingWrites, commit/rollback, status state machine
-  Middleware.kt     three-hook interceptor with metadata bag
-  Contract.kt       State, Bridge, Transformer, Initializer, StateDelegate, Disposable
-  StoreLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
-  UUID.kt           v4 UUID generator (used for unnamed transactions)
+  Store.kt              base class, action/mutate/update/effect/bridge/invoke, ownership check
+  MutableState.kt       per-state observers, bridge, transformer, applyCommitted
+  Transaction.kt        pendingWrites, commit/rollback, status state machine
+  Middleware.kt         three-hook interceptor with metadata bag
+  Contract.kt           State, Bridge, Transformer, Initializer, StateDelegate, Disposable, provideDelegate
+  StoreLock.kt          reentrant mutex over kotlinx.atomicfu SynchronizedObject
+  StoreActionDsl.kt     @DslMarker for the Store action DSL
+  StoreInternalApi.kt   @StoreInternalApi cross-module opt-in marker (ERROR level)
+  ExperimentalStoreApi.kt  @ExperimentalStoreApi opt-in marker (frame observers)
+  Snapshot.kt           snapshot()/restore() — raw-value capture & type-checked restore
+  Atomic.kt             atomic(vararg stores) cross-store frame (in-memory 2PC)
+  Frame.kt              FramePolicy, FrameMarker(s), FrameObserver(s), frame exceptions
+  Derived.kt            computed { } (read-time) and derived(...) (push-recomputed)
+  Effect.kt             State<T>.effect subscription extension
+  Eventful.kt           Eventful<E> interface (state vs events)
+  EventfulStore.kt      EventfulStore<Self, E> base class
+  EventfulSupport.kt    EventfulSupport<E> delegate (mix-in when a base is already extended)
+  bridge/               Codec, KvStore, KvBridge, FileSystemKvStore (expect/actual)
+  crypto/               StoreCipher, EncryptingTransformer, XorCipher
+  middleware/           Logging, Timing, Validation, Profiling middleware
   platform/
-    Threading.kt    expect currentThreadId, threadYield
+    Threading.kt        expect currentThreadId, threadYield
+    CrtpValidation.kt   expect validateCrtpSelfType (JVM/Android enforce; iOS/wasm no-op)
+    FrameLocal.kt       expect thread-local frame-marker slot
+    InvokeLocal.kt      expect bare-invoke-depth thread local (bare `store { }` mutation guard)
 ```
 
 ---
@@ -1166,10 +1184,15 @@ enum class TransactionStatus { Active, Committed, RolledBack, Failed }
 
 ---
 
-## 14. The 1.1 surface
+## 14. The Extended Surface
 
-Everything below ships in 1.1 on top of the 1.0 baseline above. Each
-capability is independently usable; pick the ones you need.
+Everything below extends the core baseline above. Each capability is
+independently usable; pick the ones you need.
+
+> The version numbers quoted in this section and the next (1.0, 1.1, 0.3.0) are
+> internal pre-release milestones preserved from the design archive — no such
+> public releases exist. The first Maven Central release will be 0.2.0 (see
+> `ROADMAP.md`).
 
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
@@ -1568,7 +1591,7 @@ val r = holdfast.suspendAction {
 }
 ```
 
-### 14.11 Validation 0.3.0 — three modules at the boundary
+### 14.11 Validation — the Hallmark modules
 
 [Hallmark](https://github.com/vynatix/hallmark) (`com.vynatix:hallmark`) is a
 standalone KMP refinement-types library maintained in its own repository;
@@ -1928,8 +1951,8 @@ rolls back and the frame returns `Error` carrying the inner exception.
 Consequence for the inner call site: under `Strict`, the inner action does not
 *return* its `Error` — escalation rethrows the original exception to unwind the
 frame, so a `when (innerResult)` around it never reaches the `Error` branch.
-The pre-0.3 behavior (a failed sub-action commits the other stores anyway) is
-reachable per call site with `policy = FramePolicy.TolerateInnerErrors`, and
+The pre-enforcement behavior (a failed sub-action commits the other stores
+anyway) is reachable per call site with `policy = FramePolicy.TolerateInnerErrors`, and
 then checking each inner result is on you. Frame-contract violations
 (`UnenrolledStoreException`, `FrameLockOrderException`,
 `FrameInteropException`) are never tolerated: they rethrow out of the frame
