@@ -31,6 +31,17 @@ private class SuspendVault : Store<SuspendVault>() {
 }
 
 class SuspendActionBasicsTest {
+    @Test fun suspendActionOnDisposedStoreThrows() =
+        runBlocking {
+            // P1-disposed-gaps: suspendAction matches blocking action's disposed check.
+            val v = SuspendVault()
+            v.dispose()
+            assertFailsWith<IllegalStateException> {
+                v.suspendAction { n mutate 1 }
+            }
+            Unit
+        }
+
     @Test fun suspendActionRunsBodyAndReturnsValue() =
         runBlocking {
             val v = SuspendVault()

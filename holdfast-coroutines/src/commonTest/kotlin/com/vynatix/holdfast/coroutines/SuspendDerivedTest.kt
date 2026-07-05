@@ -12,6 +12,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -51,6 +52,18 @@ class SuspendDerivedTest {
     }
 
     private fun newScope(): CoroutineScope = CoroutineScope(SupervisorJob()).also { scopes.add(it) }
+
+    @Test
+    fun suspendDerived_on_disposed_store_throws() {
+        // P1-disposed-gaps: suspendDerived checks disposed at entry.
+        val scope = newScope()
+        val v = SuspendDerivedVault(scope)
+        val source = v.n
+        v.dispose()
+        assertFailsWith<IllegalStateException> {
+            v.suspendDerived(source, initial = 0) { n.value + 1 }
+        }
+    }
 
     @Test
     fun source_change_triggers_recompute_via_suspending_compute() =

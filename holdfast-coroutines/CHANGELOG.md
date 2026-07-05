@@ -85,6 +85,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`suspendAction`, `suspendAtomic`, and `suspendDerived` now enforce the
+  disposed-store contract (P1-disposed-gaps).** `suspendAction` checks at
+  entry and again after acquiring the serializer mutex (a dispose can land
+  while parked); `suspendAtomic` checks every participant at entry and
+  re-checks each after its mutex is acquired; `suspendDerived` checks at
+  entry. Calling any of them on a disposed store throws
+  `IllegalStateException`, matching the blocking `action` contract.
+
 - **BREAKING (behavior): `suspendAction` now runs its body inside a
   single-store suspending scope (F4, F5, P1-livelock).** The body carries a
   relaxed frame marker (`AllowUnenrolled + TolerateInnerErrors` — it never

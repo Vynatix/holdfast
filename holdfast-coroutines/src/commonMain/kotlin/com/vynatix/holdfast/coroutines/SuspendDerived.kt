@@ -76,6 +76,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     initial: T,
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable> {
+    internalCheckNotDisposed()
     val self = this
     val name = "__suspendDerived_${suspendDerivedCounter.incrementAndGet()}"
     val backingState: MutableState<T> = self.registerInternalState(name, initial)
@@ -116,6 +117,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable> {
+    internalCheckNotDisposed()
     val self = this
 
     // Seed the backing state synchronously. We use runBlocking on the calling

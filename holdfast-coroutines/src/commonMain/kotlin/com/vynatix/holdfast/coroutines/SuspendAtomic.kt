@@ -115,6 +115,10 @@ suspend fun <R> suspendAtomic(
     body: suspend () -> R,
 ): TransactionResult<R> {
     require(stores.isNotEmpty()) { "suspendAtomic requires at least one store" }
+    // Disposed-store contract: no participant may be disposed at entry. A
+    // participant disposed while parked on another store's mutex is caught by
+    // the re-check inside acquireAndRun before its root is opened.
+    stores.forEach { it.internalCheckNotDisposed() }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
 
@@ -232,6 +236,9 @@ private suspend fun <R> acquireAndRun(
         serializer.mutex.lock(ownerKey)
         var openedTopLevel = false
         try {
+            // Re-check after acquiring the mutex: a dispose can land while a
+            // participant was parked waiting for an earlier store's mutex.
+            v.internalCheckNotDisposed()
             frame.heldVaults += v
             val priorActive = v.activeTransaction
             val priorOwner = v.suspendingOwner

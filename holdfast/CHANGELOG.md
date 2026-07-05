@@ -96,6 +96,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **`atomic`, `derived`, and `computed` now enforce the disposed-store
+  contract (P1-disposed-gaps).** `atomic` checks every participant before
+  acquiring any lock; `derived`/`computed` check at entry. Calling them on a
+  disposed store throws `IllegalStateException` instead of silently
+  proceeding. Adds the `@StoreInternalApi Store.internalCheckNotDisposed()`
+  hook so companion modules enforce the same rule.
+
 - **Sharper diagnostic messages for disposed-store and cross-store-state
   errors (F32).** The disposed-store `IllegalStateException` now names the
   store class (`"CounterStore is disposed — dispose() is terminal; …"`), and

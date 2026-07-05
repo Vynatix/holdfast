@@ -140,6 +140,32 @@ class StoreDisposeTest {
     }
 
     @Test
+    fun atomic_on_disposed_store_throws() {
+        // P1-disposed-gaps: atomic must enforce the disposed contract for every
+        // participant before acquiring any lock.
+        val a = CountVault()
+        val b = CountVault()
+        a.dispose()
+        assertFailsWith<IllegalStateException> {
+            atomic(a, b) { b action { n mutate 1 } }
+        }
+    }
+
+    @Test
+    fun derived_on_disposed_store_throws() {
+        // P1-disposed-gaps: derived / computed check disposed at entry.
+        val v = CountVault()
+        val source = v.n
+        v.dispose()
+        assertFailsWith<IllegalStateException> {
+            v.derived(source) { n.value + 1 }
+        }
+        assertFailsWith<IllegalStateException> {
+            v.computed { n.value + 1 }
+        }
+    }
+
+    @Test
     fun reading_value_after_dispose_returns_committed_value_or_throws() {
         // A read of `state.value` after dispose: the contract is "no further mutations".
         // Reading is allowed to either return the last committed value or throw with

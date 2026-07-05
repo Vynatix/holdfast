@@ -119,6 +119,9 @@ fun <R> atomic(
     body: () -> R,
 ): TransactionResult<R> {
     require(stores.isNotEmpty()) { "atomic requires at least one store" }
+    // Enforce the disposed-store contract for every participant before any lock
+    // is acquired — a disposed store must never open a frame root.
+    stores.forEach { it.internalCheckNotDisposed() }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
     val enclosing = FrameMarkers.current()

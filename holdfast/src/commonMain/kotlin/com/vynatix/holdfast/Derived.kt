@@ -22,6 +22,7 @@ import kotlinx.atomicfu.atomic
  * ```
  */
 fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
+    internalCheckNotDisposed()
     val self = this
     return object : State<T> {
         override val value: T get() = self.compute()
@@ -58,6 +59,7 @@ fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable> {
+    internalCheckNotDisposed()
     val self = this
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"

@@ -84,6 +84,8 @@ import kotlin.uuid.Uuid
 // Single-sourced middleware ordering + frame-gate setup — splitting it would scatter the contract.
 @Suppress("LongMethod", "CyclomaticComplexMethod", "TooGenericExceptionCaught")
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+    // Disposed-store contract: match blocking `action`'s entry check.
+    internalCheckNotDisposed()
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic
     // frame runs as a SAVEPOINT of its frame root — no mutex re-acquisition
@@ -97,6 +99,8 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
     val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
 
     return serializer.mutex.withLock(owner) {
+        // Re-check after acquiring the mutex: a dispose can land while parked here.
+        internalCheckNotDisposed()
         val txn =
             Transaction.createForExternal(
                 id = body::class.simpleName ?: Uuid.random().toString(),

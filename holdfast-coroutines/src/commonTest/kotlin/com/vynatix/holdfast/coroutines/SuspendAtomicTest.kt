@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -47,6 +48,18 @@ private class EventingAccountVault(
 }
 
 class SuspendAtomicSuccessTest {
+    @Test fun suspendAtomicOnDisposedParticipantThrows() =
+        runBlocking {
+            // P1-disposed-gaps: every participant is checked at entry, before locks.
+            val a = AccountVault(initial = 100)
+            val b = AccountVault(initial = 0)
+            a.dispose()
+            assertFailsWith<IllegalStateException> {
+                suspendAtomic(a, b) { b { balance update { it + 1 } } }
+            }
+            Unit
+        }
+
     @Test fun transferBetweenTwoVaultsCommitsBoth() =
         runBlocking {
             val a = AccountVault(initial = 100)
