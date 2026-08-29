@@ -190,15 +190,33 @@ class MutableState<T : Any>(
         notifyObservers(afterGet(processed))
     }
 
+    /**
+     * Fan out to the current observers, invoking each one OUTSIDE
+     * [observersLock].
+     *
+     * Holding the lock across the callbacks put `observersLock` into the lock
+     * graph of arbitrary user code, and let a single slow observer block
+     * [observe] and every disposal on this state from every other thread.
+     *
+     * This does NOT make cross-store observer writes safe. [Store.action] holds
+     * the store's `transactionLock` across the whole commit fanout by design, so
+     * two stores whose observers write to each other still deadlock on those —
+     * a cycle `atomic`'s `lockOrderKey` ordering never sees, because it does not
+     * run through `atomic`. Write to another store from an observer only via
+     * `Store.scope` (or another thread), never inline.
+     *
+     * Snapshotting under the lock keeps the subscription ordering that [observe]
+     * depends on: a subscriber added under [observersLock] before this snapshot
+     * is taken is guaranteed to appear in it.
+     */
     private fun notifyObservers(value: T) {
         val handler = owningStore.uncaughtObserverHandler
-        observersLock.withLock {
-            observers.toSet().forEach { observer ->
-                try {
-                    observer(value)
-                } catch (e: Throwable) {
-                    handler?.invoke(e)
-                }
+        val snapshot = observersLock.withLock { observers.toList() }
+        snapshot.forEach { observer ->
+            try {
+                observer(value)
+            } catch (e: Throwable) {
+                handler?.invoke(e)
             }
         }
     }
@@ -218,20 +236,32 @@ class MutableState<T : Any>(
      * must use [effect].
      */
     @StoreInternalApi
-    fun observe(observer: (T) -> Unit): Disposable =
-        observersLock.withLock {
-            observers.add(observer)
-            // Initial callback uses the same view as the value getter — post-transformer.get —
-            // so an observer never sees a value the getter wouldn't return for the same state.
-            val current = stateLock.withLock { afterGet(currentValue) }
-            observer(current)
+    fun observe(observer: (T) -> Unit): Disposable {
+        // Register and read the current value under observersLock, but fire
+        // outside it — see [notifyObservers] for why no callback may run under
+        // that lock.
+        //
+        // Doing both under the lock is what keeps the initial value from
+        // arriving out of order. A commit writes `currentValue` (under
+        // stateLock) strictly before it snapshots the observer set (under
+        // observersLock), so if the read below sees a pre-commit value, this
+        // registration necessarily precedes that snapshot and the observer is
+        // included in it — it sees the old value, then the new one.
+        val current =
+            observersLock.withLock {
+                observers.add(observer)
+                // Initial callback uses the same view as the value getter — post-transformer.get —
+                // so an observer never sees a value the getter wouldn't return for the same state.
+                stateLock.withLock { afterGet(currentValue) }
+            }
+        observer(current)
 
-            return Disposable {
-                observersLock.withLock {
-                    observers.remove(observer)
-                }
+        return Disposable {
+            observersLock.withLock {
+                observers.remove(observer)
             }
         }
+    }
 
     /**
      * Two-way bridge to an external system. Setting attaches:
