@@ -217,6 +217,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun hasState (Ljava/lang/String;)Z
 	public final fun internalDrainPostCommitTasks ()V
 	public final fun internalFrameMiddlewareSession (Lcom/vynatix/holdfast/Transaction;)Lcom/vynatix/holdfast/FrameMiddlewareSession;
+	public final fun internalOwnsActiveTransaction ()Z
 	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
 	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public final fun isDisposed ()Z

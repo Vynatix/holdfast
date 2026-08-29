@@ -436,6 +436,14 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
+     * Internal hook for `atomic(...)`, which brackets each participant with the
+     * store's [AsyncSerializer] and needs the same nesting test [action] uses to
+     * decide whether this thread is already inside the serialized region.
+     */
+    @StoreInternalApi
+    fun internalOwnsActiveTransaction(): Boolean = ownsActiveTransaction()
+
+    /**
      * Frame-entry gate for blocking [action]. Inside an active frame body:
      *  - an UNENROLLED store must not be written (unless the frame's policy
      *    says [FramePolicy.allowUnenrolled]) — its commit would escape the frame;
