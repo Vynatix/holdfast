@@ -257,8 +257,10 @@ final class <#A: kotlin/Any> com.vynatix.holdfast/MutableState : com.vynatix.hol
         final fun <get-bridge>(): com.vynatix.holdfast/Bridge<#A>? // com.vynatix.holdfast/MutableState.bridge.<get-bridge>|<get-bridge>(){}[0]
         final fun <set-bridge>(com.vynatix.holdfast/Bridge<#A>?) // com.vynatix.holdfast/MutableState.bridge.<set-bridge>|<set-bridge>(com.vynatix.holdfast.Bridge<1:0>?){}[0]
 
-    final fun applyCommittedRaw(#A): kotlin/Boolean // com.vynatix.holdfast/MutableState.applyCommittedRaw|applyCommittedRaw(1:0){}[0]
+    final fun applyCommittedValue(#A): kotlin/Boolean // com.vynatix.holdfast/MutableState.applyCommittedValue|applyCommittedValue(1:0){}[0]
+    final fun fanOutToObservers(#A) // com.vynatix.holdfast/MutableState.fanOutToObservers|fanOutToObservers(1:0){}[0]
     final fun observe(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/MutableState.observe|observe(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun publishToBridge(#A) // com.vynatix.holdfast/MutableState.publishToBridge|publishToBridge(1:0){}[0]
 }
 
 final class com.vynatix.holdfast.bridge/FileSystemKvStore : com.vynatix.holdfast.bridge/KvStore { // com.vynatix.holdfast.bridge/FileSystemKvStore|null[0]
@@ -438,8 +440,8 @@ final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transacti
         final fun <get-status>(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast/Transaction.status.<get-status>|<get-status>(){}[0]
 
     final fun commit() // com.vynatix.holdfast/Transaction.commit|commit(){}[0]
-    final fun commitDispatching(kotlin/Function2<com.vynatix.holdfast/MutableState<*>, kotlin/Any, kotlin/Unit>) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.holdfast.MutableState<*>,kotlin.Any,kotlin.Unit>){}[0]
-    final fun commitDispatching(kotlin/Function2<com.vynatix.holdfast/MutableState<*>, kotlin/Any, kotlin/Unit>, kotlin/Function1<kotlin.collections/List<kotlin/Pair<kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any>>, kotlin/Unit>?) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function2<com.vynatix.holdfast.MutableState<*>,kotlin.Any,kotlin.Unit>;kotlin.Function1<kotlin.collections.List<kotlin.Pair<kotlinx.coroutines.flow.MutableSharedFlow<*>,kotlin.Any>>,kotlin.Unit>?){}[0]
+    final fun commitDispatching(kotlin/Function1<kotlin.collections/List<kotlin/Pair<com.vynatix.holdfast/MutableState<*>, kotlin/Any>>, kotlin/Unit>) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function1<kotlin.collections.List<kotlin.Pair<com.vynatix.holdfast.MutableState<*>,kotlin.Any>>,kotlin.Unit>){}[0]
+    final fun commitDispatching(kotlin/Function1<kotlin.collections/List<kotlin/Pair<com.vynatix.holdfast/MutableState<*>, kotlin/Any>>, kotlin/Unit>, kotlin/Function1<kotlin.collections/List<kotlin/Pair<kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any>>, kotlin/Unit>?) // com.vynatix.holdfast/Transaction.commitDispatching|commitDispatching(kotlin.Function1<kotlin.collections.List<kotlin.Pair<com.vynatix.holdfast.MutableState<*>,kotlin.Any>>,kotlin.Unit>;kotlin.Function1<kotlin.collections.List<kotlin.Pair<kotlinx.coroutines.flow.MutableSharedFlow<*>,kotlin.Any>>,kotlin.Unit>?){}[0]
     final fun rollback() // com.vynatix.holdfast/Transaction.rollback|rollback(){}[0]
     final fun stagePendingEvent(kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any) // com.vynatix.holdfast/Transaction.stagePendingEvent|stagePendingEvent(kotlinx.coroutines.flow.MutableSharedFlow<*>;kotlin.Any){}[0]
 

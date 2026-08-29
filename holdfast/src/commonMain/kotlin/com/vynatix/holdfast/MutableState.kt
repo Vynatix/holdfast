@@ -113,50 +113,68 @@ class MutableState<T : Any>(
         get() = stateLock.withLock { currentValue }
 
     /**
-     * Commit-time apply (raw): writes `currentValue` and notifies observers, but
-     * **does NOT publish to the bridge**. Strict subset of [applyCommitted]
-     * exposed as a `@StoreInternalApi` extension hook so companion modules
-     * (notably `:holdfast-coroutines.suspendAction`) can interpose between the
-     * observer fanout (step 1+2) and the bridge publish (step 3) — necessary
-     * for [com.vynatix.holdfast.coroutines.SuspendingBridge.publishAwaited] to be
-     * awaited under `withContext(NonCancellable)` instead of fire-and-forget.
+     * Commit pass 1 — **assignment only**. Writes `currentValue` and returns
+     * whether the value changed; runs NO user code, so it cannot throw and
+     * therefore cannot tear a commit part-way through its pending writes.
+     * [Transaction.commitDispatching] applies every pending write with this
+     * before any fanout begins.
      *
      * If [distinct] is true and the new processed value is `==` to
-     * `currentValue`, skips observer fanout (opt-in dedup). Bridge publish is
-     * the caller's responsibility — they must not call `bridge.publish` either
-     * if this returns silently due to dedup.
-     *
-     * Returns `true` if the value was applied (observer fanout fired), `false`
-     * if it was deduped. The boolean lets the caller skip their own bridge
-     * publish in the dedup case.
+     * `currentValue`, nothing is written and this returns `false` — the caller
+     * skips both fanout phases for this state (opt-in dedup).
      */
     @StoreInternalApi
-    fun applyCommittedRaw(processedValue: T): Boolean {
-        val unchanged =
-            stateLock.withLock {
-                val same = distinct && currentValue == processedValue
-                if (!same) currentValue = processedValue
-                same
-            }
-        if (unchanged) return false
-        notifyObservers(afterGet(processedValue))
-        return true
+    fun applyCommittedValue(processedValue: T): Boolean =
+        stateLock.withLock {
+            val same = distinct && currentValue == processedValue
+            if (!same) currentValue = processedValue
+            !same
+        }
+
+    /**
+     * Commit pass 2 — observer fanout, for a state [applyCommittedValue] just
+     * changed. Runs outside `stateLock` to avoid AB-BA with [observe], which
+     * acquires `observersLock` then briefly `stateLock`.
+     *
+     * Never throws: a failing `transformer.get` is reported through
+     * [Store.uncaughtObserverHandler] and skips this state's observers. Commit
+     * fanout is post-commit side effect, so it must not be able to abort a
+     * commit whose values are already applied.
+     */
+    @StoreInternalApi
+    fun fanOutToObservers(processedValue: T) {
+        runCatching { afterGet(processedValue) }
+            .fold(
+                onSuccess = { notifyObservers(it) },
+                onFailure = { reportFanoutFailure(it) },
+            )
     }
 
     /**
-     * Commit-time apply: writes `currentValue`, notifies observers, publishes to bridge.
-     * The single observable side effect of a successful commit. Lock-order: snapshot
-     * under `stateLock`, release, then notify outside `stateLock` to avoid AB-BA with
-     * [observe] which acquires `observersLock` then briefly `stateLock`.
+     * Commit pass 3 — bridge publish, for a state [applyCommittedValue] just
+     * changed. Never throws: a failing `publish` (a full disk, an encoder error)
+     * is reported through [Store.uncaughtObserverHandler].
      *
-     * If [distinct] is true and the new processed value is `==` to `currentValue`,
-     * skips both observer fanout and bridge publish (opt-in dedup).
+     * A bridge is external sync, not a transaction participant — `atomic`'s KDoc
+     * already states that persistence publishes carry no crash-consistency — so
+     * a failed publish cannot undo an applied value, and must not prevent the
+     * remaining states of the same transaction from publishing.
      */
-    internal fun applyCommitted(processedValue: T) {
-        @OptIn(StoreInternalApi::class)
-        if (!applyCommittedRaw(processedValue)) return
-        bridgeLock.withLock { currentBridge?.publish(processedValue) }
+    @StoreInternalApi
+    fun publishToBridge(processedValue: T) {
+        runCatching { bridgeLock.withLock { currentBridge?.publish(processedValue) } }
+            .onFailure { reportFanoutFailure(it) }
     }
+
+    private fun reportFanoutFailure(error: Throwable) {
+        owningStore.uncaughtObserverHandler?.invoke(error)
+    }
+
+    /**
+     * Human-readable identity of the store that owns this state, for failure
+     * messages. Falls back to `"Store"` on targets without class simple names.
+     */
+    internal fun describeOwner(): String = owningStore::class.simpleName ?: "Store"
 
     /**
      * Bridge-driven update: writes `currentValue` and notifies observers, but does

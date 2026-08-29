@@ -1,6 +1,7 @@
 package com.vynatix.holdfast
 
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
 
 /**
@@ -181,36 +182,34 @@ class Transaction internal constructor(
      * from corrupting state or replaying side effects.
      *
      * For a nested (savepoint) transaction, pending writes are merged into the
-     * parent's. For a top-level transaction, pending writes are applied to state
-     * via [MutableState.applyCommitted], which is the single place observers and
-     * bridges fire.
+     * parent's. For a top-level transaction every pending write is applied via
+     * [MutableState.applyCommittedValue] first, and only then does fanout run:
+     * all observers ([MutableState.fanOutToObservers]), then all bridge
+     * publishes ([MutableState.publishToBridge]).
      */
     fun commit() {
         @OptIn(StoreInternalApi::class)
-        commitDispatching { state, value ->
+        commitDispatching { committed ->
             @Suppress("UNCHECKED_CAST")
-            (state as MutableState<Any>).applyCommitted(value)
+            committed.forEach { (state, value) -> (state as MutableState<Any>).fanOutToObservers(value) }
+            @Suppress("UNCHECKED_CAST")
+            committed.forEach { (state, value) -> (state as MutableState<Any>).publishToBridge(value) }
         }
     }
 
     /**
      * Internal commit variant for `:holdfast-coroutines.suspendAction`. Same
-     * idempotent semantics as [commit], but the per-pending-write apply step
-     * is delegated to [applyTopLevel]. Used to interpose
+     * idempotent semantics as [commit], but the fanout phase is delegated to
+     * [fanout] so the suspending path can interpose
      * [com.vynatix.holdfast.coroutines.SuspendingBridge.publishAwaited] between
-     * the observer fanout (via [MutableState.applyCommittedRaw]) and the
-     * bridge publish.
+     * the observer fanout and the bridge publish.
      *
-     * For a nested (savepoint) transaction, [applyTopLevel] is NOT called —
-     * pending writes merge into the parent's buffer just like [commit].
-     *
-     * The lambda is invoked synchronously from inside the commit lock for each
-     * pending write, in iteration order. Throwing from it propagates as
-     * [TransactionException] just like the sync path.
+     * For a nested (savepoint) transaction, [fanout] is NOT called — pending
+     * writes merge into the parent's buffer just like [commit].
      */
     @StoreInternalApi
-    fun commitDispatching(applyTopLevel: (MutableState<*>, Any) -> Unit) {
-        commitDispatching(applyTopLevel, drainEvents = null)
+    fun commitDispatching(fanout: (List<Pair<MutableState<*>, Any>>) -> Unit) {
+        commitDispatching(fanout, drainEvents = null)
     }
 
     /**
@@ -230,10 +229,17 @@ class Transaction internal constructor(
      * `suspendAction` is to stash the list, complete the bridge-publish phase,
      * and then suspendingly emit the events so back-pressure is honored. The
      * snapshot list is owned by the caller and reflects insertion order.
+     *
+     * [fanout] receives, in pending-write order, every (state, raw value) pair
+     * whose value actually changed — deduped `distinct` states are omitted, so
+     * the caller must not fan out for them. It is called ONCE, after every
+     * pending write has already been applied to state and outside the pending
+     * lock, so a callback that throws can no longer leave the transaction
+     * half-applied.
      */
     @StoreInternalApi
     fun commitDispatching(
-        applyTopLevel: (MutableState<*>, Any) -> Unit,
+        fanout: (List<Pair<MutableState<*>, Any>>) -> Unit,
         drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?,
     ) {
         val current = statusLock.withLock { _status }
@@ -244,6 +250,13 @@ class Transaction internal constructor(
         // calls `tryEmit` or a caller-supplied suspending emit) runs without
         // holding any internal store lock.
         val eventsToDrain = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
+        // Writes that actually changed a state, in pending-write order. Handed to
+        // [fanout] after every write has been applied.
+        val committed = mutableListOf<Pair<MutableState<*>, Any>>()
+        // Owning store captured before pendingWrites is cleared, so a failure
+        // message can name it. Every write in one transaction shares a store.
+        val storeLabel = pendingLock.withLock { pendingWrites.keys.firstOrNull() }?.describeOwner()
+        var phase = CommitPhase.APPLY
         try {
             pendingLock.withLock {
                 val parentTxn = parent
@@ -255,14 +268,18 @@ class Transaction internal constructor(
                     // after its own (preserving stage order across the whole tree).
                     parentTxn.pendingEvents.addAll(pendingEvents)
                 } else {
-                    // Top-level commit: apply each pending write via the caller-supplied
-                    // dispatcher. Observers and bridges see the value here, post-commit,
-                    // never mid-action. Pending writes remain readable via findPendingValue
-                    // during the iteration so observer callbacks reading sibling states
-                    // still see the about-to-be-committed values (read-your-own-writes
-                    // during fanout).
+                    // Top-level commit, pass 1: apply every pending write to state.
+                    // Assignment only — no user code runs here, so this pass cannot
+                    // throw and cannot leave the transaction half-applied. Fanout
+                    // (observers, bridges) happens afterwards, once every state in
+                    // the transaction already holds its committed value, so an
+                    // observer reading a sibling state sees the committed value
+                    // directly rather than through findPendingValue.
                     pendingWrites.forEach { (state, value) ->
-                        applyTopLevel(state, value)
+                        @Suppress("UNCHECKED_CAST")
+                        if ((state as MutableState<Any>).applyCommittedValue(value)) {
+                            committed += state to value
+                        }
                     }
                     // Snapshot the events to drain after we release pendingLock. The drain
                     // itself happens outside the lock — `tryEmit` may suspend or invoke
@@ -273,6 +290,10 @@ class Transaction internal constructor(
                 pendingWrites.clear()
                 pendingEvents.clear()
             }
+            // Pass 2+ (top-level only): fanout, outside pendingLock so no user
+            // callback ever runs under an internal store lock.
+            phase = CommitPhase.FANOUT
+            if (committed.isNotEmpty()) fanout(committed)
             // Phase 3 (top-level only): drain events AFTER observer fanout and AFTER
             // bridge publishes. Order matters: a collector subscribed to both
             // `state.asFlow()` and `store.events` will see the state value before
@@ -282,6 +303,7 @@ class Transaction internal constructor(
             // a full SUSPEND-policy buffer falls back to drop here. Suspend-action
             // callers should pass a drainEvents that uses `emit(...)` to honor
             // back-pressure.
+            phase = CommitPhase.EVENTS
             if (eventsToDrain.isNotEmpty()) {
                 if (drainEvents != null) {
                     drainEvents(eventsToDrain)
@@ -293,9 +315,17 @@ class Transaction internal constructor(
                 }
             }
             updateStatus(TransactionStatus.Committed)
-        } catch (e: Exception) {
+        } catch (e: CancellationException) {
+            // Cancellation is control flow, not a commit failure: propagate it
+            // unwrapped so structured concurrency still sees its own exception.
             runCatching { updateStatus(TransactionStatus.Failed) }
-            throw TransactionException("Commit failed", e)
+            throw e
+        } catch (e: Throwable) {
+            // Throwable, not Exception: an Error escaping here would otherwise
+            // leave the transaction Active while the caller reports a rollback
+            // that never happened.
+            runCatching { updateStatus(TransactionStatus.Failed) }
+            throw TransactionException(commitFailureMessage(phase, storeLabel, committed), e)
         } finally {
             endTimeLock.withLock {
                 _endTime = Clock.System.now().toEpochMilliseconds()
@@ -319,14 +349,42 @@ class Transaction internal constructor(
                 pendingEvents.clear()
             }
             updateStatus(TransactionStatus.RolledBack)
-        } catch (e: Exception) {
+        } catch (e: CancellationException) {
             runCatching { updateStatus(TransactionStatus.Failed) }
-            throw TransactionException("Rollback failed", e)
+            throw e
+        } catch (e: Throwable) {
+            runCatching { updateStatus(TransactionStatus.Failed) }
+            throw TransactionException("Rollback of transaction '$id' failed", e)
         } finally {
             endTimeLock.withLock {
                 _endTime = Clock.System.now().toEpochMilliseconds()
             }
         }
+    }
+
+    /**
+     * Failure text that names the transaction, the store, the commit phase and
+     * the states involved — a bare "Commit failed" leaves the reader with no way
+     * to tell which store, which state or which phase produced it.
+     */
+    private fun commitFailureMessage(
+        phase: CommitPhase,
+        storeLabel: String?,
+        committed: List<Pair<MutableState<*>, Any>>,
+    ): String {
+        val where = storeLabel?.let { " on $it" } ?: ""
+        val frame = frameId?.let { " of frame '$it'" } ?: ""
+        val states = if (committed.isEmpty()) "" else " (${committed.size} state(s) already applied)"
+        return "Commit of transaction '$id'$frame$where failed during the ${phase.label} phase$states"
+    }
+
+    /** Which stage of [commitDispatching] was running when a commit threw. */
+    private enum class CommitPhase(
+        val label: String,
+    ) {
+        APPLY("state-apply"),
+        FANOUT("observer/bridge fanout"),
+        EVENTS("event drain"),
     }
 
     private fun updateStatus(newStatus: TransactionStatus) {
