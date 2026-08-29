@@ -8,6 +8,81 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`suspendAction` on a store with a `derived()` state no longer deadlocks.**
+  The post-commit drain ran inside `serializer.mutex.withLock`, so the derived
+  recompute's blocking `action` spun on a mutex its own call stack held —
+  indefinitely, at 100% CPU, with the thread in `RUNNABLE` so no deadlock
+  detector or thread dump reported it. The drain now runs after the mutex is
+  released, matching what `suspendAtomic` already did. The blocking path had
+  the same placement, where the recompute threw instead of spinning and
+  `drainPostCommitTasks` swallowed it in `runCatching`, silently freezing the
+  derived state.
+
+- **Nested `action` works again on a store that has used `suspendAction`.**
+  `AsyncSerializer` is installed permanently on first coroutine use and is not
+  reentrant, but `Store.action` acquired it unconditionally — so the savepoint
+  mechanism failed with a raw kotlinx `"This mutex is already locked by the
+  specified owner"`, folded into an ignorable `TransactionResult.Error` that
+  discarded the outer action's writes too. A nested action is already inside the
+  serialized region and no longer re-acquires.
+
+- **Commit fanout can no longer tear a transaction.** A throwing
+  `Bridge.publish` or `Transformer.get` aborted the apply loop part-way, leaving
+  earlier states written and later ones not. Commit is now phased — apply every
+  pending write (assignment only, runs no user code), then all observers, then
+  all bridge publishes, then events — with the fanout phases isolated per state
+  and reported through `Store.uncaughtObserverHandler`.
+
+- **Blocking `atomic()` is serialized against in-flight suspending work.** It
+  took only each participant's `transactionLock`, never the `AsyncSerializer`,
+  so a frame could install a fresh root over a `suspendAction`'s transaction and
+  — because `suspendingOwner` relaxes `mutate`'s owner check — that suspending
+  body then staged its writes into the frame's transaction.
+
+- **`Transaction.commit`/`rollback` catch `Throwable`, not `Exception`.** An
+  `Error` escaping previously left the transaction `Active` while the caller
+  reported a rollback that never happened. `CancellationException` now
+  propagates unwrapped instead of being wrapped in `TransactionException`.
+
+- **`TransactionException` names the failure.** It now identifies the
+  transaction, store, commit phase and how many states were already applied,
+  replacing a bare `"Commit failed"`.
+
+- **Observer callbacks run outside `observersLock`.** Holding it across user
+  code let one slow observer block `observe` and every disposal on that state
+  from all other threads. (This does not make cross-store observer writes safe:
+  `action` still holds `transactionLock` across the fanout, so two stores whose
+  observers write to each other still deadlock.)
+
+- **`StoreLock` parks instead of spinning.** It looped on `tryAcquire` +
+  `threadYield`, so every waiter on a contended store burned a core and sat in
+  `RUNNABLE` where no profiler reports it as blocked. It now blocks on
+  `kotlinx.atomicfu.locks.SynchronousMutex`, keeping its own reentrancy depth.
+
+### Changed
+
+- **BREAKING (commit fanout order).** Observers for every state in a
+  transaction now run before any bridge publishes, where fanout previously
+  interleaved per state. This is what the documented
+  "observers → bridge publish → event drain" order always described, and what
+  the suspending commit path already did.
+
+- **BREAKING (bridge failures).** A throwing `Bridge.publish` now yields
+  `TransactionResult.Success` with the failure reported through
+  `Store.uncaughtObserverHandler`, instead of a
+  `TransactionException("Commit failed")`. A bridge is external sync, not a
+  transaction participant — `atomic`'s KDoc already stated that persistence
+  publishes carry no crash-consistency — so a failed publish cannot undo values
+  that are already committed.
+
+- **BREAKING (`@StoreInternalApi`).** `MutableState.applyCommittedRaw` is
+  replaced by `applyCommittedValue` / `fanOutToObservers` / `publishToBridge`;
+  `Transaction.commitDispatching` now takes a single fanout callback receiving
+  all committed writes rather than a per-write callback; `Store` gains
+  `internalOwnsActiveTransaction`. Companion modules only.
+
 ### Added
 
 - **`ProfilingMiddleware`** (`com.vynatix.holdfast.middleware`) — drop-in
