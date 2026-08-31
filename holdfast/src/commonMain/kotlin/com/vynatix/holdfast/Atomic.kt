@@ -149,31 +149,48 @@ private fun <R> acquireAndRun(
         return executeBody(roots, marker, body)
     }
     val v = sorted[index]
-    return v.runUnderLock {
-        val priorActive = v.activeTransaction
-        val root =
-            if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
-                // Nested inside an enclosing action/atomic on this thread for this
-                // store: open a savepoint so this frame's commit merges into the
-                // enclosing scope and this frame's rollback discards only its own
-                // writes — never the enclosing transaction's.
-                Transaction.createSavepointForExternal(id, ownerThreadId, priorActive, frameId = id)
-            } else {
-                Transaction.createForExternal(id, ownerThreadId, frameId = id)
+    // Serialize this participant against in-flight suspending work, exactly as
+    // `action` does. Without it a frame took only `transactionLock`, installed a
+    // fresh root over a suspendAction's active transaction, and — because
+    // `suspendingOwner` relaxes `mutate`'s owner check — that suspending body
+    // then staged its writes into the frame's transaction.
+    //
+    // Acquired in the same globally-sorted `lockOrderKey` order as the
+    // transaction locks, so the extra lock cannot introduce a cycle; skipped
+    // when this thread is already inside the store's serialized region (an
+    // enclosing action, or an outer frame that holds this store).
+    val serializer = if (v.internalOwnsActiveTransaction()) null else v.asyncSerializer
+    serializer?.blockingAcquire()
+    var openedTopLevel = false
+    try {
+        return v.runUnderLock {
+            val priorActive = v.activeTransaction
+            openedTopLevel = priorActive == null
+            val root =
+                if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
+                    // Nested inside an enclosing action/atomic on this thread for this
+                    // store: open a savepoint so this frame's commit merges into the
+                    // enclosing scope and this frame's rollback discards only its own
+                    // writes — never the enclosing transaction's.
+                    Transaction.createSavepointForExternal(id, ownerThreadId, priorActive, frameId = id)
+                } else {
+                    Transaction.createForExternal(id, ownerThreadId, frameId = id)
+                }
+            v.internalSetActiveTransaction(root)
+            roots.add(FrameRoot(v, root, v.internalFrameMiddlewareSession(root)))
+            try {
+                acquireAndRun(sorted, index + 1, roots, id, ownerThreadId, marker, body)
+            } finally {
+                v.internalSetActiveTransaction(priorActive)
             }
-        v.internalSetActiveTransaction(root)
-        roots.add(FrameRoot(v, root, v.internalFrameMiddlewareSession(root)))
-        try {
-            acquireAndRun(sorted, index + 1, roots, id, ownerThreadId, marker, body)
-        } finally {
-            v.internalSetActiveTransaction(priorActive)
-            // Top-level exit for this store: drain deferred work (derived
-            // recomputes) queued during the frame — same contract as the
-            // blocking action's top-level drain. Runs after the active
-            // transaction is restored so recomputes open fresh top-level
-            // actions instead of nesting under a terminal root.
-            if (priorActive == null) v.internalDrainPostCommitTasks()
         }
+    } finally {
+        serializer?.blockingRelease()
+        // Top-level exit for this store: drain deferred work (derived recomputes)
+        // queued during the frame. Runs after BOTH the transaction lock and the
+        // serializer are released — a recompute opens a fresh blocking action,
+        // which would otherwise contend with locks this frame still holds.
+        if (openedTopLevel) v.internalDrainPostCommitTasks()
     }
 }
 

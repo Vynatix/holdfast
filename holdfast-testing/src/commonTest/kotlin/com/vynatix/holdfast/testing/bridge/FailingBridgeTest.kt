@@ -1,8 +1,7 @@
 package com.vynatix.holdfast.testing.bridge
 
 import com.vynatix.holdfast.Store
-import com.vynatix.holdfast.TransactionException
-import com.vynatix.holdfast.testing.matcher.shouldBeError
+import com.vynatix.holdfast.testing.matcher.shouldBeSuccess
 import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -59,26 +58,27 @@ class FailingBridgeTest {
     }
 
     @Test
-    fun integrationPublishFailureSurfacesAsTransactionError() =
+    fun integrationPublishFailureIsReportedWithoutTearingTheCommit() =
         storeTest {
             val cause = IllegalStateException("kv unreachable")
             val bridge = FailingBridge<Int>(initial = 0, failOn = FailingBridge.FailureMode.Publish, cause = cause)
+            val reported = mutableListOf<Throwable>()
 
-            val ctr =
-                track(
-                    CounterVault().also { v ->
-                        v { count bridge bridge }
-                    },
-                )
+            val vault =
+                CounterVault().also { v ->
+                    v.uncaughtObserverHandler = { reported += it }
+                    v { count bridge bridge }
+                }
+            val ctr = track(vault)
 
-            // The bridge throws during commit-phase publish; store wraps the
-            // throw in TransactionException ("Commit failed") and surfaces it as
-            // a TransactionResult.Error. The transaction status is Failed (not
-            // RolledBack — it's a commit-time error, past the body-throw rollback
-            // path), so we use shouldBeError rather than shouldRollbackWith.
+            // A bridge is external sync, not a transaction participant. Its
+            // publish runs in post-commit fanout, after every state in the
+            // transaction is already applied, so a throw there is reported
+            // through `uncaughtObserverHandler` and cannot fail the commit or
+            // tear it part-way. See CommitAtomicityTest in :holdfast.
             val result = ctr.action { count mutate 1 }
-            val err = result.shouldBeError<TransactionException>()
-            // The original publish failure is the cause of the wrapping exception.
-            assertSame(cause, err.exception.cause)
+            result.shouldBeSuccess()
+            assertEquals(1, vault.count.value, "the committed value stands even though the publish failed")
+            assertSame(cause, reported.single(), "the publish failure is surfaced, not swallowed")
         }
 }

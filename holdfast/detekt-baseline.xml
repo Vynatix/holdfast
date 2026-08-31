@@ -14,6 +14,6 @@
     <ID>TooGenericExceptionCaught:Middleware.kt:Middleware$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:MutableState.kt:MutableState$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:Store.kt:Store$e: Throwable</ID>
-    <ID>TooGenericExceptionCaught:Transaction.kt:Transaction$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Transaction.kt:Transaction$e: Throwable</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -166,8 +166,8 @@ abstract class Store<Self : Store<Self>> {
         // (under the lock) finishes before we reach into shared structures.
         transactionLock.withLock {
             _activeTransaction = null
-            postCommitTasks.clear()
         }
+        postCommitLock.withLock { postCommitTasks.clear() }
         // Snapshot the property map under its lock, then call shutdownSilently outside
         // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
         // locks, and we don't want to invert ordering.
@@ -285,8 +285,12 @@ abstract class Store<Self : Store<Self>> {
      * recompute actions out of the parent's commit loop — this avoids re-entering
      * `pendingWrites` while the parent is iterating it.
      *
-     * Owner-thread-confined; safe to read/write only on the owning thread.
+     * Guarded by [postCommitLock] rather than by the transaction lock: the drain
+     * deliberately runs OUTSIDE the serializer bracket (see [action]), so the
+     * queue is reachable from a thread that holds neither the store's
+     * `transactionLock` nor its `AsyncSerializer`.
      */
+    private val postCommitLock = StoreLock()
     private val postCommitTasks = mutableListOf<() -> Unit>()
 
     /**
@@ -303,7 +307,7 @@ abstract class Store<Self : Store<Self>> {
     @StoreInternalApi
     fun postCommit(task: () -> Unit) {
         if (_activeTransaction != null) {
-            postCommitTasks.add(task)
+            postCommitLock.withLock { postCommitTasks.add(task) }
         } else {
             task()
         }
@@ -313,9 +317,17 @@ abstract class Store<Self : Store<Self>> {
         // Drain to a local copy so any task that queues another doesn't perturb
         // our iteration. Tasks scheduled by tasks land in postCommitTasks and
         // are picked up by the next iteration of this loop.
-        while (postCommitTasks.isNotEmpty()) {
-            val drained = postCommitTasks.toList()
-            postCommitTasks.clear()
+        //
+        // Tasks run OUTSIDE postCommitLock: each one opens a fresh top-level
+        // action, which may queue further tasks.
+        while (true) {
+            val drained =
+                postCommitLock.withLock {
+                    if (postCommitTasks.isEmpty()) return
+                    val snapshot = postCommitTasks.toList()
+                    postCommitTasks.clear()
+                    snapshot
+                }
             drained.forEach { runCatching { it() } }
         }
     }
@@ -383,7 +395,13 @@ abstract class Store<Self : Store<Self>> {
         // interop check converts into a teaching exception.
         val frame = FrameMarkers.current()
         if (frame != null) checkFrameAllowsBlockingAction(frame)
-        val serializer = asyncSerializer
+        // A nested action is a savepoint of a transaction this thread already
+        // owns, so it is already inside the region the serializer brackets.
+        // Re-acquiring there is never correct and is actively fatal: the
+        // serializer is not reentrant, so the inner acquire either spins forever
+        // or throws a raw "mutex is already locked by the specified owner".
+        val nested = ownsActiveTransaction()
+        val serializer = if (nested) null else asyncSerializer
         serializer?.blockingAcquire()
         val result =
             try {
@@ -391,9 +409,39 @@ abstract class Store<Self : Store<Self>> {
             } finally {
                 serializer?.blockingRelease()
             }
+        // Deferred work (derived recomputes) opens FRESH top-level actions, so it
+        // must run only after this call's serializer bracket is released —
+        // draining inside it makes the recompute contend with a lock its own call
+        // stack holds. Same placement, and same reason, as suspendAtomic's drain.
+        if (!nested) drainPostCommitTasks()
         escalateInFrameError(frame, result)
         return result
     }
+
+    /**
+     * Whether this thread already owns the store's active transaction — i.e. this
+     * call is nested inside an `action`/`atomic` body running on this thread.
+     *
+     * A suspending body disqualifies the check outright. While [suspendingOwner]
+     * is set, the transaction's `ownerThreadId` records the thread that OPENED it,
+     * not a thread currently executing it: the body may be parked at a suspension
+     * point with its thread handed back to the pool. An unrelated blocking caller
+     * that happens to be scheduled onto that same pooled thread would otherwise
+     * look nested and skip the serializer, interleaving with the suspending body
+     * — the exact mutual exclusion the serializer exists to provide.
+     */
+    private fun ownsActiveTransaction(): Boolean {
+        val txn = _activeTransaction
+        return suspendingOwner == null && txn != null && txn.ownerThreadId == currentThreadId()
+    }
+
+    /**
+     * Internal hook for `atomic(...)`, which brackets each participant with the
+     * store's [AsyncSerializer] and needs the same nesting test [action] uses to
+     * decide whether this thread is already inside the serialized region.
+     */
+    @StoreInternalApi
+    fun internalOwnsActiveTransaction(): Boolean = ownsActiveTransaction()
 
     /**
      * Frame-entry gate for blocking [action]. Inside an active frame body:
@@ -481,9 +529,10 @@ abstract class Store<Self : Store<Self>> {
                 } finally {
                     _activeTransaction = parent
                 }
-            // Drain post-commit tasks only at top-level exit — nested actions inherit
-            // the parent's deferred queue and let it drain at the outermost boundary.
-            if (parent == null) drainPostCommitTasks()
+            // NOTE: post-commit tasks are NOT drained here. The drain runs in
+            // [action], after the serializer bracket is released — see the comment
+            // there. Nested actions inherit the parent's deferred queue and let it
+            // drain at the outermost boundary either way.
             outcome
         }
 

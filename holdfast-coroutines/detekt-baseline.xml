@@ -2,8 +2,9 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongMethod:SuspendAction.kt:@OptIn(ExperimentalUuidApi::class) suspend fun &lt;V : Store&lt;V>, R> V.suspendAction: TransactionResult&lt;R></ID>
+    <ID>LongMethod:SuspendAction.kt:@OptIn(ExperimentalUuidApi::class) private suspend fun &lt;V : Store&lt;V>, R> V.suspendActionUnderMutex: TransactionResult&lt;R></ID>
     <ID>LongMethod:SuspendAtomic.kt:@OptIn(ExperimentalUuidApi::class) @Suppress("LongParameterList") private suspend fun &lt;R> acquireAndRun: TransactionResult&lt;R></ID>
+    <ID>TooGenericExceptionCaught:AsyncSerializer.kt:e: Throwable</ID>
     <ID>MatchingDeclarationName:AsyncSerializer.kt:MutexSerializer : AsyncSerializer</ID>
     <ID>MatchingDeclarationName:SuspendingFileSystemKvStore.wasmJs.kt:SuspendingFileSystemKvStore : SuspendingKvStore</ID>
     <ID>MaxLineLength:StateFlows.kt:val</ID>

@@ -9,6 +9,7 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * AsyncSerializer impl backed by a coroutine [Mutex]. Blocking `action` callers
@@ -61,9 +62,9 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
  *
  * Identical to [Transaction.commit] for nested (savepoint) transactions —
  * pending writes merge into the parent's buffer. For a top-level transaction,
- * each pending write is applied via [MutableState.applyCommittedRaw] (replace
- * value + observer fanout, NO bridge publish), and the bridge publish is
- * dispatched separately:
+ * every pending write is applied to state first, then observers fan out via
+ * [MutableState.fanOutToObservers] (NO bridge publish), and the bridge publish
+ * is dispatched separately:
  *
  *  - If the bound bridge is a [SuspendingBridge], call its [SuspendingBridge.publishAwaited]
  *    directly — the surrounding `withContext(NonCancellable)` ensures the write
@@ -75,11 +76,15 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
  * Events are drained AFTER bridge publishes via suspending `emit` so
  * `BufferOverflow.SUSPEND` back-pressure is honored.
  *
- * Pending writes are pre-snapshotted before observer fanout so the suspend
- * call out of [Transaction.commitDispatching] does not run inside its
- * `pendingLock.withLock` block — `publishAwaited` is genuinely suspending and
- * could deadlock or cause re-entrant lock issues otherwise. The downside is
- * one extra map allocation; the upside is correctness.
+ * The publish queue is collected during fanout and drained after
+ * [Transaction.commitDispatching] returns, so the suspending `publishAwaited`
+ * never runs inside the transaction's `pendingLock` — it could otherwise
+ * deadlock or re-enter the lock.
+ *
+ * Publish failures are isolated per state and reported through
+ * [com.vynatix.holdfast.Store.uncaughtObserverHandler], matching the sync path:
+ * a bridge is external sync, so a failed write cannot undo values that are
+ * already committed, nor stop the remaining states from publishing.
  *
  * Shared between [suspendAction] and [suspendAtomic] so the commit-phase
  * ordering contract is single-sourced.
@@ -89,14 +94,15 @@ internal suspend fun suspendingCommit(txn: Transaction) {
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
     val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
     txn.commitDispatching(
-        applyTopLevel = { state, value ->
-            val ms = state as MutableState<Any>
-            // Step 1+2: replace + observers (no bridge publish yet).
-            // applyCommittedRaw returns false when the state is `distinct = true`
-            // and the new value equals the current — observer fanout was skipped
-            // by dedup. Mirror sync `applyCommitted`'s contract: skip the bridge
-            // publish in that case too.
-            if (ms.applyCommittedRaw(value)) publishQueue += ms to value
+        fanout = { committed ->
+            // Step 2: observers for every state whose value actually changed.
+            // Deduped `distinct` states never reach here, so they correctly skip
+            // the bridge publish too.
+            committed.forEach { (state, value) ->
+                val ms = state as MutableState<Any>
+                ms.fanOutToObservers(value)
+                publishQueue += ms to value
+            }
         },
         drainEvents = { snapshot ->
             eventsQueue.addAll(snapshot)
@@ -106,10 +112,16 @@ internal suspend fun suspendingCommit(txn: Transaction) {
     // every other Bridge falls back to fire-and-forget Bridge.publish.
     for ((ms, value) in publishQueue) {
         val br = ms.bridge ?: continue
-        if (br is SuspendingBridge<*>) {
-            (br as SuspendingBridge<Any>).publishAwaited(value)
-        } else {
-            br.publish(value)
+        try {
+            if (br is SuspendingBridge<*>) {
+                (br as SuspendingBridge<Any>).publishAwaited(value)
+            } else {
+                br.publish(value)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            ms.owningStore.uncaughtObserverHandler?.invoke(e)
         }
     }
     // Step 3b: events drain via suspending emit, honoring SUSPEND back-pressure.

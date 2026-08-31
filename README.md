@@ -160,24 +160,38 @@ pin to exact versions. SemVer guarantees apply once 1.0 is declared.
 
 ## Known issues
 
-Three open hazards in 0.1.0, named honestly. All three fixes land in 0.3.0 —
-see [`ROADMAP.md`](ROADMAP.md).
+Open hazards in the current tree, named honestly. See [`ROADMAP.md`](ROADMAP.md)
+for when each lands.
 
-- **Mixing blocking `action { }` with `suspendAction { }` on the same store can
-  livelock.** The blocking action busy-spins waiting for a lock the suspending
-  action holds across a suspension point, and neither side progresses.
-  *Workaround:* use only `suspendAction` (or only `action`) per store. 0.3.0
-  ships a fail-fast guard that turns the livelock into an immediate exception.
+- **A blocking `action { }` called from inside a `suspendAction { }` body on the
+  same store still spins.** The serializer is held by the suspending body and the
+  blocking call waits for it. *Workaround:* inside a suspending body use
+  `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
+  fail-fast guard is next in 0.2.0. Other combinations that used to hang —
+  `suspendAction` with a `derived()` state, nested `action` on a
+  coroutine-touched store, and blocking `atomic()` racing a `suspendAction` — are
+  fixed.
+
+- **Writing to a second store from an observer can deadlock.** `action` holds the
+  store's transaction lock across the whole commit fanout, so two stores whose
+  observers write to each other block on each other's locks — an ordering
+  `atomic`'s deadlock-safe `lockOrderKey` never sees, because it does not run
+  through `atomic`. *Workaround:* from an observer, write to another store via
+  `Store.scope` rather than inline.
+
 - **Standalone `state.update { }` outside an action is not atomic.** It is a
-  read-modify-write, so concurrent callers overwrite each other — measured,
-  about 50% of 10,000 concurrent increments are lost. *Workaround:* wrap the
-  update in `action { }`, which serializes it under the store's transaction
-  lock. Standalone `update` becomes atomic in 0.3.0.
+  read-modify-write, so concurrent callers overwrite each other — measured, about
+  50% of 10,000 concurrent increments are lost. *Workaround:* wrap the update in
+  `action { }`, which serializes it under the store's transaction lock.
+
 - **`store { }` (plain invoke) does not open a transaction — `store action { }`
   does.** Writes inside a bare invoke commit one by one, with observers firing
   between them, so observers can see intermediate states. *Workaround:* use
-  `store action { }` for any mutation. In 0.3.0 mutating inside a bare invoke
-  fails loudly instead of silently committing piecemeal.
+  `store action { }` for any mutation.
+
+- **Nothing is published to Maven Central yet.** The badge and the install block
+  above describe the intended coordinates, not a resolvable artifact — build from
+  source until 0.3.0 ships the release pipeline.
 
 ## Contributing
 

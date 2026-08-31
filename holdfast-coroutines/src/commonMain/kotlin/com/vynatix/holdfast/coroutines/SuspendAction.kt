@@ -73,7 +73,28 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
     val serializer = ensureSerializer(this)
     val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
 
-    return serializer.mutex.withLock(owner) {
+    return try {
+        suspendActionUnderMutex(serializer, owner, body)
+    } finally {
+        // Deferred post-commit work (derived recomputes) drains AFTER the mutex
+        // releases — recomputes run blocking `action`s, which would spin forever
+        // on a mutex this call still holds. Same placement, and same reason, as
+        // suspendAtomic's drain. `finally`, so the cancellation path drains too.
+        internalDrainPostCommitTasks()
+    }
+}
+
+/**
+ * The mutex-bracketed body of [suspendAction], split out so the post-commit
+ * drain can sit strictly outside the serializer's critical section.
+ */
+@OptIn(ExperimentalUuidApi::class)
+private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
+    serializer: MutexSerializer,
+    owner: Any,
+    body: suspend V.() -> R,
+): TransactionResult<R> =
+    serializer.mutex.withLock(owner) {
         val txn =
             Transaction.createForExternal(
                 id = body::class.simpleName ?: Uuid.random().toString(),
@@ -174,11 +195,9 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
             } finally {
                 internalSetActiveTransaction(null)
                 suspendingOwner = null
-                internalDrainPostCommitTasks()
             }
         outcome
     }
-}
 
 /**
  * Frame-entry gate for [suspendAction]. Returns `true` when this store is a
