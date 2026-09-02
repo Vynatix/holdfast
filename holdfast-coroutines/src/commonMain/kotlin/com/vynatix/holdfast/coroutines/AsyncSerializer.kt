@@ -17,23 +17,29 @@ import kotlin.coroutines.cancellation.CancellationException
  * callers use the natural `Mutex.lock(owner)` suspending wait. Shared between
  * the two suspending entry points so a suspendAtomic and a suspendAction on
  * the same store block each other.
+ *
+ * The blocking bracket deliberately passes NO owner token. kotlinx's
+ * `Mutex.tryLock(owner)` does not return `false` when the mutex is already held
+ * by that same token — it throws `IllegalStateException("This mutex is already
+ * locked by the specified owner")`. A single shared token for every blocking
+ * caller therefore made the second of two concurrent blocking `action`s (or
+ * `atomic` frames) on a store that had ever run a `suspendAction` throw that
+ * raw error out of `Store.action`, before its `try`, instead of waiting its
+ * turn. Without a token, `tryLock()` simply reports "held" and the caller keeps
+ * spinning until the holder — coroutine or thread — releases.
  */
 internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
 
     override fun blockingAcquire() {
-        while (!mutex.tryLock(SPIN_OWNER)) {
+        while (!mutex.tryLock()) {
             com.vynatix.holdfast.platform
                 .threadYield()
         }
     }
 
     override fun blockingRelease() {
-        runCatching { mutex.unlock(SPIN_OWNER) }
-    }
-
-    private companion object {
-        private val SPIN_OWNER = Any()
+        runCatching { mutex.unlock() }
     }
 }
 

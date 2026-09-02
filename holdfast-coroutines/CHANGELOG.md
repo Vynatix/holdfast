@@ -31,6 +31,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Concurrent blocking callers on a coroutine-touched store no longer crash.**
+  `MutexSerializer.blockingAcquire` spun on `Mutex.tryLock(owner)` with one
+  shared owner token for every blocking caller; kotlinx's `tryLock(owner)`
+  throws `IllegalStateException("This mutex is already locked by the specified
+  owner")` for a same-token re-attempt instead of returning `false`, so the
+  second of two concurrent blocking `action`s or `atomic` frames on any store
+  that had ever run a `suspendAction` escaped `Store.action` with that raw
+  exception (before its `try` — not even a `TransactionResult.Error`). The
+  blocking bracket now takes the mutex without an owner token and simply waits
+  its turn. Found by the new `jvmAndAndroidHostTest` stress suite
+  (`SerializerContentionRegressionTest`).
+
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
   outer root; a failed nested frame discards only its own writes.
