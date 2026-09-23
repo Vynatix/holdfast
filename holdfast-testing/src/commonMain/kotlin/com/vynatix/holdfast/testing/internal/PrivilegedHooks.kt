@@ -2,11 +2,13 @@
 
 package com.vynatix.holdfast.testing.internal
 
+import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.platform.currentThreadId
+import kotlin.time.Clock
 
 /**
  * Centralises every `@StoreInternalApi` access used by the testing module so the
@@ -14,11 +16,14 @@ import com.vynatix.holdfast.platform.currentThreadId
  * for these helpers rather than opt in directly — that way new dependencies on
  * store internals are visible at PR time.
  *
- * Two clusters of hooks live here:
+ * Three clusters of hooks live here:
  *  - **Recorder reads** — [snapshotCommittedStateValues] and [modifiedStates]
  *    let the timeline recorder observe committed values from inside a
  *    middleware hook without re-entering the read-your-own-writes overlay.
  *    Strict subset of what `:holdfast-coroutines.SuspendAction` uses.
+ *  - **Clock binding** — [boundClock] and [restoreBoundClock] let a handle
+ *    remember a store's raw clock binding at track time and put it back at
+ *    teardown.
  *  - **Manufactured-transaction hooks** — [openTransaction], [commitOpenTransaction],
  *    and [rollbackOpenTransaction] manufacture a transaction outside the
  *    blocking `action` path so a test can hold a transaction open across
@@ -85,6 +90,32 @@ internal object PrivilegedHooks {
      * thread that called [com.vynatix.holdfast.Store.action]).
      */
     fun modifiedStates(transaction: Transaction): Set<State<*>> = transaction.modifiedStates
+
+    /**
+     * The clock bound on [store] via `Store.bindClock`, or `null` when none is.
+     * Reads the raw binding ([Store.internalBoundClock]), not [Store.clock]: a
+     * subclass override of `clock` is not a binding, and restoring it as one
+     * would pin the override's current clock onto the store.
+     */
+    fun boundClock(store: Store<*>): Clock? = store.internalBoundClock
+
+    /**
+     * Rebind [store]'s clock to [clock] (a value [boundClock] returned earlier)
+     * if the binding has changed since. Skips a disposed store — `bindClock`
+     * throws on one, and a disposed store has no next test to leak into — and
+     * swallows the throw of a store disposed concurrently, so teardown stays
+     * robust. It must never throw: it also runs as the test job's completion
+     * handler (see `StoreTestScope`), possibly a second time for the same
+     * handle, where the identity check makes it a no-op.
+     */
+    @OptIn(ExperimentalStoreApi::class)
+    fun restoreBoundClock(
+        store: Store<*>,
+        clock: Clock?,
+    ) {
+        if (store.isDisposed || store.internalBoundClock === clock) return
+        runCatching { store.bindClock(clock) }
+    }
 
     /**
      * Manufacture a transaction on [store] and run [body] against it without

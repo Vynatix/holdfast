@@ -130,6 +130,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 - **`atomic(vararg stores, policy) { }`** — cross-store transaction frames: all enrolled stores commit or roll back together (basic usage in [Cross-store transactions](#cross-store-transactions) above). Per-store middleware fires for the frame with a shared `Transaction.frameId`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
+- **`Store.clock` / `bindClock(clock)`** *(experimental)* — time as an input: store code reads `clock.now()`, and a test pins it with a fixed `kotlin.time.Clock` (subclass getter override → bound clock → `Clock.System`). `storeTest { }` restores each tracked store's binding to its value at first track, so track before binding.
 
 ### `:holdfast-coroutines` extension
 
@@ -143,7 +144,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 
 ### `:holdfast-testing` extension
 
-- **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
+- **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions. Teardown puts each tracked store's clock binding (`bindClock`) back to what it was when the store was first tracked, including bindings made by the test's un-joined child coroutines, so a test clock does not leak into the next test through a singleton store. Track the store before binding its clock, with `track(store)` or an auto-tracking call such as `store.read { }` (a bare `store.action { }` resolves to the `Store` member and does not track): a clock bound before the first track, or on a store the test never tracks, is kept. Work in `backgroundScope` or on scopes outside the test is not waited for, so join it before the body ends.
 
 ### `:holdfast-hallmark` + `:holdfast-hallmark-coroutines`
 

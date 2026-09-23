@@ -11,8 +11,14 @@ import com.vynatix.holdfast.testing.StoreHandle
  * Implemented as a linear-search list rather than a hash map because KMP doesn't
  * expose a portable identity hash code. Tests typically track 1–3 vaults, so the
  * O(n) lookup is irrelevant in practice.
+ *
+ * [onCreate] runs once for each handle this registry creates, right after it is
+ * registered; [com.vynatix.holdfast.testing.StoreTestScope] uses it to schedule
+ * the handle's end-of-test clock restore.
  */
-internal class HandleRegistry {
+internal class HandleRegistry(
+    private val onCreate: (StoreHandle<*>) -> Unit,
+) {
     private val entries: MutableList<Entry<*>> = mutableListOf()
 
     fun <V : Store<V>> getOrCreate(
@@ -26,6 +32,7 @@ internal class HandleRegistry {
         }
         val handle = StoreHandle(store, capture)
         entries.add(Entry(store, handle))
+        onCreate(handle)
         return handle
     }
 

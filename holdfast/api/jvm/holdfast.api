@@ -200,6 +200,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
 	public fun <init> ()V
 	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public final fun bindClock (Lkotlin/time/Clock;)V
 	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
 	public final fun bridge (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Bridge;)V
 	public final fun clearMiddleware ()V
@@ -207,6 +208,8 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun dispose ()V
 	public final fun getActiveTransaction ()Lcom/vynatix/holdfast/Transaction;
 	public final fun getAsyncSerializer ()Lcom/vynatix/holdfast/Store$AsyncSerializer;
+	public fun getClock ()Lkotlin/time/Clock;
+	public final fun getInternalBoundClock ()Lkotlin/time/Clock;
 	public final fun getLockOrderKey ()J
 	public final fun getProperties ()Ljava/util/Map;
 	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;

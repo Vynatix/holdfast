@@ -147,6 +147,8 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
 
     final val activeTransaction // com.vynatix.holdfast/Store.activeTransaction|{}activeTransaction[0]
         final fun <get-activeTransaction>(): com.vynatix.holdfast/Transaction? // com.vynatix.holdfast/Store.activeTransaction.<get-activeTransaction>|<get-activeTransaction>(){}[0]
+    final val internalBoundClock // com.vynatix.holdfast/Store.internalBoundClock|{}internalBoundClock[0]
+        final fun <get-internalBoundClock>(): kotlin.time/Clock? // com.vynatix.holdfast/Store.internalBoundClock.<get-internalBoundClock>|<get-internalBoundClock>(){}[0]
     final val isDisposed // com.vynatix.holdfast/Store.isDisposed|{}isDisposed[0]
         final fun <get-isDisposed>(): kotlin/Boolean // com.vynatix.holdfast/Store.isDisposed.<get-isDisposed>|<get-isDisposed>(){}[0]
     final val lockOrderKey // com.vynatix.holdfast/Store.lockOrderKey|{}lockOrderKey[0]
@@ -155,6 +157,8 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
         final fun <get-properties>(): kotlin.collections/Map<kotlin/String, com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Store.properties.<get-properties>|<get-properties>(){}[0]
     final val selfForExternal // com.vynatix.holdfast/Store.selfForExternal|{}selfForExternal[0]
         final fun <get-selfForExternal>(): #A // com.vynatix.holdfast/Store.selfForExternal.<get-selfForExternal>|<get-selfForExternal>(){}[0]
+    open val clock // com.vynatix.holdfast/Store.clock|{}clock[0]
+        open fun <get-clock>(): kotlin.time/Clock // com.vynatix.holdfast/Store.clock.<get-clock>|<get-clock>(){}[0]
     open val scope // com.vynatix.holdfast/Store.scope|{}scope[0]
         open fun <get-scope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast/Store.scope.<get-scope>|<get-scope>(){}[0]
 
@@ -177,6 +181,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Store.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast/Store.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/Store.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
+    final fun bindClock(kotlin.time/Clock?) // com.vynatix.holdfast/Store.bindClock|bindClock(kotlin.time.Clock?){}[0]
     final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.holdfast/Store.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
     final fun clearMiddleware() // com.vynatix.holdfast/Store.clearMiddleware|clearMiddleware(){}[0]
     final fun clearStates() // com.vynatix.holdfast/Store.clearStates|clearStates(){}[0]

@@ -157,7 +157,44 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   then converges. For a read-your-writes value, read the sources or use
   `computed`.
 
+- **BREAKING (source): a `Store` subclass property named `clock` no longer
+  compiles.** It collides with the new `Store.clock` ("'clock' hides member of
+  supertype 'Store' and needs an 'override' modifier"), whatever its type and
+  visibility, including `val clock by state { … }`. Rename it, or `override` it
+  as a getter with `@OptIn(ExperimentalStoreApi::class)`. Inside a `Store`
+  subclass's body (initializers, `state { … }` lambdas, member functions) and
+  inside a lambda with a store receiver (`store.action { … }`, `store { … }`),
+  an unqualified `clock` that resolved to a companion-object, enclosing-class or
+  top-level declaration now resolves to `Store.clock`: a compile error without
+  the opt-in, a silent switch with it. See
+  [MIGRATING.md](../MIGRATING.md#source-break-storeclock-030).
+
 ### Added
+
+- **`Store.clock` and `Store.bindClock(clock)`** (`@ExperimentalStoreApi`,
+  issue #20 R10) — time as an input. Store code reads `clock.now()` instead of
+  `Clock.System.now()`, so a timestamp stamped in an action, or an initial value
+  computed from the time, is deterministic under a fixed test clock. `clock`
+  resolves like `scope`: a subclass getter override, then the clock bound with
+  `bindClock`, then `Clock.System`. `bindClock(null)` unbinds; `bindClock` throws
+  on a disposed store, while reading `clock` never throws. State initializers
+  read it lazily, at the state's first read, so bind before that read. The
+  library's own timestamps (`Transaction.endTime`, `TimingMiddleware`,
+  `ProfilingMiddleware`) keep using the system clocks. `Store.internalBoundClock`
+  (`@StoreInternalApi`) exposes the raw binding for the test harness.
+
+- **`:holdfast-testing`: `storeTest { }` teardown restores the clock binding of
+  every tracked store.** Tracking a store (with `track`, or by an
+  auto-registering extension such as `store.read { }`; a bare
+  `store.action { }` resolves to the `Store` member and does not track)
+  remembers its `bindClock` binding. Teardown puts it back, also when the body
+  failed, and again once the test's un-joined child coroutines have finished.
+  A clock bound after tracking therefore does not leak into the next test
+  through a singleton store. Bind after tracking: a clock bound before the store
+  is first tracked counts as the pre-test binding and is kept, and a store the
+  test never tracks is not restored. Work in `backgroundScope` or on scopes
+  outside the test is not waited for, so join it before the body ends. A store
+  disposed during the test is skipped.
 
 - **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
   non-blocking acquire for the store's non-blocking paths (the `derived`

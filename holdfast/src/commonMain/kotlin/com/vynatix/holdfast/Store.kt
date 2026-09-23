@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -125,6 +126,81 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
+     * Volatile backing field for the clock bound via [bindClock]. `null` until the
+     * first `bindClock` call, and again after `bindClock(null)`. Read by the default
+     * getter of [clock] as resolution level 2 (between a subclass override and
+     * [Clock.System]).
+     *
+     * Marked `@Volatile` for the same reason as [boundScope]: the binding is racy
+     * by contract (last writer wins), but a write is visible to every reader.
+     */
+    @kotlin.concurrent.Volatile
+    private var boundClock: Clock? = null
+
+    /**
+     * The clock this store reads time through. Time is an input: a store that
+     * stamps `clock.now()` in an action, or computes an initial value from it, is
+     * deterministic under a fixed test clock. Resolution order
+     * (per-store override → bound → system):
+     *
+     *  1. **Per-store** — a subclass may `override val clock: Clock`. Use a getter,
+     *     not a `val` initializer, for the same reason as [scope]: a property
+     *     initialized before the override's backing field (for example one that
+     *     reads a state whose initializer reads `clock`) sees it `null`. A subclass
+     *     override sits ABOVE this property in the resolution chain, so it beats any
+     *     [bindClock] call — including a test's. Prefer [bindClock] for pinning time
+     *     in tests.
+     *  2. **Bound** — the clock passed to the most recent [bindClock] call on this
+     *     store instance, if any. Rebindable; `bindClock(null)` unbinds.
+     *  3. **System** — [Clock.System].
+     *
+     * State initializers run lazily, on the first read of their delegate, so an
+     * initializer that reads `clock` sees the resolution in force at that moment:
+     * bind before anything first reads such a state (for a singleton store, before
+     * anything touches it). A materialized state keeps its value; rebinding the
+     * clock never re-runs an initializer.
+     *
+     * The library's own timestamps ([Transaction.endTime], `TimingMiddleware`,
+     * `ProfilingMiddleware`) do not read this clock — it is an input for store code
+     * only. Reading it never throws, even after [dispose].
+     */
+    @ExperimentalStoreApi
+    open val clock: Clock
+        get() = boundClock ?: Clock.System
+
+    /**
+     * Bind this store to [clock] for resolution level 2 (see [clock]), or unbind it
+     * with `null` so [clock] falls back to [Clock.System]. After this call,
+     * `store.clock` returns [clock] (unless a subclass has its own
+     * `override val clock`, which beats the binding). Calling [bindClock] again
+     * replaces the binding.
+     *
+     * Thread safety: the binding field is `@Volatile`; the latest write becomes
+     * visible to all readers, and concurrent callers race (last write wins). Bind
+     * once at app init, or once per test. Inside `storeTest { }`, a clock bound on a
+     * store after the test tracks it is restored to its track-time binding at
+     * teardown; a store the test never tracks keeps whatever it was bound to.
+     *
+     * @throws IllegalStateException if the store is disposed.
+     */
+    @ExperimentalStoreApi
+    fun bindClock(clock: Clock?) {
+        checkNotDisposed()
+        boundClock = clock
+    }
+
+    /**
+     * The clock bound via [bindClock], or `null` when none is — the raw binding,
+     * ignoring any subclass override of [clock]. `:holdfast-testing` records it
+     * when a test first tracks a store and rebinds it at teardown, so a clock bound
+     * after tracking does not leak into the next test through a long-lived
+     * (singleton) store. Reading it never throws, even after [dispose].
+     */
+    @StoreInternalApi
+    val internalBoundClock: Clock?
+        get() = boundClock
+
+    /**
      * Atomic disposed flag. CAS'd to `true` exactly once on the first [dispose] call;
      * subsequent calls observe `true` and return without throwing (idempotent contract).
      * Every public entry point reads this — when `true`, they throw
@@ -152,6 +228,7 @@ abstract class Store<Self : Store<Self>> {
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
+     *  - The bound clock is kept, and reading [clock] still works; [bindClock] throws.
      *
      * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
