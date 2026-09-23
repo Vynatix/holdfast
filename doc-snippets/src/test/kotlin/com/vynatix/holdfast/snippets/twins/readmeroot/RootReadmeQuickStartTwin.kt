@@ -19,7 +19,7 @@ class RootReadmeQuickStartTwin {
     @Test
     fun quickStartExecutesWithClaimedOutput() {
         val printed = capturePrintln {
-            // DOC-SNIPPET README.md#0
+            // DOC-SNIPPET README.md#2
             class CounterStore : Store<CounterStore>() {
                 val count by state { 0 }
                 val label by state { "init" }

@@ -13,7 +13,7 @@ class RootReadmeCrossStoreTwin {
     @Test
     fun crossStoreTransferExecutesWithClaimedOutput() {
         val printed = capturePrintln {
-            // DOC-SNIPPET README.md#1
+            // DOC-SNIPPET README.md#3
             class AccountStore(initial: Long = 0) : Store<AccountStore>() {
                 val balance by state { initial }
             }

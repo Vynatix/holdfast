@@ -6,7 +6,7 @@
 # when those issues land.
 
 # --- root README ---
-README.md#2: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
+README.md#4: Gradle install snippet (settings.gradle.kts + build.gradle.kts fragments), not a Kotlin source file
 
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders

@@ -12,6 +12,63 @@ is a **transaction** — mutations buffer, observers see only committed values,
 failed transactions never leak, and the type system enforces that a state
 class anchors itself to its own type.
 
+## An invariant enforced by a comment
+
+Grep your codebase for `must be updated together` or `keep in sync`. Every
+hit is an invariant enforced by a comment, and this is what usually lives
+under it:
+
+```kotlin
+// balance and history must be updated together
+try {
+    accounts.debit(amount)
+    history.append(entry)
+} catch (e: Exception) {
+    accounts.refund(amount)
+}
+```
+
+A transaction with a hand-written rollback. The rollback can fail too, and
+the screen already showed the debit before the refund landed. The same
+transfer in Holdfast, with `accounts` and `history` as two stores that own a
+`balance` and an `entries` state:
+
+```kotlin
+val result = atomic(accounts, history) {
+    accounts.action { balance update { it - amount } }
+    history.action { entries update { it + entry } }
+    "transferred"
+}
+```
+
+Two stores, one frame. Writes buffer in memory; both stores commit, or
+neither does. Observers fire once, with committed values. Persistence
+bridges publish only on commit. Participant locks are taken in one global
+order, so frames cannot deadlock each other. And `result` is a value —
+`TransactionResult.Success("transferred")` or `TransactionResult.Error` —
+not an exception somebody forgot to catch.
+
+Six months later someone adds a badge counter inside that transfer and
+forgets to enroll its store. The frame refuses instead of committing the
+badge on its own, and this is the message it throws, verbatim:
+
+```
+UnenrolledStoreException: BadgeStore was mutated (via action) inside
+atomic(AccountStore, HistoryStore) but is not enrolled. Its writes would
+commit independently and would NOT roll back with the frame.
+Fix: add BadgeStore to the atomic(...) participant list.
+(Mid-frame enrollment is not possible — it would acquire a lock outside the
+sorted global order.) To deliberately run an independent side-transaction,
+pass policy = FramePolicy.AllowUnenrolled.
+```
+
+Enforcement happens at runtime, so the message has to do the compiler's job:
+cause, consequence, exact fix.
+
+## Quick start
+
+A single store has the same transaction boundary:
+
 ```kotlin
 class CounterStore : Store<CounterStore>() {
     val count by state { 0 }
@@ -68,11 +125,29 @@ when (transfer) {
 ```
 
 The frame is enforced, not advisory: writing to a store you forgot to enroll
-throws instead of committing independently, a failed inner action aborts the
-whole frame, and blocking/suspending misuse fails fast with a teaching
-exception instead of deadlocking. See the
-[GUIDE's cross-store chapter](holdfast/GUIDE.md#15-cross-store-transactions)
+throws the `UnenrolledStoreException` shown above instead of committing
+independently, a failed inner action aborts the whole frame, and
+blocking/suspending misuse fails fast with a teaching exception instead of
+deadlocking. Both enforcements have per-call-site opt-outs via `FramePolicy`.
+See the [GUIDE's cross-store chapter](holdfast/GUIDE.md#15-cross-store-transactions)
 for the full consistency contract.
+
+## Where it fits
+
+| If your state is… | Reach for |
+|---|---|
+| One value | `StateFlow`. Holdfast's unit is the transaction across several cells; a single cell does not need one. |
+| Several fields that change together | `store action { … }` — one commit, one observer fanout, all-or-nothing rollback. |
+| Two stores that must agree | `atomic(a, b) { … }` (blocking) or `suspendAtomic` (`:holdfast-coroutines`) — cross-store commit with enforced enrollment. |
+| Under test | `storeTest { }` (`:holdfast-testing`) records a timeline of store events with ordered matchers, and fails at teardown if a `TransactionResult.Error` returned through a tracked handle was never asserted on. |
+
+Adoption does not start with a rewrite: move one screen's fields into one
+store, expose them with `asStateFlow` (`:holdfast-coroutines`), and the
+Compose code collecting that flow never finds out. Core depends only on
+`kotlinx-coroutines-core` and `kotlinx-atomicfu`, has about 50 public types,
+and no Compose or Android framework dependencies. If what you want is a
+serializable action history for replay, a Redux-style library is the better
+fit — see [positioning](holdfast/README.md#positioning).
 
 ## Modules
 
@@ -111,6 +186,15 @@ is **experimental** with these limitations:
 
 ## Install
 
+**Not on Maven Central yet.** The coordinates below are the intended ones;
+`0.3.0` is the release that ships the publishing pipeline (see
+[`ROADMAP.md`](ROADMAP.md)). Until then, build from source and add
+`mavenLocal()` to your repositories:
+
+```sh
+./gradlew publishToMavenLocal -Pholdfast.version=0.1.0
+```
+
 ```kotlin
 // settings.gradle.kts
 dependencyResolutionManagement {
@@ -138,6 +222,7 @@ published klib/metadata format, and the JVM/Android class files target
 - [`holdfast/README.md`](holdfast/README.md) — full guide: mental model, transactions, state, middleware, positioning vs. other state-management libraries.
 - [`holdfast/GUIDE.md`](holdfast/GUIDE.md) — long-form tutorial with decision charts, feature differentiation tables, technique cookbook, and API reference.
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — release history (with internal pre-rename design archive preserved).
+- Every fenced Kotlin block in this README, [`holdfast/README.md`](holdfast/README.md), [`holdfast/GUIDE.md`](holdfast/GUIDE.md) and the coroutines/compose module READMEs is either compiled by `./gradlew check` (the `:doc-snippets` module) or listed with a reason in [`doc-snippets/snippet-exclusions.txt`](doc-snippets/snippet-exclusions.txt). The four examples above are also executed: their printed output, final balances, and the quoted exception message are asserted.
 
 ## Companion library
 
