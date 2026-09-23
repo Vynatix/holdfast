@@ -85,6 +85,11 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
      * Throws [IllegalStateException] if called outside `action` /
      * `suspendAction`. Events MUST be transactional: a non-transactional emit
      * could not honor the rollback-discards-events guarantee.
+     *
+     * Also throws [IllegalStateException] when the active transaction has
+     * already applied its writes — an observer emitting on this store while
+     * this store's commit is notifying it. The event would never be drained;
+     * thrown out of an observer, it reaches [uncaughtObserverHandler].
      */
     final override fun emit(event: E) {
         val txn =
@@ -92,7 +97,7 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
                 "emit(event) called outside of an action / suspendAction. " +
                     "Events must be staged inside a transaction so rollback can discard them.",
             )
-        txn.stagePendingEvent(_events, event)
+        txn.stageEmittedEvent(this, _events, event)
     }
 
     /**

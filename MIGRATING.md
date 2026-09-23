@@ -96,6 +96,64 @@ reference where you meant it: `Companion.clock` (or `SessionStore.clock`),
 
 `bindClock` throws on a disposed store. Reading `clock` never throws.
 
+## Behavior change: writes from an observer into its own committing store (0.4.0)
+
+An effect (or `observe` callback, bridge publish, event collector) runs during
+its store's commit fanout — after the transaction has applied its writes, while
+it is still the store's active transaction. A write back into that store from
+there used to be staged into the finished transaction and silently lost. It is
+now refused (issue #20):
+
+- `mutate`, `update` and `emit` on that store throw `IllegalStateException`
+  ("Cannot write S.x: S's transaction '…' has already applied its writes …").
+  Thrown out of an effect, it reaches `uncaughtObserverHandler` — or the default
+  log below.
+- A nested `action { }` or `atomic(...) { }` on that store returns
+  `TransactionResult.Error` carrying that exception, without running its body.
+  Check that result (e.g. `.getOrThrow()`, which rethrows into
+  `uncaughtObserverHandler`): an effect that ignores it still drops the write,
+  and nothing is logged.
+
+If a test or an app relied on such a write "working", it never did: the value
+never committed. Pick one of:
+
+- **Write in the action itself.** If a write to `x` should always follow a
+  write to `y`, do both in the same `action`.
+- **Derive the value.** `computed { }` recomputes on read; `derived(...)`
+  recomputes in its own transaction after each source commit.
+- **Run a follow-up action after the commit**: a follow-up `action { }` from
+  another thread, or one launched on a dispatcher that does not run it inline,
+  checking the result —
+  `store.scope.launch(Dispatchers.Default) { store action { … }.getOrThrow() }`.
+  On `Dispatchers.Unconfined`, or `Dispatchers.Main.immediate` when the commit
+  already runs on the main thread (a store bound to `viewModelScope`, say), the
+  launched body runs at once, inside the commit's fanout, and is refused like
+  any nested action; the launch alone drops that `Error`, and `.getOrThrow()`
+  turns it into a coroutine failure that reaches the scope's exception handler.
+  Another thread's `action` is not refused: it waits for the
+  store and then commits normally. Use `action` there rather than a bare
+  `mutate`/`update`: while a `suspendAction`/`suspendAtomic` holds the store, a
+  bare write from any thread stages into its transaction — before that
+  transaction applies it silently joins it, after it throws ("Cannot write S.x:
+  a suspendAction or suspendAtomic holds S …") until the suspending call
+  returns.
+
+Writes to a *different* store from an effect keep working (subject to the
+cross-store lock-ordering caveat in the README's known issues).
+
+## Behavior change: post-commit failures are logged by default (0.4.0)
+
+With no `Store.uncaughtObserverHandler` set, a throwing effect, bridge publish
+(`Bridge.publish` or `SuspendingBridge.publishAwaited`) or `derived` recompute
+used to be dropped without a trace. It is now logged: a line naming the store,
+then the stack trace, on standard error (JVM/Android) or standard output
+(iOS/wasmJs). Nothing else changes — the commit still stands and the remaining
+observers still run.
+
+- To keep failures out of standard error, route them:
+  `store.uncaughtObserverHandler = { e -> logger.warn("post-commit failure", e) }`.
+- To restore the old silence deliberately: `store.uncaughtObserverHandler = { }`.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

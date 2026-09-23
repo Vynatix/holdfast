@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
@@ -105,15 +106,58 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
  * deadlock or re-enter the lock.
  *
  * Publish failures are isolated per state and reported through
- * [com.vynatix.holdfast.Store.uncaughtObserverHandler], matching the sync path:
- * a bridge is external sync, so a failed write cannot undo values that are
- * already committed, nor stop the remaining states from publishing.
+ * [com.vynatix.holdfast.Store.uncaughtObserverHandler] (logged loudly while no
+ * handler is set), matching the sync path: a bridge is external sync, so a
+ * failed write cannot undo values that are already committed, nor stop the
+ * remaining states from publishing.
+ *
+ * The transaction stays installed as the store's active one until
+ * [suspendAction]/[suspendAtomic] unwinds, but from the end of the apply pass it
+ * refuses further writes. Code running inside this commit — an observer, a
+ * bridge publish, an event collector the emit resumes inline — that writes back
+ * into the store (or emits on it) gets an `IllegalStateException`, and a
+ * blocking `action`/`atomic` it opens on the store returns an `Error`, instead
+ * of staging into a transaction that is never applied again — or, for the
+ * blocking calls, waiting for the serializer this very commit holds. The whole
+ * commit runs under [inSuspendingCommitOf], which is how the store recognises
+ * that code across thread hops. (A bare `mutate`/`update` from another thread
+ * is refused too while the store is held: see `Store.stagesInto`.)
  *
  * Shared between [suspendAction] and [suspendAtomic] so the commit-phase
  * ordering contract is single-sourced.
  */
-@Suppress("UNCHECKED_CAST")
 internal suspend fun suspendingCommit(txn: Transaction) {
+    // Already marked by the caller (suspendAtomic marks its whole commit):
+    // skip the redundant nested marker.
+    if (FanoutMarkers.current()?.contains(txn) == true) {
+        commitThenPublish(txn)
+    } else {
+        inSuspendingCommitOf(listOf(txn)) { commitThenPublish(txn) }
+    }
+}
+
+/**
+ * Run [block], a suspending commit phase, with the core's [FanoutMarkers]
+ * naming [roots] — added to any roots an enclosing suspending commit on this
+ * coroutine already marks — on every thread it resumes on. A savepoint in
+ * [roots] (a nested [suspendAtomic]'s entry for a store its enclosing frame
+ * holds) marks that savepoint: once it has committed into the enclosing root,
+ * a blocking call from this commit that reaches its store is recognised as
+ * nested too. [suspendAtomic] marks every participant for its whole commit, so
+ * a later participant's fanout also counts as nested for an earlier,
+ * already-applied one, and so do its frame observers.
+ */
+internal suspend fun <T> inSuspendingCommitOf(
+    roots: Collection<Transaction>,
+    block: suspend () -> T,
+): T {
+    val marked = FanoutMarkers.current().orEmpty() + roots
+    return withFanoutMarker(marked, block)
+}
+
+/** The body of [suspendingCommit]: apply and fan out, then publish, then drain events. */
+@Suppress("UNCHECKED_CAST")
+private suspend fun commitThenPublish(txn: Transaction) {
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
     val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
     txn.commitDispatching(
@@ -144,7 +188,7 @@ internal suspend fun suspendingCommit(txn: Transaction) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            ms.owningStore.uncaughtObserverHandler?.invoke(e)
+            ms.owningStore.internalReportUncaughtFailure(e)
         }
     }
     // Step 3b: events drain via suspending emit, honoring SUSPEND back-pressure.

@@ -137,7 +137,8 @@ class MutableState<T : Any>(
      * acquires `observersLock` then briefly `stateLock`.
      *
      * Never throws: a failing `transformer.get` is reported through
-     * [Store.uncaughtObserverHandler] and skips this state's observers. Commit
+     * [Store.uncaughtObserverHandler] (logged loudly while none is set) and
+     * skips this state's observers. Commit
      * fanout is post-commit side effect, so it must not be able to abort a
      * commit whose values are already applied.
      */
@@ -167,7 +168,7 @@ class MutableState<T : Any>(
     }
 
     private fun reportFanoutFailure(error: Throwable) {
-        owningStore.uncaughtObserverHandler?.invoke(error)
+        owningStore.internalReportUncaughtFailure(error)
     }
 
     /**
@@ -208,15 +209,21 @@ class MutableState<T : Any>(
      * Snapshotting under the lock keeps the subscription ordering that [observe]
      * depends on: a subscriber added under [observersLock] before this snapshot
      * is taken is guaranteed to appear in it.
+     *
+     * A throwing observer never stops the others: its exception goes to
+     * [Store.uncaughtObserverHandler], or is logged loudly while none is set —
+     * including the [IllegalStateException] an observer gets for writing back
+     * into its own store while that store's commit is notifying it. The one
+     * exception is a handler that itself throws: that propagates, ending the
+     * commit's fanout early (the commit's values stay applied).
      */
     private fun notifyObservers(value: T) {
-        val handler = owningStore.uncaughtObserverHandler
         val snapshot = observersLock.withLock { observers.toList() }
         snapshot.forEach { observer ->
             try {
                 observer(value)
             } catch (e: Throwable) {
-                handler?.invoke(e)
+                owningStore.internalReportUncaughtFailure(e)
             }
         }
     }

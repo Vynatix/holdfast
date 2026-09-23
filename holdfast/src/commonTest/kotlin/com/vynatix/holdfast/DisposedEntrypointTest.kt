@@ -57,6 +57,15 @@ class DisposedEntrypointTest {
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
             Entrypoint("dispose (idempotent)") { p, _ -> p.dispose() },
+            Entrypoint("internalReportUncaughtFailure (handler)") { p, _ ->
+                var reported: Throwable? = null
+                p.uncaughtObserverHandler = { reported = it }
+                p.internalReportUncaughtFailure(IllegalStateException("reported after dispose"))
+                checkNotNull(reported) { "the handler was not called" }
+            },
+            Entrypoint("internalReportUncaughtFailure (default log)") { p, _ ->
+                p.internalReportUncaughtFailure(IllegalStateException("expected: DisposedEntrypointTest probe"))
+            },
         )
 
     @Test

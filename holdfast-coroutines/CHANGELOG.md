@@ -31,6 +31,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A blocking `action` or `atomic` from inside a `suspendAction` or
+  `suspendAtomic` commit no longer spins forever** when it targets a store
+  that commit has applied: from an observer, a sync `Bridge.publish` or a
+  `SuspendingBridge.publishAwaited` (also after a dispatcher hop on
+  JVM/Android), an event collector the suspending emit resumes inline, a
+  `FrameObserver.onFrameCommitted`, or a later `suspendAtomic` participant's
+  observer targeting an earlier participant. It was not recognised as nested
+  (`suspendingOwner` is set, and the commit may run on another thread than the
+  one it started on), so it waited for the store's serializer, held by the
+  very commit running it. The commit phase now runs under a fanout marker
+  (`FanoutMarkers`, a `ThreadContextElement` on JVM/Android, a bracketing
+  interceptor on iOS/wasmJs) that follows its coroutine, and the call returns
+  `TransactionResult.Error` at once. A blocking call from any other thread
+  still waits its turn and commits. Remaining gaps: on iOS/wasmJs, a nested
+  `withContext(dispatcher)` inside the commit replaces the interceptor, so a
+  blocking call from there still waits; and a blocking call on a later
+  `suspendAtomic` participant that has not committed yet (from an earlier
+  one's fanout) still waits for the frame.
+
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
   outer root; a failed nested frame discards only its own writes.
@@ -67,6 +86,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   drains every store whose root it opened after releasing all of them.
 
 ### Changed
+
+- **BREAKING (behavior): writes into a `suspendAction` or `suspendAtomic`
+  commit from its own fanout fail loudly** (see `:holdfast`'s changelog, issue
+  #20). The suspending root stays installed while `suspendingCommit` fans out,
+  and `suspendingOwner` relaxes `mutate`'s owner check to any thread, so an
+  observer's `mutate`/`update`/`emit` on the committing store staged into the
+  applied root and was lost. It now throws an `IllegalStateException` that
+  reaches `uncaughtObserverHandler`. So does a write, from a later
+  participant's observer, into a nested `suspendAtomic`'s savepoint entry for
+  a store its enclosing frame holds, once that entry has committed into the
+  enclosing root (it used to be rejected as "Cannot mutate state on a
+  Committed transaction"). The same relaxation means a bare
+  `mutate`/`update` on that store from any other thread while the commit runs
+  (its fanout, a slow `publishAwaited`, a suspending event emit) throws too,
+  with a message saying a suspending transaction holds the store — it used to
+  be lost silently during the observer fanout, or rejected as "Cannot mutate
+  state on a Committed transaction" in the bridge and event phases. Before the
+  apply pass such a write joins the transaction; the check and the stage are
+  atomic with the apply pass, so it is applied with the commit or refused,
+  never lost in between. Write from other threads through `action { }`, which
+  waits for the serializer.
+
+- **BREAKING (behavior): a failed `SuspendingBridge.publishAwaited` is logged
+  when no `uncaughtObserverHandler` is set**, like every other post-commit
+  failure, instead of being dropped silently. The commit still succeeds.
 
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.

@@ -44,7 +44,19 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 `Store.defaultScope`); pass a scope explicitly to override. `suspendAction`
 allows the transaction body to suspend; cancellation of the body rolls the
 transaction back, and the commit fanout runs under `NonCancellable` so it
-completes even if the surrounding scope cancels mid-commit. `bridge(...)`
+completes even if the surrounding scope cancels mid-commit. As with blocking
+`action`, code running inside the commit — an observer, a bridge publish, an
+event collector the emit resumes inline — must not write back into a store
+that commit has applied: `mutate`/`update`/`emit` throw, and a blocking
+`action`/`atomic` on that store returns an `Error` (which the caller must
+check) rather than waiting on the commit it runs in. On iOS and wasmJs a
+nested `withContext(dispatcher)` inside the commit is not recognised and such
+a blocking call still waits forever. While a `suspendAction` holds the store,
+another thread's bare `mutate`/`update` is not isolated from it — before the
+commit applies it joins the transaction, after it throws — so write from other
+threads through `action { }`, which waits. A failing
+`SuspendingBridge.publishAwaited` never undoes the commit; it goes to
+`Store.uncaughtObserverHandler` (logged while none is set). `bridge(...)`
 saves fire-and-forget (conflated — rapid publishes coalesce);
 `suspendingBridge(...)` returns an await-completion `SuspendingBridge` whose
 `publishAwaited` suspends until the value is persisted.

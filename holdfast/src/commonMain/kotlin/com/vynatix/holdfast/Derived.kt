@@ -61,8 +61,8 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *    sources, or use [computed], when you need the caller's own write.
  *  - A throwing [compute] (or a middleware rejecting the recompute) rolls that
  *    recompute back and is reported through this store's
- *    [Store.uncaughtObserverHandler] (dropped silently while no handler is
- *    set); the derived keeps its previous value until the next source commit.
+ *    [Store.uncaughtObserverHandler] (logged loudly while no handler is set);
+ *    the derived keeps its previous value until the next source commit.
  *
  * Example:
  * ```
@@ -180,7 +180,7 @@ private class DerivedRecompute<V : Store<V>, T : Any>(
         if (result is TransactionResult.Error && !host.isDisposed) {
             // Previously swallowed by the drain's runCatching, silently freezing
             // the derived. Reported like any other post-commit side-effect failure.
-            host.uncaughtObserverHandler?.invoke(result.exception)
+            host.internalReportUncaughtFailure(result.exception)
         }
         return attempt
     }

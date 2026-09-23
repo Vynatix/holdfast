@@ -347,10 +347,7 @@ private suspend fun <R> executeBody(
             // validation middleware throwing on the last store still rolls
             // every store back.
             roots.forEach { it.session.fireCompleted() }
-            for (entry in roots) {
-                suspendingCommit(entry.txn)
-            }
-            observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
+            commitInLockOrder(roots, observers, marker.frameId)
             TransactionResult.Success(resultTxn, value)
         } catch (e: Throwable) {
             // Commit/completed failure: unwind in reverse. Entries that already
@@ -367,6 +364,27 @@ private suspend fun <R> executeBody(
             rethrowFrameContractViolation(e)
             TransactionResult.Error(e, resultTxn)
         }
+    }
+}
+
+/**
+ * Commit every entry in lock order, then notify the frame observers — all of
+ * it marked as this frame's suspending commit ([inSuspendingCommitOf]). An
+ * earlier participant stays installed, applied, with its serializer held,
+ * while later ones fan out, so a blocking `action`/`atomic` on it from a later
+ * participant's observer (or from `onFrameCommitted`) must count as nested:
+ * it is refused rather than left waiting for this very frame.
+ */
+private suspend fun commitInLockOrder(
+    roots: List<RootEntry>,
+    observers: List<com.vynatix.holdfast.FrameObserver>,
+    frameId: String,
+) {
+    inSuspendingCommitOf(roots.map { it.txn }) {
+        for (entry in roots) {
+            suspendingCommit(entry.txn)
+        }
+        observers.forEach { runCatching { it.onFrameCommitted(frameId) } }
     }
 }
 

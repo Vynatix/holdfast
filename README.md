@@ -167,8 +167,21 @@ for when each lands.
   same store still spins.** The serializer is held by the suspending body and the
   blocking call waits for it. *Workaround:* inside a suspending body use
   `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
-  fail-fast guard is next in 0.2.0. Other combinations that used to hang or
-  fail — `suspendAction` with a `derived()` state (including a second
+  fail-fast guard is next in 0.2.0. (From inside a `suspendAction`'s or
+  `suspendAtomic`'s commit — an observer, a bridge publish, an event collector
+  the emit resumes inline, a frame observer — a blocking `action` or `atomic`
+  on a store whose transaction that commit has applied already returns an
+  `Error` instead of spinning. Two gaps remain: on iOS and wasmJs, inside a
+  nested `withContext(dispatcher)` there (say, in a `publishAwaited`); and a
+  blocking call on a later `suspendAtomic` participant that has not committed
+  yet. For the later participant, `mutate` it instead: the write stages into
+  its pending root and commits with the frame. The store that commit has
+  applied refuses every inline write — `mutate` throws there too — so from a
+  nested `withContext(dispatcher)`, make the write part of the action, or
+  launch it once the commit has finished:
+  `store.scope.launch { store.suspendAction { … }.getOrThrow() }`.) Other
+  combinations that used to hang or fail — `suspendAction` with a `derived()`
+  state (including a second
   `suspendAction` queued behind the first), nested `action` on a
   coroutine-touched store, blocking actions from two threads on a
   coroutine-touched store, and blocking `atomic()` racing a `suspendAction` —
@@ -181,7 +194,11 @@ for when each lands.
   through `atomic`. *Workaround:* from an observer, write to another store via
   `Store.scope` rather than inline. (`derived()` states are not affected: a
   recompute whose store is busy is handed to that store's current holder
-  instead of waiting for it.)
+  instead of waiting for it.) Writing back into the *same* store from its own
+  observer is not a silent loss any more: `mutate`/`update`/`emit` throw (the
+  exception reaches `uncaughtObserverHandler`, or the default log), and a
+  nested `action`/`atomic` returns an `Error` without running — the observer
+  must check that result, or the write is still dropped without a log line.
 
 - **Standalone `state.update { }` outside an action is not atomic.** It is a
   read-modify-write, so concurrent callers overwrite each other — measured, about

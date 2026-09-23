@@ -61,6 +61,12 @@ import kotlin.uuid.Uuid
  * discards everything. A nested frame may only introduce stores whose
  * `lockOrderKey` sorts above every key the enclosing frame holds; violating
  * that throws [FrameLockOrderException] at entry (before any lock is taken).
+ * A frame that would nest into a participant's transaction that has already
+ * applied — `atomic(store) { … }` from an observer of `store` while `store`'s
+ * commit is notifying it — behaves like a nested `action` there: it returns
+ * [TransactionResult.Error] carrying an [IllegalStateException], before any
+ * lock is taken or any body or middleware runs, because its savepoint could
+ * never commit.
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
@@ -112,7 +118,7 @@ fun <R> atomic(
     // writing to one of those stores hit a finished transaction.
     val drainOnExit = mutableListOf<Store<*>>()
     val result =
-        try {
+        refuseFrameUnderAppliedTransaction(sorted, id) ?: try {
             acquireAndRun(sorted, 0, mutableListOf(), drainOnExit, id, ownerThreadId, marker, body)
         } finally {
             // After BOTH the transaction locks and the serializers are released:
@@ -130,6 +136,24 @@ fun <R> atomic(
         throw result.exception
     }
     return result
+}
+
+/**
+ * The refusal of a frame that would nest into a participant's transaction
+ * that has already applied its writes (see `Store.appliedTransactionNestedHere`),
+ * or `null` when no participant would. Checked before any serializer or lock
+ * is taken: under a `suspendAction`'s or `suspendAtomic`'s commit, the
+ * serializer acquire would wait for the very coroutine running this call.
+ */
+private fun refuseFrameUnderAppliedTransaction(
+    sorted: List<Store<*>>,
+    id: String,
+): TransactionResult.Error? {
+    for (store in sorted) {
+        val applied = store.appliedTransactionNestedHere() ?: continue
+        return refusedUnderAppliedTransaction(store, applied, id, "open an atomic(...) frame", frameId = id)
+    }
+    return null
 }
 
 /**

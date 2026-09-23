@@ -3,6 +3,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.logUncaughtFailure
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -58,7 +59,17 @@ class FrameMiddlewareSession internal constructor(
  *    but must not be relied on for race-free decisions outside the owner thread.
  *  - `mutate` from a thread that does not own the active transaction synthesizes its
  *    own one-shot transaction (this is intentional, not a bug — middleware fires and
- *    observers see only the committed value).
+ *    observers see only the committed value). Exception: while a `suspendAction`/
+ *    `suspendAtomic` (`:holdfast-coroutines`) holds the store, its body may resume on
+ *    any thread, so a bare `mutate`/`update` from any thread stages into its
+ *    transaction. Before that transaction applies, the write silently joins it;
+ *    after, it throws until the suspending call returns. Write from other threads
+ *    through [action], which waits (GUIDE §8.2).
+ *  - Commit fanout (observers, bridge publishes, events) runs after the transaction
+ *    has applied its writes. From then on it refuses writes: an observer writing back
+ *    into this store gets an exception from [mutate] (or `update`/`emit`), or an
+ *    Error result from a nested [action], instead of losing the write silently.
+ *    Post-commit failures go to [uncaughtObserverHandler], or are logged.
  *
  * Typical subclass:
  * ```
@@ -286,8 +297,8 @@ abstract class Store<Self : Store<Self>> {
     /**
      * The transaction currently being built on this Store, if any. Direct volatile
      * read — cross-thread observers see the most recent set without acquiring a lock.
-     * `null` between actions; non-null only on the action's owner thread for the
-     * duration of the action body.
+     * `null` between actions; non-null for the duration of an action's body and of
+     * its commit fanout (by then it has applied, and refuses further writes).
      */
     val activeTransaction: Transaction?
         get() = _activeTransaction
@@ -310,19 +321,41 @@ abstract class Store<Self : Store<Self>> {
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * Optional handler for failures in post-commit side effects, which cannot
-     * undo a commit whose values are already applied:
-     *  - a commit-fire observer callback that throws;
+     * Handler for failures in post-commit side effects, which cannot undo a
+     * commit whose values are already applied:
+     *  - a commit-fire observer callback that throws — including the
+     *    [IllegalStateException] a callback gets for writing back into this
+     *    store (or emitting on it) while this store's commit is notifying it
+     *    (see [mutate]);
      *  - a throwing `Transformer.get` during observer fanout (that state's
      *    observers are skipped);
-     *  - a throwing `Bridge.publish` (the commit still succeeds);
+     *  - a throwing `Bridge.publish` (the commit still succeeds), and under
+     *    `:holdfast-coroutines`' `suspendAction` a throwing
+     *    `SuspendingBridge.publishAwaited`;
      *  - a failed [derived] recompute — a throwing `compute`, or a middleware
      *    rejecting it: rolled back, and the derived keeps its value until the
      *    next source commit.
      *
-     * If null (the default), all of these are dropped silently — matching the
-     * original library contract. Set to a non-null handler to surface them (e.g.
-     * a logger or a test fixture's failure list).
+     * If null (the default), each failure is logged loudly instead: a line
+     * naming this store, then the exception's stack trace — on standard error
+     * on JVM and Android (logcat's `System.err` tag), on standard output on
+     * iOS and wasmJs. Set a handler to route them into your own logging or
+     * crash reporting, or into a test's failure list; `{ }` silences them.
+     *
+     * For an observer callback, a fanout `Transformer.get` or a bridge publish,
+     * the handler runs on the committing thread, inside the commit fanout. The
+     * store is still held then: under its transaction lock for a blocking
+     * `action`/`atomic`, under its serializer for `suspendAction`/
+     * `suspendAtomic`. Keep it short, and don't write to this store from it. A
+     * handler that throws there ends that commit's fanout early, so the
+     * remaining observers, bridge publishes and events are skipped, and the
+     * action reports an error; the commit's values stay applied.
+     *
+     * A failed [derived] recompute is reported after the recompute's own action
+     * has released this store, from the post-commit drain. That drain may run
+     * on another holder's thread, or inline in the observer fanout of a source
+     * on another store. There, a throwing handler fails no action: the drain
+     * swallows it, or the source's store reports it as that observer's failure.
      *
      * Note: this handler does NOT capture exceptions thrown from the initial-fire
      * call inside [State.effect]/[MutableState.observe]. Those propagate to the
@@ -331,6 +364,30 @@ abstract class Store<Self : Store<Self>> {
      */
     @kotlin.concurrent.Volatile
     var uncaughtObserverHandler: ((Throwable) -> Unit)? = null
+
+    /**
+     * Report a post-commit failure (see [uncaughtObserverHandler] for the
+     * kinds) to [uncaughtObserverHandler], or, while none is set, log it loudly
+     * through the platform's default output with a message naming this store.
+     * Every such failure in the library goes through here, including
+     * `:holdfast-coroutines`' suspending bridge publishes. A throwing handler
+     * propagates, exactly as when fanout invoked it directly. Works on a
+     * disposed store.
+     */
+    @StoreInternalApi
+    fun internalReportUncaughtFailure(error: Throwable) {
+        val handler = uncaughtObserverHandler
+        if (handler != null) {
+            handler(error)
+        } else {
+            logUncaughtFailure(
+                "Holdfast: a post-commit side effect of $displayName failed (an observer callback, a bridge " +
+                    "publish or a derived recompute); the commit itself stands. Set uncaughtObserverHandler on " +
+                    "the store to handle these failures yourself, or to silence them.",
+                error,
+            )
+        }
+    }
 
     /**
      * Hook for an external mutual-exclusion mechanism that needs to coordinate
@@ -631,6 +688,13 @@ abstract class Store<Self : Store<Self>> {
      * outer transaction. Inner.commit merges its pending writes into the outer.
      * Inner.rollback drops just the savepoint. Outer.rollback discards everything,
      * including merged inner writes.
+     *
+     * An action nested into a transaction of this store that has already applied
+     * its writes — typically opened by an observer of this store while this
+     * store's commit is notifying it — returns [TransactionResult.Error] carrying
+     * an [IllegalStateException], without running [body] or any middleware: a
+     * savepoint of that transaction could never commit. Another thread's action
+     * is not nested, and simply runs once the commit has finished.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
@@ -642,6 +706,11 @@ abstract class Store<Self : Store<Self>> {
         // interop check converts into a teaching exception.
         val frame = FrameMarkers.current()
         if (frame != null) checkFrameAllowsBlockingAction(frame)
+        // Also before the serializer: under a suspendAction's commit, an
+        // observer's acquire would wait for the very coroutine running it.
+        appliedTransactionNestedHere()?.let { applied ->
+            return refusedUnderAppliedTransaction(this, applied, actionId(body), "open a nested action")
+        }
         // A nested action is a savepoint of a transaction this thread already
         // owns, so it is already inside the region the serializer brackets.
         // Re-acquiring there is never correct and is actively fatal: the
@@ -680,8 +749,49 @@ abstract class Store<Self : Store<Self>> {
      * — the exact mutual exclusion the serializer exists to provide.
      */
     private fun ownsActiveTransaction(): Boolean {
+        // Owner before slot: a suspending holder installs the slot before its
+        // owner and clears the slot before its owner, so reading the owner
+        // first never pairs a null owner with a suspending transaction that is
+        // being torn down.
+        val owner = suspendingOwner
         val txn = _activeTransaction
-        return suspendingOwner == null && txn != null && txn.ownerThreadId == currentThreadId()
+        return owner == null && txn != null && txn.ownerThreadId == currentThreadId()
+    }
+
+    /**
+     * This store's active transaction when a call on this thread would nest
+     * into it although it is closed to writes ([Transaction.closedToWrites]:
+     * its root has applied, or it or an ancestor has already ended); `null`
+     * otherwise. The call nests when this thread owns the transaction (see
+     * [ownsActiveTransaction]) or runs inside its commit fanout — an observer,
+     * bridge or event collector reacting to it. Under `suspendAction` and
+     * `suspendAtomic`, whose recorded owner thread is only where they started,
+     * that is the whole suspending commit, across thread hops: every
+     * participant's fanout, bridge publish and event emit, and the frame
+     * observers ([fanningOutHere]). So an earlier `suspendAtomic` participant
+     * that already applied is refused from a later one's fanout too, and so is
+     * an `atomic` participant whose savepoint entry has already committed into
+     * an enclosing action.
+     *
+     * Any other thread is not nested: its `action`/`atomic` waits for the store
+     * and then runs on its own. A participant whose transaction is still open
+     * (a later one, while an earlier one fans out) is not refused either.
+     * `internal` for `atomic`, which refuses the same nesting.
+     */
+    internal fun appliedTransactionNestedHere(): Transaction? {
+        val txn = _activeTransaction?.takeIf { it.closedToWrites } ?: return null
+        // Owned here: owner first, then re-check the slot (`&&` evaluates in
+        // order). A suspending holder installs its owner before its
+        // transaction can close, and its teardown clears the slot BEFORE the
+        // owner. So once `txn` is closed, a null owner with `txn` still in the
+        // slot means `txn` is a blocking transaction, never a suspending one
+        // mid-teardown (whose `ownerThreadId` may name this pooled thread). A
+        // slot now holding null or another transaction means `txn` has
+        // finished: not nested, so the call waits for the serializer.
+        val nested =
+            txn.fanningOutHere() ||
+                (suspendingOwner == null && _activeTransaction === txn && txn.ownerThreadId == currentThreadId())
+        return if (nested) txn else null
     }
 
     /**
@@ -747,26 +857,37 @@ abstract class Store<Self : Store<Self>> {
             "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
         transactionLock.withLock {
             // NOTE: post-commit tasks are NOT drained here. The drain runs in
             // [action], after the serializer bracket is released — see the comment
             // there. Nested actions inherit the parent's deferred queue and let it
             // drain at the outermost boundary either way.
-            runTransaction(body::class.simpleName ?: Uuid.random().toString(), body)
+            runTransaction(actionId(body), body)
         }
+
+    /** Transaction id for an action: the body's class simple name, else a random UUID. */
+    @OptIn(ExperimentalUuidApi::class)
+    private fun actionId(body: Any): String = body::class.simpleName ?: Uuid.random().toString()
 
     /**
      * Open a transaction on top of whatever is active (a savepoint if anything
      * is), run [body] through the middleware chain, then commit or roll back.
      * The caller holds `transactionLock` and owns the post-commit drain.
+     *
+     * Refuses to open a savepoint of a transaction that is closed to writes —
+     * [action] turns observer nesting away before this, so this is the backstop
+     * for any other route into a finished transaction (e.g. one committed by
+     * hand).
      */
     private fun <R> runTransaction(
         id: String,
         body: Self.() -> R,
     ): TransactionResult<R> {
         val parent = _activeTransaction
+        if (parent != null && parent.closedToWrites) {
+            return refusedUnderAppliedTransaction(this, parent, id, "open a nested action")
+        }
         val txn = Transaction(id = id, parent = parent, ownerThreadId = currentThreadId())
 
         _activeTransaction = txn
@@ -896,7 +1017,7 @@ abstract class Store<Self : Store<Self>> {
      * the current value once and threads it through [block]. Inside an active
      * transaction owned by this thread, the read sees pending writes
      * (read-your-own-writes); outside, an implicit single-shot transaction wraps
-     * the operation.
+     * the operation (same exceptions as [mutate]).
      *
      * ```
      * store action {
@@ -917,36 +1038,29 @@ abstract class Store<Self : Store<Self>> {
      *
      * Outside any transaction (or on a non-owner thread), an implicit single-shot
      * transaction wraps the mutation so middleware fires and observers see only the
-     * committed value.
+     * committed value. Exception: while a `suspendAction`/`suspendAtomic` holds this
+     * store, a bare write from ANY thread stages into its transaction (the suspending
+     * body may resume on any thread). Before that transaction applies, the write
+     * joins it (GUIDE §8.2).
+     *
+     * @throws IllegalStateException when this thread would stage into a
+     *   transaction of this store that is closed to writes — an observer
+     *   writing back into this store while this store's commit is notifying it
+     *   (also through [update]), or a write into a transaction that has already
+     *   ended. The write could never commit; the message names the state and
+     *   the fixes. Thrown out of an observer, it reaches
+     *   [uncaughtObserverHandler]. Also thrown when a `suspendAction`/
+     *   `suspendAtomic` holds this store and its transaction has already
+     *   applied but is still committing (bridge publishes, event emits), and
+     *   this thread is not part of that commit: write from other threads
+     *   through [action], which waits for the store.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         checkNotDisposed()
         val state = this.getMutableState()
         val txn = _activeTransaction
-        val onOwnerThread = txn != null && txn.ownerThreadId == currentThreadId()
-        // Suspending body may resume on a different thread; AsyncSerializer ensures
-        // no other action runs concurrently while suspendingOwner != null, so the
-        // relaxed check is sound.
-        val onOwnerCoroutine = txn != null && suspendingOwner != null
-
-        if (txn != null && (onOwnerThread || onOwnerCoroutine)) {
-            // Frame policing for the direct-stage path: a store with an active
-            // transaction from an ENCLOSING action can be written here without
-            // ever passing through `action` — e.g. `c.action { atomic(a, b) {
-            // c.x mutate 1 } }` — and those writes would commit with c's outer
-            // action regardless of the frame's outcome. Same rule as the
-            // action-path check: unenrolled writes inside a frame body are an
-            // escape unless the policy explicitly allows them.
-            val frame = FrameMarkers.current()
-            if (frame != null && !frame.isEnrolled(this@Store) && !frame.policy.allowUnenrolled) {
-                throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
-            }
-            // Defensive: a transaction that's been manually committed or rolled back
-            // shouldn't accept further mutations. Throw rather than silently lose the write.
-            check(txn.status == TransactionStatus.Active) {
-                "Cannot mutate state on a ${txn.status} transaction"
-            }
-            txn.pendingWrites[state] = state.beforeSet(that)
+        if (txn != null && stagesInto(txn)) {
+            stageWrite(txn, state, that)
             return
         }
 
@@ -954,6 +1068,100 @@ abstract class Store<Self : Store<Self>> {
         // fires and observers see only the committed value. The recursive call lands
         // in the branch above on the second pass.
         action { this@mutate mutate that }
+    }
+
+    /**
+     * Whether a `mutate` on this thread stages into [txn] rather than opening
+     * its own one-shot action: on [txn]'s owner thread; on the thread running
+     * [txn]'s commit fanout, so that [stageWrite] refuses the write loudly
+     * instead of a one-shot action refusing it into a result `mutate` drops;
+     * and on EVERY thread while a `suspendAction`/`suspendAtomic` holds the
+     * store ([suspendingOwner] is set), because its body may resume on any
+     * thread and nothing identifies the body's thread yet.
+     *
+     * That last rule is not isolation: the AsyncSerializer keeps other
+     * actions out, but not another thread's bare `mutate`. Before the
+     * suspending transaction applies, such a write joins it; after, [stageWrite]
+     * refuses it (with [suspendingCommitWriteMessage]) until the suspending
+     * call returns. The two outcomes are exhaustive: the stage is checked
+     * under the transaction's pending lock, atomically with the apply pass
+     * ([Transaction.stagePendingWrite]). Other threads must write through
+     * [action], which waits. A
+     * marker for the running body (planned with the 0.2.0 fail-fast guard)
+     * would let a foreign bare write open its own action instead.
+     */
+    private fun stagesInto(txn: Transaction): Boolean {
+        val here = currentThreadId()
+        return txn.ownerThreadId == here || suspendingOwner != null || txn.fanoutThreadId == here
+    }
+
+    /** The staging half of [mutate]: police, then buffer [value] in [txn]. */
+    private fun <T : Any> stageWrite(
+        txn: Transaction,
+        state: MutableState<T>,
+        value: T,
+    ) {
+        // Frame policing for the direct-stage path: a store with an active
+        // transaction from an ENCLOSING action can be written here without
+        // ever passing through `action` — e.g. `c.action { atomic(a, b) {
+        // c.x mutate 1 } }` — and those writes would commit with c's outer
+        // action regardless of the frame's outcome. Same rule as the
+        // action-path check: unenrolled writes inside a frame body are an
+        // escape unless the policy explicitly allows them.
+        val frame = FrameMarkers.current()
+        if (frame != null && !frame.isEnrolled(this) && !frame.policy.allowUnenrolled) {
+            throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
+        }
+        // Closed to writes: its root has applied and its commit is fanning out
+        // (or, for an earlier participant of a frame whose later participants
+        // are fanning out, has finished), or it has already ended (an `atomic`
+        // participant's committed savepoint entry, a manual commit/rollback).
+        // The write comes from an observer (or bridge, or event collector)
+        // reacting to it, or from another thread while a suspending commit
+        // holds the store. Staged, it would never be applied. Checked here
+        // first so no transformer runs for a write that will be refused.
+        check(!txn.closedToWrites) { appliedWriteMessage(txn, state) }
+        // `Transformer.set` is user code: run it outside any internal lock.
+        val raw = state.beforeSet(value)
+        // Checked again, atomically with the stage, under the transaction's
+        // pendingLock: a foreign thread's write racing the apply pass is either
+        // applied with it or refused here, never lost in between.
+        check(txn.stagePendingWrite(state, raw)) { appliedWriteMessage(txn, state) }
+    }
+
+    /**
+     * The refusal text for a write into [txn], which is closed to writes: the
+     * observer case, or — when a suspending commit holds the store and this
+     * thread is not part of it — the foreign-thread case.
+     */
+    private fun appliedWriteMessage(
+        txn: Transaction,
+        state: MutableState<*>,
+    ): String {
+        val attempt = "write ${describeState(state)}"
+        return if (suspendingOwner != null && txn.rolledBackIn == null && !txn.fanningOutHere()) {
+            suspendingCommitWriteMessage(attempt, displayName, txn)
+        } else {
+            appliedTransactionMessage(attempt, displayName, txn)
+        }
+    }
+
+    /**
+     * `Store.property` for failure messages, or a generic phrase when the name
+     * is not at hand. Best effort, and never blocks: this runs on the refusal
+     * path, possibly inside a `Bridge.publish` that holds the state's bridge
+     * lock, while `removeState`/`clearStates` take [propertiesLock] and then
+     * bridge locks. Waiting for [propertiesLock] here would invert that order.
+     */
+    private fun describeState(state: MutableState<*>): String {
+        if (!propertiesLock.tryAcquire()) return "a state of $displayName"
+        val name =
+            try {
+                _properties.entries.firstOrNull { it.value === state }?.key
+            } finally {
+                propertiesLock.release()
+            }
+        return if (name != null) "$displayName.$name" else "a state of $displayName"
     }
 
     /**

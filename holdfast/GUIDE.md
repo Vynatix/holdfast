@@ -239,7 +239,10 @@ value, never the pending one.
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
 see only the committed value. This means standalone `holdfast { x mutate v }`
 is equivalent to `holdfast action { x mutate v }` — never a "raw" write that
-skips observers, middleware, or commit semantics.
+skips observers, middleware, or commit semantics — except while a
+`suspendAction`/`suspendAtomic` holds the store: then a bare write from any
+thread stages into (or, once it has applied, is refused by) that transaction;
+see §8.2.
 
 ### 4.4 `effect { … }` — Observe
 
@@ -264,6 +267,40 @@ holdfast action { count mutate 6 }
 
 The receiver `this` is the new value. Returning a `Disposable` lets you
 unsubscribe; observers held forever are a memory leak.
+
+**An effect must not write back into the store that is notifying it.**
+Commit fanout runs after the transaction has applied its writes, but while it
+is still the store's active transaction, so anything staged into it then could
+never commit. `mutate`, `update` and `emit` on that store throw an
+`IllegalStateException` naming the store and state, which reaches
+`uncaughtObserverHandler` (below). A nested `action` or `atomic` on it returns
+`TransactionResult.Error` without running its body: check that result (e.g.
+`.getOrThrow()`, which rethrows into the handler), or the write is dropped
+without a log line. Write in the action itself, derive the value
+(`computed { }`, `derived(...)`), or run a follow-up action once the commit has
+finished: as `store action { … }` on another thread, which waits for the store,
+or launched on a dispatcher that does not run it inline, checking the result —
+`store.scope.launch(Dispatchers.Default) { store action { … }.getOrThrow() }`.
+Mind the dispatcher: on `Dispatchers.Unconfined`, or on
+`Dispatchers.Main.immediate` when the commit already runs on the main thread
+(a store bound to `viewModelScope`, say), `launch` runs its body at once,
+inside this commit's fanout, where the action is refused. The launch alone
+drops that `Error`; `.getOrThrow()` turns it into a coroutine failure that
+reaches the scope's exception handler. (Use `action` there, not a bare
+`mutate`: while a `suspendAction` holds the store, another thread's bare
+`mutate` is refused too — see §8.2.) Writing to another store whose
+transaction is not committing still works.
+
+**A throwing effect never undoes the commit, and never stops the other effects
+unless the handler itself throws** (which ends that commit's fanout and makes
+the action return an `Error`). Its exception goes to the store's
+`uncaughtObserverHandler` — the same place throwing bridge publishes and failed
+`derived` recomputes go. With no handler set, it is logged: a line naming the
+store, then the stack trace, on standard error (JVM/Android) or standard output
+(iOS/wasmJs). Set `store.uncaughtObserverHandler = { e -> crashReporter.log(e) }`
+at app init to route these failures yourself, or `{ }` to silence them. The
+initial fire on subscribe is different: it runs inside `effect` and throws to
+its caller.
 
 ### 4.5 `bridge(b)` — External sync
 
@@ -565,12 +602,19 @@ a separate state).
    nothing                         single read or effect      holdfast { … }
    an outer action                 atomic sub-batch with own  action { … }
                                    savepoint semantics        (becomes nested)
-   an effect callback              atomic write               action { … }
-                                                              (the outer txn is
-                                                              already committed
-                                                              by the time effects
-                                                              fire — your action
-                                                              becomes top-level)
+   an effect callback on the       write that same store      NOT from the effect:
+   store it observes (commit                                  action { … } returns
+   fire)                                                      Error without running
+                                                              (its commit has applied
+                                                              but is still fanning
+                                                              out — §4.4). Write in
+                                                              the action itself, use
+                                                              computed/derived, or
+                                                              launch a follow-up
+                                                              action (§4.4)
+   an effect callback              atomic write to ANOTHER    other action { … }
+                                   store                      (top-level; waits for
+                                                              that store)
    a middleware hook               read state                 context.store.x.value
    a middleware hook               write state                NOT recommended;
                                                               use action's body to
@@ -588,7 +632,7 @@ a separate state).
 | Granularity | per-state | per-state | per-store (all transactions) |
 | When it fires | per-commit, on changed states | outbound: per-commit / inbound: any time | start, complete, error of every txn |
 | Has access to the transaction | no | no | yes (in `MiddlewareContext`) |
-| Can mutate state | yes (via action) | yes (via observe→applyFromBridge) | yes (next() runs body, can wrap with logic) |
+| Can mutate state | other stores, via action; not its own store during its commit fire (returns Error — see §4.4) | yes (via observe→applyFromBridge) | yes (next() runs body, can wrap with logic) |
 | Initial fire on subscribe | yes | yes (via observe call) | no (only on next txn) |
 | Use case | UI binding, logging | persistence, sync, StateFlow adapter | logging, validation, audit, metrics |
 
@@ -602,6 +646,13 @@ a separate state).
 | Throws on a finalized txn? | yes — `IllegalStateException` | n/a | n/a |
 | Cost | O(1) into a map | one full transaction setup | one full transaction setup |
 | Recommended? | preferred | acceptable for one-liners | acceptable |
+
+Foreign thread while a `suspendAction`/`suspendAtomic` holds the store: a bare
+`mutate`/`update` is **not** wrapped in its own action. The suspending body may
+resume on any thread, so every thread's bare write stages into its
+transaction: before that transaction applies, the write silently joins it;
+once it has applied, the write throws until the suspending call returns. From
+other threads, write through `store action { … }`, which waits for the store.
 
 ### 8.3 Transformer vs Middleware
 
@@ -752,9 +803,10 @@ fun MyScreen(holdfast: TodoStore) {
 ### 9.6 Computed / derived state
 
 The library ships native operators for this — `computed { … }` (read-time)
-and `derived(sources) { … }` (push-recomputed); see §14.2. The hand-rolled
-idioms below remain useful when you want the recompute to land inside the
-same commit as the source write:
+and `derived(sources) { … }` (push-recomputed); see §14.2. Of the patterns
+below, the first computes on read and the second writes the value in the
+same commit as the source, so both always agree with it; the third uses the
+built-in `derived`, which recomputes right after the commit:
 
 **Read-only derived (compute on demand):** define a holdfast function.
 
@@ -778,20 +830,23 @@ class CartStore : Store<CartStore>() {
 }
 ```
 
-**Auto-recomputed derived:** wire it through `effect` (extra commit per source change):
+**Auto-recomputed derived:** let `derived` (§14.2) recompute it after each
+commit that changes a source:
 
 ```kotlin
-init {
-    items effect {
-        val current = this   // the effect's payload: the committed List<Line>
-        action { total mutate current.sumOf { it.price * it.qty } }
-    }
+class CartStore : Store<CartStore>() {
+    val items by state { emptyList<Line>() }
+    private val totalAndSub = derived(items) { items.value.sumOf { it.price * it.qty } }
+    val total: State<Money> get() = totalAndSub.first
 }
 ```
 
-The third pattern double-commits and is rarely worth the indirection;
-prefer pattern two — keeping derived consistency inside the original
-action — or the built-in `derived` from §14.2.
+Don't hand-roll this with an `effect` that opens an `action` on its own
+store: that action would run inside the source commit's fanout, where it
+returns `TransactionResult.Error` without running (§4.4) — and an effect that
+ignores the result drops the write without a trace. `derived` recomputes
+after the commit's fanout instead, so its value can briefly lag the source;
+prefer pattern two when the total must change in the same commit.
 
 ### 9.7 Read-your-own-writes inside an action
 
@@ -910,7 +965,10 @@ A `Transaction` records its `ownerThreadId` at construction. `mutate`
 checks `txn.ownerThreadId == currentThreadId()` before buffering. A
 mutate from a non-owner thread skips the pending path entirely and
 synthesizes its own one-shot transaction (which serializes through
-`transactionLock`).
+`transactionLock`). Exception: while a `suspendAction`/`suspendAtomic` holds
+the store, the owner check is relaxed to every thread, so a non-owner bare
+`mutate` stages into the suspending transaction and throws once it has
+applied (§8.2). Use `store action { … }` from other threads.
 
 This means you can have `holdfast action { … }` running on T1 while T2
 calls `holdfast.count.value` — T2 reads a consistent committed snapshot,
@@ -1021,7 +1079,10 @@ never T1's pending writes.
 | Observer fires twice for one logical event | Subscribed via `effect` AND wired through a bridge | Pick one |
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
 | `IllegalStateException: State must be created by this Store instance` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
-| `IllegalStateException: Cannot mutate state on a Committed transaction` | Mutating after manually calling `commit()`/`rollback()` on the active transaction inside the action body | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
+| `IllegalStateException: Cannot write S.x: S's transaction '…' has already been rolled back (status: RolledBack) …` (or `… has already applied its writes (status: Committed) …`) | Mutating after manually calling `rollback()` (or `commit()`) on the active transaction inside the action body; or writing into an `atomic` participant from a middleware's `onTransactionError` or a `FrameObserver` while the frame unwinds | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
+| `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it; the write could never commit | Write in the action itself, derive the value (`computed`/`derived`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4 |
+| `IllegalStateException: Cannot write S.x: a suspendAction or suspendAtomic holds S …` | A bare `mutate`/`update` from another thread while a `suspendAction`/`suspendAtomic` on S is committing | Write through `S action { … }`, which waits for the store — see §8.2 |
+| `Holdfast: a post-commit side effect of S failed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | An effect, bridge publish or `derived` recompute threw after its commit; with no `uncaughtObserverHandler` set, the failure is logged | Fix the thrower, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
 | `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
 | `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
@@ -1042,7 +1103,7 @@ never T1's pending writes.
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
-| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Optional handler for post-commit failures: observer callbacks, fanout `Transformer.get`, `Bridge.publish`, `derived` recomputes (default null = silently dropped) |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
@@ -1213,7 +1274,7 @@ sources, even on the same store when another holder takes the store right
 after the commit, then converges. Read the sources, or use `computed`,
 when you need the caller's own write. A throwing `compute` rolls that
 recompute back and is reported through `uncaughtObserverHandler`
-(silently dropped while no handler is set); the next source commit
+(logged while no handler is set); the next source commit
 recomputes normally. Disposing the `Disposable` stops recomputation,
 including a recompute that is already queued.
 
@@ -1396,8 +1457,11 @@ not abort other middlewares' hooks. Behavior change: middleware authors who
 relied on "suspendAction won't trigger me" must verify their hooks are idempotent
 under the suspending path.
 
-Limitations: body should be single-threaded — spawned threads' `mutate`
-calls fall outside the recognized owner.
+Limitations: while the `suspendAction` holds the store, a bare
+`mutate`/`update` from ANY thread (including threads the body spawns) stages
+into its transaction. Before the apply pass it silently joins it; after, it
+throws until `suspendAction` returns (§8.2). Other threads should write
+through `store action { … }`, which waits.
 
 ### 14.9 `:holdfast-compose`
 
@@ -1837,7 +1901,14 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    cross-store snapshot isolation; however, an observer on `a` running on the
    frame's thread reads `b` through `b`'s still-active root, so it sees `b`'s
    about-to-be-committed value and the cross-store invariant holds at every
-   fanout point.
+   fanout point. An observer may write to a participant that has not committed
+   yet (`b`, while `a` fans out) — the write stages into `b`'s root and
+   commits with it — but not to one that already has (`a`, while `b` fans out):
+   that throws, and a nested `action`/`atomic` on it returns an `Error` the
+   observer must check, exactly like a write back into a store from its own
+   fanout (§4.4). `suspendAtomic` behaves the same way, with one gap: a
+   blocking `action`/`atomic` on a participant that has not committed yet
+   still waits for the frame's serializer forever — use `mutate` there.
 6. **Rollback** (body throw, `started`/`completed` throw, or inner-error
    escalation) — REVERSE lock order, `onTransactionError` per store first,
    then rollback. Rollback never touches state and never re-runs

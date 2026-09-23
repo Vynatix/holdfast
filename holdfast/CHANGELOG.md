@@ -79,8 +79,9 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   inside the post-commit drain's `runCatching`, silently freezing the derived.
   It now rolls back and goes to `Store.uncaughtObserverHandler`; the next
   source commit recomputes normally. With no handler set (the default) the
-  failure is still dropped silently. Disposing a derived also drops a
-  recompute that was already queued.
+  failure is logged (see "post-commit failures are logged by default" under
+  Changed). Disposing a derived also drops a recompute that was already
+  queued.
 
 - **A `derived()` whose host store was disposed no longer throws into its
   source's commit.** Its subscriptions live on the source store and outlive
@@ -169,7 +170,76 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   the opt-in, a silent switch with it. See
   [MIGRATING.md](../MIGRATING.md#source-break-storeclock-030).
 
+- **BREAKING (behavior): writing into a transaction that has already applied
+  is refused instead of silently lost (issue #20).** A commit applies its
+  writes, then notifies observers, bridges and event collectors while its
+  transaction is still the store's active one. An observer that wrote back
+  into the store it observes during that fanout staged into the finished
+  transaction, and the write was silently lost: `mutate`/`update` and `emit`
+  (on `EventfulStore` and `EventfulSupport`) landed in buffers nobody applies
+  again, and a nested `action` or `atomic` opened a savepoint that merged into
+  them. Now `mutate`, `update` and `emit` throw an `IllegalStateException`
+  that names the store and state and lists the fixes (write in the action
+  itself, derive the value, or run a follow-up action as an `action` on
+  another thread, or launched on `Store.scope` with a dispatcher that does not
+  run it inline — on `Dispatchers.Unconfined` or an immediate main dispatcher
+  the launched action runs inside the fanout and is refused too); thrown out
+  of an observer it reaches `uncaughtObserverHandler`. A nested `action` or
+  `atomic` returns `TransactionResult.Error` carrying it, without running its
+  body or middleware — the observer must check that result (e.g.
+  `getOrThrow()`); ignored, the write is still dropped without a log line.
+  The same holds for a participant of an `atomic` frame that already
+  committed while a later one fans out — whether its entry is a root of its
+  own or a savepoint of an enclosing action on the same thread, which used to
+  accept a nested `action`/`atomic`/`emit` and lose it — for a participant
+  already rolled back while the frame's error hooks run, and inside
+  `suspendAction` and `suspendAtomic` commits — their observers, bridge
+  publishes, event collectors resumed inline and frame observers, across
+  thread hops (see `:holdfast-coroutines`' changelog for the two remaining
+  gaps). Another thread's `action`/`atomic` is not affected: it waits for the
+  store and commits on its own, and so does its bare `mutate`/`update` during
+  a blocking commit. While a `suspendAction`/`suspendAtomic` holds the store,
+  though, a bare `mutate`/`update` from any thread stages into its
+  transaction (the suspending body may resume on any thread): before the
+  apply pass it joins the transaction, after it throws this error — with a
+  message saying a suspending transaction holds the store — until the
+  suspending call returns; write from other threads through `action { }`.
+  That check and the stage are atomic with the apply pass, so such a write is
+  applied with the commit or refused, never lost in between. A write into a
+  transaction committed or rolled back by hand now reports this error with
+  its status ("has already applied its writes (status: Committed)", or "has
+  already been rolled back (status: RolledBack)") where `mutate` used to
+  report "Cannot mutate state on a Committed/RolledBack transaction", and a
+  nested `action` there, which used to open a savepoint of the finished
+  transaction and return `Success`, returns it as an `Error`. Writes to
+  another store whose transaction has not applied still commit, as before. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-writes-from-an-observer-into-its-own-committing-store-040).
+
+- **BREAKING (behavior): post-commit failures are logged by default.** With no
+  `Store.uncaughtObserverHandler` set, a throwing observer callback, fanout
+  `Transformer.get`, `Bridge.publish` or `derived` recompute used to be dropped
+  without a trace. It is now logged: a line naming the store and pointing at
+  `uncaughtObserverHandler`, then the stack trace — on standard error on JVM
+  and Android, on standard output on iOS and wasmJs. The commit still stands and
+  the remaining observers still run. Set a handler to route these failures into
+  your own logging, or `{ }` to silence them. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-post-commit-failures-are-logged-by-default-040).
+
 ### Added
+
+- **`Store.internalReportUncaughtFailure(error)`** (`@StoreInternalApi`) — the
+  one reporting path for post-commit failures: `uncaughtObserverHandler` when
+  set, the default log otherwise. `:holdfast-coroutines` reports its suspending
+  bridge-publish failures through it. Companion modules only.
+
+- **`FanoutMarkers`** (`@StoreInternalApi`) — a thread-local marker naming the
+  transactions (roots, or a nested frame's savepoints) whose suspending commit
+  the current thread is running.
+  `:holdfast-coroutines` installs it around the commit phase of
+  `suspendAction`/`suspendAtomic` and keeps it coherent across dispatch, so a
+  blocking `action`/`atomic` from inside that commit is recognised as nested
+  and refused instead of waiting for the serializer the commit holds.
+  Companion modules only.
 
 - **`Store.clock` and `Store.bindClock(clock)`** (`@ExperimentalStoreApi`,
   issue #20 R10) — time as an input. Store code reads `clock.now()` instead of

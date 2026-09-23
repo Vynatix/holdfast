@@ -50,6 +50,12 @@ public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/E
 public abstract interface annotation class com/vynatix/holdfast/ExperimentalStoreApi : java/lang/annotation/Annotation {
 }
 
+public final class com/vynatix/holdfast/FanoutMarkers {
+	public static final field INSTANCE Lcom/vynatix/holdfast/FanoutMarkers;
+	public final fun current ()Ljava/util/Set;
+	public final fun install (Ljava/util/Set;)Ljava/util/Set;
+}
+
 public class com/vynatix/holdfast/FrameContractException : java/lang/IllegalStateException {
 	public fun <init> (Ljava/lang/String;)V
 }
@@ -221,6 +227,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun internalDrainPostCommitTasks ()V
 	public final fun internalFrameMiddlewareSession (Lcom/vynatix/holdfast/Transaction;)Lcom/vynatix/holdfast/FrameMiddlewareSession;
 	public final fun internalOwnsActiveTransaction ()Z
+	public final fun internalReportUncaughtFailure (Ljava/lang/Throwable;)V
 	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
 	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public final fun isDisposed ()Z

@@ -121,7 +121,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 ### Core surface
 
 - **Transactional `action { }`** — atomic multi-state writes; body's return value flows into `TransactionResult.Success<R>`.
-- **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`.
+- **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`. A throwing effect, bridge publish or `derived` recompute never undoes its commit: it goes to `Store.uncaughtObserverHandler`, and is logged (standard error on JVM/Android) while no handler is set — set one at app init to route these failures into your own logging. An effect writing back into the store whose commit is notifying it is refused instead of being lost: `mutate`/`update`/`emit` throw into that handler, and a nested `action`/`atomic` returns an `Error` the effect must check ([GUIDE §4.4](GUIDE.md#4-the-seven-primitives)).
 - **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, `ProfilingMiddleware`, or your own.
 - **Transformers** — normalize on write / project on read, including the asymmetric case where `set` and `get` produce different shapes.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
@@ -179,7 +179,10 @@ and `com.vynatix.holdfast.crypto`:
 - Transactions are thread-confined: only the action's owner thread sees pending
   writes. Cross-thread reads see committed values.
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
-  middleware fires; observers see only committed values.
+  middleware fires; observers see only committed values — except while a
+  `suspendAction`/`suspendAtomic` holds the store: then a bare write from any
+  thread stages into (or, once it has applied, is refused by) that
+  transaction; see GUIDE §8.2.
 - `atomic(s1, s2, …)` sorts stores by a process-monotonic `lockOrderKey`
   and acquires locks in order — deadlock-safe across any combination. Frame
   bodies are policed: writes to unenrolled stores throw, nested frames verify
@@ -192,6 +195,16 @@ and `com.vynatix.holdfast.crypto`:
   source commit for same-store sources, and if that store is busy the
   recompute is handed to its current holder and runs when that holder
   releases — so `value` may briefly lag the committing call.
+- Commit fanout (observers, bridge publishes, events) runs after the
+  transaction has applied, while the store is still held — under its lock
+  for a blocking `action`, under its serializer for `suspendAction`. An
+  observer that writes back into that same store gets an
+  `IllegalStateException` (`mutate`/`update`/`emit`) or an `Error` result
+  (nested `action`/`atomic`) — the write could never commit. Other threads'
+  actions just wait for the store. (While a `suspendAction`/`suspendAtomic`
+  holds the store, a bare `mutate`/`update` from another thread is not
+  wrapped in its own action: it joins the suspending transaction before that
+  applies and throws after — use `action` from other threads.)
 
 ## Modules
 
