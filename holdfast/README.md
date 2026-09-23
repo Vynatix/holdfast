@@ -187,6 +187,10 @@ and `com.vynatix.holdfast.crypto`:
 - `suspendAction` and blocking `action` are mutually exclusive on the same
   store via a coroutine `Mutex` installed lazily through an internal
   `AsyncSerializer` hook.
+- `derived` recomputes never wait on the derived's store: one recompute per
+  source commit for same-store sources, and if that store is busy the
+  recompute is handed to its current holder and runs when that holder
+  releases — so `value` may briefly lag the committing call.
 
 ## Modules
 

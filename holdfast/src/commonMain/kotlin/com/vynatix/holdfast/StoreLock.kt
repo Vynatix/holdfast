@@ -49,6 +49,34 @@ class StoreLock {
         lockCount = 1
     }
 
+    /**
+     * Non-blocking [acquire]: deepen the lock if this thread already holds it,
+     * take it if it is free, and otherwise return `false` at once instead of
+     * parking. A `true` return must be paired with [release], exactly like
+     * [acquire].
+     *
+     * Reentrancy is read the same way [acquire] reads it. On wasmJs every
+     * caller reports thread id `0`, so a held lock always reads as this
+     * thread's and the call deepens it; that is only sound because that
+     * target is single-threaded, which [acquire] already assumes.
+     */
+    internal fun tryAcquire(): Boolean {
+        val currentThreadId = currentThreadId()
+        val acquired =
+            when {
+                locked && ownerThreadId == currentThreadId -> true
+                mutex.tryLock() -> {
+                    locked = true
+                    ownerThreadId = currentThreadId
+                    lockCount = 0
+                    true
+                }
+                else -> false
+            }
+        if (acquired) lockCount++
+        return acquired
+    }
+
     fun release() {
         val currentThreadId = currentThreadId()
         check(locked && ownerThreadId == currentThreadId) {

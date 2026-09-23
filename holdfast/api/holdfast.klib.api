@@ -196,6 +196,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     abstract interface AsyncSerializer { // com.vynatix.holdfast/Store.AsyncSerializer|null[0]
         abstract fun blockingAcquire() // com.vynatix.holdfast/Store.AsyncSerializer.blockingAcquire|blockingAcquire(){}[0]
         abstract fun blockingRelease() // com.vynatix.holdfast/Store.AsyncSerializer.blockingRelease|blockingRelease(){}[0]
+        open fun tryBlockingAcquire(): kotlin/Boolean // com.vynatix.holdfast/Store.AsyncSerializer.tryBlockingAcquire|tryBlockingAcquire(){}[0]
     }
 
     final object Companion { // com.vynatix.holdfast/Store.Companion|null[0]

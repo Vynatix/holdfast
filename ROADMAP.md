@@ -17,10 +17,13 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 4. **Hallmark is decoupled — build and publish.** `:holdfast-hallmark*` modules become property-gated in `settings.gradle.kts` (excluded by default; included with `-Pholdfast.includeHallmark`), so a fresh clone builds standalone. They ship only after `vynatix/hallmark` itself reaches Central, possibly relocated to that repo. Core 1.0 never blocks on the sibling.
 5. **Launch is one-shot.** No announcement, awesome-kotlin submission, or comparison content until the 0.4.0 footgun pass is complete. Known issues are documented by name with workarounds — honesty is the brand repair for the badge that lied.
 6. **New surface needs soak.** Anything introduced after 0.4.0 (lifecycle/savedstate modules) is labeled experimental at 1.0 unless it has had two minors of soak.
+   - *Recorded exception:* `StateCodec<T>` (issue #20, 0.5.0) is stable from the release that introduces it. The stable `bridge.Codec<T>` becomes its subtype, so `Codec`'s contract already freezes it. The rest of #20's public surface from 0.5.0 on ships `@ExperimentalStoreApi`.
 
 ---
 
 ## Milestones
+
+Issue #20 (snapshot-driven bootstrap: codecs, schema versions, tags, `reset()`, eager registration, `merged`, keyed states, hydration, per-frame derivation, clock) lands as fifteen PRs across 0.2.0–0.6.0; each milestone below lists its share. Issue #21 (the typed `Root`) builds on them afterwards.
 
 ### 0.2.0 — "Correct under concurrency" *(in progress)*
 
@@ -34,9 +37,10 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 | **`commit`/`rollback` catch `Throwable`**, propagate `CancellationException` unwrapped, and `TransactionException` names store/phase/state count. | **Done** |
 | **Observer callbacks run outside `observersLock`**, so one slow observer no longer blocks subscribe/dispose from other threads. | **Done** |
 | **`StoreLock` parks instead of spinning** (`SynchronousMutex`), so contention stops presenting as unexplained CPU load in `RUNNABLE`. | **Done** |
+| **Serializer and post-commit correctness (#20 PR 1, the prerequisite).** Each blocking serializer acquire gets its own owner token, so two threads' blocking actions on a coroutine-touched store wait instead of dying on a raw kotlinx mutex error; `postCommit` dedups by identity and closes a cross-thread lost wakeup; `derived` recomputes run once per commit for same-store sources (cross-store sources on an idle host still recompute once per changed source until PR 11) and commit through a non-blocking top-level attempt that hands off to a busy host, instead of a blocking `action` inside the source's fanout (a source commit stalled on a host held with no transaction visible, and the spin on a mutex handed to a queued `suspendAction`). | **Done** |
 | **Savepoint-or-teach for nested `suspendAction`** and `suspendAtomic`-inside-`suspendAction` on an overlapping store — currently a raw kotlinx mutex error. `Mutex.holdsLock(owner)` detects it; needs care where the owner is the `SuspendActionFallbackOwner` singleton. | Open (M) |
 | **Fail fast on blocking `action` inside a `suspendAction` body** — the last remaining spin. Thread identity cannot distinguish it from a legitimate blocking caller on a reused pool thread, so this needs a "body is running on this thread" marker propagated like `FrameMarkerContext` already does for frames. | Open (M) |
-| **Verify the locking changes on iOS.** `StoreLock` and the drain placement touch `pthread`-backed actuals; `iosSimulatorArm64Test` needs a macOS host. | Open (S) |
+| **Verify the locking changes on iOS.** `StoreLock` (including `tryAcquire`) and the drain placement touch `pthread`-backed actuals; `iosSimulatorArm64Test` needs a macOS host. | Open (S) |
 | Standalone `update` reads inside its synthesized action; disposed checks on `atomic`/`derived`/`suspendAction`/`suspendAtomic`; owner check on `emit()`. | Open (M) |
 
 **Success criteria:** every defect above has a regression test that fails without its fix and completes rather than hangs; `./gradlew check` green on JVM, Android host and iOS simulator; no documented feature pair deadlocks.
@@ -58,6 +62,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 | **Docs-truth sweep**: the five doc/code contradictions, stale `*Holdfast`/`*Vault` sample classes, `holdfastTest` references, `asEagerStateFlow` ghost, `validation*` coordinates, MIGRATING.md links (stub or delete — file doesn't exist), compose-README shadowing bug, toolchain floor (Kotlin 2.3.x / JVM 21) documented in Install. | M |
 | **Known-issues section** rewritten against what 0.2.0 actually fixed: the remaining `action`-in-`suspendAction` spin, the `store{}`-vs-`action{}` trap, and cross-store observer writes deadlocking on `transactionLock`. | S |
 | **wasmJs → explicit experimental tier** (tests disabled, `FileSystemKvStore` throws, `suspendDerived` unusable — say so; keep the artifact: the build comment indicates an external consumer). | S |
+| **Time as an input (#20 PR 2, R10).** Getter-based `Store.clock` plus a per-instance `bindClock(Clock?)`, mirroring `scope`/`bindToScope`; bound clocks restored at `storeTest` teardown. **Source break**, inside this window: a subclass member named `clock` now conflicts. | S |
 | **Publish 0.3.0 to Maven Central**: `holdfast`, `-coroutines`, `-compose`, `-testing`. | M |
 
 **Success criteria:** all four artifacts return HTTP 200 on repo1.maven.org; a scripted fresh-clone consumer project with the README install block + quick-start pasted verbatim compiles and prints the documented output including the surfaced error; `grep -ri vault */api/*.api` returns only deprecated aliases; link checker reports zero broken internal links; `./gradlew check` passes on a fresh clone with no sibling-repo ritual.
@@ -69,7 +74,9 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - Enforce the CRTP self-type at construction — `class Foo : Store<Bar>()` fails at init with a two-type teaching message (S)
 - Defuse `store { }` vs `store action { }` — bare invoke becomes non-mutating; mutate outside an action via invoke fails loudly (M)
 - Flip `distinct` default to `true` (matches the StateFlow dedup contract users carry in — and what the GUIDE already claims) (S)
-- Eager state registration via `provideDelegate` — kills the snapshot/restore-on-untouched-store surprise class (M)
+- Eager state registration via `provideDelegate` — kills the snapshot/restore-on-untouched-store surprise class. Lands as #20 PR 4 (R5): a declaration registry (declared vs materialized states, initializers kept out of `propertiesLock`, cycles and initializer writes fail fast) plus consistent single-store snapshots (M/L)
+- #20 PR 3: writes into an already-applied transaction fail loudly — `mutate`, `emit` and nested `action` from an observer into its own committing store surface instead of being silently lost. Lands with or after the observer-exception default below (S)
+- #20 PR 5 (R4): experimental `reset()` from retained initializers — stages initializer output raw, only where it differs, as one transaction (S/M)
 - `suspendAction` disposed-store check matches blocking `action`; `emit()` gains the ownership check `mutate` has (S)
 - Observer-exception default: log loudly instead of silent swallow; document `uncaughtObserverHandler` where users will find it (S)
 - Remove the 0.3.0 deprecated aliases (the one-minor promise) (S)
@@ -86,6 +93,11 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - Never-recordable matcher categories throw instead of passing vacuously (S)
 - Dependency diet: drop unused `api(kotest-assertions)`; make the hallmark matcher optional (S)
 - GUIDE chapters: **Threading & Scopes** (4-level chain, observers-under-lock, dispose asymmetry, `defaultScope`-in-tests + a test-reset story) and **Lifecycle & Events** (who calls `dispose()`, EventfulStore patterns) (M)
+- #20 PR 6 (R1): codec-bearing states, `snapshot().encode()`/`StoreSnapshot.decode`, `RestorePolicy`, typed snapshot reads; stable `StateCodec` (see principle 6), the rest experimental (M/L)
+- #20 PR 7 (R2): opt-in `SchemaVersioned` schema version and `migrate` upcasting (S)
+- #20 PR 8 (R3): state tags (`Secret`/`UserAuthored`/`Remote`), snapshot scopes, sterile restore, and Secret redaction across snapshots, middleware and the test harness (M)
+- #20 PR 9 (R6): experimental `derivedState(...)` and `merged(local, remote)` returning `DerivedState<T>`; the legacy `derived` `Pair` stays until the 0.7.0 triage (S/M)
+- #20 PR 10: internal `StoreAttachment` slot (dispose/reset notifications), which unblocks #21 independently of hydration (S)
 
 **Success criteria:** a newcomer can find, install, and write their first harness test from the module README alone; harness traps from Theme 6 have regression tests; threading model documented where users look.
 
@@ -96,7 +108,12 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 - holdfast-compose depth: single-mention observation (extension on `State<T>`), `rememberStore`, event-collection helper — StateFlow-ergonomics parity for the common cases (M)
 - `holdfast-lifecycle` module (experimental tier): ViewModel ownership pattern, `dispose()` wired to `onCleared`, factory helpers (M)
 - DI recipes as *documentation* (Koin + Hilt patterns, compiled in the snippet module — not new artifacts) (S)
-- Process-death story: SavedStateHandle recipe built on `snapshot()`/`restore()` (recipe first; promote to a module only on demand) (M)
+- Process-death story: SavedStateHandle recipe built on `snapshot()`/`restore()` and #20's `encode`/`decode` (recipe first; promote to a module only on demand) (M)
+- #20 PR 11 (R9): frames apply every participant before any fans out, derivations settle once per outermost entry or frame (`SettleScope`), and a consistent multi-store cut (L)
+- #20 PR 12 (R7): keyed state families — `val docs by keyedState<K, T> { key -> … }` — with per-key eviction and snapshot support (M)
+- #20 PR 13 (R8): hydration lifecycle — `hydrator { base; refresh; adopt }` returning `Hydrator<V>` — carrying the principle-6 soak (L)
+- #20 PR 14 (R8/R3): persisted `UserAuthored` overlay for hydration, next to the process-death recipe (M)
+- #20 PR 15: internal #21 primitives — one-frame restore and dynamic derivation sources (S/M; may fold into #21)
 - **Migration guide**: mechanical StateFlow→Holdfast and MVI→Holdfast mapping tables, validated by porting one banking-demo feature side-by-side (M)
 - banking-demo: Compose Multiplatform UI + ViewModel + DI wiring as the flagship evaluation track (L)
 - **Launch**: announcement anchored on verified differentiators, awesome-kotlin, comparison content; governance pack ships *first* (SECURITY.md, issue templates, triage expectations) so launch-generated load lands on rails (S)

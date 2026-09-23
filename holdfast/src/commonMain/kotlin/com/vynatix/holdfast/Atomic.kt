@@ -104,7 +104,24 @@ fun <R> atomic(
             suspending = false,
             parent = enclosing,
         )
-    val result = acquireAndRun(sorted, 0, mutableListOf(), id, ownerThreadId, marker, body)
+    // Stores whose root this frame opened top-level. The frame is their holder,
+    // so it drains their post-commit queues, but only once it has fully
+    // unwound: a drain at a participant's own unwind step would run derived
+    // recomputes (and their observers) while the EARLIER participants' locks
+    // and committed roots were still installed on this thread, so an observer
+    // writing to one of those stores hit a finished transaction.
+    val drainOnExit = mutableListOf<Store<*>>()
+    val result =
+        try {
+            acquireAndRun(sorted, 0, mutableListOf(), drainOnExit, id, ownerThreadId, marker, body)
+        } finally {
+            // After BOTH the transaction locks and the serializers are released:
+            // a recompute opens a fresh top-level action, which would otherwise
+            // find its store still held by this frame. This drain also serves
+            // recomputes other threads handed to this frame while it held the
+            // store (Store.tryTopLevelAction).
+            drainOnExit.forEach { it.internalDrainPostCommitTasks() }
+        }
     // A nested frame is an inner unit of the enclosing frame's body: its Error
     // escalates just like an inner action's, unless the ENCLOSING policy
     // tolerates inner errors. (Contract exceptions never reach here — they
@@ -133,13 +150,16 @@ private class FrameRoot(
  * A store whose thread already has an active transaction (an enclosing
  * `action` or `atomic` on this thread) gets a SAVEPOINT root — commit merges
  * into the enclosing scope, rollback discards only this frame's writes. All
- * other stores get fresh top-level roots.
+ * other stores get fresh top-level roots. A store that had no active
+ * transaction is added to [drainOnExit], which [atomic] drains once the whole
+ * frame has unwound.
  */
 @Suppress("LongParameterList")
 private fun <R> acquireAndRun(
     sorted: List<Store<*>>,
     index: Int,
     roots: MutableList<FrameRoot>,
+    drainOnExit: MutableList<Store<*>>,
     id: String,
     ownerThreadId: Long,
     marker: FrameMarker,
@@ -161,11 +181,12 @@ private fun <R> acquireAndRun(
     // enclosing action, or an outer frame that holds this store).
     val serializer = if (v.internalOwnsActiveTransaction()) null else v.asyncSerializer
     serializer?.blockingAcquire()
-    var openedTopLevel = false
     try {
         return v.runUnderLock {
             val priorActive = v.activeTransaction
-            openedTopLevel = priorActive == null
+            // A fresh top-level root makes this frame the store's holder. A store
+            // that already had a transaction leaves the drain to its holder.
+            if (priorActive == null) drainOnExit += v
             val root =
                 if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
                     // Nested inside an enclosing action/atomic on this thread for this
@@ -179,18 +200,13 @@ private fun <R> acquireAndRun(
             v.internalSetActiveTransaction(root)
             roots.add(FrameRoot(v, root, v.internalFrameMiddlewareSession(root)))
             try {
-                acquireAndRun(sorted, index + 1, roots, id, ownerThreadId, marker, body)
+                acquireAndRun(sorted, index + 1, roots, drainOnExit, id, ownerThreadId, marker, body)
             } finally {
                 v.internalSetActiveTransaction(priorActive)
             }
         }
     } finally {
         serializer?.blockingRelease()
-        // Top-level exit for this store: drain deferred work (derived recomputes)
-        // queued during the frame. Runs after BOTH the transaction lock and the
-        // serializer are released — a recompute opens a fresh blocking action,
-        // which would otherwise contend with locks this frame still holds.
-        if (openedTopLevel) v.internalDrainPostCommitTasks()
     }
 }
 

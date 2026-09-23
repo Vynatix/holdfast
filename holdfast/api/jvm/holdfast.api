@@ -242,6 +242,11 @@ public abstract class com/vynatix/holdfast/Store {
 public abstract interface class com/vynatix/holdfast/Store$AsyncSerializer {
 	public abstract fun blockingAcquire ()V
 	public abstract fun blockingRelease ()V
+	public fun tryBlockingAcquire ()Z
+}
+
+public final class com/vynatix/holdfast/Store$AsyncSerializer$DefaultImpls {
+	public static fun tryBlockingAcquire (Lcom/vynatix/holdfast/Store$AsyncSerializer;)Z
 }
 
 public final class com/vynatix/holdfast/Store$Companion {

@@ -1042,7 +1042,7 @@ never T1's pending writes.
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
-| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Optional handler for commit-fire observer exceptions (default null = silent swallow) |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Optional handler for post-commit failures: observer callbacks, fanout `Transformer.get`, `Bridge.publish`, `derived` recomputes (default null = silently dropped) |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
@@ -1189,14 +1189,31 @@ fun <V : Store<V>, T : Any> V.derived(
 - **`computed`**: read-time, no observation. Cheap. The returned `State<T>`
   has no observer mechanism — every read of `value` re-runs `compute`.
 - **`derived`**: push-recomputed. Subscribes to each source via `effect`;
-  on each source commit, runs `compute()` inside a fresh top-level action
-  on the same store and stages the result in a backing `MutableState`.
+  after each commit that touches a source, runs `compute()` once — however
+  many of its same-store sources that commit changed — inside a fresh
+  top-level action on the same store and stages the result in a backing
+  `MutableState`.
   The returned `State<T>` is a real observable state — use `effect` to
   subscribe.
 
 The recompute is deferred via `Store.postCommit` (an internal queue) so
-it doesn't re-enter the parent's `pendingWrites` map mid-iteration.
-Disposing the `Disposable` stops recomputation.
+it doesn't re-enter the parent's `pendingWrites` map mid-iteration. It
+never waits for its own store. For sources on the same store, it runs
+after the triggering commit's fanout, once the locks are released. For a
+source on another store while the derived's store is idle, it runs inline
+inside the source's observer fanout, under the source store's lock — so a
+slow `compute` lengthens that commit — and once per changed source, since
+there is no transaction on the derived's store to coalesce behind. If the
+derived's own store is busy (another action, frame or `suspendAction`
+holds it), the recompute is handed to that holder and runs on the
+holder's thread when it releases — so a derived can briefly lag its
+sources, even on the same store when another holder takes the store right
+after the commit, then converges. Read the sources, or use `computed`,
+when you need the caller's own write. A throwing `compute` rolls that
+recompute back and is reported through `uncaughtObserverHandler`
+(silently dropped while no handler is set); the next source commit
+recomputes normally. Disposing the `Disposable` stops recomputation,
+including a recompute that is already queued.
 
 ### 14.3 `atomic(vararg stores) { body }`
 
@@ -1823,8 +1840,9 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    escalation) — REVERSE lock order, `onTransactionError` per store first,
    then rollback. Rollback never touches state and never re-runs
    `Transformer.set`.
-7. **Post-commit drain** — deferred work (`derived` recomputes) runs per
-   store at frame exit, after that store's transaction slot is restored.
+7. **Post-commit drain** — deferred work (`derived` recomputes) runs at
+   frame exit, once every participant's transaction slot is restored and
+   its lock released, for each store whose root the frame opened.
 
 `suspendAtomic` follows the same phases with the suspending machinery: the
 per-store `AsyncSerializer` mutex instead of the blocking lock, commit under

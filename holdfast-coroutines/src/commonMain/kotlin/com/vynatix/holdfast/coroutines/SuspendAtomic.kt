@@ -133,19 +133,37 @@ suspend fun <R> suspendAtomic(
             parent = enclosingMarker,
         )
 
+    // Stores this frame owes a post-commit drain: those whose root it opened
+    // top-level, and one whose mutex acquire was cancelled after kotlinx may
+    // have handed it the mutex. Drained only once the frame has fully unwound:
+    // a drain at a participant's own unwind step ran derived recomputes (and
+    // their observers) while EARLIER participants still had this frame's roots
+    // installed and their mutexes held, so an observer's write to one of those
+    // stores was staged into a root nobody would commit, or hit a finished one.
+    val drainOnExit = mutableListOf<Store<*>>()
     val result =
-        acquireAndRun(
-            sorted = sorted,
-            newlyHeldSet = newlyHeld.toSet(),
-            index = 0,
-            rootsAcquired = mutableListOf(),
-            ownerKey = owner,
-            frame = frame,
-            marker = marker,
-            id = id,
-            ownerThreadId = ownerThreadId,
-            body = body,
-        )
+        try {
+            acquireAndRun(
+                sorted = sorted,
+                newlyHeldSet = newlyHeld.toSet(),
+                index = 0,
+                rootsAcquired = mutableListOf(),
+                drainOnExit = drainOnExit,
+                ownerKey = owner,
+                frame = frame,
+                marker = marker,
+                id = id,
+                ownerThreadId = ownerThreadId,
+                body = body,
+            )
+        } finally {
+            // Every root this frame installed is uninstalled and every mutex it
+            // took is released by now. A recompute opens a fresh top-level
+            // action, so it could not run while this frame held its store. This
+            // drain also serves recomputes handed to this frame while it held
+            // the store (Store.tryTopLevelAction).
+            drainOnExit.forEach { it.internalDrainPostCommitTasks() }
+        }
     // A nested frame is an inner unit of the enclosing frame's body: its
     // Error escalates like an inner action's, unless the ENCLOSING policy
     // tolerates inner errors. (Contract exceptions rethrow directly.)
@@ -165,9 +183,10 @@ suspend fun <R> suspendAtomic(
  *    into the outer, its rollback discards only nested writes.
  *
  * On unwind, newly-acquired locks release in reverse order. Deferred
- * post-commit work (derived recomputes) drains AFTER the mutex releases —
- * recompute actions are blocking and would deadlock on a mutex still held by
- * this frame.
+ * post-commit work (derived recomputes) is not drained here: each store whose
+ * root this frame opened top-level, or whose mutex acquire was cancelled after
+ * kotlinx may have handed it the mutex, is added to [drainOnExit], and
+ * [suspendAtomic] drains those once the whole frame has unwound.
  */
 @OptIn(ExperimentalUuidApi::class)
 @Suppress("LongParameterList", "LongMethod")
@@ -176,6 +195,7 @@ private suspend fun <R> acquireAndRun(
     newlyHeldSet: Set<Store<*>>,
     index: Int,
     rootsAcquired: MutableList<RootEntry>,
+    drainOnExit: MutableList<Store<*>>,
     ownerKey: Any,
     frame: SuspendAtomicFrame,
     marker: FrameMarker,
@@ -195,13 +215,28 @@ private suspend fun <R> acquireAndRun(
         // Mutex.lock(owner) — non-reentrant by kotlinx Mutex contract; the
         // newlyHeld filter above guarantees we never re-acquire a mutex we
         // already hold via this frame's owner key.
-        serializer.mutex.lock(ownerKey)
-        var openedTopLevel = false
+        try {
+            serializer.mutex.lock(ownerKey)
+        } catch (ce: CancellationException) {
+            // Mutex.unlock hands the permit straight to the first waiter. If this
+            // waiter is cancelled before it resumes, kotlinx's prompt-cancellation
+            // handler has already released the permit again by the time lock()
+            // throws — but while we held it, a recompute that found the store busy
+            // may have been handed to us (Store.tryTopLevelAction), so we owe the
+            // store a drain like any releasing holder. Not here, though: earlier
+            // participants still have this frame's roots installed, and a drained
+            // recompute's observers could write into them. Harmless when we were
+            // never handed the permit: every queued task is a non-blocking attempt.
+            drainOnExit += v
+            throw ce
+        }
         try {
             frame.heldVaults += v
             val priorActive = v.activeTransaction
             val priorOwner = v.suspendingOwner
-            openedTopLevel = priorActive == null
+            // A fresh top-level root makes this frame the store's holder. A store
+            // that already had a transaction leaves the drain to its holder.
+            if (priorActive == null) drainOnExit += v
             // Install a fresh root transaction for this store. Subsequent
             // mutate / update / suspendAction calls inside the body stage into
             // this root's pendingWrites.
@@ -215,6 +250,7 @@ private suspend fun <R> acquireAndRun(
                     newlyHeldSet = newlyHeldSet,
                     index = index + 1,
                     rootsAcquired = rootsAcquired,
+                    drainOnExit = drainOnExit,
                     ownerKey = ownerKey,
                     frame = frame,
                     marker = marker,
@@ -231,10 +267,6 @@ private suspend fun <R> acquireAndRun(
             }
         } finally {
             runCatching { serializer.mutex.unlock(ownerKey) }
-            // Drain deferred post-commit work (derived recomputes) only after
-            // the mutex released: recomputes run blocking `action`s, which
-            // would spin forever on a mutex this frame still holds.
-            if (openedTopLevel) v.internalDrainPostCommitTasks()
         }
     } else {
         // Held by the outer frame: no mutex acquire. Open a SAVEPOINT of the
@@ -255,6 +287,7 @@ private suspend fun <R> acquireAndRun(
                 newlyHeldSet = newlyHeldSet,
                 index = index + 1,
                 rootsAcquired = rootsAcquired,
+                drainOnExit = drainOnExit,
                 ownerKey = ownerKey,
                 frame = frame,
                 marker = marker,

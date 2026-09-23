@@ -167,7 +167,7 @@ abstract class Store<Self : Store<Self>> {
         transactionLock.withLock {
             _activeTransaction = null
         }
-        postCommitLock.withLock { postCommitTasks.clear() }
+        postCommitQueue.clear()
         // Snapshot the property map under its lock, then call shutdownSilently outside
         // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
         // locks, and we don't want to invert ordering.
@@ -233,10 +233,19 @@ abstract class Store<Self : Store<Self>> {
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * Optional handler invoked when a commit-fire observer callback throws. If null
-     * (the default), exceptions thrown from observer bodies during commit are
-     * swallowed silently — matching the original library contract. Set to a non-null
-     * handler to surface them (e.g. a logger or a test fixture's failure list).
+     * Optional handler for failures in post-commit side effects, which cannot
+     * undo a commit whose values are already applied:
+     *  - a commit-fire observer callback that throws;
+     *  - a throwing `Transformer.get` during observer fanout (that state's
+     *    observers are skipped);
+     *  - a throwing `Bridge.publish` (the commit still succeeds);
+     *  - a failed [derived] recompute — a throwing `compute`, or a middleware
+     *    rejecting it: rolled back, and the derived keeps its value until the
+     *    next source commit.
+     *
+     * If null (the default), all of these are dropped silently — matching the
+     * original library contract. Set to a non-null handler to surface them (e.g.
+     * a logger or a test fixture's failure list).
      *
      * Note: this handler does NOT capture exceptions thrown from the initial-fire
      * call inside [State.effect]/[MutableState.observe]. Those propagate to the
@@ -257,11 +266,33 @@ abstract class Store<Self : Store<Self>> {
      * Marked `@StoreInternalApi` because it's an extension point for companion
      * modules, not a user-facing knob. If null (the default), `action` runs
      * unwrapped — the legacy fast path.
+     *
+     * An implementation must tolerate blocking acquires from several threads
+     * at once: each caller holds the serializer exclusively between its own
+     * [blockingAcquire] and [blockingRelease], and [blockingRelease] is always
+     * called on the thread that acquired.
      */
     interface AsyncSerializer {
         fun blockingAcquire()
 
         fun blockingRelease()
+
+        /**
+         * Non-blocking [blockingAcquire]: take the serializer and return `true`
+         * if it is free, or return `false` at once if anyone else holds it.
+         * A `true` return must be paired with [blockingRelease].
+         *
+         * The store's non-blocking paths (the `derived` recompute hand-off)
+         * rely on this never waiting. The default delegates to
+         * [blockingAcquire] and therefore DOES block — it exists only so
+         * implementations written before this member keep compiling; override
+         * it in any serializer a `derived` state can meet.
+         */
+        @StoreInternalApi
+        fun tryBlockingAcquire(): Boolean {
+            blockingAcquire()
+            return true
+        }
     }
 
     @StoreInternalApi
@@ -280,56 +311,195 @@ abstract class Store<Self : Store<Self>> {
     var suspendingOwner: Any? = null
 
     /**
-     * Tasks queued during an in-progress action that should run AFTER the current
-     * top-level action's commit fanout completes. Used by [derived] to defer
-     * recompute actions out of the parent's commit loop — this avoids re-entering
-     * `pendingWrites` while the parent is iterating it.
-     *
-     * Guarded by [postCommitLock] rather than by the transaction lock: the drain
-     * deliberately runs OUTSIDE the serializer bracket (see [action]), so the
-     * queue is reachable from a thread that holds neither the store's
-     * `transactionLock` nor its `AsyncSerializer`.
+     * Tasks queued during an in-progress transaction that should run AFTER the
+     * current top-level transaction's commit fanout completes and its locks are
+     * released. Used by [derived] to defer recomputes out of the parent's commit
+     * loop — this avoids re-entering `pendingWrites` while the parent is
+     * iterating it.
      */
-    private val postCommitLock = StoreLock()
-    private val postCommitTasks = mutableListOf<() -> Unit>()
+    private val postCommitQueue = PostCommitQueue()
 
     /**
-     * Schedule [task] to run after the current top-level action's commit fanout
-     * finishes. If called outside any action, the task runs immediately.
+     * Schedule [task] to run after the current top-level transaction's commit
+     * fanout finishes and its locks are released. If no transaction is active,
+     * the task runs immediately on the calling thread.
      *
-     * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
-     * instead of re-entering the parent's commit. Also reachable by companion
-     * modules (`:holdfast-coroutines.suspendDerived`) that need the same deferral
+     * A task instance that is already queued is not queued twice (identity,
+     * `===`), so a caller that submits one stable task per consumer gets one
+     * run per transaction of this store however many times that transaction's
+     * commit triggers it. The dedup only applies while a transaction is
+     * active: on an idle store every submission runs inline, so a consumer
+     * triggered N times from ANOTHER store's commit fanout runs N times.
+     *
+     * Used by `derived(...)` to defer its recompute instead of re-entering the
+     * parent's commit. Also reachable by companion modules
+     * (`:holdfast-coroutines.suspendDerived`) that need the same deferral
      * contract; marked `@StoreInternalApi` because the deferral is an
      * implementation detail of the derived-recompute machinery, not a
      * user-facing knob.
      */
     @StoreInternalApi
     fun postCommit(task: () -> Unit) {
-        if (_activeTransaction != null) {
-            postCommitLock.withLock { postCommitTasks.add(task) }
-        } else {
+        if (_activeTransaction == null) {
             task()
+            return
         }
+        postCommitQueue.enqueue(task)
+        // Lost-wakeup guard. The transaction seen above may have ended — and its
+        // holder already drained an empty queue — between that read and the
+        // enqueue, which would strand [task] until some unrelated later
+        // transaction drains. If the slot is empty now, nobody is left to drain,
+        // so drain here. If it is still occupied, that holder clears it strictly
+        // after this read and drains after clearing, so it will see [task].
+        if (_activeTransaction == null) drainPostCommitTasks()
     }
 
     private fun drainPostCommitTasks() {
-        // Drain to a local copy so any task that queues another doesn't perturb
-        // our iteration. Tasks scheduled by tasks land in postCommitTasks and
-        // are picked up by the next iteration of this loop.
-        //
-        // Tasks run OUTSIDE postCommitLock: each one opens a fresh top-level
-        // action, which may queue further tasks.
-        while (true) {
-            val drained =
-                postCommitLock.withLock {
-                    if (postCommitTasks.isEmpty()) return
-                    val snapshot = postCommitTasks.toList()
-                    postCommitTasks.clear()
-                    snapshot
-                }
-            drained.forEach { runCatching { it() } }
+        postCommitQueue.drain()
+    }
+
+    /**
+     * Queue [task] for the store's current holder without running it, even
+     * when no transaction is visible. For a task that just found the store busy
+     * through [tryTopLevelAction]; see there for why the holder is guaranteed
+     * to drain it.
+     */
+    internal fun handOffPostCommit(task: () -> Unit) {
+        postCommitQueue.enqueue(task)
+    }
+
+    /** Withdraw a still-queued [task]; see [PostCommitQueue.withdraw]. */
+    internal fun withdrawPostCommit(task: () -> Unit) {
+        postCommitQueue.withdraw(task)
+    }
+
+    /**
+     * Run [body] as a top-level action if the store can take one right now,
+     * and never block or spin trying.
+     *
+     * Returns [TopLevelAttempt.Disposed] on a disposed store, and
+     * [TopLevelAttempt.Busy] while a transaction is active — including this
+     * thread's own, since a top-level action cannot nest inside it — or when
+     * the serializer or `transactionLock` is taken while one is.
+     * [TopLevelAttempt.BusyNoTxn] means one of those is taken with no
+     * transaction installed. Otherwise [onAcquired] runs once the store is
+     * taken — before the middleware chain, so it runs even when a middleware
+     * then rejects the action — and the body runs exactly like a top-level
+     * [action] (middleware chain, commit, fanout; failures fold into the
+     * [TopLevelAttempt.Ran] result), the locks release in `action`'s order, and
+     * the post-commit queue drains. No frame policing: callers are library
+     * machinery that runs after commits, not user bodies.
+     *
+     * **Hand-off invariant.** A caller that gets a busy answer may queue its
+     * task with [handOffPostCommit] and retry once; if the retry is busy too,
+     * dropping the task is safe, because every top-level holder of this
+     * store's serializer, `transactionLock` or active-transaction slot drains
+     * the queue after it releases: blocking [action], `atomic` for a store whose
+     * root it opened (a savepoint root defers to the enclosing holder),
+     * `suspendAction` in its `finally`, `suspendAtomic` for a root it opened
+     * (and for a mutex acquire cancelled after kotlinx handed it the mutex) —
+     * both frames once they have fully unwound — this function after it ran,
+     * and after it backed out busy from a serializer or lock it took (unless
+     * the store has another holder by then, which drains instead), and
+     * `:holdfast-testing`'s open-transaction commit, rollback and body-throw
+     * cleanup. The queue write happens before the busy retry, and that
+     * holder's drain after it releases, so the drain sees the task. [dispose]
+     * holds the lock only to empty the active-transaction slot, then clears
+     * the queue instead of draining it — fine, because a disposed store
+     * refuses every later attempt with [TopLevelAttempt.Disposed]. A new
+     * holder added to any of these must drain the same way (see
+     * [internalDrainPostCommitTasks]).
+     */
+    internal fun tryTopLevelAction(
+        id: String,
+        onAcquired: () -> Unit = {},
+        body: Self.() -> Unit,
+    ): TopLevelAttempt {
+        val active = _activeTransaction
+        val attempt =
+            when {
+                isDisposed -> TopLevelAttempt.Disposed
+                active != null -> TopLevelAttempt.Busy(active)
+                else -> tryTopLevelUnderSerializer(id, onAcquired, body)
+            }
+        if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
+        return attempt
+    }
+
+    private fun tryTopLevelUnderSerializer(
+        id: String,
+        onAcquired: () -> Unit,
+        body: Self.() -> Unit,
+    ): TopLevelAttempt {
+        val serializer = asyncSerializer
+        if (serializer != null && !serializer.tryBlockingAcquire()) return busyAttempt()
+        val underLock =
+            try {
+                tryTopLevelUnderLock(id, onAcquired, body)
+            } finally {
+                serializer?.blockingRelease()
+            }
+        val attempt = underLock ?: busyAttempt()
+        // This attempt held the store (the serializer, or the lock with a
+        // transaction installed) and then backed out busy. While it held it,
+        // another holder's drain may have found the store busy and handed a
+        // task to it, so it owes the store a drain like any releasing holder.
+        // Without this, a lock-only holder (the harness's open-transaction
+        // commit, or an `action` that read the serializer as not yet installed)
+        // whose drain ran during our hold would leave that task stranded.
+        if (attempt !is TopLevelAttempt.Ran && (serializer != null || underLock != null)) drainIfUnheld()
+        return attempt
+    }
+
+    /** `null` when the lock is taken by someone else, i.e. nothing was held. */
+    private fun tryTopLevelUnderLock(
+        id: String,
+        onAcquired: () -> Unit,
+        body: Self.() -> Unit,
+    ): TopLevelAttempt? {
+        if (!transactionLock.tryAcquire()) return null
+        return try {
+            // Re-read under the lock: a holder may have installed a transaction
+            // after the unlocked read in tryTopLevelAction (e.g. a test harness
+            // transaction held open without the lock).
+            val active = _activeTransaction
+            if (active != null) {
+                TopLevelAttempt.Busy(active)
+            } else {
+                onAcquired()
+                TopLevelAttempt.Ran(runTransaction(id, body))
+            }
+        } finally {
+            transactionLock.release()
         }
+    }
+
+    private fun busyAttempt(): TopLevelAttempt {
+        val active = _activeTransaction
+        return if (active != null) TopLevelAttempt.Busy(active) else TopLevelAttempt.BusyNoTxn
+    }
+
+    /**
+     * Drain the post-commit queue unless the active-transaction slot or
+     * `transactionLock` has a holder right now. That holder releases after this
+     * check and drains after it releases, so its drain sees everything queued
+     * before it.
+     *
+     * The lock is probed with [StoreLock.tryAcquire] rather than read: its
+     * `locked` flag is written after the mutex is taken and cleared before it
+     * is released, so a read can miss a holder. Probing instead of draining
+     * unconditionally is also what keeps this from recursing: while a
+     * lock-only holder keeps the lock, an unconditional drain would re-run the
+     * caller's own handed-off task, which would back out busy and drain again.
+     * With the probe, a nested drain needs the store to change hands in
+     * between. A holder of the serializer alone is not probed for: a drained
+     * task meets it before taking anything, backs out without draining, and
+     * that holder drains after it releases.
+     */
+    private fun drainIfUnheld() {
+        if (_activeTransaction != null || !transactionLock.tryAcquire()) return
+        transactionLock.release()
+        drainPostCommitTasks()
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -398,8 +568,8 @@ abstract class Store<Self : Store<Self>> {
         // A nested action is a savepoint of a transaction this thread already
         // owns, so it is already inside the region the serializer brackets.
         // Re-acquiring there is never correct and is actively fatal: the
-        // serializer is not reentrant, so the inner acquire either spins forever
-        // or throws a raw "mutex is already locked by the specified owner".
+        // serializer is not reentrant, so the inner acquire would wait forever
+        // for the outer acquire this very call stack holds.
         val nested = ownsActiveTransaction()
         val serializer = if (nested) null else asyncSerializer
         serializer?.blockingAcquire()
@@ -411,8 +581,10 @@ abstract class Store<Self : Store<Self>> {
             }
         // Deferred work (derived recomputes) opens FRESH top-level actions, so it
         // must run only after this call's serializer bracket is released —
-        // draining inside it makes the recompute contend with a lock its own call
-        // stack holds. Same placement, and same reason, as suspendAtomic's drain.
+        // inside it, the recompute would find the store busy and hand itself
+        // back to this very call. Draining after the release is also what makes
+        // this call a valid hand-off target (see tryTopLevelAction). Same
+        // placement, and same reason, as suspendAtomic's drain.
         if (!nested) drainPostCommitTasks()
         escalateInFrameError(frame, result)
         return result
@@ -501,40 +673,45 @@ abstract class Store<Self : Store<Self>> {
     @OptIn(ExperimentalUuidApi::class)
     private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
         transactionLock.withLock {
-            val parent = _activeTransaction
-            val txn =
-                Transaction(
-                    id = body::class.simpleName ?: Uuid.random().toString(),
-                    parent = parent,
-                    ownerThreadId = currentThreadId(),
-                )
-
-            _activeTransaction = txn
-            // Box for capturing the body's return value so we can pipe it into Success.
-            // Holds null before the body runs; holds (result) after.
-            val box = arrayOfNulls<Any?>(1)
-            val outcome: TransactionResult<R> =
-                try {
-                    runMiddlewareChain { box[0] = body(self) }
-                    try {
-                        txn.commit()
-                        @Suppress("UNCHECKED_CAST")
-                        TransactionResult.Success(txn, box[0] as R)
-                    } catch (e: Throwable) {
-                        TransactionResult.Error(e, txn)
-                    }
-                } catch (e: Throwable) {
-                    runCatching { txn.rollback() }
-                    TransactionResult.Error(e, txn)
-                } finally {
-                    _activeTransaction = parent
-                }
             // NOTE: post-commit tasks are NOT drained here. The drain runs in
             // [action], after the serializer bracket is released — see the comment
             // there. Nested actions inherit the parent's deferred queue and let it
             // drain at the outermost boundary either way.
-            outcome
+            runTransaction(body::class.simpleName ?: Uuid.random().toString(), body)
         }
+
+    /**
+     * Open a transaction on top of whatever is active (a savepoint if anything
+     * is), run [body] through the middleware chain, then commit or roll back.
+     * The caller holds `transactionLock` and owns the post-commit drain.
+     */
+    private fun <R> runTransaction(
+        id: String,
+        body: Self.() -> R,
+    ): TransactionResult<R> {
+        val parent = _activeTransaction
+        val txn = Transaction(id = id, parent = parent, ownerThreadId = currentThreadId())
+
+        _activeTransaction = txn
+        // Box for capturing the body's return value so we can pipe it into Success.
+        // Holds null before the body runs; holds (result) after.
+        val box = arrayOfNulls<Any?>(1)
+        return try {
+            runMiddlewareChain { box[0] = body(self) }
+            try {
+                txn.commit()
+                @Suppress("UNCHECKED_CAST")
+                TransactionResult.Success(txn, box[0] as R)
+            } catch (e: Throwable) {
+                TransactionResult.Error(e, txn)
+            }
+        } catch (e: Throwable) {
+            runCatching { txn.rollback() }
+            TransactionResult.Error(e, txn)
+        } finally {
+            _activeTransaction = parent
+        }
+    }
 
     private fun runMiddlewareChain(block: () -> Unit) {
         middlewareLock.withLock {
@@ -776,9 +953,15 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Internal hook for `:holdfast-coroutines.suspendAction`. Sets the active
-     * transaction directly without going through the blocking lock — the caller
-     * is responsible for serialization (via [asyncSerializer]).
+     * Internal hook for `atomic`, `:holdfast-coroutines` (`suspendAction`,
+     * `suspendAtomic`) and `:holdfast-testing`'s open transactions. Sets the
+     * active transaction directly without going through the blocking lock —
+     * the caller is responsible for serialization (via [asyncSerializer] or
+     * [runUnderLock]).
+     *
+     * Installing a top-level transaction makes the caller a post-commit
+     * holder: after clearing the slot and releasing, it must call
+     * [internalDrainPostCommitTasks].
      */
     @StoreInternalApi
     fun internalSetActiveTransaction(txn: Transaction?) {
@@ -786,9 +969,21 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Internal hook for `:holdfast-coroutines.suspendAction`. Drains any post-commit
-     * tasks queued during the suspending action — same semantics as the
-     * blocking action's tail drain.
+     * Drain this store's post-commit queue on the calling thread — the same
+     * drain as the blocking [action]'s tail. Used by `atomic`,
+     * `:holdfast-coroutines` (`suspendAction`, `suspendAtomic`) and
+     * `:holdfast-testing`'s open transactions.
+     *
+     * Any caller that takes this store's serializer, `transactionLock` or
+     * active-transaction slot as a TOP-LEVEL holder must call this once it has
+     * released all three, on every exit: commit, rollback, body throw and
+     * cancellation, including a cancelled mutex acquire. A caller that only
+     * opened a savepoint of an enclosing root leaves the drain to that root's
+     * holder. Never call it while still holding the serializer or the lock: a
+     * queued `derived` recompute would find the store busy, hand itself back
+     * to this caller, and be stranded. `derived` recomputes that found the
+     * store busy are queued for its current holder and rely on this drain
+     * (see `Store.tryTopLevelAction`).
      */
     @StoreInternalApi
     fun internalDrainPostCommitTasks() {
@@ -816,10 +1011,15 @@ abstract class Store<Self : Store<Self>> {
         }
 
     /**
-     * Internal hook for `atomic(...)`. Runs [block] under this store's
-     * `transactionLock`. The reentrant lock makes this safe to call when the
-     * same thread already holds the lock (e.g., nested `atomic` calls overlap
-     * on a store).
+     * Internal hook for `atomic(...)` and `:holdfast-testing`'s open
+     * transactions. Runs [block] under this store's `transactionLock`. The
+     * reentrant lock makes this safe to call when the same thread already
+     * holds the lock (e.g., nested `atomic` calls overlap on a store).
+     *
+     * A caller that takes the lock as a top-level holder must call
+     * [internalDrainPostCommitTasks] once `runUnderLock` has returned or
+     * thrown (and once any active-transaction slot it installed is cleared
+     * again), not inside [block].
      */
     @StoreInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)

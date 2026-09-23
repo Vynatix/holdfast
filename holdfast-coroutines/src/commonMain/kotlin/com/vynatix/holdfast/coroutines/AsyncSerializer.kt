@@ -17,23 +17,46 @@ import kotlin.coroutines.cancellation.CancellationException
  * callers use the natural `Mutex.lock(owner)` suspending wait. Shared between
  * the two suspending entry points so a suspendAtomic and a suspendAction on
  * the same store block each other.
+ *
+ * Every blocking acquire locks with a fresh owner token. They used to share
+ * one process-wide owner, and kotlinx `Mutex.tryLock(owner)` does not return
+ * `false` when that owner already holds the mutex — it THROWS
+ * `IllegalStateException`. So while one thread's blocking action held the
+ * serializer, a second thread's blocking action on the same store failed with
+ * a raw mutex error instead of waiting its turn.
  */
 internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
 
+    /**
+     * Owner token of the blocking caller currently holding [mutex], or `null`.
+     * Written only by that caller after it wins the lock and cleared by the
+     * same caller before it unlocks, so it is never contended; `@Volatile`
+     * publishes the value alongside the mutex handover.
+     */
+    @kotlin.concurrent.Volatile
+    private var blockingHolder: Any? = null
+
     override fun blockingAcquire() {
-        while (!mutex.tryLock(SPIN_OWNER)) {
+        val token = Any()
+        while (!mutex.tryLock(token)) {
             com.vynatix.holdfast.platform
                 .threadYield()
         }
+        blockingHolder = token
+    }
+
+    override fun tryBlockingAcquire(): Boolean {
+        val token = Any()
+        val acquired = mutex.tryLock(token)
+        if (acquired) blockingHolder = token
+        return acquired
     }
 
     override fun blockingRelease() {
-        runCatching { mutex.unlock(SPIN_OWNER) }
-    }
-
-    private companion object {
-        private val SPIN_OWNER = Any()
+        val token = blockingHolder ?: return
+        blockingHolder = null
+        runCatching { mutex.unlock(token) }
     }
 }
 

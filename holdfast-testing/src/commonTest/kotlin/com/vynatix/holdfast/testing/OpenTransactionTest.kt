@@ -3,6 +3,7 @@ package com.vynatix.holdfast.testing
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.derived
 import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.testing.concurrency.parallel
 import com.vynatix.holdfast.testing.concurrency.transaction
@@ -18,6 +19,10 @@ import kotlin.test.assertTrue
 private class OpenTxnCounterVault : Store<OpenTxnCounterVault>() {
     val count by state { 0 }
     val label by state { "init" }
+}
+
+private class OpenTxnSourceStore : Store<OpenTxnSourceStore>() {
+    val x by state { 1 }
 }
 
 class OpenTransactionTest {
@@ -65,6 +70,117 @@ class OpenTransactionTest {
             assertEquals(0, ctr.read { count.value })
             assertEquals(TransactionStatus.RolledBack, open.transaction.status)
             assertTrue(open.isClosed, "isClosed should be true after rollback")
+        }
+
+    /**
+     * An open transaction occupies its store's active-transaction slot, so a
+     * `derived` recompute that fires meanwhile is queued behind it, and the
+     * store relies on whoever holds the slot to drain that queue when it ends.
+     * Rollback used not to drain at all, stranding the recompute until some
+     * later action happened to drain.
+     */
+    @Test
+    fun openRollbackRunsTheDerivedRecomputeQueuedBehindIt() =
+        storeTest {
+            val host = OpenTxnCounterVault()
+            val ctr = track(host)
+            val source = OpenTxnSourceStore()
+            val (mirror, d) = host.derived(source.x) { source.x.value * 10 }
+            try {
+                val open = transaction(on = ctr) { count mutate 5 }
+                source action { x mutate 4 }
+                assertEquals(10, mirror.value, "the host is held by the open transaction, so the recompute waits")
+
+                open.rollback()
+
+                assertEquals(40, mirror.value, "rollback must drain the recompute queued behind the open transaction")
+                assertEquals(0, ctr.read { count.value })
+            } finally {
+                d.dispose()
+            }
+        }
+
+    /**
+     * Commit is the open transaction's most common exit. A recompute that fired
+     * from another store while the transaction was open is queued behind it,
+     * and only commit's drain can run it.
+     */
+    @Test
+    fun openCommitRunsTheDerivedRecomputeQueuedBehindIt() =
+        storeTest {
+            val host = OpenTxnCounterVault()
+            val ctr = track(host)
+            val source = OpenTxnSourceStore()
+            val (mirror, d) = host.derived(source.x) { source.x.value * 10 }
+            try {
+                val open = transaction(on = ctr) { count mutate 5 }
+                source action { x mutate 4 }
+                assertEquals(10, mirror.value, "the host is held by the open transaction, so the recompute waits")
+
+                open.commit().shouldBeSuccess()
+
+                assertEquals(40, mirror.value, "commit must drain the recompute queued behind the open transaction")
+                assertEquals(5, ctr.read { count.value })
+            } finally {
+                d.dispose()
+            }
+        }
+
+    /**
+     * A same-store source: commit's own fanout queues the recompute while the
+     * open transaction still occupies the slot, so nothing but commit's drain
+     * runs it.
+     */
+    @Test
+    fun openCommitRunsTheSameStoreDerivedRecompute() =
+        storeTest {
+            val host = OpenTxnCounterVault()
+            val ctr = track(host)
+            val (mirror, d) = host.derived(host.count) { count.value * 10 }
+            try {
+                val open = transaction(on = ctr) { count mutate 5 }
+                open.commit().shouldBeSuccess()
+
+                assertEquals(
+                    50,
+                    mirror.value,
+                    "the commit fanout queues the recompute while the slot is still held; commit's drain must run it",
+                )
+            } finally {
+                d.dispose()
+            }
+        }
+
+    /**
+     * A throwing body is the open transaction's third exit: it clears the
+     * active-transaction slot too, so it must drain what was queued behind it
+     * like commit and rollback do.
+     */
+    @Test
+    fun openBodyThrowRunsTheDerivedRecomputeQueuedBehindIt() =
+        storeTest {
+            val host = OpenTxnCounterVault()
+            val ctr = track(host)
+            val source = OpenTxnSourceStore()
+            val (mirror, d) = host.derived(source.x) { source.x.value * 10 }
+            try {
+                assertFailsWith<IllegalStateException> {
+                    transaction(on = ctr) {
+                        count mutate 5
+                        source action { x mutate 4 }
+                        error("boom")
+                    }
+                }
+
+                assertEquals(
+                    40,
+                    mirror.value,
+                    "the body-throw cleanup must drain the recompute queued behind the open transaction",
+                )
+                assertEquals(0, ctr.read { count.value })
+            } finally {
+                d.dispose()
+            }
         }
 
     @Test

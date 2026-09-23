@@ -103,9 +103,13 @@ internal object PrivilegedHooks {
      *     `pendingWrites`, identical to the staging that `store.action`'s body
      *     performs.
      *  4. On a body throw: re-acquire the lock, clear the active transaction,
-     *     rollback the new transaction so its status flips to RolledBack, and
-     *     propagate. The store is left in a clean state (no active txn,
-     *     unchanged committed values).
+     *     rollback the new transaction so its status flips to RolledBack, drain
+     *     the post-commit queue once the lock is released (work such as a
+     *     `derived` recompute may have been queued behind the open transaction
+     *     — see [commitOpenTransaction]), and propagate. The store is left in a
+     *     clean state: no active txn, and the body's writes discarded (a
+     *     drained post-commit task such as a `derived` recompute may still
+     *     commit its own transaction).
      *
      * No middleware runs — this matches `:holdfast-coroutines.suspendAction`'s
      * v1 contract for externally-manufactured transactions. The recorder
@@ -137,12 +141,21 @@ internal object PrivilegedHooks {
             store.selfForExternal.body()
         } catch (e: Throwable) {
             // Body threw — leave the store in a clean state for the next test.
-            store.runUnderLock {
-                if (store.activeTransaction === txn) {
-                    store.internalSetActiveTransaction(null)
+            try {
+                store.runUnderLock {
+                    if (store.activeTransaction === txn) {
+                        store.internalSetActiveTransaction(null)
+                    }
                 }
+                runCatching { txn.rollback() }
+            } finally {
+                // This exit releases the active-transaction slot too, so it is a
+                // hand-off holder like commit/rollbackOpenTransaction: drain the
+                // post-commit work queued behind the open transaction
+                // (Store.tryTopLevelAction). The drain swallows task failures, so
+                // `e` still propagates unchanged.
+                store.internalDrainPostCommitTasks()
             }
-            runCatching { txn.rollback() }
             throw e
         }
         return txn
@@ -151,12 +164,17 @@ internal object PrivilegedHooks {
     /**
      * Apply [transaction]'s pending writes to [store] under the store's
      * `transactionLock`, fire observers and bridges, then clear the active
-     * transaction and drain any post-commit tasks.
+     * transaction and — once the lock is released — drain any post-commit
+     * tasks.
      *
-     * Mirrors the tail of `Store.runBlockingActionUnderLock`: the lock guards
+     * Mirrors the tail of a production `Store.action`: the lock guards
      * against a peer `action` interleaving with the apply-and-fanout, the
      * `internalDrainPostCommitTasks` call lets `derived` recompute fan out
-     * exactly like a production action would.
+     * exactly like a production action would. The drain runs after the lock
+     * is released, like `action`'s: an open transaction occupies the store's
+     * active-transaction slot, so a `derived` recompute that found the store
+     * busy handed its work to this transaction, and the store relies on every
+     * holder draining after it releases (`Store.tryTopLevelAction`).
      *
      * Throws if [Transaction.commit] throws (commit-time `TransactionException`
      * or any state's `applyCommitted` throwing). The caller wraps this in
@@ -166,22 +184,30 @@ internal object PrivilegedHooks {
         store: Store<*>,
         transaction: Transaction,
     ) {
-        store.runUnderLock {
-            try {
-                transaction.commit()
-            } finally {
-                if (store.activeTransaction === transaction) {
-                    store.internalSetActiveTransaction(null)
+        try {
+            store.runUnderLock {
+                try {
+                    transaction.commit()
+                } finally {
+                    if (store.activeTransaction === transaction) {
+                        store.internalSetActiveTransaction(null)
+                    }
                 }
-                store.internalDrainPostCommitTasks()
             }
+        } finally {
+            store.internalDrainPostCommitTasks()
         }
     }
 
     /**
      * Rollback [transaction] on [store] under the store's `transactionLock`,
-     * then clear the active transaction. Idempotent on a non-Active
-     * transaction — matching [Transaction.rollback]'s contract.
+     * then clear the active transaction and drain any post-commit tasks
+     * handed to it while it was open (see [commitOpenTransaction]). A drained
+     * task such as a `derived` recompute commits as its own transaction, so
+     * it runs the store's middleware — including the recorder, when teardown's
+     * auto-rollback runs this while the recorder is still installed.
+     * Idempotent on a non-Active transaction — matching
+     * [Transaction.rollback]'s contract.
      *
      * Used both by the user-facing [com.vynatix.holdfast.testing.concurrency.OpenTransaction.rollback]
      * and by the test-scope `tearDown` auto-rollback path. Catches and
@@ -198,5 +224,6 @@ internal object PrivilegedHooks {
                 store.internalSetActiveTransaction(null)
             }
         }
+        store.internalDrainPostCommitTasks()
     }
 }

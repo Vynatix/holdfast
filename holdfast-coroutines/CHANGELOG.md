@@ -40,6 +40,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the store's mutex releases.** Previously the drain ran while the frame
   still held the mutex, so a recompute (a blocking `action`) could spin
   forever.
+- **Blocking actions on two threads no longer fail on a store that has used
+  a coroutine entry point.** The store's serializer locked its mutex with one
+  shared owner for every blocking caller, and kotlinx `Mutex.tryLock(owner)`
+  throws — rather than returning `false` — when that owner already holds it.
+  So while one thread's blocking `action` (or `atomic`) held the serializer, a
+  second thread's blocking action on the same store threw a raw
+  `"This mutex is already locked by the specified owner"` instead of waiting.
+  Each blocking acquire now locks with its own owner token.
+- **A `suspendAction` that hands the store's mutex to a queued
+  `suspendAction` no longer spins in its `derived` recompute.** kotlinx
+  `Mutex.unlock` transfers ownership straight to the first waiter, so the
+  first action's post-commit drain met a mutex held by a coroutine that had
+  not resumed; the recompute's blocking acquire spun on it — forever when both
+  ran on one thread (`runBlocking`, a single-threaded dispatcher). The
+  recompute now hands itself to the new holder, which runs it after its own
+  commit. A `suspendAtomic` waiter that is cancelled after being handed the
+  mutex (kotlinx then gives the mutex back and `lock` throws) drains that
+  recompute on its way out, once the frame has unwound.
+- **`suspendAtomic` runs its post-commit work only once the whole frame has
+  unwound.** Each participant's queue drained at that participant's own unwind
+  step, while the frame still held the EARLIER participants' mutexes with its
+  roots installed. So an observer on a `derived` recompute that wrote to an
+  earlier participant hit the frame's finished root and threw, and a blocking
+  `action` on it waited forever for a mutex the frame held. The frame now
+  drains every store whose root it opened after releasing all of them.
 
 ### Changed
 

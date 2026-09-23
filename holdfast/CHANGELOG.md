@@ -61,6 +61,55 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `RUNNABLE` where no profiler reports it as blocked. It now blocks on
   `kotlinx.atomicfu.locks.SynchronousMutex`, keeping its own reentrancy depth.
 
+- **A `derived()` recompute never blocks or spins on its host store.** The
+  recompute ran a blocking `action` on the store hosting the derived. For a
+  derived whose source lives on another store, that happened inside the
+  source's commit fanout with the source's `transactionLock` held, so a host
+  held with no transaction visible yet (its serializer taken, its action not
+  yet in its body) stalled the source's commit — a deadlock if that holder
+  then needed the source store. And when kotlinx `Mutex.unlock` handed the
+  host's serializer to a queued `suspendAction` that had not resumed yet, the
+  recompute spun on it — forever on a single-threaded event loop, where that
+  coroutine needed the spinning thread. The recompute now makes one
+  non-blocking top-level attempt; a busy host gets it handed to its current
+  holder, which runs it after releasing.
+
+- **`derived()` recompute failures reach `Store.uncaughtObserverHandler`.** A
+  throwing `compute` (or a middleware rejecting the recompute) used to vanish
+  inside the post-commit drain's `runCatching`, silently freezing the derived.
+  It now rolls back and goes to `Store.uncaughtObserverHandler`; the next
+  source commit recomputes normally. With no handler set (the default) the
+  failure is still dropped silently. Disposing a derived also drops a
+  recompute that was already queued.
+
+- **A `derived()` whose host store was disposed no longer throws into its
+  source's commit.** Its subscriptions live on the source store and outlive
+  the host, so a later source commit ran the recompute's blocking `action` on
+  the disposed host, and its `"store disposed"` went to the source's
+  `uncaughtObserverHandler`. The recompute now sees the host disposed and does
+  nothing.
+
+- **A `postCommit` from another thread can no longer be stranded.** A caller
+  could read an active transaction that was just ending, then enqueue after its
+  owner had cleared the slot and drained an empty queue, leaving the task queued
+  until some unrelated later transaction drained it. `postCommit` re-reads the
+  slot after enqueueing and drains itself if it emptied.
+
+- **`atomic` runs its post-commit work only once the whole frame has
+  unwound.** Each participant's queue drained at that participant's own unwind
+  step, while the frame still held the EARLIER participants' locks with their
+  finished roots installed. So an observer on a `derived` recompute that wrote
+  to an earlier participant hit that finished transaction: `mutate` threw, and
+  an `action` opened a savepoint of it whose writes never committed. The frame
+  now drains every store whose root it opened after releasing all of them.
+
+- **`:holdfast-testing`: closing an open `transaction(on = …)` runs the
+  post-commit work queued behind it.** Rollback and a throwing body never
+  drained the store's post-commit queue, and commit drained it while still
+  holding the store's lock, so a `derived` recompute that fired while the
+  transaction was open could be stranded. All three exits now drain after
+  releasing, like a production `action`.
+
 ### Changed
 
 - **BREAKING (commit fanout order).** Observers for every state in a
@@ -83,7 +132,38 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   all committed writes rather than a per-write callback; `Store` gains
   `internalOwnsActiveTransaction`. Companion modules only.
 
+- **BREAKING (behavior): a `derived()` whose sources live on its own store
+  recomputes once per source commit, not once per changed source.** Each
+  source's observer queued its own recompute, so a commit touching N sources
+  ran `compute` N times and committed (and fanned out) the derived N times.
+  The recompute is now one task per derived, and `Store.postCommit`
+  deduplicates queued tasks by identity, so middleware and observers on such a
+  derived see one recompute transaction per source commit. The dedup needs a
+  transaction active on the derived's store: for sources on another store,
+  while the derived's store is idle, the recompute still runs inline from each
+  changed source's observer — once per changed source — until cross-store
+  settling lands (issue #20).
+
+- **BREAKING (behavior): a `derived()` recompute can land after the
+  committing `action` returns, on another thread.** The post-commit drain used
+  to recompute with a blocking `action`, so the derived reflected the caller's
+  commit by the time `action` returned, and its middleware, observers and
+  bridge publish ran on the committing thread. The recompute now makes one
+  non-blocking attempt; if the derived's store is busy, it is handed to that
+  store's holder and runs on the holder's thread after the holder releases.
+  This applies even when the sources are on the same store — for example when
+  another thread's action or a queued `suspendAction` takes the store between
+  the commit and the drain. So `derived.value` can briefly lag its sources,
+  then converges. For a read-your-writes value, read the sources or use
+  `computed`.
+
 ### Added
+
+- **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
+  non-blocking acquire for the store's non-blocking paths (the `derived`
+  recompute hand-off). It has a default that delegates to `blockingAcquire()`,
+  so existing serializers keep compiling, but that default blocks; a serializer
+  a `derived` state can meet should override it.
 
 - **`ProfilingMiddleware`** (`com.vynatix.holdfast.middleware`) — drop-in
   transaction profiler. Records per-transaction monotonic-clock duration,

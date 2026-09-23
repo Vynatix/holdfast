@@ -167,17 +167,21 @@ for when each lands.
   same store still spins.** The serializer is held by the suspending body and the
   blocking call waits for it. *Workaround:* inside a suspending body use
   `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
-  fail-fast guard is next in 0.2.0. Other combinations that used to hang —
-  `suspendAction` with a `derived()` state, nested `action` on a
-  coroutine-touched store, and blocking `atomic()` racing a `suspendAction` — are
-  fixed.
+  fail-fast guard is next in 0.2.0. Other combinations that used to hang or
+  fail — `suspendAction` with a `derived()` state (including a second
+  `suspendAction` queued behind the first), nested `action` on a
+  coroutine-touched store, blocking actions from two threads on a
+  coroutine-touched store, and blocking `atomic()` racing a `suspendAction` —
+  are fixed.
 
 - **Writing to a second store from an observer can deadlock.** `action` holds the
   store's transaction lock across the whole commit fanout, so two stores whose
   observers write to each other block on each other's locks — an ordering
   `atomic`'s deadlock-safe `lockOrderKey` never sees, because it does not run
   through `atomic`. *Workaround:* from an observer, write to another store via
-  `Store.scope` rather than inline.
+  `Store.scope` rather than inline. (`derived()` states are not affected: a
+  recompute whose store is busy is handed to that store's current holder
+  instead of waiting for it.)
 
 - **Standalone `state.update { }` outside an action is not atomic.** It is a
   read-modify-write, so concurrent callers overwrite each other — measured, about

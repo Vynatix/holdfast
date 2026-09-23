@@ -77,9 +77,12 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         suspendActionUnderMutex(serializer, owner, body)
     } finally {
         // Deferred post-commit work (derived recomputes) drains AFTER the mutex
-        // releases — recomputes run blocking `action`s, which would spin forever
-        // on a mutex this call still holds. Same placement, and same reason, as
-        // suspendAtomic's drain. `finally`, so the cancellation path drains too.
+        // releases — a recompute opens a fresh top-level action, which cannot
+        // run while this call still holds the mutex. Draining after the release
+        // also makes this call a valid hand-off target for recomputes that found
+        // the store busy (Store.tryTopLevelAction). Same placement, and same
+        // reason, as suspendAtomic's drain. `finally`, so the cancellation path
+        // drains too.
         internalDrainPostCommitTasks()
     }
 }
