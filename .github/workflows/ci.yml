@@ -55,6 +55,7 @@ jobs:
             :holdfast-coroutines:jvmTest :holdfast-coroutines:testAndroidHostTest \
             :holdfast-compose:jvmTest :holdfast-compose:testAndroidHostTest \
             :holdfast-testing:jvmTest :holdfast-testing:testAndroidHostTest \
+            :holdfast-debug:jvmTest :holdfast-debug:testAndroidHostTest \
             :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
             :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
             --stacktrace
@@ -67,6 +68,7 @@ jobs:
             :holdfast-coroutines:apiCheck :holdfast-coroutines:dokkaGenerate \
             :holdfast-compose:apiCheck :holdfast-compose:dokkaGenerate \
             :holdfast-testing:apiCheck :holdfast-testing:dokkaGenerate \
+            :holdfast-debug:apiCheck :holdfast-debug:dokkaGenerate \
             :holdfast-hallmark:apiCheck :holdfast-hallmark:dokkaGenerate \
             :holdfast-hallmark-coroutines:apiCheck :holdfast-hallmark-coroutines:dokkaGenerate \
             --stacktrace
@@ -79,6 +81,7 @@ jobs:
             :holdfast-coroutines:detekt :holdfast-coroutines:ktlintCheck \
             :holdfast-compose:detekt :holdfast-compose:ktlintCheck \
             :holdfast-testing:detekt :holdfast-testing:ktlintCheck \
+            :holdfast-debug:detekt :holdfast-debug:ktlintCheck \
             :holdfast-hallmark:detekt :holdfast-hallmark:ktlintCheck \
             :holdfast-hallmark-coroutines:detekt :holdfast-hallmark-coroutines:ktlintCheck \
             --stacktrace
@@ -121,6 +124,7 @@ jobs:
             :holdfast-coroutines:iosSimulatorArm64Test :holdfast-coroutines:jvmTest \
             :holdfast-compose:iosSimulatorArm64Test :holdfast-compose:jvmTest \
             :holdfast-testing:iosSimulatorArm64Test :holdfast-testing:jvmTest \
+            :holdfast-debug:iosSimulatorArm64Test :holdfast-debug:jvmTest \
             :holdfast-hallmark:iosSimulatorArm64Test :holdfast-hallmark:jvmTest \
             :holdfast-hallmark-coroutines:iosSimulatorArm64Test :holdfast-hallmark-coroutines:jvmTest \
             --stacktrace

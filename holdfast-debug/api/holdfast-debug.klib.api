@@ -1,0 +1,334 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-debug>
+abstract fun interface com.vynatix.holdfast.debug/MutationRunner { // com.vynatix.holdfast.debug/MutationRunner|null[0]
+    abstract fun run(kotlin/Function0<kotlin/String>): kotlin/String // com.vynatix.holdfast.debug/MutationRunner.run|run(kotlin.Function0<kotlin.String>){}[0]
+
+    final object Companion { // com.vynatix.holdfast.debug/MutationRunner.Companion|null[0]
+        final val Inline // com.vynatix.holdfast.debug/MutationRunner.Companion.Inline|{}Inline[0]
+            final fun <get-Inline>(): com.vynatix.holdfast.debug/MutationRunner // com.vynatix.holdfast.debug/MutationRunner.Companion.Inline.<get-Inline>|<get-Inline>(){}[0]
+    }
+}
+
+sealed interface com.vynatix.holdfast.debug/JournalEntry { // com.vynatix.holdfast.debug/JournalEntry|null[0]
+    abstract val seq // com.vynatix.holdfast.debug/JournalEntry.seq|{}seq[0]
+        abstract fun <get-seq>(): kotlin/Long // com.vynatix.holdfast.debug/JournalEntry.seq.<get-seq>|<get-seq>(){}[0]
+    abstract val timestamp // com.vynatix.holdfast.debug/JournalEntry.timestamp|{}timestamp[0]
+        abstract fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.debug/JournalEntry.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    abstract val writes // com.vynatix.holdfast.debug/JournalEntry.writes|{}writes[0]
+        abstract fun <get-writes>(): kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite> // com.vynatix.holdfast.debug/JournalEntry.writes.<get-writes>|<get-writes>(){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.debug/JournalMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.debug/JournalMiddleware|null[0]
+    final val capacity // com.vynatix.holdfast.debug/JournalMiddleware.capacity|{}capacity[0]
+        final fun <get-capacity>(): kotlin/Int // com.vynatix.holdfast.debug/JournalMiddleware.capacity.<get-capacity>|<get-capacity>(){}[0]
+    final val evicted // com.vynatix.holdfast.debug/JournalMiddleware.evicted|{}evicted[0]
+        final fun <get-evicted>(): kotlin/Long // com.vynatix.holdfast.debug/JournalMiddleware.evicted.<get-evicted>|<get-evicted>(){}[0]
+    final val isActive // com.vynatix.holdfast.debug/JournalMiddleware.isActive|{}isActive[0]
+        final fun <get-isActive>(): kotlin/Boolean // com.vynatix.holdfast.debug/JournalMiddleware.isActive.<get-isActive>|<get-isActive>(){}[0]
+
+    final fun clear() // com.vynatix.holdfast.debug/JournalMiddleware.clear|clear(){}[0]
+    final fun diff(): com.vynatix.holdfast.debug/JournalDiff? // com.vynatix.holdfast.debug/JournalMiddleware.diff|diff(){}[0]
+    final fun entries(): kotlin.collections/List<com.vynatix.holdfast.debug/JournalEntry> // com.vynatix.holdfast.debug/JournalMiddleware.entries|entries(){}[0]
+    final fun lastSeen(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.debug/JournalMiddleware.lastSeen|lastSeen(){}[0]
+    final fun lastWriter(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.debug/JournalMiddleware.lastWriter|lastWriter(){}[0]
+    final fun mark(): kotlin/Long // com.vynatix.holdfast.debug/JournalMiddleware.mark|mark(){}[0]
+    final fun stats(): com.vynatix.holdfast.debug/JournalStats // com.vynatix.holdfast.debug/JournalMiddleware.stats|stats(){}[0]
+
+    final object Companion { // com.vynatix.holdfast.debug/JournalMiddleware.Companion|null[0]
+        final const val INBOUND // com.vynatix.holdfast.debug/JournalMiddleware.Companion.INBOUND|{}INBOUND[0]
+            final fun <get-INBOUND>(): kotlin/String // com.vynatix.holdfast.debug/JournalMiddleware.Companion.INBOUND.<get-INBOUND>|<get-INBOUND>(){}[0]
+    }
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.debug/QuarantineMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.debug/QuarantineMiddleware|null[0]
+    final var enabled // com.vynatix.holdfast.debug/QuarantineMiddleware.enabled|{}enabled[0]
+        final fun <get-enabled>(): kotlin/Boolean // com.vynatix.holdfast.debug/QuarantineMiddleware.enabled.<get-enabled>|<get-enabled>(){}[0]
+        final fun <set-enabled>(kotlin/Boolean) // com.vynatix.holdfast.debug/QuarantineMiddleware.enabled.<set-enabled>|<set-enabled>(kotlin.Boolean){}[0]
+}
+
+final class com.vynatix.holdfast.debug/DebugConsole { // com.vynatix.holdfast.debug/DebugConsole|null[0]
+    constructor <init>(com.vynatix.holdfast.debug/StoreRegistry) // com.vynatix.holdfast.debug/DebugConsole.<init>|<init>(com.vynatix.holdfast.debug.StoreRegistry){}[0]
+
+    final val registry // com.vynatix.holdfast.debug/DebugConsole.registry|{}registry[0]
+        final fun <get-registry>(): com.vynatix.holdfast.debug/StoreRegistry // com.vynatix.holdfast.debug/DebugConsole.registry.<get-registry>|<get-registry>(){}[0]
+
+    final var mutationRunner // com.vynatix.holdfast.debug/DebugConsole.mutationRunner|{}mutationRunner[0]
+        final fun <get-mutationRunner>(): com.vynatix.holdfast.debug/MutationRunner // com.vynatix.holdfast.debug/DebugConsole.mutationRunner.<get-mutationRunner>|<get-mutationRunner>(){}[0]
+        final fun <set-mutationRunner>(com.vynatix.holdfast.debug/MutationRunner) // com.vynatix.holdfast.debug/DebugConsole.mutationRunner.<set-mutationRunner>|<set-mutationRunner>(com.vynatix.holdfast.debug.MutationRunner){}[0]
+
+    final fun execute(kotlin.collections/List<kotlin/String>): kotlin/String // com.vynatix.holdfast.debug/DebugConsole.execute|execute(kotlin.collections.List<kotlin.String>){}[0]
+    final fun execute(kotlin/String): kotlin/String // com.vynatix.holdfast.debug/DebugConsole.execute|execute(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast.debug/DebugOptions { // com.vynatix.holdfast.debug/DebugOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ...) // com.vynatix.holdfast.debug/DebugOptions.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+
+    final val checkpointCapacity // com.vynatix.holdfast.debug/DebugOptions.checkpointCapacity|{}checkpointCapacity[0]
+        final fun <get-checkpointCapacity>(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.checkpointCapacity.<get-checkpointCapacity>|<get-checkpointCapacity>(){}[0]
+    final val journalCapacity // com.vynatix.holdfast.debug/DebugOptions.journalCapacity|{}journalCapacity[0]
+        final fun <get-journalCapacity>(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.journalCapacity.<get-journalCapacity>|<get-journalCapacity>(){}[0]
+    final val valueMaxChars // com.vynatix.holdfast.debug/DebugOptions.valueMaxChars|{}valueMaxChars[0]
+        final fun <get-valueMaxChars>(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.valueMaxChars.<get-valueMaxChars>|<get-valueMaxChars>(){}[0]
+
+    final fun component1(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.component1|component1(){}[0]
+    final fun component2(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.component3|component3(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ...): com.vynatix.holdfast.debug/DebugOptions // com.vynatix.holdfast.debug/DebugOptions.copy|copy(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/DebugOptions.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/DebugOptions.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/DebugOptions.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/DebugVerb { // com.vynatix.holdfast.debug/DebugVerb|null[0]
+    constructor <init>(kotlin/String, kotlin/String, kotlin/Function1<kotlin.collections/List<kotlin/String>, kotlin/Any?>) // com.vynatix.holdfast.debug/DebugVerb.<init>|<init>(kotlin.String;kotlin.String;kotlin.Function1<kotlin.collections.List<kotlin.String>,kotlin.Any?>){}[0]
+
+    final val body // com.vynatix.holdfast.debug/DebugVerb.body|{}body[0]
+        final fun <get-body>(): kotlin/Function1<kotlin.collections/List<kotlin/String>, kotlin/Any?> // com.vynatix.holdfast.debug/DebugVerb.body.<get-body>|<get-body>(){}[0]
+    final val description // com.vynatix.holdfast.debug/DebugVerb.description|{}description[0]
+        final fun <get-description>(): kotlin/String // com.vynatix.holdfast.debug/DebugVerb.description.<get-description>|<get-description>(){}[0]
+    final val name // com.vynatix.holdfast.debug/DebugVerb.name|{}name[0]
+        final fun <get-name>(): kotlin/String // com.vynatix.holdfast.debug/DebugVerb.name.<get-name>|<get-name>(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/DiffChange { // com.vynatix.holdfast.debug/DiffChange|null[0]
+    constructor <init>(kotlin/String, kotlin/String?, kotlin/String, kotlin/String) // com.vynatix.holdfast.debug/DiffChange.<init>|<init>(kotlin.String;kotlin.String?;kotlin.String;kotlin.String){}[0]
+
+    final val atMark // com.vynatix.holdfast.debug/DiffChange.atMark|{}atMark[0]
+        final fun <get-atMark>(): kotlin/String? // com.vynatix.holdfast.debug/DiffChange.atMark.<get-atMark>|<get-atMark>(){}[0]
+    final val lastWriter // com.vynatix.holdfast.debug/DiffChange.lastWriter|{}lastWriter[0]
+        final fun <get-lastWriter>(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.lastWriter.<get-lastWriter>|<get-lastWriter>(){}[0]
+    final val now // com.vynatix.holdfast.debug/DiffChange.now|{}now[0]
+        final fun <get-now>(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.now.<get-now>|<get-now>(){}[0]
+    final val state // com.vynatix.holdfast.debug/DiffChange.state|{}state[0]
+        final fun <get-state>(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.state.<get-state>|<get-state>(){}[0]
+
+    final fun component1(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.component1|component1(){}[0]
+    final fun component2(): kotlin/String? // com.vynatix.holdfast.debug/DiffChange.component2|component2(){}[0]
+    final fun component3(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.component3|component3(){}[0]
+    final fun component4(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.component4|component4(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String? = ..., kotlin/String = ..., kotlin/String = ...): com.vynatix.holdfast.debug/DiffChange // com.vynatix.holdfast.debug/DiffChange.copy|copy(kotlin.String;kotlin.String?;kotlin.String;kotlin.String){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/DiffChange.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/DiffChange.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/DiffChange.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/InboundEntry : com.vynatix.holdfast.debug/JournalEntry { // com.vynatix.holdfast.debug/InboundEntry|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long, com.vynatix.holdfast.debug/JournalWrite) // com.vynatix.holdfast.debug/InboundEntry.<init>|<init>(kotlin.Long;kotlin.Long;com.vynatix.holdfast.debug.JournalWrite){}[0]
+
+    final val seq // com.vynatix.holdfast.debug/InboundEntry.seq|{}seq[0]
+        final fun <get-seq>(): kotlin/Long // com.vynatix.holdfast.debug/InboundEntry.seq.<get-seq>|<get-seq>(){}[0]
+    final val timestamp // com.vynatix.holdfast.debug/InboundEntry.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.debug/InboundEntry.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val write // com.vynatix.holdfast.debug/InboundEntry.write|{}write[0]
+        final fun <get-write>(): com.vynatix.holdfast.debug/JournalWrite // com.vynatix.holdfast.debug/InboundEntry.write.<get-write>|<get-write>(){}[0]
+    final val writes // com.vynatix.holdfast.debug/InboundEntry.writes|{}writes[0]
+        final fun <get-writes>(): kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite> // com.vynatix.holdfast.debug/InboundEntry.writes.<get-writes>|<get-writes>(){}[0]
+
+    final fun component1(): kotlin/Long // com.vynatix.holdfast.debug/InboundEntry.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.debug/InboundEntry.component2|component2(){}[0]
+    final fun component3(): com.vynatix.holdfast.debug/JournalWrite // com.vynatix.holdfast.debug/InboundEntry.component3|component3(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ..., com.vynatix.holdfast.debug/JournalWrite = ...): com.vynatix.holdfast.debug/InboundEntry // com.vynatix.holdfast.debug/InboundEntry.copy|copy(kotlin.Long;kotlin.Long;com.vynatix.holdfast.debug.JournalWrite){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/InboundEntry.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/InboundEntry.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/InboundEntry.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/JournalDiff { // com.vynatix.holdfast.debug/JournalDiff|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long, kotlin.collections/List<com.vynatix.holdfast.debug/DiffChange>, kotlin/Long) // com.vynatix.holdfast.debug/JournalDiff.<init>|<init>(kotlin.Long;kotlin.Long;kotlin.collections.List<com.vynatix.holdfast.debug.DiffChange>;kotlin.Long){}[0]
+
+    final val changes // com.vynatix.holdfast.debug/JournalDiff.changes|{}changes[0]
+        final fun <get-changes>(): kotlin.collections/List<com.vynatix.holdfast.debug/DiffChange> // com.vynatix.holdfast.debug/JournalDiff.changes.<get-changes>|<get-changes>(){}[0]
+    final val currentSeq // com.vynatix.holdfast.debug/JournalDiff.currentSeq|{}currentSeq[0]
+        final fun <get-currentSeq>(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.currentSeq.<get-currentSeq>|<get-currentSeq>(){}[0]
+    final val evicted // com.vynatix.holdfast.debug/JournalDiff.evicted|{}evicted[0]
+        final fun <get-evicted>(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.evicted.<get-evicted>|<get-evicted>(){}[0]
+    final val markSeq // com.vynatix.holdfast.debug/JournalDiff.markSeq|{}markSeq[0]
+        final fun <get-markSeq>(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.markSeq.<get-markSeq>|<get-markSeq>(){}[0]
+
+    final fun component1(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.component2|component2(){}[0]
+    final fun component3(): kotlin.collections/List<com.vynatix.holdfast.debug/DiffChange> // com.vynatix.holdfast.debug/JournalDiff.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // com.vynatix.holdfast.debug/JournalDiff.component4|component4(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ..., kotlin.collections/List<com.vynatix.holdfast.debug/DiffChange> = ..., kotlin/Long = ...): com.vynatix.holdfast.debug/JournalDiff // com.vynatix.holdfast.debug/JournalDiff.copy|copy(kotlin.Long;kotlin.Long;kotlin.collections.List<com.vynatix.holdfast.debug.DiffChange>;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/JournalDiff.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/JournalDiff.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/JournalDiff.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/JournalStats { // com.vynatix.holdfast.debug/JournalStats|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Long, kotlin/Long, kotlin/String?, kotlin.collections/Map<kotlin/String, kotlin/Int>) // com.vynatix.holdfast.debug/JournalStats.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Long;kotlin.Long;kotlin.String?;kotlin.collections.Map<kotlin.String,kotlin.Int>){}[0]
+
+    final val committed // com.vynatix.holdfast.debug/JournalStats.committed|{}committed[0]
+        final fun <get-committed>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.committed.<get-committed>|<get-committed>(){}[0]
+    final val entries // com.vynatix.holdfast.debug/JournalStats.entries|{}entries[0]
+        final fun <get-entries>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.entries.<get-entries>|<get-entries>(){}[0]
+    final val inbound // com.vynatix.holdfast.debug/JournalStats.inbound|{}inbound[0]
+        final fun <get-inbound>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.inbound.<get-inbound>|<get-inbound>(){}[0]
+    final val rolledBack // com.vynatix.holdfast.debug/JournalStats.rolledBack|{}rolledBack[0]
+        final fun <get-rolledBack>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.rolledBack.<get-rolledBack>|<get-rolledBack>(){}[0]
+    final val savepoints // com.vynatix.holdfast.debug/JournalStats.savepoints|{}savepoints[0]
+        final fun <get-savepoints>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.savepoints.<get-savepoints>|<get-savepoints>(){}[0]
+    final val slowestMicros // com.vynatix.holdfast.debug/JournalStats.slowestMicros|{}slowestMicros[0]
+        final fun <get-slowestMicros>(): kotlin/Long // com.vynatix.holdfast.debug/JournalStats.slowestMicros.<get-slowestMicros>|<get-slowestMicros>(){}[0]
+    final val slowestTransactionId // com.vynatix.holdfast.debug/JournalStats.slowestTransactionId|{}slowestTransactionId[0]
+        final fun <get-slowestTransactionId>(): kotlin/String? // com.vynatix.holdfast.debug/JournalStats.slowestTransactionId.<get-slowestTransactionId>|<get-slowestTransactionId>(){}[0]
+    final val totalMicros // com.vynatix.holdfast.debug/JournalStats.totalMicros|{}totalMicros[0]
+        final fun <get-totalMicros>(): kotlin/Long // com.vynatix.holdfast.debug/JournalStats.totalMicros.<get-totalMicros>|<get-totalMicros>(){}[0]
+    final val transactions // com.vynatix.holdfast.debug/JournalStats.transactions|{}transactions[0]
+        final fun <get-transactions>(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.transactions.<get-transactions>|<get-transactions>(){}[0]
+    final val writeCounts // com.vynatix.holdfast.debug/JournalStats.writeCounts|{}writeCounts[0]
+        final fun <get-writeCounts>(): kotlin.collections/Map<kotlin/String, kotlin/Int> // com.vynatix.holdfast.debug/JournalStats.writeCounts.<get-writeCounts>|<get-writeCounts>(){}[0]
+
+    final fun component1(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component1|component1(){}[0]
+    final fun component10(): kotlin.collections/Map<kotlin/String, kotlin/Int> // com.vynatix.holdfast.debug/JournalStats.component10|component10(){}[0]
+    final fun component2(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component4|component4(){}[0]
+    final fun component5(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component5|component5(){}[0]
+    final fun component6(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.component6|component6(){}[0]
+    final fun component7(): kotlin/Long // com.vynatix.holdfast.debug/JournalStats.component7|component7(){}[0]
+    final fun component8(): kotlin/Long // com.vynatix.holdfast.debug/JournalStats.component8|component8(){}[0]
+    final fun component9(): kotlin/String? // com.vynatix.holdfast.debug/JournalStats.component9|component9(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/String? = ..., kotlin.collections/Map<kotlin/String, kotlin/Int> = ...): com.vynatix.holdfast.debug/JournalStats // com.vynatix.holdfast.debug/JournalStats.copy|copy(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Long;kotlin.Long;kotlin.String?;kotlin.collections.Map<kotlin.String,kotlin.Int>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/JournalStats.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/JournalStats.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/JournalStats.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/JournalWrite { // com.vynatix.holdfast.debug/JournalWrite|null[0]
+    constructor <init>(kotlin/String, kotlin/String?, kotlin/String) // com.vynatix.holdfast.debug/JournalWrite.<init>|<init>(kotlin.String;kotlin.String?;kotlin.String){}[0]
+
+    final val after // com.vynatix.holdfast.debug/JournalWrite.after|{}after[0]
+        final fun <get-after>(): kotlin/String // com.vynatix.holdfast.debug/JournalWrite.after.<get-after>|<get-after>(){}[0]
+    final val before // com.vynatix.holdfast.debug/JournalWrite.before|{}before[0]
+        final fun <get-before>(): kotlin/String? // com.vynatix.holdfast.debug/JournalWrite.before.<get-before>|<get-before>(){}[0]
+    final val state // com.vynatix.holdfast.debug/JournalWrite.state|{}state[0]
+        final fun <get-state>(): kotlin/String // com.vynatix.holdfast.debug/JournalWrite.state.<get-state>|<get-state>(){}[0]
+
+    final fun component1(): kotlin/String // com.vynatix.holdfast.debug/JournalWrite.component1|component1(){}[0]
+    final fun component2(): kotlin/String? // com.vynatix.holdfast.debug/JournalWrite.component2|component2(){}[0]
+    final fun component3(): kotlin/String // com.vynatix.holdfast.debug/JournalWrite.component3|component3(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String? = ..., kotlin/String = ...): com.vynatix.holdfast.debug/JournalWrite // com.vynatix.holdfast.debug/JournalWrite.copy|copy(kotlin.String;kotlin.String?;kotlin.String){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/JournalWrite.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/JournalWrite.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/JournalWrite.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.debug/StoreQuarantinedException : kotlin/IllegalStateException { // com.vynatix.holdfast.debug/StoreQuarantinedException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast.debug/StoreQuarantinedException.<init>|<init>(kotlin.String){}[0]
+}
+
+final class com.vynatix.holdfast.debug/StoreRegistry { // com.vynatix.holdfast.debug/StoreRegistry|null[0]
+    constructor <init>(com.vynatix.holdfast.debug/DebugOptions = ...) // com.vynatix.holdfast.debug/StoreRegistry.<init>|<init>(com.vynatix.holdfast.debug.DebugOptions){}[0]
+
+    final val options // com.vynatix.holdfast.debug/StoreRegistry.options|{}options[0]
+        final fun <get-options>(): com.vynatix.holdfast.debug/DebugOptions // com.vynatix.holdfast.debug/StoreRegistry.options.<get-options>|<get-options>(){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Store<#A1>> register(#A1, kotlin/String = ..., kotlin.collections/Set<kotlin/String> = ...): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.debug/StoreRegistry.register|register(0:0;kotlin.String;kotlin.collections.Set<kotlin.String>){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+    final fun clear() // com.vynatix.holdfast.debug/StoreRegistry.clear|clear(){}[0]
+    final fun entries(): kotlin.collections/List<com.vynatix.holdfast.debug/StoreRegistry.Entry> // com.vynatix.holdfast.debug/StoreRegistry.entries|entries(){}[0]
+    final fun find(kotlin/String): com.vynatix.holdfast.debug/StoreRegistry.Entry? // com.vynatix.holdfast.debug/StoreRegistry.find|find(kotlin.String){}[0]
+    final fun unregister(kotlin/String): kotlin/Boolean // com.vynatix.holdfast.debug/StoreRegistry.unregister|unregister(kotlin.String){}[0]
+    final fun verb(kotlin/String): com.vynatix.holdfast.debug/DebugVerb? // com.vynatix.holdfast.debug/StoreRegistry.verb|verb(kotlin.String){}[0]
+    final fun verb(kotlin/String, kotlin/String = ..., kotlin/Function1<kotlin.collections/List<kotlin/String>, kotlin/Any?>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.debug/StoreRegistry.verb|verb(kotlin.String;kotlin.String;kotlin.Function1<kotlin.collections.List<kotlin.String>,kotlin.Any?>){}[0]
+    final fun verbs(): kotlin.collections/List<com.vynatix.holdfast.debug/DebugVerb> // com.vynatix.holdfast.debug/StoreRegistry.verbs|verbs(){}[0]
+
+    final class Checkpoint { // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint|null[0]
+        final val id // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.id|{}id[0]
+            final fun <get-id>(): kotlin/Int // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.id.<get-id>|<get-id>(){}[0]
+        final val snapshot // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.snapshot|{}snapshot[0]
+            final fun <get-snapshot>(): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.snapshot.<get-snapshot>|<get-snapshot>(){}[0]
+        final val takenAt // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.takenAt|{}takenAt[0]
+            final fun <get-takenAt>(): kotlin/Long // com.vynatix.holdfast.debug/StoreRegistry.Checkpoint.takenAt.<get-takenAt>|<get-takenAt>(){}[0]
+    }
+
+    final class Entry { // com.vynatix.holdfast.debug/StoreRegistry.Entry|null[0]
+        final val className // com.vynatix.holdfast.debug/StoreRegistry.Entry.className|{}className[0]
+            final fun <get-className>(): kotlin/String // com.vynatix.holdfast.debug/StoreRegistry.Entry.className.<get-className>|<get-className>(){}[0]
+        final val isQuarantined // com.vynatix.holdfast.debug/StoreRegistry.Entry.isQuarantined|{}isQuarantined[0]
+            final fun <get-isQuarantined>(): kotlin/Boolean // com.vynatix.holdfast.debug/StoreRegistry.Entry.isQuarantined.<get-isQuarantined>|<get-isQuarantined>(){}[0]
+        final val journal // com.vynatix.holdfast.debug/StoreRegistry.Entry.journal|{}journal[0]
+            final fun <get-journal>(): com.vynatix.holdfast.debug/JournalMiddleware<*> // com.vynatix.holdfast.debug/StoreRegistry.Entry.journal.<get-journal>|<get-journal>(){}[0]
+        final val name // com.vynatix.holdfast.debug/StoreRegistry.Entry.name|{}name[0]
+            final fun <get-name>(): kotlin/String // com.vynatix.holdfast.debug/StoreRegistry.Entry.name.<get-name>|<get-name>(){}[0]
+        final val redact // com.vynatix.holdfast.debug/StoreRegistry.Entry.redact|{}redact[0]
+            final fun <get-redact>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast.debug/StoreRegistry.Entry.redact.<get-redact>|<get-redact>(){}[0]
+        final val store // com.vynatix.holdfast.debug/StoreRegistry.Entry.store|{}store[0]
+            final fun <get-store>(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast.debug/StoreRegistry.Entry.store.<get-store>|<get-store>(){}[0]
+
+        final fun checkpoint(): com.vynatix.holdfast.debug/StoreRegistry.Checkpoint // com.vynatix.holdfast.debug/StoreRegistry.Entry.checkpoint|checkpoint(){}[0]
+        final fun checkpoint(kotlin/Int): com.vynatix.holdfast.debug/StoreRegistry.Checkpoint? // com.vynatix.holdfast.debug/StoreRegistry.Entry.checkpoint|checkpoint(kotlin.Int){}[0]
+        final fun checkpoints(): kotlin.collections/List<com.vynatix.holdfast.debug/StoreRegistry.Checkpoint> // com.vynatix.holdfast.debug/StoreRegistry.Entry.checkpoints|checkpoints(){}[0]
+        final fun rewind(com.vynatix.holdfast.debug/StoreRegistry.Checkpoint): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast.debug/StoreRegistry.Entry.rewind|rewind(com.vynatix.holdfast.debug.StoreRegistry.Checkpoint){}[0]
+    }
+}
+
+final class com.vynatix.holdfast.debug/TransactionEntry : com.vynatix.holdfast.debug/JournalEntry { // com.vynatix.holdfast.debug/TransactionEntry|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long, com.vynatix.holdfast/Transaction, kotlin/Int, kotlin/Long, kotlin/Long, kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite>, kotlin/Boolean, kotlin/String?) // com.vynatix.holdfast.debug/TransactionEntry.<init>|<init>(kotlin.Long;kotlin.Long;com.vynatix.holdfast.Transaction;kotlin.Int;kotlin.Long;kotlin.Long;kotlin.collections.List<com.vynatix.holdfast.debug.JournalWrite>;kotlin.Boolean;kotlin.String?){}[0]
+
+    final val bodyThrew // com.vynatix.holdfast.debug/TransactionEntry.bodyThrew|{}bodyThrew[0]
+        final fun <get-bodyThrew>(): kotlin/Boolean // com.vynatix.holdfast.debug/TransactionEntry.bodyThrew.<get-bodyThrew>|<get-bodyThrew>(){}[0]
+    final val depth // com.vynatix.holdfast.debug/TransactionEntry.depth|{}depth[0]
+        final fun <get-depth>(): kotlin/Int // com.vynatix.holdfast.debug/TransactionEntry.depth.<get-depth>|<get-depth>(){}[0]
+    final val durationMicros // com.vynatix.holdfast.debug/TransactionEntry.durationMicros|{}durationMicros[0]
+        final fun <get-durationMicros>(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.durationMicros.<get-durationMicros>|<get-durationMicros>(){}[0]
+    final val error // com.vynatix.holdfast.debug/TransactionEntry.error|{}error[0]
+        final fun <get-error>(): kotlin/String? // com.vynatix.holdfast.debug/TransactionEntry.error.<get-error>|<get-error>(){}[0]
+    final val frameId // com.vynatix.holdfast.debug/TransactionEntry.frameId|{}frameId[0]
+        final fun <get-frameId>(): kotlin/String? // com.vynatix.holdfast.debug/TransactionEntry.frameId.<get-frameId>|<get-frameId>(){}[0]
+    final val seq // com.vynatix.holdfast.debug/TransactionEntry.seq|{}seq[0]
+        final fun <get-seq>(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.seq.<get-seq>|<get-seq>(){}[0]
+    final val status // com.vynatix.holdfast.debug/TransactionEntry.status|{}status[0]
+        final fun <get-status>(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast.debug/TransactionEntry.status.<get-status>|<get-status>(){}[0]
+    final val threadId // com.vynatix.holdfast.debug/TransactionEntry.threadId|{}threadId[0]
+        final fun <get-threadId>(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.threadId.<get-threadId>|<get-threadId>(){}[0]
+    final val timestamp // com.vynatix.holdfast.debug/TransactionEntry.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.debug/TransactionEntry.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.debug/TransactionEntry.transaction.<get-transaction>|<get-transaction>(){}[0]
+    final val transactionId // com.vynatix.holdfast.debug/TransactionEntry.transactionId|{}transactionId[0]
+        final fun <get-transactionId>(): kotlin/String // com.vynatix.holdfast.debug/TransactionEntry.transactionId.<get-transactionId>|<get-transactionId>(){}[0]
+    final val writes // com.vynatix.holdfast.debug/TransactionEntry.writes|{}writes[0]
+        final fun <get-writes>(): kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite> // com.vynatix.holdfast.debug/TransactionEntry.writes.<get-writes>|<get-writes>(){}[0]
+    final val writesAvailable // com.vynatix.holdfast.debug/TransactionEntry.writesAvailable|{}writesAvailable[0]
+        final fun <get-writesAvailable>(): kotlin/Boolean // com.vynatix.holdfast.debug/TransactionEntry.writesAvailable.<get-writesAvailable>|<get-writesAvailable>(){}[0]
+
+    final fun component1(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.component2|component2(){}[0]
+    final fun component3(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.debug/TransactionEntry.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // com.vynatix.holdfast.debug/TransactionEntry.component4|component4(){}[0]
+    final fun component5(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.component5|component5(){}[0]
+    final fun component6(): kotlin/Long // com.vynatix.holdfast.debug/TransactionEntry.component6|component6(){}[0]
+    final fun component7(): kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite> // com.vynatix.holdfast.debug/TransactionEntry.component7|component7(){}[0]
+    final fun component8(): kotlin/Boolean // com.vynatix.holdfast.debug/TransactionEntry.component8|component8(){}[0]
+    final fun component9(): kotlin/String? // com.vynatix.holdfast.debug/TransactionEntry.component9|component9(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ..., com.vynatix.holdfast/Transaction = ..., kotlin/Int = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin.collections/List<com.vynatix.holdfast.debug/JournalWrite> = ..., kotlin/Boolean = ..., kotlin/String? = ...): com.vynatix.holdfast.debug/TransactionEntry // com.vynatix.holdfast.debug/TransactionEntry.copy|copy(kotlin.Long;kotlin.Long;com.vynatix.holdfast.Transaction;kotlin.Int;kotlin.Long;kotlin.Long;kotlin.collections.List<com.vynatix.holdfast.debug.JournalWrite>;kotlin.Boolean;kotlin.String?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.debug/TransactionEntry.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.debug/TransactionEntry.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.debug/TransactionEntry.toString|toString(){}[0]
+}
+
+final object com.vynatix.holdfast.debug/HoldfastDebug { // com.vynatix.holdfast.debug/HoldfastDebug|null[0]
+    final val console // com.vynatix.holdfast.debug/HoldfastDebug.console|{}console[0]
+        final fun <get-console>(): com.vynatix.holdfast.debug/DebugConsole // com.vynatix.holdfast.debug/HoldfastDebug.console.<get-console>|<get-console>(){}[0]
+    final val registry // com.vynatix.holdfast.debug/HoldfastDebug.registry|{}registry[0]
+        final fun <get-registry>(): com.vynatix.holdfast.debug/StoreRegistry // com.vynatix.holdfast.debug/HoldfastDebug.registry.<get-registry>|<get-registry>(){}[0]
+
+    final var mutationRunner // com.vynatix.holdfast.debug/HoldfastDebug.mutationRunner|{}mutationRunner[0]
+        final fun <get-mutationRunner>(): com.vynatix.holdfast.debug/MutationRunner // com.vynatix.holdfast.debug/HoldfastDebug.mutationRunner.<get-mutationRunner>|<get-mutationRunner>(){}[0]
+        final fun <set-mutationRunner>(com.vynatix.holdfast.debug/MutationRunner) // com.vynatix.holdfast.debug/HoldfastDebug.mutationRunner.<set-mutationRunner>|<set-mutationRunner>(com.vynatix.holdfast.debug.MutationRunner){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Store<#A1>> register(#A1, kotlin/String = ..., kotlin.collections/Set<kotlin/String> = ...): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.debug/HoldfastDebug.register|register(0:0;kotlin.String;kotlin.collections.Set<kotlin.String>){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+    final fun execute(kotlin.collections/List<kotlin/String>): kotlin/String // com.vynatix.holdfast.debug/HoldfastDebug.execute|execute(kotlin.collections.List<kotlin.String>){}[0]
+    final fun execute(kotlin/String): kotlin/String // com.vynatix.holdfast.debug/HoldfastDebug.execute|execute(kotlin.String){}[0]
+    final fun unregister(kotlin/String): kotlin/Boolean // com.vynatix.holdfast.debug/HoldfastDebug.unregister|unregister(kotlin.String){}[0]
+    final fun verb(kotlin/String, kotlin/String = ..., kotlin/Function1<kotlin.collections/List<kotlin/String>, kotlin/Any?>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.debug/HoldfastDebug.verb|verb(kotlin.String;kotlin.String;kotlin.Function1<kotlin.collections.List<kotlin.String>,kotlin.Any?>){}[0]
+}
+
+final fun (com.vynatix.holdfast.debug/DebugConsole).com.vynatix.holdfast.debug/repl(kotlin/Function0<kotlin/String?>, kotlin/Function1<kotlin/String, kotlin/Unit>, kotlin/String = ...) // com.vynatix.holdfast.debug/repl|repl@com.vynatix.holdfast.debug.DebugConsole(kotlin.Function0<kotlin.String?>;kotlin.Function1<kotlin.String,kotlin.Unit>;kotlin.String){}[0]

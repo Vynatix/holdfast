@@ -82,6 +82,7 @@ for the full consistency contract.
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
 | [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers. |
+| [`com.vynatix:holdfast-debug`](holdfast-debug/) | On-device debugging console (**experimental**) — `dump`/`set`/`journal`/`autopsy`/`diff`/`rewind`/`quarantine` over registered stores, driven from `adb shell dumpsys` on Android or `HoldfastDebug.execute(...)` anywhere. |
 | [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
@@ -125,6 +126,7 @@ dependencies {
     implementation("com.vynatix:holdfast-coroutines:0.1.0")   // optional
     implementation("com.vynatix:holdfast-compose:0.1.0")      // optional, Compose Multiplatform
     testImplementation("com.vynatix:holdfast-testing:0.1.0")  // optional
+    debugImplementation("com.vynatix:holdfast-debug:0.1.0")   // optional, experimental adb console
 }
 ```
 

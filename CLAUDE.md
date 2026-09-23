@@ -35,6 +35,7 @@ The hallmark modules (`:holdfast-hallmark`, `:holdfast-hallmark-coroutines`) are
 :holdfast                        core kernel — deps: kotlinx-coroutines-core (api), atomicfu (impl) only
 ├─ :holdfast-coroutines          suspendAction / suspendAtomic / asFlow / SuspendingBridge
 ├─ :holdfast-compose             collectAsState, rememberDisposable (only Compose module)
+├─ :holdfast-debug               HoldfastDebug registry + DebugConsole command interpreter; androidMain ContentProvider for `adb shell dumpsys activity provider` (all @ExperimentalStoreApi; no wasmJs)
 ├─ :holdfast-hallmark            ValidatingTransformer, Store.boxed{}, BoxedCodec → external hallmark lib
 ├─ :holdfast-hallmark-coroutines suspendValidateAndMutate (uses coroutines + hallmark modules)
 └─ :holdfast-testing             storeTest{} harness; core's own commonTest depends on it (deliberate test-only cycle)
@@ -58,6 +59,10 @@ The unit of consistency is the transaction; everything below is contractual, not
 - `Store.Companion.defaultScope` is CAS-settable **once per process** — setting it in a test poisons every later test in that process.
 
 Package layering: root kernel depends only on `platform`; `middleware/`, `bridge/`, `crypto/` are plug-ins over root contracts and never import each other. Grep trap: `middleware/HallmarkMiddleware.kt` contains `class ValidationMiddleware`. The public "vault" trio is renamed (`owningVault`→`owningStore`, `bindVault`→`bindStore`, `vaultTest`→`storeTest`); the old names survive as WARNING-level deprecated aliases for one minor — don't remove them early, and don't use them in new code. Remaining lowercase "vault" prose/internals are pre-rename residue.
+
+## Debug console (`:holdfast-debug`)
+
+`HoldfastDebug.register(store, name, redact)` installs `QuarantineMiddleware` (inner) + `JournalMiddleware` (outer) and a per-state `MutableState.observe` for journal before-values / bridge-inbound capture; core has no `removeMiddleware`, so unregister only makes them inert. `DebugConsole.execute(argv)` is the platform-neutral interpreter; empty argv MUST stay a single summary line with no state names/values (Android bugreports run argument-less `dumpsys` over every provider). Mutating commands (`set`/`batch`/`rewind`/`run`) go through `MutationRunner`; the Android provider swaps in `MainThreadMutationRunner`. `set` parses literals into the runtime class of the state's *current* value and writes via the real `mutate` path in one `action` (never `restore`/raw staging) — that class match is what makes the unchecked cast in `applyWrites` sound. Snapshot/restore need the store's self-type, so `StoreRegistry.register<S>` captures them as lambdas in `Entry`. The module opts into `StoreInternalApi` + `ExperimentalStoreApi` at the compiler level (`build.gradle.kts`), not per file.
 
 ## Testing harness (`:holdfast-testing`)
 

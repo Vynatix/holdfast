@@ -1,0 +1,256 @@
+public final class com/vynatix/holdfast/debug/DebugConsole {
+	public fun <init> (Lcom/vynatix/holdfast/debug/StoreRegistry;)V
+	public final fun execute (Ljava/lang/String;)Ljava/lang/String;
+	public final fun execute (Ljava/util/List;)Ljava/lang/String;
+	public final fun getMutationRunner ()Lcom/vynatix/holdfast/debug/MutationRunner;
+	public final fun getRegistry ()Lcom/vynatix/holdfast/debug/StoreRegistry;
+	public final fun setMutationRunner (Lcom/vynatix/holdfast/debug/MutationRunner;)V
+}
+
+public final class com/vynatix/holdfast/debug/DebugOptions {
+	public fun <init> ()V
+	public fun <init> (III)V
+	public synthetic fun <init> (IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy (III)Lcom/vynatix/holdfast/debug/DebugOptions;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/DebugOptions;IIIILjava/lang/Object;)Lcom/vynatix/holdfast/debug/DebugOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCheckpointCapacity ()I
+	public final fun getJournalCapacity ()I
+	public final fun getValueMaxChars ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/DebugVerb {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun getBody ()Lkotlin/jvm/functions/Function1;
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/DiffChange {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/vynatix/holdfast/debug/DiffChange;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/DiffChange;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/debug/DiffChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAtMark ()Ljava/lang/String;
+	public final fun getLastWriter ()Ljava/lang/String;
+	public final fun getNow ()Ljava/lang/String;
+	public final fun getState ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/HoldfastDebug {
+	public static final field INSTANCE Lcom/vynatix/holdfast/debug/HoldfastDebug;
+	public final fun execute (Ljava/lang/String;)Ljava/lang/String;
+	public final fun execute (Ljava/util/List;)Ljava/lang/String;
+	public final fun getConsole ()Lcom/vynatix/holdfast/debug/DebugConsole;
+	public final fun getMutationRunner ()Lcom/vynatix/holdfast/debug/MutationRunner;
+	public final fun getRegistry ()Lcom/vynatix/holdfast/debug/StoreRegistry;
+	public final fun register (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/util/Set;)Lcom/vynatix/holdfast/Disposable;
+	public static synthetic fun register$default (Lcom/vynatix/holdfast/debug/HoldfastDebug;Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/util/Set;ILjava/lang/Object;)Lcom/vynatix/holdfast/Disposable;
+	public final fun setMutationRunner (Lcom/vynatix/holdfast/debug/MutationRunner;)V
+	public final fun unregister (Ljava/lang/String;)Z
+	public final fun verb (Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
+	public static synthetic fun verb$default (Lcom/vynatix/holdfast/debug/HoldfastDebug;Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/Disposable;
+}
+
+public final class com/vynatix/holdfast/debug/HoldfastDebugKt {
+	public static final fun repl (Lcom/vynatix/holdfast/debug/DebugConsole;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Ljava/lang/String;)V
+	public static synthetic fun repl$default (Lcom/vynatix/holdfast/debug/DebugConsole;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Ljava/lang/String;ILjava/lang/Object;)V
+}
+
+public final class com/vynatix/holdfast/debug/InboundEntry : com/vynatix/holdfast/debug/JournalEntry {
+	public fun <init> (JJLcom/vynatix/holdfast/debug/JournalWrite;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Lcom/vynatix/holdfast/debug/JournalWrite;
+	public final fun copy (JJLcom/vynatix/holdfast/debug/JournalWrite;)Lcom/vynatix/holdfast/debug/InboundEntry;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/InboundEntry;JJLcom/vynatix/holdfast/debug/JournalWrite;ILjava/lang/Object;)Lcom/vynatix/holdfast/debug/InboundEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getSeq ()J
+	public fun getTimestamp ()J
+	public final fun getWrite ()Lcom/vynatix/holdfast/debug/JournalWrite;
+	public fun getWrites ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/JournalDiff {
+	public fun <init> (JJLjava/util/List;J)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()J
+	public final fun copy (JJLjava/util/List;J)Lcom/vynatix/holdfast/debug/JournalDiff;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/JournalDiff;JJLjava/util/List;JILjava/lang/Object;)Lcom/vynatix/holdfast/debug/JournalDiff;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChanges ()Ljava/util/List;
+	public final fun getCurrentSeq ()J
+	public final fun getEvicted ()J
+	public final fun getMarkSeq ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/vynatix/holdfast/debug/JournalEntry {
+	public abstract fun getSeq ()J
+	public abstract fun getTimestamp ()J
+	public abstract fun getWrites ()Ljava/util/List;
+}
+
+public final class com/vynatix/holdfast/debug/JournalMiddleware : com/vynatix/holdfast/Middleware {
+	public static final field Companion Lcom/vynatix/holdfast/debug/JournalMiddleware$Companion;
+	public static final field INBOUND Ljava/lang/String;
+	public final fun clear ()V
+	public final fun diff ()Lcom/vynatix/holdfast/debug/JournalDiff;
+	public final fun entries ()Ljava/util/List;
+	public final fun getCapacity ()I
+	public final fun getEvicted ()J
+	public final fun isActive ()Z
+	public final fun lastSeen ()Ljava/util/Map;
+	public final fun lastWriter ()Ljava/util/Map;
+	public final fun mark ()J
+	public final fun stats ()Lcom/vynatix/holdfast/debug/JournalStats;
+}
+
+public final class com/vynatix/holdfast/debug/JournalMiddleware$Companion {
+}
+
+public final class com/vynatix/holdfast/debug/JournalStats {
+	public fun <init> (IIIIIIJJLjava/lang/String;Ljava/util/Map;)V
+	public final fun component1 ()I
+	public final fun component10 ()Ljava/util/Map;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun component6 ()I
+	public final fun component7 ()J
+	public final fun component8 ()J
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (IIIIIIJJLjava/lang/String;Ljava/util/Map;)Lcom/vynatix/holdfast/debug/JournalStats;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/JournalStats;IIIIIIJJLjava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lcom/vynatix/holdfast/debug/JournalStats;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCommitted ()I
+	public final fun getEntries ()I
+	public final fun getInbound ()I
+	public final fun getRolledBack ()I
+	public final fun getSavepoints ()I
+	public final fun getSlowestMicros ()J
+	public final fun getSlowestTransactionId ()Ljava/lang/String;
+	public final fun getTotalMicros ()J
+	public final fun getTransactions ()I
+	public final fun getWriteCounts ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/JournalWrite {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/vynatix/holdfast/debug/JournalWrite;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/JournalWrite;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/debug/JournalWrite;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAfter ()Ljava/lang/String;
+	public final fun getBefore ()Ljava/lang/String;
+	public final fun getState ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/vynatix/holdfast/debug/MutationRunner {
+	public static final field Companion Lcom/vynatix/holdfast/debug/MutationRunner$Companion;
+	public abstract fun run (Lkotlin/jvm/functions/Function0;)Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/debug/MutationRunner$Companion {
+	public final fun getInline ()Lcom/vynatix/holdfast/debug/MutationRunner;
+}
+
+public final class com/vynatix/holdfast/debug/QuarantineMiddleware : com/vynatix/holdfast/Middleware {
+	public final fun getEnabled ()Z
+	public final fun setEnabled (Z)V
+}
+
+public final class com/vynatix/holdfast/debug/StoreQuarantinedException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/vynatix/holdfast/debug/StoreRegistry {
+	public fun <init> ()V
+	public fun <init> (Lcom/vynatix/holdfast/debug/DebugOptions;)V
+	public synthetic fun <init> (Lcom/vynatix/holdfast/debug/DebugOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun clear ()V
+	public final fun entries ()Ljava/util/List;
+	public final fun find (Ljava/lang/String;)Lcom/vynatix/holdfast/debug/StoreRegistry$Entry;
+	public final fun getOptions ()Lcom/vynatix/holdfast/debug/DebugOptions;
+	public final fun register (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/util/Set;)Lcom/vynatix/holdfast/Disposable;
+	public static synthetic fun register$default (Lcom/vynatix/holdfast/debug/StoreRegistry;Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/util/Set;ILjava/lang/Object;)Lcom/vynatix/holdfast/Disposable;
+	public final fun unregister (Ljava/lang/String;)Z
+	public final fun verb (Ljava/lang/String;)Lcom/vynatix/holdfast/debug/DebugVerb;
+	public final fun verb (Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
+	public static synthetic fun verb$default (Lcom/vynatix/holdfast/debug/StoreRegistry;Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/Disposable;
+	public final fun verbs ()Ljava/util/List;
+}
+
+public final class com/vynatix/holdfast/debug/StoreRegistry$Checkpoint {
+	public final fun getId ()I
+	public final fun getSnapshot ()Lcom/vynatix/holdfast/StoreSnapshot;
+	public final fun getTakenAt ()J
+}
+
+public final class com/vynatix/holdfast/debug/StoreRegistry$Entry {
+	public final fun checkpoint ()Lcom/vynatix/holdfast/debug/StoreRegistry$Checkpoint;
+	public final fun checkpoint (I)Lcom/vynatix/holdfast/debug/StoreRegistry$Checkpoint;
+	public final fun checkpoints ()Ljava/util/List;
+	public final fun getClassName ()Ljava/lang/String;
+	public final fun getJournal ()Lcom/vynatix/holdfast/debug/JournalMiddleware;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getRedact ()Ljava/util/Set;
+	public final fun getStore ()Lcom/vynatix/holdfast/Store;
+	public final fun isQuarantined ()Z
+	public final fun rewind (Lcom/vynatix/holdfast/debug/StoreRegistry$Checkpoint;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
+public final class com/vynatix/holdfast/debug/TransactionEntry : com/vynatix/holdfast/debug/JournalEntry {
+	public fun <init> (JJLcom/vynatix/holdfast/Transaction;IJJLjava/util/List;ZLjava/lang/String;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Lcom/vynatix/holdfast/Transaction;
+	public final fun component4 ()I
+	public final fun component5 ()J
+	public final fun component6 ()J
+	public final fun component7 ()Ljava/util/List;
+	public final fun component8 ()Z
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (JJLcom/vynatix/holdfast/Transaction;IJJLjava/util/List;ZLjava/lang/String;)Lcom/vynatix/holdfast/debug/TransactionEntry;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/debug/TransactionEntry;JJLcom/vynatix/holdfast/Transaction;IJJLjava/util/List;ZLjava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/debug/TransactionEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBodyThrew ()Z
+	public final fun getDepth ()I
+	public final fun getDurationMicros ()J
+	public final fun getError ()Ljava/lang/String;
+	public final fun getFrameId ()Ljava/lang/String;
+	public fun getSeq ()J
+	public final fun getStatus ()Lcom/vynatix/holdfast/TransactionStatus;
+	public final fun getThreadId ()J
+	public fun getTimestamp ()J
+	public final fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
+	public final fun getTransactionId ()Ljava/lang/String;
+	public fun getWrites ()Ljava/util/List;
+	public final fun getWritesAvailable ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
