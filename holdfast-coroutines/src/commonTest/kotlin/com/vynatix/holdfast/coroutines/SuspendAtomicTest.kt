@@ -303,22 +303,36 @@ class SuspendAtomicEventsTest {
         runBlocking {
             val a = EventingAccountVault(initial = 100)
             val b = EventingAccountVault(initial = 0)
-            val timeline = mutableListOf<String>()
+            val recorded = mutableListOf<String>()
+            val timelineLock = object : kotlinx.atomicfu.locks.SynchronizedObject() {}
 
+            // The state observers record on the committing thread while the
+            // collectors record on a Default worker: guard the shared list.
+            fun record(item: String) = kotlinx.atomicfu.locks.synchronized(timelineLock) { recorded += item }
+
+            fun snapshotTimeline() = kotlinx.atomicfu.locks.synchronized(timelineLock) { recorded.toList() }
+
+            // Both collectors share ONE serial view of Default: a collector's
+            // resumption is still dispatched asynchronously off the committing
+            // thread, but the two run in the order the commit emitted to them.
+            // On the plain multi-threaded Default each would get its own
+            // worker, and those two workers race — the arrival order would
+            // then say nothing about the emission order asserted below.
+            val collectors = Dispatchers.Default.limitedParallelism(1)
             val collectorA =
-                scope.launch {
+                scope.launch(collectors) {
                     a.events.collect { ev ->
-                        timeline += "a-event"
+                        record("a-event")
                     }
                 }
             val collectorB =
-                scope.launch {
+                scope.launch(collectors) {
                     b.events.collect { ev ->
-                        timeline += "b-event"
+                        record("b-event")
                     }
                 }
-            val balanceObserverA = a { balance effect { if (this != 100L) timeline += "a-state=$this" } }
-            val balanceObserverB = b { balance effect { if (this != 0L) timeline += "b-state=$this" } }
+            val balanceObserverA = a { balance effect { if (this != 100L) record("a-state=$this") } }
+            val balanceObserverB = b { balance effect { if (this != 0L) record("b-state=$this") } }
             // Allow collectors to subscribe.
             delay(100)
 
@@ -337,7 +351,7 @@ class SuspendAtomicEventsTest {
 
             // Wait for events to land.
             withTimeoutOrNull(2_000) {
-                while (!(timeline.contains("a-event") && timeline.contains("b-event"))) {
+                while (!snapshotTimeline().let { it.contains("a-event") && it.contains("b-event") }) {
                     delay(20)
                 }
             }
@@ -345,6 +359,7 @@ class SuspendAtomicEventsTest {
             collectorB.cancel()
             balanceObserverA.dispose()
             balanceObserverB.dispose()
+            val timeline = snapshotTimeline()
 
             // Per-store: state observer fires before that store's events.
             // Across vaults: a (lower lockOrderKey) commits before b.
@@ -366,7 +381,8 @@ class SuspendAtomicEventsTest {
             // Cross-store state ordering: a (lower lockOrderKey) commits before b.
             assertTrue(aStateIdx < bStateIdx, "a's state observer must fire before b's; saw $timeline")
             // Events are dispatched to collectors asynchronously, but their
-            // emission order to the SharedFlow is the lock order.
+            // emission order to the SharedFlows is the lock order (the serial
+            // collector dispatcher preserves it).
             assertTrue(aEventIdx < bEventIdx, "a's event must arrive before b's; saw $timeline")
         }
 

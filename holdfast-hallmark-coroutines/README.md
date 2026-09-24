@@ -40,6 +40,15 @@ Holdfast state inside a `suspendAction { }`. On validation failure, throws
 `HallmarkException` inside the action — every other state mutation in
 the transaction rolls back.
 
+For a `StateTag.Secret` state (declared with `:holdfast-hallmark`'s
+experimental `boxed(validator, codec, tags)` or
+`boxedHandle(validator, codec, tags)`), the `HallmarkException` withholds the
+rejected value: each violation keeps its code, path and rule, reads
+"`<code>` rejected the value (withheld: a Secret state)" and carries no
+arguments, so a mistyped secret never reaches the `TransactionResult.Error`
+or a middleware's log line. Any other state gets hallmark's own messages,
+which may quote the value.
+
 ## Building
 
 ```

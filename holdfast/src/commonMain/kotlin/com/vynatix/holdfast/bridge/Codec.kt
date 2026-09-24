@@ -1,5 +1,7 @@
 package com.vynatix.holdfast.bridge
 
+import com.vynatix.holdfast.StateCodec
+
 /**
  * Bidirectional serialization for a value of type [T] to/from a string.
  * Used by [KvBridge] to persist arbitrary state types via a [KvStore].
@@ -7,11 +9,14 @@ package com.vynatix.holdfast.bridge
  * Implementations should round-trip: `decode(encode(x)) == x` for all valid `x`.
  * For types whose String representation is the natural encoding (Int, Long,
  * String), the trivial codecs in this package can be used directly.
+ *
+ * Every `Codec` is a [StateCodec], so the same codec can also give a state its
+ * snapshot encoding (`state(codec = IntCodec) { 0 }`; see [StateCodec]).
  */
-interface Codec<T : Any> {
-    fun encode(value: T): String
+interface Codec<T : Any> : StateCodec<T> {
+    override fun encode(value: T): String
 
-    fun decode(string: String): T
+    override fun decode(string: String): T
 }
 
 /** Identity codec for `String`. */

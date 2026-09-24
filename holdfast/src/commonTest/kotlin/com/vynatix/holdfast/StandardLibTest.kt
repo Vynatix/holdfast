@@ -1,6 +1,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.bridge.BooleanCodec
+import com.vynatix.holdfast.bridge.Codec
 import com.vynatix.holdfast.bridge.InMemoryKvStore
 import com.vynatix.holdfast.bridge.IntCodec
 import com.vynatix.holdfast.bridge.KvBridge
@@ -459,5 +460,65 @@ class StandardLibIntegrationTest {
         assertIs<TransactionResult.Error>(r)
         assertTrue(log.any { it.contains("✗") }, "logging middleware sees the error: $log")
         assertEquals(2, timings.size, "timing middleware records the rolled-back transaction too")
+    }
+}
+
+private class CodecStateVault : Store<CodecStateVault>() {
+    @OptIn(ExperimentalStoreApi::class)
+    val n by state(codec = IntCodec) { 0 }
+
+    @OptIn(ExperimentalStoreApi::class)
+    val s by state(codec = StringCodec) { "init" }
+
+    @OptIn(ExperimentalStoreApi::class)
+    val balance by state(codec = LongCodec) { 0L }
+
+    @OptIn(ExperimentalStoreApi::class)
+    val flag by state(codec = BooleanCodec) { false }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+class BridgeCodecsAreStateCodecsTest {
+    @Test
+    fun everyBridgeCodecIsAStateCodec() {
+        val codecs: List<StateCodec<*>> = listOf(StringCodec, IntCodec, LongCodec, BooleanCodec)
+        assertEquals(4, codecs.size, "each standard bridge codec is usable where a StateCodec is expected")
+    }
+
+    @Test
+    fun bridgeCodecsGiveStatesASnapshotEncoding() {
+        val source = CodecStateVault()
+        source action {
+            n mutate 7
+            s mutate "text"
+            balance mutate 9_000_000_000L
+            flag mutate true
+        }
+        val text = source.snapshot().encode()
+        assertEquals(
+            """{"format":"holdfast.store","v":1,"schema":1,""" +
+                """"states":{"balance":"9000000000","flag":"true","n":"7","s":"text"},"skipped":[]}""",
+            text,
+            "each state's text is its bridge codec's encoding",
+        )
+
+        val fresh = CodecStateVault()
+        fresh.restore(StoreSnapshot.decode(text), RestorePolicy.Strict).getOrThrow()
+        assertEquals(7, fresh.n.value)
+        assertEquals("text", fresh.s.value)
+        assertEquals(9_000_000_000L, fresh.balance.value)
+        assertEquals(true, fresh.flag.value)
+    }
+
+    @Test
+    fun aCustomBridgeCodecIsAStateCodecToo() {
+        val upper =
+            object : Codec<String> {
+                override fun encode(value: String): String = value.uppercase()
+
+                override fun decode(string: String): String = string.lowercase()
+            }
+        val asStateCodec: StateCodec<String> = upper
+        assertEquals("abc", asStateCodec.decode(asStateCodec.encode("abc")))
     }
 }

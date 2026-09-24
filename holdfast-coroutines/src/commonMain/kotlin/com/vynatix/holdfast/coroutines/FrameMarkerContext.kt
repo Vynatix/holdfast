@@ -2,8 +2,9 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.FrameMarker
-import com.vynatix.holdfast.FrameMarkers
+import com.vynatix.holdfast.Transaction
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.ContinuationInterceptor
@@ -19,7 +20,7 @@ import kotlin.coroutines.CoroutineContext
  * Platform split: on JVM/Android this is a `kotlinx.coroutines.ThreadContextElement`
  * (which survives nested `withContext(otherDispatcher)` sections); on iOS and
  * wasmJs — where `ThreadContextElement` is not available — it is a delegating
- * [ContinuationInterceptor] ([FrameMarkerInterceptor]). The interceptor
+ * [ContinuationInterceptor] ([SlotBracketingInterceptor]). The interceptor
  * occupies the context's single interceptor slot, so a nested
  * `withContext(Dispatchers.X)` inside the body REPLACES it there: writes in
  * that section are not policed (a documented enforcement gap on those
@@ -35,19 +36,42 @@ internal expect fun frameMarkerContext(
 ): CoroutineContext
 
 /**
- * Non-JVM implementation of the frame-marker propagation: a
- * [ContinuationInterceptor] that wraps every intercepted continuation so its
- * `resumeWith` brackets the real resumption with thread-local marker
- * install/restore, then hands the wrapped continuation to [delegate] (the
- * actual dispatcher) for ordinary dispatch.
+ * Run [block] — a suspending commit phase — with the core thread-local
+ * commit-fanout marker ([FanoutMarkers]) naming [roots] on whatever thread
+ * each of its resumptions lands: its observer fanout, bridge publishes, event
+ * emits and frame observers. A blocking `action`/`atomic` on one of those
+ * stores from inside the commit is then recognised as nested and refused,
+ * instead of waiting for the serializer the commit itself holds.
+ *
+ * Starts [block] on the calling thread without a dispatch, so a commit whose
+ * body never suspended still does not yield the thread while it holds the
+ * store. Platform split as in [frameMarkerContext]: a `ThreadContextElement`
+ * on JVM/Android; [withFanoutMarkerIntercepted] on iOS and wasmJs, with the
+ * same gap — a nested `withContext(Dispatchers.X)` inside the commit (in a
+ * `SuspendingBridge.publishAwaited`, say) replaces the interceptor, so a
+ * blocking call from that section is not recognised and still waits.
  */
-internal class FrameMarkerInterceptor(
+internal expect suspend fun <T> withFanoutMarker(
+    roots: Set<Transaction>,
+    block: suspend () -> T,
+): T
+
+/**
+ * Non-JVM implementation of the marker propagation: a
+ * [ContinuationInterceptor] that wraps every intercepted continuation so its
+ * `resumeWith` brackets the real resumption with a thread-local install of
+ * [value] (through [install], which returns the prior value) and a restore,
+ * then hands the wrapped continuation to [delegate] (the actual dispatcher)
+ * for ordinary dispatch. Serves both the frame marker and the fanout marker.
+ */
+internal class SlotBracketingInterceptor<M : Any>(
     private val delegate: ContinuationInterceptor?,
-    private val marker: FrameMarker,
+    private val value: M,
+    private val install: (M?) -> M?,
 ) : AbstractCoroutineContextElement(ContinuationInterceptor),
     ContinuationInterceptor {
     override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> {
-        val wrapped = MarkerBracketingContinuation(continuation, marker)
+        val wrapped = SlotBracketingContinuation(continuation, value, install)
         return delegate?.interceptContinuation(wrapped) ?: wrapped
     }
 
@@ -59,24 +83,25 @@ internal class FrameMarkerInterceptor(
 }
 
 /**
- * The bracketing continuation: installs [marker] into the thread-local slot
+ * The bracketing continuation: installs [value] into the thread-local slot
  * for exactly the duration of one resumption (the coroutine runs inside
  * `delegate.resumeWith`), restoring the previous value when the coroutine
  * suspends again or completes. Single-threaded wasmJs gets the same property:
- * interleaved OTHER coroutines never observe this frame's marker.
+ * interleaved OTHER coroutines never observe this coroutine's marker.
  */
-private class MarkerBracketingContinuation<T>(
+private class SlotBracketingContinuation<T, M : Any>(
     private val delegate: Continuation<T>,
-    private val marker: FrameMarker,
+    private val value: M,
+    private val install: (M?) -> M?,
 ) : Continuation<T> {
     override val context: CoroutineContext get() = delegate.context
 
     override fun resumeWith(result: Result<T>) {
-        val prior = FrameMarkers.install(marker)
+        val prior = install(value)
         try {
             delegate.resumeWith(result)
         } finally {
-            FrameMarkers.install(prior)
+            install(prior)
         }
     }
 }

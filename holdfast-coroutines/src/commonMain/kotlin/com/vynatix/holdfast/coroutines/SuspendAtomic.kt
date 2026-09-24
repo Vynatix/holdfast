@@ -12,6 +12,9 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.applyFrameCommit
+import com.vynatix.holdfast.internalDrainPostCommitTasksWhenSettled
+import com.vynatix.holdfast.internalRefuseInitializerWrite
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.verifyFrameNesting
 import kotlinx.coroutines.CancellationException
@@ -28,7 +31,8 @@ import kotlin.uuid.Uuid
 /**
  * Run [body] as a cross-store atomic frame with a suspending body — the
  * suspending peer of [com.vynatix.holdfast.atomic]. Every enrolled store's
- * transaction commits or rolls back together.
+ * transaction commits or rolls back together, unless the commit itself fails
+ * partway (see **Commit failure**).
  *
  * **Enrollment is enforced.** A write to a store not in the [stores] list
  * throws [com.vynatix.holdfast.UnenrolledStoreException] — such a write would
@@ -68,14 +72,50 @@ import kotlin.uuid.Uuid
  * Commit fanout order (the cross-store consistency contract): per-store
  * middleware `onTransactionStarted` in lock order, then the body, then ALL
  * stores' `onTransactionCompleted` hooks (a throw rolls the whole frame
- * back — `completed` does not mean durably-committed for frames), then
- * per-store commits in lock order under `withContext(NonCancellable)`.
- * Per-store fanout is sequential: observers → bridge publish
+ * back — `completed` does not mean durably-committed for frames), then,
+ * under `withContext(NonCancellable)`, EVERY store applies its writes inside
+ * one write bracket before any fans out — so no consistent read (a snapshot,
+ * a derived state's compute) ever sees one participant applied without the
+ * others, and no reader sees one applied while another's publish is in
+ * flight (for the participants this frame opened a root for: a store an
+ * enclosing frame holds joins as a savepoint and applies with that frame) —
+ * then per-store fanout in lock order: observers → bridge publish
  * ([SuspendingBridge.publishAwaited] awaited) → suspending event drain
- * honoring `BufferOverflow.SUSPEND` back-pressure. On body throw or
- * [CancellationException], roots roll back in REVERSE lock order under
- * `NonCancellable`, with per-store middleware `onTransactionError` first.
- * Every participant root shares one [Transaction.frameId].
+ * honoring `BufferOverflow.SUSPEND` back-pressure. An observer (or bridge, or
+ * event collector) finds every participant applied, and may not write into
+ * any of them. The `derivedState`/`merged` states the frame changes a source
+ * of settle once the outermost entry on this coroutine — this frame, unless
+ * it is nested in another entry — has released every store (see
+ * [com.vynatix.holdfast.SettleScope]). On body throw or
+ * [CancellationException] from the body, roots roll back in REVERSE lock
+ * order under `NonCancellable`, with per-store middleware
+ * `onTransactionError` first. Every participant root shares one
+ * [Transaction.frameId].
+ *
+ * **Cancellation.** Called from an already-cancelled coroutine, an outermost
+ * `suspendAtomic` throws that [CancellationException] before taking any
+ * store: no middleware hook and no [com.vynatix.holdfast.FrameObserver]
+ * callback fires — on every platform. A call nested in another
+ * `suspendAction`/`suspendAtomic` on this coroutine joins that entry instead
+ * of checking. Once the body has returned, the commit runs under
+ * `NonCancellable`, and the call returns the commit's [TransactionResult]
+ * even if the caller was cancelled meanwhile; the caller sees its
+ * cancellation at its next suspension point.
+ *
+ * **Commit failure.** The same in-memory-2PC limitation as
+ * [com.vynatix.holdfast.atomic]. If the apply throws partway (only a
+ * `distinct` state's `equals` can), the roots applied before it still fan out
+ * and stay committed; the rest roll back, and so does every participant
+ * joined as a savepoint. A root whose fanout fails — a throwing
+ * [Store.uncaughtObserverHandler], or a [CancellationException] from its
+ * [SuspendingBridge.publishAwaited], such as one that times out — does not
+ * stop the later ones from fanning out and committing. In every such case
+ * the frame returns [TransactionResult.Error] — carrying that
+ * [CancellationException] when there is one, with any other failure attached
+ * as suppressed — and [com.vynatix.holdfast.FrameObserver.onFrameRolledBack]
+ * fires instead of `onFrameCommitted`, although the applied participants'
+ * values stand. Only the participants that roll back get
+ * `onTransactionError`.
  *
  * Middleware caveat: frame-driven hooks are the SYNC `Middleware` hooks;
  * [SuspendingMiddlewareHooks] async siblings do not fire for the frame's
@@ -102,6 +142,9 @@ suspend fun <R> suspendAtomic(
     require(stores.isNotEmpty()) { "suspendAtomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
+    // A state initializer or a schema migration (SchemaVersioned.migrate) may
+    // read states but not write them (Store.state).
+    sorted.first().internalRefuseInitializerWrite("open a suspendAtomic(...) frame")
 
     // Nested-frame safety (interop flavor + lock order), BEFORE any lock is
     // acquired. The enclosing marker is coherent on this thread because the
@@ -109,6 +152,32 @@ suspend fun <R> suspendAtomic(
     val enclosingMarker = FrameMarkers.current()
     verifyFrameNesting(enclosingMarker, sorted, suspending = true)
 
+    // An entry: the derived states its participants' commits change a source
+    // of settle once the outermost entry — this frame, unless it is nested in
+    // another — has released everything, as do the post-commit drains it
+    // owes the stores whose roots it opened.
+    val result = settlingSuspended { runSuspendAtomic(sorted, enclosingMarker, policy, body) }
+    // A nested frame is an inner unit of the enclosing frame's body: its
+    // Error escalates like an inner action's, unless the ENCLOSING policy
+    // tolerates inner errors. (Contract exceptions rethrow directly.)
+    if (result is TransactionResult.Error && enclosingMarker != null && !enclosingMarker.policy.tolerateInnerErrors) {
+        throw result.exception
+    }
+    return result
+}
+
+/**
+ * [suspendAtomic] from resolving its owner on: take every participant, run
+ * the body, commit or roll back, release, and defer the post-commit drains it
+ * owes to the settle of the entry it runs in.
+ */
+@OptIn(ExperimentalUuidApi::class)
+private suspend fun <R> runSuspendAtomic(
+    sorted: List<Store<*>>,
+    enclosingMarker: FrameMarker?,
+    policy: FramePolicy,
+    body: suspend () -> R,
+): TransactionResult<R> {
     // Resolve the suspending owner: prefer the parent frame's owner so a
     // nested suspendAtomic in the same coroutine sees the same owner key.
     // Fall back to coroutineContext[Job], then a per-call sentinel.
@@ -133,12 +202,21 @@ suspend fun <R> suspendAtomic(
             parent = enclosingMarker,
         )
 
-    val result =
+    // Stores this frame owes a post-commit drain: those whose root it opened
+    // top-level, and one whose mutex acquire was cancelled after kotlinx may
+    // have handed it the mutex. Drained only once the frame has fully unwound:
+    // a drain at a participant's own unwind step ran derived recomputes (and
+    // their observers) while EARLIER participants still had this frame's roots
+    // installed and their mutexes held, so an observer's write to one of those
+    // stores was staged into a root nobody would commit, or hit a finished one.
+    val drainOnExit = mutableListOf<Store<*>>()
+    return try {
         acquireAndRun(
             sorted = sorted,
             newlyHeldSet = newlyHeld.toSet(),
             index = 0,
             rootsAcquired = mutableListOf(),
+            drainOnExit = drainOnExit,
             ownerKey = owner,
             frame = frame,
             marker = marker,
@@ -146,13 +224,15 @@ suspend fun <R> suspendAtomic(
             ownerThreadId = ownerThreadId,
             body = body,
         )
-    // A nested frame is an inner unit of the enclosing frame's body: its
-    // Error escalates like an inner action's, unless the ENCLOSING policy
-    // tolerates inner errors. (Contract exceptions rethrow directly.)
-    if (result is TransactionResult.Error && enclosingMarker != null && !enclosingMarker.policy.tolerateInnerErrors) {
-        throw result.exception
+    } finally {
+        // Every root this frame installed is uninstalled and every mutex it
+        // took is released by now; the drains are deferred further, to the
+        // settle of the outermost entry. A recompute opens a fresh top-level
+        // action, so it could not run while this frame held its store. This
+        // drain also serves recomputes handed to this frame while it held
+        // the store (Store.tryTopLevelAction).
+        drainOnExit.forEach { it.internalDrainPostCommitTasksWhenSettled() }
     }
-    return result
 }
 
 /**
@@ -165,9 +245,10 @@ suspend fun <R> suspendAtomic(
  *    into the outer, its rollback discards only nested writes.
  *
  * On unwind, newly-acquired locks release in reverse order. Deferred
- * post-commit work (derived recomputes) drains AFTER the mutex releases —
- * recompute actions are blocking and would deadlock on a mutex still held by
- * this frame.
+ * post-commit work (derived recomputes) is not drained here: each store whose
+ * root this frame opened top-level, or whose mutex acquire was cancelled after
+ * kotlinx may have handed it the mutex, is added to [drainOnExit], and
+ * [suspendAtomic] drains those once the whole frame has unwound.
  */
 @OptIn(ExperimentalUuidApi::class)
 @Suppress("LongParameterList", "LongMethod")
@@ -176,6 +257,7 @@ private suspend fun <R> acquireAndRun(
     newlyHeldSet: Set<Store<*>>,
     index: Int,
     rootsAcquired: MutableList<RootEntry>,
+    drainOnExit: MutableList<Store<*>>,
     ownerKey: Any,
     frame: SuspendAtomicFrame,
     marker: FrameMarker,
@@ -195,13 +277,28 @@ private suspend fun <R> acquireAndRun(
         // Mutex.lock(owner) — non-reentrant by kotlinx Mutex contract; the
         // newlyHeld filter above guarantees we never re-acquire a mutex we
         // already hold via this frame's owner key.
-        serializer.mutex.lock(ownerKey)
-        var openedTopLevel = false
+        try {
+            serializer.mutex.lock(ownerKey)
+        } catch (ce: CancellationException) {
+            // Mutex.unlock hands the permit straight to the first waiter. If this
+            // waiter is cancelled before it resumes, kotlinx's prompt-cancellation
+            // handler has already released the permit again by the time lock()
+            // throws — but while we held it, a recompute that found the store busy
+            // may have been handed to us (Store.tryTopLevelAction), so we owe the
+            // store a drain like any releasing holder. Not here, though: earlier
+            // participants still have this frame's roots installed, and a drained
+            // recompute's observers could write into them. Harmless when we were
+            // never handed the permit: every queued task is a non-blocking attempt.
+            drainOnExit += v
+            throw ce
+        }
         try {
             frame.heldVaults += v
             val priorActive = v.activeTransaction
             val priorOwner = v.suspendingOwner
-            openedTopLevel = priorActive == null
+            // A fresh top-level root makes this frame the store's holder. A store
+            // that already had a transaction leaves the drain to its holder.
+            if (priorActive == null) drainOnExit += v
             // Install a fresh root transaction for this store. Subsequent
             // mutate / update / suspendAction calls inside the body stage into
             // this root's pendingWrites.
@@ -215,6 +312,7 @@ private suspend fun <R> acquireAndRun(
                     newlyHeldSet = newlyHeldSet,
                     index = index + 1,
                     rootsAcquired = rootsAcquired,
+                    drainOnExit = drainOnExit,
                     ownerKey = ownerKey,
                     frame = frame,
                     marker = marker,
@@ -231,10 +329,6 @@ private suspend fun <R> acquireAndRun(
             }
         } finally {
             runCatching { serializer.mutex.unlock(ownerKey) }
-            // Drain deferred post-commit work (derived recomputes) only after
-            // the mutex released: recomputes run blocking `action`s, which
-            // would spin forever on a mutex this frame still holds.
-            if (openedTopLevel) v.internalDrainPostCommitTasks()
         }
     } else {
         // Held by the outer frame: no mutex acquire. Open a SAVEPOINT of the
@@ -255,6 +349,7 @@ private suspend fun <R> acquireAndRun(
                 newlyHeldSet = newlyHeldSet,
                 index = index + 1,
                 rootsAcquired = rootsAcquired,
+                drainOnExit = drainOnExit,
                 ownerKey = ownerKey,
                 frame = frame,
                 marker = marker,
@@ -270,10 +365,12 @@ private suspend fun <R> acquireAndRun(
 
 /**
  * Run the body (with the frame marker travelling across coroutine thread
- * hops), then commit every entry in lock order (success) or roll every entry
- * back in reverse lock order (failure) under [NonCancellable]. Savepoint
- * entries merge into their outer frame on commit; fresh roots apply state and
- * run the per-store observer / bridge / event fanout via [suspendingCommit].
+ * hops), then commit (success) or roll every entry back in reverse lock order
+ * (failure) under [NonCancellable]. The commit ([commitInLockOrder]) applies
+ * every fresh root inside one write bracket and then merges savepoint entries
+ * into their outer frame ([applyFrameCommit]), and only then fans each root
+ * out in lock order (observers, then bridge publish, then event drain) via
+ * [suspendingFanOut].
  */
 private suspend fun <R> executeBody(
     roots: List<RootEntry>,
@@ -314,10 +411,7 @@ private suspend fun <R> executeBody(
             // validation middleware throwing on the last store still rolls
             // every store back.
             roots.forEach { it.session.fireCompleted() }
-            for (entry in roots) {
-                suspendingCommit(entry.txn)
-            }
-            observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
+            commitInLockOrder(roots, observers, marker.frameId)
             TransactionResult.Success(resultTxn, value)
         } catch (e: Throwable) {
             // Commit/completed failure: unwind in reverse. Entries that already
@@ -334,6 +428,51 @@ private suspend fun <R> executeBody(
             rethrowFrameContractViolation(e)
             TransactionResult.Error(e, resultTxn)
         }
+    }
+}
+
+/**
+ * Apply every entry inside one write bracket ([applyFrameCommit]), then fan
+ * each applied root out in lock order — its observers, its awaited bridge
+ * publishes, its suspending event drain — then notify the frame observers,
+ * all of it marked as this frame's suspending commit ([inSuspendingCommitOf]).
+ * Every participant stays installed, applied, with its serializer held, while
+ * the others fan out, so a blocking `action`/`atomic` on any of them from an
+ * observer (or from `onFrameCommitted`) must count as nested: it is refused
+ * rather than left waiting for this very frame. A root whose fanout fails
+ * leaves the others to fan out — each of them has applied — and the first
+ * failure (an apply failure first) is thrown once they have. A
+ * [CancellationException] from one root's fanout (a [SuspendingBridge] whose
+ * `publishAwaited` times out, say) is no exception: the others still fan out,
+ * and it is thrown after them, carrying any other failure as suppressed.
+ */
+private suspend fun commitInLockOrder(
+    roots: List<RootEntry>,
+    observers: List<com.vynatix.holdfast.FrameObserver>,
+    frameId: String,
+) {
+    inSuspendingCommitOf(roots.map { it.txn }) {
+        val apply = applyFrameCommit(roots.map { it.txn })
+        var failure = apply.failure
+        var cancellation: CancellationException? = null
+        for (txn in apply.applied) {
+            // Under NonCancellable: a CancellationException here came from user
+            // code (a bridge's publishAwaited using withTimeout, say), not from
+            // this coroutine being cancelled, so every other applied root can,
+            // and must, still fan out — its values are already assigned.
+            val fanoutFailure = runCatching { suspendingFanOut(txn) }.exceptionOrNull() ?: continue
+            if (fanoutFailure is CancellationException && cancellation == null) {
+                cancellation = fanoutFailure
+            } else {
+                failure = failure?.apply { addSuppressed(fanoutFailure) } ?: fanoutFailure
+            }
+        }
+        cancellation?.let { ce ->
+            failure?.let(ce::addSuppressed)
+            throw ce
+        }
+        if (failure != null) throw failure
+        observers.forEach { runCatching { it.onFrameCommitted(frameId) } }
     }
 }
 

@@ -3,11 +3,13 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.logUncaughtFailure
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -57,7 +59,24 @@ class FrameMiddlewareSession internal constructor(
  *    but must not be relied on for race-free decisions outside the owner thread.
  *  - `mutate` from a thread that does not own the active transaction synthesizes its
  *    own one-shot transaction (this is intentional, not a bug — middleware fires and
- *    observers see only the committed value).
+ *    observers see only the committed value). Exception: while a `suspendAction`/
+ *    `suspendAtomic` (`:holdfast-coroutines`) holds the store, its body may resume on
+ *    any thread, so a bare `mutate`/`update` from any thread stages into its
+ *    transaction. Before that transaction applies, the write silently joins it;
+ *    after, it throws until the suspending call returns. Write from other threads
+ *    through [action], which waits (GUIDE §8.2).
+ *  - Commit fanout (observers, bridge publishes, events) runs after the transaction
+ *    has applied its writes. From then on it refuses writes: an observer writing back
+ *    into this store gets an exception from [mutate] (or `update`/`emit`), or an
+ *    Error result from a nested [action], instead of losing the write silently.
+ *    Post-commit failures go to [uncaughtObserverHandler], or are logged.
+ *  - A state's initializer runs once, when the state is first needed, without the
+ *    store taking any lock to run it; other threads needing that state meanwhile wait
+ *    for it. First needed inside an action (or by a [snapshot] or [restore] called
+ *    in one), it runs under that action's locks. Initializers may read committed values of states, but not write
+ *    (see [state]). The initializer is retained: the experimental [reset] runs it
+ *    again, inside its own action, and so does a sterile [restore] for a Remote
+ *    state (see [state]).
  *
  * Typical subclass:
  * ```
@@ -125,12 +144,99 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
+     * Volatile backing field for the clock bound via [bindClock]. `null` until the
+     * first `bindClock` call, and again after `bindClock(null)`. Read by the default
+     * getter of [clock] as resolution level 2 (between a subclass override and
+     * [Clock.System]).
+     *
+     * Marked `@Volatile` for the same reason as [boundScope]: the binding is racy
+     * by contract (last writer wins), but a write is visible to every reader.
+     */
+    @kotlin.concurrent.Volatile
+    private var boundClock: Clock? = null
+
+    /**
+     * The clock this store reads time through. Time is an input: a store that
+     * stamps `clock.now()` in an action, or computes an initial value from it, is
+     * deterministic under a fixed test clock. Resolution order
+     * (per-store override → bound → system):
+     *
+     *  1. **Per-store** — a subclass may `override val clock: Clock`. Use a getter,
+     *     not a `val` initializer, for the same reason as [scope]: a property
+     *     initialized before the override's backing field (for example one that
+     *     reads a state whose initializer reads `clock`) sees it `null`. A subclass
+     *     override sits ABOVE this property in the resolution chain, so it beats any
+     *     [bindClock] call — including a test's. Prefer [bindClock] for pinning time
+     *     in tests.
+     *  2. **Bound** — the clock passed to the most recent [bindClock] call on this
+     *     store instance, if any. Rebindable; `bindClock(null)` unbinds.
+     *  3. **System** — [Clock.System].
+     *
+     * State initializers run lazily, when the state is first needed — its first
+     * read, or a [snapshot]/[restore] that captures or writes it — and [reset]
+     * runs every declared state's initializer again (a sterile [restore], every
+     * Remote state's), so an initializer that reads `clock` sees the resolution
+     * in force at that moment: bind before anything first reads, snapshots,
+     * resets or sterile-restores such a state (for a singleton store, before
+     * anything touches it). A materialized state keeps its value until a
+     * [reset] or a sterile [restore]; rebinding the clock never re-runs an
+     * initializer.
+     *
+     * The library's own timestamps ([Transaction.endTime], `TimingMiddleware`,
+     * `ProfilingMiddleware`) do not read this clock — it is an input for store code
+     * only. Reading it never throws, even after [dispose].
+     */
+    @ExperimentalStoreApi
+    open val clock: Clock
+        get() = boundClock ?: Clock.System
+
+    /**
+     * Bind this store to [clock] for resolution level 2 (see [clock]), or unbind it
+     * with `null` so [clock] falls back to [Clock.System]. After this call,
+     * `store.clock` returns [clock] (unless a subclass has its own
+     * `override val clock`, which beats the binding). Calling [bindClock] again
+     * replaces the binding.
+     *
+     * Thread safety: the binding field is `@Volatile`; the latest write becomes
+     * visible to all readers, and concurrent callers race (last write wins). Bind
+     * once at app init, or once per test. Inside `storeTest { }`, a clock bound on a
+     * store after the test tracks it is restored to its track-time binding at
+     * teardown; a store the test never tracks keeps whatever it was bound to.
+     *
+     * @throws IllegalStateException if the store is disposed.
+     */
+    @ExperimentalStoreApi
+    fun bindClock(clock: Clock?) {
+        checkNotDisposed()
+        boundClock = clock
+    }
+
+    /**
+     * The clock bound via [bindClock], or `null` when none is — the raw binding,
+     * ignoring any subclass override of [clock]. `:holdfast-testing` records it
+     * when a test first tracks a store and rebinds it at teardown, so a clock bound
+     * after tracking does not leak into the next test through a long-lived
+     * (singleton) store. Reading it never throws, even after [dispose].
+     */
+    @StoreInternalApi
+    val internalBoundClock: Clock?
+        get() = boundClock
+
+    /**
      * Atomic disposed flag. CAS'd to `true` exactly once on the first [dispose] call;
      * subsequent calls observe `true` and return without throwing (idempotent contract).
      * Every public entry point reads this — when `true`, they throw
      * `IllegalStateException("store disposed")`.
      */
     private val disposedFlag = atomic(false)
+
+    /**
+     * This store's [StoreAttachment]s. Initialized with the store's own fields,
+     * before any subclass code runs, and independent of the state registry,
+     * so a base class's `init` block can attach before the subclass has
+     * declared its states.
+     */
+    internal val attachmentSlot = AttachmentSlot(this)
 
     /**
      * Whether [dispose] has been called on this store. Once `true`, every public
@@ -148,10 +254,31 @@ abstract class Store<Self : Store<Self>> {
      * After `dispose()`:
      *  - Every state-mutation API throws `IllegalStateException("store disposed")`.
      *  - Every state-registry read API throws.
-     *  - All registered observers are dropped; all bridges are detached.
+     *  - All registered observers are dropped; all bridges are detached; every state
+     *    declaration is dropped with its initializer, and every keyed state
+     *    family with its entries (their `observeFrom` subscriptions disposed).
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
+     *  - The bound clock is kept, and reading [clock] still works; [bindClock] throws.
+     *  - A `derivedState`/`merged` hosted on another, live store still
+     *    recomputes after this store's last commit changed one of its sources,
+     *    even when `dispose()` is called from inside that commit's fanout (one
+     *    of its observers): the recompute runs once the outermost action or
+     *    frame on that thread has exited, as every recompute does. A recompute
+     *    still waiting in this store's post-commit queue — one that deferred
+     *    to this store's holder, or that fell back to it with no entry open
+     *    on the committing thread — for a derived state hosted on another,
+     *    live store runs before `dispose()` returns, on the calling thread:
+     *    that derived state's compute, its host's middleware and its host's
+     *    observers then run inside `dispose()`. A recompute hosted on this
+     *    store does nothing.
+     *  - Library machinery attached to the store (`@StoreInternalApi`
+     *    [StoreAttachment]s) is told last, once each, on the calling thread,
+     *    holding no lock `dispose()` took (but under any lock its caller
+     *    holds, e.g. the `transactionLock` of an action of this store that
+     *    calls `dispose()`); a throwing one is reported to
+     *    [uncaughtObserverHandler].
      *
      * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
@@ -164,30 +291,43 @@ abstract class Store<Self : Store<Self>> {
         // Drop in-flight transactional state so any pending writes can never be applied.
         // Acquire the transaction lock briefly so a racing action that's mid-flight
         // (under the lock) finishes before we reach into shared structures.
-        transactionLock.withLock {
-            _activeTransaction = null
-        }
-        postCommitLock.withLock { postCommitTasks.clear() }
-        // Snapshot the property map under its lock, then call shutdownSilently outside
-        // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
-        // locks, and we don't want to invert ordering.
-        val toShutdown =
-            propertiesLock.withLock {
-                val snap = _properties.values.toList()
-                _properties.clear()
-                snap
+        val attachments =
+            transactionLock.withLock {
+                _activeTransaction = null
+                // Closed under the lock: a reset still telling the attachments
+                // (it holds this lock) has finished, and a reset that runs
+                // after it finds none left to tell, so the dispose notification
+                // below is the last call every attachment gets.
+                attachmentSlot.close()
             }
+        // Drain, not clear, outside the lock: this store's queue can hold the
+        // recomputes of derived states hosted on OTHER, live stores (a
+        // DerivedState's recompute can wait for a holder of its source's
+        // store there), which must still see this store's last commit. A task
+        // hosted here refuses itself (tryTopLevelAction answers Disposed), and
+        // one hosted elsewhere never blocks: a busy host is handed the task.
+        drainPostCommitTasks()
+        // Drop every state and declaration under the registry's lock, then call
+        // shutdownSilently outside any store-side lock — `shutdownSilently` takes
+        // the per-state observer + bridge locks, and we don't want to invert
+        // ordering.
+        val toShutdown = registry.releaseAll()
         toShutdown.forEach { runCatching { it.shutdownSilently() } }
         // Drop middleware so a stray reference to a disposed store can't keep
         // captured state alive.
         middlewareLock.withLock { middlewareList.clear() }
         // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
         runCatching { onDispose() }
+        // Last, holding no lock dispose() took (a caller inside an action of
+        // this store still holds its transactionLock and middlewareLock): an
+        // attachment hears of a store that is completely torn down.
+        attachmentSlot.notifyDisposed(attachments)
     }
 
     /**
      * Subclass hook invoked once, AFTER the base `dispose()` has cleared all states,
-     * observers, bridges, and middleware. Override to release subclass-owned resources
+     * observers, bridges, and middleware, and BEFORE the store's attachments
+     * ([StoreAttachment]) are told. Override to release subclass-owned resources
      * (e.g. `EventfulStore` resets its events SharedFlow). Default no-op.
      *
      * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
@@ -195,13 +335,27 @@ abstract class Store<Self : Store<Self>> {
      */
     protected open fun onDispose() {}
 
-    private fun checkNotDisposed() {
+    internal fun checkNotDisposed() {
         if (disposedFlag.value) error("store disposed")
     }
 
     private val transactionLock = StoreLock()
-    private val propertiesLock = StoreLock()
     private val middlewareLock = StoreLock()
+
+    /**
+     * Every state of this store: its declarations, in declaration order, and
+     * the materialized states by name. Its lock is the store's
+     * `propertiesLock`.
+     */
+    internal val registry = StateRegistry(this)
+
+    /**
+     * The wait-for graph this store's initializer latches belong to. Always
+     * [InitializerGraph.Process] outside tests, which swap it (before the first
+     * read) to model a thread identity such as wasmJs's shared id `0`.
+     */
+    @kotlin.concurrent.Volatile
+    internal var initializerGraph: InitializerGraph = InitializerGraph.Process
 
     @kotlin.concurrent.Volatile
     private var _activeTransaction: Transaction? = null
@@ -209,34 +363,79 @@ abstract class Store<Self : Store<Self>> {
     /**
      * The transaction currently being built on this Store, if any. Direct volatile
      * read — cross-thread observers see the most recent set without acquiring a lock.
-     * `null` between actions; non-null only on the action's owner thread for the
-     * duration of the action body.
+     * `null` between actions; non-null for the duration of an action's body and of
+     * its commit fanout (by then it has applied, and refuses further writes).
      */
     val activeTransaction: Transaction?
         get() = _activeTransaction
 
-    private val _properties = mutableMapOf<String, MutableState<*>>()
-
     /**
-     * Snapshot view of every state currently registered with this store, keyed by
-     * property name. The map is a copy — modifying it does not affect the store.
-     * The contained `State<*>` references are LIVE — reading `.value` reflects the
-     * current state. Callers MUST NOT cast these back to `MutableState` to bypass
-     * the transactional API; doing so leads to undefined behavior.
+     * Snapshot view of every state currently materialized on this store, keyed
+     * by property name. A declared state appears once it has been created —
+     * by its first read, or by [snapshot], [restore] or [reset] — and a state
+     * removed with [removeState] disappears until it is created again. The backing
+     * states of [derived] (and `:holdfast-coroutines`' `suspendDerived`)
+     * appear too, under their synthesized names; the entries of a keyed state
+     * family ([keyedState]) do not. The map is a copy — modifying
+     * it does not affect the store. The contained `State<*>` references are
+     * LIVE — reading `.value` reflects the current state. Callers MUST NOT cast
+     * these back to `MutableState` to bypass the transactional API; doing so
+     * leads to undefined behavior.
      */
     val properties: Map<String, State<*>>
         get() {
             checkNotDisposed()
-            return propertiesLock.withLock { _properties.toMap() }
+            return registry.lock.withLock { registry.states.toMap() }
         }
 
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * Optional handler invoked when a commit-fire observer callback throws. If null
-     * (the default), exceptions thrown from observer bodies during commit are
-     * swallowed silently — matching the original library contract. Set to a non-null
-     * handler to surface them (e.g. a logger or a test fixture's failure list).
+     * Handler for failures the store cannot propagate: those of post-commit
+     * side effects, which cannot undo a commit whose values are already
+     * applied, and of dispose notifications:
+     *  - a commit-fire observer callback that throws — including the
+     *    [IllegalStateException] a callback gets for writing back into this
+     *    store (or emitting on it) while this store's commit is notifying it
+     *    (see [mutate]);
+     *  - a throwing `Transformer.get` during observer fanout (that state's
+     *    observers are skipped);
+     *  - a throwing `Bridge.publish` (the commit still succeeds), and under
+     *    `:holdfast-coroutines`' `suspendAction` a throwing
+     *    `SuspendingBridge.publishAwaited`;
+     *  - a failed [derived] recompute — a throwing `compute`, or a middleware
+     *    rejecting it: rolled back, and the derived keeps its value until the
+     *    next source commit;
+     *  - a throwing `onStoreDisposed` of library machinery attached to the
+     *    store (an `@StoreInternalApi` [StoreAttachment]), told by [dispose].
+     *
+     * If null (the default), each failure is logged loudly instead: a line
+     * naming this store, then the exception's stack trace — on standard error
+     * on JVM and Android (logcat's `System.err` tag), on standard output on
+     * iOS and wasmJs. Set a handler to route them into your own logging or
+     * crash reporting, or into a test's failure list; `{ }` silences them.
+     *
+     * For an observer callback, a fanout `Transformer.get` or a bridge publish,
+     * the handler runs on the committing thread, inside the commit fanout. The
+     * store is still held then: under its transaction lock for a blocking
+     * `action`/`atomic`, under its serializer for `suspendAction`/
+     * `suspendAtomic`. Keep it short, and don't write to this store from it. A
+     * handler that throws there ends that commit's fanout early, so the
+     * remaining observers, bridge publishes and events are skipped, and the
+     * action reports an error; the commit's values stay applied.
+     *
+     * A failed [derived] recompute is reported after the recompute's own action
+     * has released this store, from the post-commit drain. That drain may run
+     * on another holder's thread, or inline in the observer fanout of a source
+     * on another store. There, a throwing handler fails no action: the drain
+     * swallows it, or the source's store reports it as that observer's failure.
+     *
+     * A failed dispose notification is reported by [dispose] as its last step,
+     * on the disposing thread, holding no lock `dispose()` took (but under any
+     * lock its caller holds). A handler that throws there is ignored, since
+     * `dispose()` never throws, and the store's other attachments are still
+     * told. With no handler, it is logged with a line of its own, naming the
+     * attachment.
      *
      * Note: this handler does NOT capture exceptions thrown from the initial-fire
      * call inside [State.effect]/[MutableState.observe]. Those propagate to the
@@ -245,6 +444,38 @@ abstract class Store<Self : Store<Self>> {
      */
     @kotlin.concurrent.Volatile
     var uncaughtObserverHandler: ((Throwable) -> Unit)? = null
+
+    /**
+     * Report a post-commit failure (see [uncaughtObserverHandler] for the
+     * kinds) to [uncaughtObserverHandler], or, while none is set, log it loudly
+     * through the platform's default output with a message naming this store.
+     * Every post-commit failure in the library goes through here, including
+     * `:holdfast-coroutines`' suspending bridge publishes. A throwing handler
+     * propagates, exactly as when fanout invoked it directly. Works on a
+     * disposed store. (A failed dispose notification goes to the same handler
+     * through [reportUncaughtFailure], with a log line of its own.)
+     */
+    @StoreInternalApi
+    fun internalReportUncaughtFailure(error: Throwable) {
+        reportUncaughtFailure(error) {
+            "Holdfast: a post-commit side effect of $displayName failed (an observer callback, a bridge " +
+                "publish or a derived recompute); the commit itself stands. Set uncaughtObserverHandler on " +
+                "the store to handle these failures yourself, or to silence them."
+        }
+    }
+
+    /**
+     * Hand [error] to [uncaughtObserverHandler], or, while none is set, log it
+     * through the platform's default output under [unhandledMessage]. A
+     * throwing handler propagates.
+     */
+    internal fun reportUncaughtFailure(
+        error: Throwable,
+        unhandledMessage: () -> String,
+    ) {
+        val handler = uncaughtObserverHandler
+        if (handler != null) handler(error) else logUncaughtFailure(unhandledMessage(), error)
+    }
 
     /**
      * Hook for an external mutual-exclusion mechanism that needs to coordinate
@@ -257,11 +488,33 @@ abstract class Store<Self : Store<Self>> {
      * Marked `@StoreInternalApi` because it's an extension point for companion
      * modules, not a user-facing knob. If null (the default), `action` runs
      * unwrapped — the legacy fast path.
+     *
+     * An implementation must tolerate blocking acquires from several threads
+     * at once: each caller holds the serializer exclusively between its own
+     * [blockingAcquire] and [blockingRelease], and [blockingRelease] is always
+     * called on the thread that acquired.
      */
     interface AsyncSerializer {
         fun blockingAcquire()
 
         fun blockingRelease()
+
+        /**
+         * Non-blocking [blockingAcquire]: take the serializer and return `true`
+         * if it is free, or return `false` at once if anyone else holds it.
+         * A `true` return must be paired with [blockingRelease].
+         *
+         * The store's non-blocking paths (the `derived` recompute hand-off)
+         * rely on this never waiting. The default delegates to
+         * [blockingAcquire] and therefore DOES block — it exists only so
+         * implementations written before this member keep compiling; override
+         * it in any serializer a `derived` state can meet.
+         */
+        @StoreInternalApi
+        fun tryBlockingAcquire(): Boolean {
+            blockingAcquire()
+            return true
+        }
     }
 
     @StoreInternalApi
@@ -280,56 +533,206 @@ abstract class Store<Self : Store<Self>> {
     var suspendingOwner: Any? = null
 
     /**
-     * Tasks queued during an in-progress action that should run AFTER the current
-     * top-level action's commit fanout completes. Used by [derived] to defer
-     * recompute actions out of the parent's commit loop — this avoids re-entering
-     * `pendingWrites` while the parent is iterating it.
-     *
-     * Guarded by [postCommitLock] rather than by the transaction lock: the drain
-     * deliberately runs OUTSIDE the serializer bracket (see [action]), so the
-     * queue is reachable from a thread that holds neither the store's
-     * `transactionLock` nor its `AsyncSerializer`.
+     * Tasks queued during an in-progress transaction that should run AFTER the
+     * current top-level transaction's commit fanout completes and its locks are
+     * released. Used by [derived] to defer recomputes out of the parent's commit
+     * loop — this avoids re-entering `pendingWrites` while the parent is
+     * iterating it.
      */
-    private val postCommitLock = StoreLock()
-    private val postCommitTasks = mutableListOf<() -> Unit>()
+    private val postCommitQueue = PostCommitQueue()
 
     /**
-     * Schedule [task] to run after the current top-level action's commit fanout
-     * finishes. If called outside any action, the task runs immediately.
+     * Schedule [task] to run after the current top-level transaction's commit
+     * fanout finishes and its locks are released. If no transaction is active,
+     * the task runs immediately on the calling thread.
      *
-     * Used by `derived(...)` to enqueue its recompute on a fresh top-level action
-     * instead of re-entering the parent's commit. Also reachable by companion
-     * modules (`:holdfast-coroutines.suspendDerived`) that need the same deferral
+     * A task instance that is already queued is not queued twice (identity,
+     * `===`), so a caller that submits one stable task per consumer gets one
+     * run per transaction of this store however many times that transaction's
+     * commit triggers it. The dedup only applies while a transaction is
+     * active: on an idle store every submission runs inline, so a consumer
+     * triggered N times from ANOTHER store's commit fanout runs N times.
+     *
+     * Used by `derived(...)` to defer its recompute instead of re-entering the
+     * parent's commit. Also reachable by companion modules
+     * (`:holdfast-coroutines.suspendDerived`) that need the same deferral
      * contract; marked `@StoreInternalApi` because the deferral is an
      * implementation detail of the derived-recompute machinery, not a
      * user-facing knob.
      */
     @StoreInternalApi
     fun postCommit(task: () -> Unit) {
-        if (_activeTransaction != null) {
-            postCommitLock.withLock { postCommitTasks.add(task) }
-        } else {
+        if (_activeTransaction == null) {
             task()
+            return
         }
+        postCommitQueue.enqueue(task)
+        // Lost-wakeup guard. The transaction seen above may have ended — and its
+        // holder already drained an empty queue — between that read and the
+        // enqueue, which would strand [task] until some unrelated later
+        // transaction drains. If the slot is empty now, nobody is left to drain,
+        // so drain here. If it is still occupied, that holder clears it strictly
+        // after this read and drains after clearing, so it will see [task].
+        if (_activeTransaction == null) drainPostCommitTasks()
     }
 
     private fun drainPostCommitTasks() {
-        // Drain to a local copy so any task that queues another doesn't perturb
-        // our iteration. Tasks scheduled by tasks land in postCommitTasks and
-        // are picked up by the next iteration of this loop.
-        //
-        // Tasks run OUTSIDE postCommitLock: each one opens a fresh top-level
-        // action, which may queue further tasks.
-        while (true) {
-            val drained =
-                postCommitLock.withLock {
-                    if (postCommitTasks.isEmpty()) return
-                    val snapshot = postCommitTasks.toList()
-                    postCommitTasks.clear()
-                    snapshot
+        postCommitQueue.drain()
+    }
+
+    /**
+     * Queue [task] for the store's current holder without running it, even
+     * when no transaction is visible. For a task that just found the store busy
+     * through [tryTopLevelAction]; see there for why the holder is guaranteed
+     * to drain it.
+     */
+    internal fun handOffPostCommit(task: () -> Unit) {
+        postCommitQueue.enqueue(task)
+    }
+
+    /** Withdraw a still-queued [task]; see [PostCommitQueue.withdraw]. */
+    internal fun withdrawPostCommit(task: () -> Unit) {
+        postCommitQueue.withdraw(task)
+    }
+
+    /**
+     * Run [body] as a top-level action if the store can take one right now,
+     * and never block or spin trying.
+     *
+     * Returns [TopLevelAttempt.Disposed] on a disposed store, and
+     * [TopLevelAttempt.Busy] while a transaction is active — including this
+     * thread's own, since a top-level action cannot nest inside it — or when
+     * the serializer or `transactionLock` is taken while one is.
+     * [TopLevelAttempt.BusyNoTxn] means one of those is taken with no
+     * transaction installed. Otherwise [onAcquired] runs once the store is
+     * taken — before the middleware chain, so it runs even when a middleware
+     * then rejects the action — and the body runs exactly like a top-level
+     * [action] (middleware chain, commit, fanout; failures fold into the
+     * [TopLevelAttempt.Ran] result), the locks release in `action`'s order, and
+     * the post-commit queue drains. No frame policing: callers are library
+     * machinery that runs after commits, not user bodies. Like [action] it is
+     * an entry: it joins the settle scope open on this thread (a recompute a
+     * settle runs), else opens one that settles once it has released the
+     * store ([SettleScope]).
+     *
+     * **Hand-off invariant.** A caller that gets a busy answer may queue its
+     * task with [handOffPostCommit] and retry once; if the retry is busy too,
+     * dropping the task is safe, because every top-level holder of this
+     * store's serializer, `transactionLock` or active-transaction slot drains
+     * the queue after it releases: blocking [action], `atomic` for a store whose
+     * root it opened (a savepoint root defers to the enclosing holder),
+     * `suspendAction` in its `finally`, `suspendAtomic` for a root it opened
+     * (and for a mutex acquire cancelled after kotlinx handed it the mutex) —
+     * both frames once they have fully unwound, deferred to the settle of the
+     * outermost entry on their thread ([internalDrainPostCommitTasksWhenSettled]),
+     * which runs once that entry has released everything it took — this
+     * function after it ran, and after it backed out busy from a serializer or
+     * lock it took (unless the store has another holder by then, which drains
+     * instead), `:holdfast-coroutines`' hydration gate (a hydrator's decision,
+     * seed, adopt or failure transaction, which [internalTopLevelAction] runs
+     * while the gate holds the serializer) once it has released the
+     * serializer, on every exit, and `:holdfast-testing`'s open-transaction
+     * commit, rollback and body-throw cleanup. The queue write happens before
+     * the busy retry, and that
+     * holder's drain after it releases, so the drain sees the task. [dispose]
+     * holds the lock only to empty the active-transaction slot, then drains
+     * the queue too: it can hold the recomputes of derived states hosted on
+     * other, live stores, queued there by this store's last commit, while a
+     * task hosted on this store meets [TopLevelAttempt.Disposed] and does
+     * nothing. A new holder added to any of these must drain the same way
+     * (see [internalDrainPostCommitTasks]).
+     */
+    internal fun tryTopLevelAction(
+        id: String,
+        onAcquired: () -> Unit = {},
+        body: Self.() -> Unit,
+    ): TopLevelAttempt =
+        settling {
+            val active = _activeTransaction
+            val attempt =
+                when {
+                    isDisposed -> TopLevelAttempt.Disposed
+                    active != null -> TopLevelAttempt.Busy(active)
+                    else -> tryTopLevelUnderSerializer(id, onAcquired, body)
                 }
-            drained.forEach { runCatching { it() } }
+            if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
+            attempt
         }
+
+    private fun tryTopLevelUnderSerializer(
+        id: String,
+        onAcquired: () -> Unit,
+        body: Self.() -> Unit,
+    ): TopLevelAttempt {
+        val serializer = asyncSerializer
+        if (serializer != null && !serializer.tryBlockingAcquire()) return busyAttempt()
+        val underLock =
+            try {
+                tryTopLevelUnderLock(id, onAcquired, body)
+            } finally {
+                serializer?.blockingRelease()
+            }
+        val attempt = underLock ?: busyAttempt()
+        // This attempt held the store (the serializer, or the lock with a
+        // transaction installed) and then backed out busy. While it held it,
+        // another holder's drain may have found the store busy and handed a
+        // task to it, so it owes the store a drain like any releasing holder.
+        // Without this, a lock-only holder (the harness's open-transaction
+        // commit, or an `action` that read the serializer as not yet installed)
+        // whose drain ran during our hold would leave that task stranded.
+        if (attempt !is TopLevelAttempt.Ran && (serializer != null || underLock != null)) drainIfUnheld()
+        return attempt
+    }
+
+    /** `null` when the lock is taken by someone else, i.e. nothing was held. */
+    private fun tryTopLevelUnderLock(
+        id: String,
+        onAcquired: () -> Unit,
+        body: Self.() -> Unit,
+    ): TopLevelAttempt? {
+        if (!transactionLock.tryAcquire()) return null
+        return try {
+            // Re-read under the lock: a holder may have installed a transaction
+            // after the unlocked read in tryTopLevelAction (e.g. a test harness
+            // transaction held open without the lock).
+            val active = _activeTransaction
+            if (active != null) {
+                TopLevelAttempt.Busy(active)
+            } else {
+                onAcquired()
+                TopLevelAttempt.Ran(runTransaction(id, body))
+            }
+        } finally {
+            transactionLock.release()
+        }
+    }
+
+    private fun busyAttempt(): TopLevelAttempt {
+        val active = _activeTransaction
+        return if (active != null) TopLevelAttempt.Busy(active) else TopLevelAttempt.BusyNoTxn
+    }
+
+    /**
+     * Drain the post-commit queue unless the active-transaction slot or
+     * `transactionLock` has a holder right now. That holder releases after this
+     * check and drains after it releases, so its drain sees everything queued
+     * before it.
+     *
+     * The lock is probed with [StoreLock.tryAcquire] rather than read: its
+     * `locked` flag is written after the mutex is taken and cleared before it
+     * is released, so a read can miss a holder. Probing instead of draining
+     * unconditionally is also what keeps this from recursing: while a
+     * lock-only holder keeps the lock, an unconditional drain would re-run the
+     * caller's own handed-off task, which would back out busy and drain again.
+     * With the probe, a nested drain needs the store to change hands in
+     * between. A holder of the serializer alone is not probed for: a drained
+     * task meets it before taking anything, backs out without draining, and
+     * that holder drains after it releases.
+     */
+    private fun drainIfUnheld() {
+        if (_activeTransaction != null || !transactionLock.tryAcquire()) return
+        transactionLock.release()
+        drainPostCommitTasks()
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -384,10 +787,30 @@ abstract class Store<Self : Store<Self>> {
      * outer transaction. Inner.commit merges its pending writes into the outer.
      * Inner.rollback drops just the savepoint. Outer.rollback discards everything,
      * including merged inner writes.
+     *
+     * An action nested into a transaction of this store that has already applied
+     * its writes — typically opened by an observer of this store while this
+     * store's commit is notifying it — returns [TransactionResult.Error] carrying
+     * an [IllegalStateException], without running [body] or any middleware: a
+     * savepoint of that transaction could never commit. Another thread's action
+     * is not nested, and simply runs once the commit has finished.
+     *
+     * An action is an entry: the [derivedState]/[merged] states whose sources
+     * it — or any action or frame nested in it, on any store — changes settle
+     * once, after the outermost entry on this thread has exited and released
+     * every store it took: each recomputes once, from a committed cut of its
+     * sources ([SettleScope]). Inside the action they reflect none of its
+     * writes.
+     *
+     * @throws IllegalStateException when called from inside a state
+     *   initializer (see [state]), a schema migration
+     *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
+     *   recompute: all three may read states but not write.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
         checkNotDisposed()
+        NoWriteRegion.refuse { "open an action on $displayName" }
         // Frame policing (body-only: the marker is cleared before commit fanout,
         // so observer-triggered actions never land here). Ordered BEFORE the
         // serializer acquire — a blocking acquire on a suspendAtomic
@@ -395,11 +818,29 @@ abstract class Store<Self : Store<Self>> {
         // interop check converts into a teaching exception.
         val frame = FrameMarkers.current()
         if (frame != null) checkFrameAllowsBlockingAction(frame)
+        // Also before the serializer: under a suspendAction's commit, an
+        // observer's acquire would wait for the very coroutine running it.
+        appliedTransactionNestedHere()?.let { applied ->
+            return refusedUnderAppliedTransaction(this, applied, actionId(body), "open a nested action")
+        }
+        // An entry: derived states whose sources this action (or anything
+        // nested in it) changes settle once the outermost entry on this thread
+        // has exited — this action's own settle when it is the outermost.
+        val result = settling { runSerialized(body) }
+        escalateInFrameError(frame, result)
+        return result
+    }
+
+    /**
+     * The serialized part of [action]: the serializer bracket (unless nested),
+     * the transaction under `transactionLock`, then the post-commit drain.
+     */
+    private fun <R> runSerialized(body: Self.() -> R): TransactionResult<R> {
         // A nested action is a savepoint of a transaction this thread already
         // owns, so it is already inside the region the serializer brackets.
         // Re-acquiring there is never correct and is actively fatal: the
-        // serializer is not reentrant, so the inner acquire either spins forever
-        // or throws a raw "mutex is already locked by the specified owner".
+        // serializer is not reentrant, so the inner acquire would wait forever
+        // for the outer acquire this very call stack holds.
         val nested = ownsActiveTransaction()
         val serializer = if (nested) null else asyncSerializer
         serializer?.blockingAcquire()
@@ -411,10 +852,11 @@ abstract class Store<Self : Store<Self>> {
             }
         // Deferred work (derived recomputes) opens FRESH top-level actions, so it
         // must run only after this call's serializer bracket is released —
-        // draining inside it makes the recompute contend with a lock its own call
-        // stack holds. Same placement, and same reason, as suspendAtomic's drain.
+        // inside it, the recompute would find the store busy and hand itself
+        // back to this very call. Draining after the release is also what makes
+        // this call a valid hand-off target (see tryTopLevelAction). Same
+        // placement, and same reason, as suspendAtomic's drain.
         if (!nested) drainPostCommitTasks()
-        escalateInFrameError(frame, result)
         return result
     }
 
@@ -431,8 +873,53 @@ abstract class Store<Self : Store<Self>> {
      * — the exact mutual exclusion the serializer exists to provide.
      */
     private fun ownsActiveTransaction(): Boolean {
+        // Owner before slot: a suspending holder installs the slot before its
+        // owner and clears the slot before its owner, so reading the owner
+        // first never pairs a null owner with a suspending transaction that is
+        // being torn down.
+        val owner = suspendingOwner
         val txn = _activeTransaction
-        return suspendingOwner == null && txn != null && txn.ownerThreadId == currentThreadId()
+        return owner == null && txn != null && txn.ownerThreadId == currentThreadId()
+    }
+
+    /**
+     * This store's active transaction when a call on this thread would nest
+     * into it although it is closed to writes ([Transaction.closedToWrites]:
+     * its root has applied, or it or an ancestor has already ended); `null`
+     * otherwise. The call nests when this thread owns the transaction (see
+     * [ownsActiveTransaction]) or runs inside its commit fanout — an observer,
+     * bridge or event collector reacting to it. Under `suspendAction` and
+     * `suspendAtomic`, whose recorded owner thread is only where they started,
+     * that is the whole suspending commit, across thread hops: every
+     * participant's fanout, bridge publish and event emit, and the frame
+     * observers ([fanningOutHere]). So every `atomic` or `suspendAtomic`
+     * participant is refused from any participant's fanout, earlier or later,
+     * and so is an `atomic` participant whose savepoint entry has already
+     * committed into an enclosing action.
+     *
+     * Any other thread is not nested: its `action`/`atomic` waits for the store
+     * and then runs on its own. A frame applies every participant before it
+     * fans any out (R9), so from a frame's fanout a nested call is refused on
+     * every participant, a later one as much as an earlier one. Only a
+     * transaction still open (not applied, not ended) takes the nested call:
+     * after a partial apply failure, the later participants left open are
+     * rolled back with the frame.
+     * `internal` for `atomic`, which refuses the same nesting.
+     */
+    internal fun appliedTransactionNestedHere(): Transaction? {
+        val txn = _activeTransaction?.takeIf { it.closedToWrites } ?: return null
+        // Owned here: owner first, then re-check the slot (`&&` evaluates in
+        // order). A suspending holder installs its owner before its
+        // transaction can close, and its teardown clears the slot BEFORE the
+        // owner. So once `txn` is closed, a null owner with `txn` still in the
+        // slot means `txn` is a blocking transaction, never a suspending one
+        // mid-teardown (whose `ownerThreadId` may name this pooled thread). A
+        // slot now holding null or another transaction means `txn` has
+        // finished: not nested, so the call waits for the serializer.
+        val nested =
+            txn.fanningOutHere() ||
+                (suspendingOwner == null && _activeTransaction === txn && txn.ownerThreadId == currentThreadId())
+        return if (nested) txn else null
     }
 
     /**
@@ -485,7 +972,7 @@ abstract class Store<Self : Store<Self>> {
         if (escalate) throw exception
     }
 
-    private fun unenrolledMessage(
+    internal fun unenrolledMessage(
         frame: FrameMarker,
         via: String,
     ): String {
@@ -498,43 +985,62 @@ abstract class Store<Self : Store<Self>> {
             "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
         transactionLock.withLock {
-            val parent = _activeTransaction
-            val txn =
-                Transaction(
-                    id = body::class.simpleName ?: Uuid.random().toString(),
-                    parent = parent,
-                    ownerThreadId = currentThreadId(),
-                )
-
-            _activeTransaction = txn
-            // Box for capturing the body's return value so we can pipe it into Success.
-            // Holds null before the body runs; holds (result) after.
-            val box = arrayOfNulls<Any?>(1)
-            val outcome: TransactionResult<R> =
-                try {
-                    runMiddlewareChain { box[0] = body(self) }
-                    try {
-                        txn.commit()
-                        @Suppress("UNCHECKED_CAST")
-                        TransactionResult.Success(txn, box[0] as R)
-                    } catch (e: Throwable) {
-                        TransactionResult.Error(e, txn)
-                    }
-                } catch (e: Throwable) {
-                    runCatching { txn.rollback() }
-                    TransactionResult.Error(e, txn)
-                } finally {
-                    _activeTransaction = parent
-                }
             // NOTE: post-commit tasks are NOT drained here. The drain runs in
             // [action], after the serializer bracket is released — see the comment
             // there. Nested actions inherit the parent's deferred queue and let it
             // drain at the outermost boundary either way.
-            outcome
+            runTransaction(actionId(body), body)
         }
+
+    /** Transaction id for an action: the body's class simple name, else a random UUID. */
+    @OptIn(ExperimentalUuidApi::class)
+    private fun actionId(body: Any): String = body::class.simpleName ?: Uuid.random().toString()
+
+    /**
+     * Open a transaction on top of whatever is active (a savepoint if anything
+     * is), run [body] through the middleware chain, then commit or roll back.
+     * The caller holds `transactionLock` and owns the post-commit drain.
+     *
+     * Refuses to open a savepoint of a transaction that is closed to writes —
+     * [action] turns observer nesting away before this, so this is the backstop
+     * for any other route into a finished transaction (e.g. one committed by
+     * hand).
+     *
+     * `internal` for [internalTopLevelAction], whose caller already holds the
+     * store.
+     */
+    internal fun <R> runTransaction(
+        id: String,
+        body: Self.() -> R,
+    ): TransactionResult<R> {
+        val parent = _activeTransaction
+        if (parent != null && parent.closedToWrites) {
+            return refusedUnderAppliedTransaction(this, parent, id, "open a nested action")
+        }
+        val txn = Transaction(id = id, parent = parent, ownerThreadId = currentThreadId())
+
+        _activeTransaction = txn
+        // Box for capturing the body's return value so we can pipe it into Success.
+        // Holds null before the body runs; holds (result) after.
+        val box = arrayOfNulls<Any?>(1)
+        return try {
+            runMiddlewareChain { box[0] = body(self) }
+            try {
+                txn.commit()
+                @Suppress("UNCHECKED_CAST")
+                TransactionResult.Success(txn, box[0] as R)
+            } catch (e: Throwable) {
+                TransactionResult.Error(e, txn)
+            }
+        } catch (e: Throwable) {
+            runCatching { txn.rollback() }
+            TransactionResult.Error(e, txn)
+        } finally {
+            _activeTransaction = parent
+        }
+    }
 
     private fun runMiddlewareChain(block: () -> Unit) {
         middlewareLock.withLock {
@@ -554,45 +1060,131 @@ abstract class Store<Self : Store<Self>> {
     operator fun <R> invoke(block: Self.() -> R): R = block(self)
 
     /**
-     * Declare a state property. The first read of the delegate creates a
-     * [MutableState] from [initialize]; subsequent reads return the same instance.
+     * Declare a state property. Delegating a property to it
+     * (`val count by state { 0 }`) DECLARES the state under the property's
+     * name while the store is being constructed, without running
+     * [initialize]. The state is MATERIALIZED — a [MutableState] created from
+     * [initialize] — the first time it is needed: on the first read of the
+     * property, when [snapshot] or [restore] captures or writes it, or when
+     * [reset] resets it. Subsequent reads return the same instance.
      *
      *  - Pass a [transformer] to normalize on write or project on read.
      *  - Pass [distinct] = true to skip observer fanout and bridge publish when a
      *    commit re-applies the same value (StateFlow-style dedup). Default is
      *    false — every commit fires observers, matching the library's original
      *    contract.
+     *
+     * [initialize] runs at most once per materialization, on the thread that
+     * first needs the state ([reset] also runs it again; see below). The store
+     * takes no lock to run it (in particular not its registry lock,
+     * `propertiesLock`); it holds only the state's own latch, and other
+     * threads needing the state meanwhile wait for it. It does run under
+     * whatever locks its caller already holds: first needed inside an action,
+     * an `atomic(...)` frame, an observer during commit fanout, or a
+     * [snapshot] or [restore] called inside an action, it runs under that
+     * action's `transactionLock` (and, from the action body, its
+     * `middlewareLock`), so a slow initializer there holds up every other
+     * action on that store, and an initializer must not block on another
+     * thread's store work.
+     *
+     * [initialize] may read other states (which materializes them in turn),
+     * and sees their committed values only — never the pending writes of an
+     * action on its thread, even the action that happened to need the state:
+     * the initial value is committed at once and survives that action's
+     * rollback, so it must not be computed from writes that may roll back.
+     * A store write from inside it — `mutate`/`update`, `action`, `atomic`,
+     * `reset()`, `emit`, `KeyedState.evict`/`evictAll` — throws
+     * [IllegalStateException], and so does an initializer that (directly or
+     * through other initializers, on this thread or across threads) needs its
+     * own state. An initializer that throws propagates to the read that ran
+     * it, and runs again on the next read.
+     *
+     * The store retains [initialize] for its lifetime: a state dropped with
+     * [removeState] is created from it again, and the experimental [reset]
+     * re-runs it to put the state back to its initial value. Re-run by a
+     * reset, it reads the other declared states of this store at their reset
+     * values, and everything else at committed values; it runs without the
+     * latch, inside the reset's action and under its locks, and its result is
+     * staged into that action, so it rolls back with it. A sterile [restore]
+     * re-runs a [StateTag.Remote] state's initializer the same way — and that
+     * of a declared state the restore itself brought to life, so it holds
+     * what a first read after the restore computes — except that it reads
+     * this store's declared states it does not re-run as the restore's
+     * transaction holds them (restored, else an enclosing action's pending
+     * writes).
+     *
+     * Each name is declared once per store: a second property with the same
+     * name (for example a subclass redeclaring a base class's state) fails
+     * fast with [IllegalStateException] when it is declared. The same
+     * declaration evaluated again — a local delegated property in a function
+     * called twice, or a member property of a helper class instantiated twice
+     * over this store — binds to the existing state instead. The owning store
+     * is always the receiver of `state(…)`, never the object the property
+     * belongs to.
+     *
+     * A state declared here has no codec and no tags: a snapshot can hold it
+     * in memory, but `snapshot().encode()` lists it as unencodable. Declare it
+     * with the experimental overload to give it a text encoding or
+     * [StateTag]s.
      */
+    @OptIn(ExperimentalStoreApi::class) // Passes "no tags" to the declaration; the stable signature has none.
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
         initialize: Initializer<T>,
-    ): StateDelegate<T> {
-        val owningStore: Store<*> = this
-        return StateDelegate { _, property ->
-            checkNotDisposed()
-            propertiesLock.withLock {
-                val existing = _properties[property.name]
-                if (existing != null) {
-                    @Suppress("UNCHECKED_CAST")
-                    existing as MutableState<T>
-                } else {
-                    MutableState(initialize(), transformer, owningStore, distinct).also { state ->
-                        _properties[property.name] = state
-                    }
-                }
-            }
-        }
-    }
+    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, emptySet(), initialize)
 
     /**
-     * Create-or-fetch a state under an arbitrary name. Used by [derived] to
-     * register synthetic backing states whose names ("__derived_N") never
-     * collide with user-declared property names (since Kotlin identifiers
-     * can't start with `__`). Also reachable by companion modules
-     * (`:holdfast-coroutines.suspendDerived`) for the suspending-derived backing
-     * state; marked `@StoreInternalApi` because the synthesized name scheme
-     * is an implementation detail.
+     * Declare a state property that can leave memory, and that carries policy:
+     * exactly the stable [state] above, plus
+     *
+     *  - a [codec] that [StoreSnapshot.encode] writes the state's raw value
+     *    with and [StoreSnapshot.decode]/[restore] read it back with
+     *    (`val count by state(codec = IntCodec) { 0 }`). Any `bridge.Codec` is
+     *    a [StateCodec]. A state declared without one (here or through the
+     *    stable overload) is captured in memory like any other, but `encode()`
+     *    lists it in [StoreSnapshot.unencodableStateNames] instead of writing
+     *    it.
+     *  - [tags] the library enforces for the state
+     *    (`state(tags = setOf(StateTag.Secret)) { "" }`): [StateTag.Secret]
+     *    keeps its value out of encodings, renders, `toString`s, test
+     *    timelines and middleware output; [StateTag.UserAuthored] puts it in
+     *    `snapshot(SnapshotScope.UserAuthored)`; [StateTag.Remote] keeps it out
+     *    of `encode()` by default and lets a sterile [restore] reset it. The
+     *    set is copied. Read them back with [State.tags].
+     *
+     * Calls that pass neither [codec] nor [tags] (`state { … }`,
+     * `state(transformer = t) { … }`) resolve to the stable overload, which
+     * needs no opt-in: Kotlin prefers the candidate that leaves fewer
+     * parameters to their defaults.
+     *
+     * Experimental (issue #20, R1 and R3): later releases add parameters here.
+     *
+     * @throws IllegalStateException if the store is disposed.
+     * @throws IllegalArgumentException when the property is declared, if
+     *   [tags] combine [StateTag.Secret] with [StateTag.UserAuthored] or
+     *   [StateTag.UserAuthored] with [StateTag.Remote]; the message names the
+     *   state.
+     */
+    @ExperimentalStoreApi
+    fun <T : Any> state(
+        transformer: Transformer<T>? = null,
+        distinct: Boolean = false,
+        codec: StateCodec<T>? = null,
+        tags: Set<StateTag> = emptySet(),
+        initialize: Initializer<T>,
+    ): StateDelegate<T> = checkedDeclaringDelegate(transformer, distinct, codec, tags, initialize)
+
+    /**
+     * Create-or-fetch a state under an arbitrary name. Kept for companion
+     * code that registers synthetic states; [derived] and
+     * `:holdfast-coroutines.suspendDerived` use [registerDerivedBackingState].
+     * Callers choose names unlikely to collide with a property name (such as
+     * `"__internal_N"`) — Kotlin identifiers CAN start with `__`, so a
+     * collision with a declared state is possible, and fails fast. A state
+     * registered here is captured by [snapshot] like a declared one. Marked
+     * `@StoreInternalApi` because the synthesized name scheme is an
+     * implementation detail.
      */
     @StoreInternalApi
     fun <T : Any> registerInternalState(
@@ -600,24 +1192,54 @@ abstract class Store<Self : Store<Self>> {
         initial: T,
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
-    ): MutableState<T> =
-        propertiesLock.withLock {
-            val existing = _properties[name]
-            if (existing != null) {
-                @Suppress("UNCHECKED_CAST")
-                existing as MutableState<T>
-            } else {
-                MutableState(initial, transformer, this, distinct).also {
-                    _properties[name] = it
-                }
-            }
-        }
+    ): MutableState<T> = registry.registerEager(name, initial, transformer, distinct, StateKind.Internal, emptyList())
+
+    /**
+     * Register the backing state of a [derived] (or `:holdfast-coroutines`'
+     * `suspendDerived`) under [name], seeded with [initial] and computed from
+     * [sources]. [name] is synthesized by the caller to be unlikely to collide
+     * with a property name (`"__derived_N"`); an existing declaration of it
+     * fails fast.
+     *
+     * A backing state is live at once. [snapshot] captures it, but it is not
+     * one of [StoreSnapshot.stateNames]: [restore] writes it back only into
+     * this same store instance (undo), and skips it anywhere else — another
+     * instance's derived states have backing states of their own. It stays
+     * visible through [properties] and [getState] under [name]. It carries
+     * [StateTag.Secret] when any of [sources] does ([State.tags]), and no
+     * other tag.
+     *
+     * @throws IllegalStateException if the store is disposed.
+     */
+    @StoreInternalApi
+    fun <T : Any> registerDerivedBackingState(
+        name: String,
+        initial: T,
+        sources: List<State<*>>,
+        distinct: Boolean = false,
+    ): MutableState<T> {
+        checkNotDisposed()
+        return registry.registerEager(name, initial, null, distinct, StateKind.DerivedBacking, sources)
+    }
+
+    /**
+     * Every state declared on this store, in declaration order, whether or not
+     * it has been materialized. Resolved at call time: code that captures the
+     * store during construction (a base-class `init` block) must call this
+     * after construction to see the subclass's declarations.
+     */
+    internal fun declarations(): List<StateDeclaration<*>> = registry.declarationsInOrder()
 
     /**
      * Attach (or detach, when null) a [Bridge] for two-way external sync.
      * On attach, the bridge's `observe` is invoked immediately — implementations
      * typically replay any persisted value here for load-on-attach.
      * On detach, the previous bridge's inbound observer is disposed.
+     *
+     * @throws IllegalStateException for a [DerivedState] ([derivedState],
+     *   [merged]), which is read-only, for an evicted keyed entry's stale
+     *   handle, and for a hydrator's `state` (`:holdfast-coroutines`), which
+     *   only the hydrator writes.
      */
     infix fun <T : Any> State<T>.bridge(bridge: Bridge<T>?) {
         checkNotDisposed()
@@ -629,12 +1251,19 @@ abstract class Store<Self : Store<Self>> {
      * when an external system only needs to push values into the state (e.g. an
      * admin override channel) and the state should not echo back via `publish`.
      *
-     * Returns a [Disposable] that detaches the inbound subscription.
+     * Returns a [Disposable] that detaches the inbound subscription. For an
+     * entry of a keyed state family ([keyedState]), evicting the entry
+     * disposes the subscription too.
+     *
+     * @throws IllegalStateException for a [DerivedState] ([derivedState],
+     *   [merged]), which is read-only, for an evicted keyed entry's stale
+     *   handle, and for a hydrator's `state` (`:holdfast-coroutines`), which
+     *   only the hydrator writes.
      */
     infix fun <T : Any> State<T>.observeFrom(observable: Observable<T>): Disposable {
         checkNotDisposed()
         val ms = this.getMutableState()
-        return observable.observe { value -> ms.applyFromBridge(value) }
+        return ms.trackInbound(observable.observe { value -> ms.applyFromBridge(value) })
     }
 
     /**
@@ -642,7 +1271,7 @@ abstract class Store<Self : Store<Self>> {
      * the current value once and threads it through [block]. Inside an active
      * transaction owned by this thread, the read sees pending writes
      * (read-your-own-writes); outside, an implicit single-shot transaction wraps
-     * the operation.
+     * the operation (same exceptions as [mutate]).
      *
      * ```
      * store action {
@@ -663,36 +1292,35 @@ abstract class Store<Self : Store<Self>> {
      *
      * Outside any transaction (or on a non-owner thread), an implicit single-shot
      * transaction wraps the mutation so middleware fires and observers see only the
-     * committed value.
+     * committed value. Exception: while a `suspendAction`/`suspendAtomic` holds this
+     * store, a bare write from ANY thread stages into its transaction (the suspending
+     * body may resume on any thread). Before that transaction applies, the write
+     * joins it (GUIDE §8.2).
+     *
+     * @throws IllegalStateException when this thread would stage into a
+     *   transaction of this store that is closed to writes — an observer
+     *   writing back into this store while this store's commit is notifying it
+     *   (also through [update]), or a write into a transaction that has already
+     *   ended. The write could never commit; the message names the state and
+     *   the fixes. Thrown out of an observer, it reaches
+     *   [uncaughtObserverHandler]. Also thrown when a `suspendAction`/
+     *   `suspendAtomic` holds this store and its transaction has already
+     *   applied but is still committing (bridge publishes, event emits), and
+     *   this thread is not part of that commit: write from other threads
+     *   through [action], which waits for the store. Also thrown from inside
+     *   a state initializer (see [state]), a schema migration
+     *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
+     *   recompute: all three may read states but not write. And for a
+     *   [DerivedState] ([derivedState], [merged]), which is read-only, for
+     *   the stale handle of an evicted keyed-state entry ([keyedState]), and
+     *   for a state library machinery keeps sealed — a `:holdfast-coroutines`
+     *   hydrator's `state`, which only the hydrator writes.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
-        checkNotDisposed()
-        val state = this.getMutableState()
+        val state = writableState()
         val txn = _activeTransaction
-        val onOwnerThread = txn != null && txn.ownerThreadId == currentThreadId()
-        // Suspending body may resume on a different thread; AsyncSerializer ensures
-        // no other action runs concurrently while suspendingOwner != null, so the
-        // relaxed check is sound.
-        val onOwnerCoroutine = txn != null && suspendingOwner != null
-
-        if (txn != null && (onOwnerThread || onOwnerCoroutine)) {
-            // Frame policing for the direct-stage path: a store with an active
-            // transaction from an ENCLOSING action can be written here without
-            // ever passing through `action` — e.g. `c.action { atomic(a, b) {
-            // c.x mutate 1 } }` — and those writes would commit with c's outer
-            // action regardless of the frame's outcome. Same rule as the
-            // action-path check: unenrolled writes inside a frame body are an
-            // escape unless the policy explicitly allows them.
-            val frame = FrameMarkers.current()
-            if (frame != null && !frame.isEnrolled(this@Store) && !frame.policy.allowUnenrolled) {
-                throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
-            }
-            // Defensive: a transaction that's been manually committed or rolled back
-            // shouldn't accept further mutations. Throw rather than silently lose the write.
-            check(txn.status == TransactionStatus.Active) {
-                "Cannot mutate state on a ${txn.status} transaction"
-            }
-            txn.pendingWrites[state] = state.beforeSet(that)
+        if (txn != null && stagesInto(txn)) {
+            stageWrite(txn, state, that)
             return
         }
 
@@ -703,11 +1331,86 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
+     * Whether a `mutate` on this thread stages into [txn] rather than opening
+     * its own one-shot action: on [txn]'s owner thread; on the thread running
+     * [txn]'s commit fanout, so that [stageWrite] refuses the write loudly
+     * instead of a one-shot action refusing it into a result `mutate` drops;
+     * and on EVERY thread while a `suspendAction`/`suspendAtomic` holds the
+     * store ([suspendingOwner] is set), because its body may resume on any
+     * thread and nothing identifies the body's thread yet.
+     *
+     * That last rule is not isolation: the AsyncSerializer keeps other
+     * actions out, but not another thread's bare `mutate`. Before the
+     * suspending transaction applies, such a write joins it; after, [stageWrite]
+     * refuses it (with [suspendingCommitWriteMessage]) until the suspending
+     * call returns. The two outcomes are exhaustive: the stage is checked
+     * under the transaction's pending lock, atomically with the apply pass
+     * ([Transaction.stagePendingWrite]). Other threads must write through
+     * [action], which waits. A
+     * marker for the running body (planned with the 0.2.0 fail-fast guard)
+     * would let a foreign bare write open its own action instead.
+     */
+    internal fun stagesInto(txn: Transaction): Boolean {
+        val here = currentThreadId()
+        return txn.ownerThreadId == here || suspendingOwner != null || txn.fanoutThreadId == here
+    }
+
+    /** The staging half of [mutate]: police, then buffer [value] in [txn]. */
+    private fun <T : Any> stageWrite(
+        txn: Transaction,
+        state: MutableState<T>,
+        value: T,
+    ) {
+        // Frame policing for the direct-stage path: a store with an active
+        // transaction from an ENCLOSING action can be written here without
+        // ever passing through `action` — e.g. `c.action { atomic(a, b) {
+        // c.x mutate 1 } }` — and those writes would commit with c's outer
+        // action regardless of the frame's outcome. Same rule as the
+        // action-path check: unenrolled writes inside a frame body are an
+        // escape unless the policy explicitly allows them.
+        val frame = FrameMarkers.current()
+        if (frame != null && !frame.isEnrolled(this) && !frame.policy.allowUnenrolled) {
+            throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
+        }
+        // Closed to writes: its root has applied — its commit is fanning out,
+        // has finished fanning out, or (a frame participant) is waiting for
+        // its turn to fan out after the whole frame applied, while the frame's
+        // participants fan out — or it has already ended (an `atomic`
+        // participant's committed savepoint entry, a manual commit/rollback).
+        // The write comes from an observer (or bridge, or event collector)
+        // reacting to it, or from another thread while a suspending commit
+        // holds the store. Staged, it would never be applied. Checked here
+        // first so no transformer runs for a write that will be refused.
+        check(!txn.closedToWrites) { appliedWriteMessage(txn, state) }
+        // `Transformer.set` is user code: run it outside any internal lock.
+        val raw = state.beforeSet(value)
+        // Checked again, atomically with the stage, under the transaction's
+        // pendingLock: a foreign thread's write racing the apply pass is either
+        // applied with it or refused here, never lost in between.
+        check(txn.stagePendingWrite(state, raw)) { appliedWriteMessage(txn, state) }
+    }
+
+    /**
+     * The [MutableState] behind this state, for a write: checks that the
+     * store is not disposed, that the state is this store's, and that no state
+     * initializer is running on this thread.
+     */
+    private fun <T : Any> State<T>.writableState(): MutableState<T> {
+        checkNotDisposed()
+        val state = getMutableState()
+        NoWriteRegion.refuse { "write ${describeState(state)}" }
+        return state
+    }
+
+    /**
      * O(1) ownership check via [MutableState.owningStore]. Throws if [State] was
      * created by a different store — without this, a foreign-store state would
-     * silently pass the type cast and corrupt either store's state.
+     * silently pass the type cast and corrupt either store's state — and for a
+     * read-only `DerivedState` (or its backing state), which only its recompute
+     * writes.
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
+        refuseUnwritable(this)
         @Suppress("UNCHECKED_CAST")
         val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
         if (ms.owningStore !== this@Store) error("State must be created by this Store instance")
@@ -715,70 +1418,118 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Look up a state by its property name. Returns null if not registered yet
-     * (states are registered lazily on first delegate read). Caller MUST NOT cast
-     * the returned [State] back to [MutableState].
+     * Look up a materialized state by its property name. Returns null if it
+     * has not been materialized yet: a declared state is created by its first
+     * read, or by [snapshot], [restore] or [reset], not by this lookup. Caller MUST NOT
+     * cast the returned [State] back to [MutableState].
      */
     fun getState(name: String): State<*>? {
         checkNotDisposed()
-        return propertiesLock.withLock { _properties[name] }
+        return registry.lock.withLock { registry.states[name] }
     }
 
-    /** Whether a state with [name] has been registered. */
+    /** Whether a state with [name] is materialized (see [getState]). */
     fun hasState(name: String): Boolean {
         checkNotDisposed()
-        return propertiesLock.withLock { _properties.containsKey(name) }
+        return registry.lock.withLock { registry.states.containsKey(name) }
     }
 
     /**
      * Drop the named state from the registry and silently dispose its observers
-     * and bridge. A subsequent delegate read recreates the state from its initializer.
+     * and bridge. Its declaration stays: a subsequent delegate read — or
+     * [snapshot]/[restore]/[reset] — recreates the state from its initializer. (A
+     * derived backing or internally registered state has no initializer to
+     * recreate it from, and goes with its declaration.)
      *
-     * Throws [IllegalStateException] if the state has pending writes in an active
-     * transaction (caller must commit or roll back first).
+     * Throws [IllegalStateException] if the state has pending writes in the
+     * active transaction or one enclosing it (caller must commit or roll back
+     * first), or while an open experimental [reset], or a sterile [restore]
+     * (which resets the [StateTag.Remote] states, and recomputes the states it
+     * brings to life), holds it: once a reset has
+     * decided a state's value — staged it, or left it because it already held
+     * its reset value — it holds the state until its transaction (or the
+     * action or frame it joined) commits or rolls back. Also thrown from inside
+     * a transaction whose library machinery forbids it: a `:holdfast-coroutines`
+     * hydrator's `adopt { }`, whose rollback could not bring a dropped state
+     * back.
      */
     fun removeState(name: String) {
         checkNotDisposed()
-        propertiesLock.withLock {
-            val state = _properties[name] ?: return@withLock
-            checkNoPendingWrites(state, name)
-            state.shutdownSilently()
-            _properties.remove(name)
-        }
+        val removed =
+            registry.lock.withLock {
+                val state = registry.states[name] ?: return
+                checkNoPendingWrites(state, name)
+                registry.dematerialize(name)
+                state
+            }
+        // Outside the registry's lock, as in dispose(): shutting down disposes
+        // the bridge's inbound subscription, which is user code — and user code
+        // may read a state another thread is materializing, which needs this
+        // lock to publish it.
+        removed.shutdownSilently()
     }
 
     /**
-     * Drop every registered state and silently dispose all observers and bridges.
-     * Subsequent delegate reads recreate fresh states.
+     * Drop every materialized state and silently dispose all observers and
+     * bridges. Declarations stay: subsequent delegate reads — or
+     * [snapshot]/[restore]/[reset] — recreate fresh states from their initializers.
+     * (Derived backing and internally registered states have no initializer
+     * and go with their declarations.)
      *
-     * Throws [IllegalStateException] if any state has pending writes in an active
-     * transaction.
+     * Throws [IllegalStateException] if any state has pending writes in the
+     * active transaction or one enclosing it, or while an open experimental
+     * [reset] or sterile [restore] holds one, or from inside a hydrator's
+     * `adopt { }` (see [removeState]).
      */
     fun clearStates() {
         checkNotDisposed()
-        propertiesLock.withLock {
-            _properties.values.forEach { state ->
-                checkNoPendingWrites(state, state.toString())
+        val removed =
+            registry.lock.withLock {
+                registry.states.forEach { (name, state) -> checkNoPendingWrites(state, name) }
+                val live = registry.states.toMap()
+                live.keys.forEach { registry.dematerialize(it) }
+                live.values
             }
-            _properties.values.forEach { it.shutdownSilently() }
-            _properties.clear()
-        }
+        // Outside the registry's lock; see removeState.
+        removed.forEach { it.shutdownSilently() }
     }
 
+    /** The caller holds the registry lock, under which a reset takes its hold (`ResetPass.hold`). */
     private fun checkNoPendingWrites(
         state: MutableState<*>,
         name: String,
     ) {
-        val txn = _activeTransaction ?: return
-        if (state in txn.pendingWrites) {
-            error("Cannot remove state '$name' with pending writes in an active transaction; commit or rollback first")
+        val active = _activeTransaction ?: return
+        active.refuseStructuralWriteHere(this, name)
+        var txn: Transaction? = active
+        while (txn != null) {
+            if (state in txn.pendingWrites) {
+                error(
+                    "Cannot remove state '$name' with pending writes in an active transaction; " +
+                        "commit or rollback first",
+                )
+            }
+            txn = txn.parent
+        }
+        val root = active.root
+        if (!root.closedToWrites && state in root.resetHeld) {
+            error(
+                "Cannot remove state '$name' while a reset() or sterile restore() in the active transaction " +
+                    "holds it; commit or rollback first",
+            )
         }
     }
 
     /**
-     * Internal hook for `:holdfast-coroutines.suspendAction`. Sets the active
-     * transaction directly without going through the blocking lock — the caller
-     * is responsible for serialization (via [asyncSerializer]).
+     * Internal hook for `atomic`, `:holdfast-coroutines` (`suspendAction`,
+     * `suspendAtomic`) and `:holdfast-testing`'s open transactions. Sets the
+     * active transaction directly without going through the blocking lock —
+     * the caller is responsible for serialization (via [asyncSerializer] or
+     * [runUnderLock]).
+     *
+     * Installing a top-level transaction makes the caller a post-commit
+     * holder: after clearing the slot and releasing, it must call
+     * [internalDrainPostCommitTasks].
      */
     @StoreInternalApi
     fun internalSetActiveTransaction(txn: Transaction?) {
@@ -786,9 +1537,21 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Internal hook for `:holdfast-coroutines.suspendAction`. Drains any post-commit
-     * tasks queued during the suspending action — same semantics as the
-     * blocking action's tail drain.
+     * Drain this store's post-commit queue on the calling thread — the same
+     * drain as the blocking [action]'s tail. Used by `atomic`,
+     * `:holdfast-coroutines` (`suspendAction`, `suspendAtomic`) and
+     * `:holdfast-testing`'s open transactions.
+     *
+     * Any caller that takes this store's serializer, `transactionLock` or
+     * active-transaction slot as a TOP-LEVEL holder must call this once it has
+     * released all three, on every exit: commit, rollback, body throw and
+     * cancellation, including a cancelled mutex acquire. A caller that only
+     * opened a savepoint of an enclosing root leaves the drain to that root's
+     * holder. Never call it while still holding the serializer or the lock: a
+     * queued `derived` recompute would find the store busy, hand itself back
+     * to this caller, and be stranded. `derived` recomputes that found the
+     * store busy are queued for its current holder and rely on this drain
+     * (see `Store.tryTopLevelAction`).
      */
     @StoreInternalApi
     fun internalDrainPostCommitTasks() {
@@ -816,10 +1579,15 @@ abstract class Store<Self : Store<Self>> {
         }
 
     /**
-     * Internal hook for `atomic(...)`. Runs [block] under this store's
-     * `transactionLock`. The reentrant lock makes this safe to call when the
-     * same thread already holds the lock (e.g., nested `atomic` calls overlap
-     * on a store).
+     * Internal hook for `atomic(...)` and `:holdfast-testing`'s open
+     * transactions. Runs [block] under this store's `transactionLock`. The
+     * reentrant lock makes this safe to call when the same thread already
+     * holds the lock (e.g., nested `atomic` calls overlap on a store).
+     *
+     * A caller that takes the lock as a top-level holder must call
+     * [internalDrainPostCommitTasks] once `runUnderLock` has returned or
+     * thrown (and once any active-transaction slot it installed is cleared
+     * again), not inside [block].
      */
     @StoreInternalApi
     fun <R> runUnderLock(block: () -> R): R = transactionLock.withLock(block)

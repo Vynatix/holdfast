@@ -19,7 +19,8 @@ import kotlin.uuid.Uuid
  * deliberately run an independent side-transaction inside the frame.
  * Enforcement covers the frame BODY only: middleware hooks, commit fanout, and
  * observers run outside the enforcement window (an observer that writes to a
- * foreign store during fanout is post-commit and legal, exactly as before).
+ * store outside the frame during fanout is post-commit and legal, exactly as
+ * before; one that writes to a participant is refused, see below).
  *
  * **Inner errors escalate.** An inner `action { }` on a participant store that
  * returns [TransactionResult.Error] aborts the whole frame; the frame returns
@@ -44,23 +45,61 @@ import kotlin.uuid.Uuid
  *     stores' `completed` hooks fire before ANY store commits, so a validation
  *     middleware throwing on the last store still rolls every store back
  *     (for frames, `completed` does not mean durably-committed);
- *  4. per-store commit, in lock order — store A's observer/bridge/event fanout
- *     completes before store B's commit applies;
- *  5. [FrameObserver.onFrameCommitted].
+ *  4. apply: EVERY store's writes are assigned inside one write bracket
+ *     spanning all the participants' states, before any store fans out — a
+ *     consistent read across the participants sees the whole frame or none of
+ *     it, from any thread. That holds when every participant opens a fresh
+ *     top-level root: an outermost frame, or a nested one that shares no
+ *     store with the action or frame it is nested in. A participant shared
+ *     with an enclosing action or frame is a savepoint (see Nesting): its
+ *     writes apply when the enclosing transaction commits, so until then a
+ *     consistent read can see the frame's other stores new and that one old.
+ *     Enroll every store in the outermost frame to keep the guarantee;
+ *  5. per-store fanout, in lock order — each store's observers, then its
+ *     bridge publishes, then its events. Every participant has applied by
+ *     then, so an observer of store A reads store B's committed value, and
+ *     cannot write into B (or open an action or frame on it) any more than
+ *     into A: that is refused as a write into an applied transaction;
+ *  6. [FrameObserver.onFrameCommitted];
+ *  7. once the outermost action or frame on this thread has exited and
+ *     released everything it took, derived states settle: each
+ *     [derivedState]/[merged] a participant's commit changed a source of
+ *     recomputes once, from a committed cut, and the post-commit work
+ *     (`derived` recomputes) of every store whose root this frame opened runs.
  * On abort, roots roll back in REVERSE lock order with per-store middleware
  * `onTransactionError` first. Rollback never touches state and never re-runs
- * `Transformer.set`. If a COMMIT itself throws partway (step 4), stores that
- * already committed stay committed — same in-memory-2PC limitation as before.
+ * `Transformer.set`. If the apply itself throws partway (step 4; only a
+ * `distinct` state's `equals` can), stores applied before it still fan out and
+ * stay committed, and the rest roll back — as does every participant joined
+ * as a savepoint, whose writes would otherwise have merged into the enclosing
+ * transaction; a store whose fanout fails (step 5; only a throwing
+ * [Store.uncaughtObserverHandler] can) does not keep the later ones from
+ * fanning out — same in-memory-2PC limitation as before. Either way the frame
+ * returns `Error` and [FrameObserver.onFrameRolledBack] fires instead of
+ * `onFrameCommitted`, although the applied participants' values stand; their
+ * middleware gets no `onTransactionError`.
  *
  * Every participant root shares one [Transaction.frameId], so middleware and
  * the testing harness can correlate the per-store transactions of one frame.
  *
  * Nesting: an `atomic` nested inside an `action` or another `atomic` on the
  * same thread opens SAVEPOINTS of the enclosing transactions for shared
- * stores — inner commit merges into the enclosing scope; enclosing rollback
- * discards everything. A nested frame may only introduce stores whose
- * `lockOrderKey` sorts above every key the enclosing frame holds; violating
- * that throws [FrameLockOrderException] at entry (before any lock is taken).
+ * stores — inner commit merges into the enclosing scope, and an enclosing
+ * rollback discards those shared stores' writes. The stores the nested frame
+ * introduces get fresh roots, which commit when the nested frame exits: an
+ * enclosing rollback cannot undo them. A nested frame may only introduce
+ * stores whose `lockOrderKey` sorts above every key the enclosing frame holds;
+ * violating that throws [FrameLockOrderException] at entry (before any lock is
+ * taken).
+ * A frame that would nest into a participant's transaction that has already
+ * applied — `atomic(store) { … }` from an observer of `store` while `store`'s
+ * commit is notifying it — behaves like a nested `action` there: it returns
+ * [TransactionResult.Error] carrying an [IllegalStateException], before any
+ * lock is taken or any body or middleware runs, because its savepoint could
+ * never commit. From inside a state initializer or a schema migration
+ * ([SchemaVersioned.migrate]), `atomic` throws [IllegalStateException]
+ * before taking anything: both may read states but not write (see
+ * [Store.state]).
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
@@ -90,6 +129,7 @@ fun <R> atomic(
     require(stores.isNotEmpty()) { "atomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
+    NoWriteRegion.refuse { "open an atomic(...) frame on ${sorted.joinToString { it.displayName }}" }
     val enclosing = FrameMarkers.current()
     // O(1)-per-store nested-frame safety: interop flavor + lock-order checks,
     // BEFORE any lock is acquired.
@@ -104,7 +144,28 @@ fun <R> atomic(
             suspending = false,
             parent = enclosing,
         )
-    val result = acquireAndRun(sorted, 0, mutableListOf(), id, ownerThreadId, marker, body)
+    // Stores whose root this frame opened top-level. The frame is their holder,
+    // so it owes their post-commit queues a drain, but only once it has fully
+    // unwound: a drain at a participant's own unwind step would run derived
+    // recomputes (and their observers) while the EARLIER participants' locks
+    // and committed roots were still installed on this thread, so an observer
+    // writing to one of those stores hit a finished transaction.
+    val drainOnExit = mutableListOf<Store<*>>()
+    val result =
+        refuseFrameUnderAppliedTransaction(sorted, id) ?: settling {
+            try {
+                acquireAndRun(sorted, 0, mutableListOf(), drainOnExit, id, ownerThreadId, marker, body)
+            } finally {
+                // After BOTH the transaction locks and the serializers are
+                // released, and deferred to the settle of the outermost entry
+                // on this thread (this frame's own, unless it is nested in
+                // another action or frame): a recompute opens a fresh
+                // top-level action, which would otherwise find its store still
+                // held. This drain also serves recomputes other threads handed
+                // to this frame while it held the store (Store.tryTopLevelAction).
+                drainOnExit.forEach { it.internalDrainPostCommitTasksWhenSettled() }
+            }
+        }
     // A nested frame is an inner unit of the enclosing frame's body: its Error
     // escalates just like an inner action's, unless the ENCLOSING policy
     // tolerates inner errors. (Contract exceptions never reach here — they
@@ -113,6 +174,24 @@ fun <R> atomic(
         throw result.exception
     }
     return result
+}
+
+/**
+ * The refusal of a frame that would nest into a participant's transaction
+ * that has already applied its writes (see `Store.appliedTransactionNestedHere`),
+ * or `null` when no participant would. Checked before any serializer or lock
+ * is taken: under a `suspendAction`'s or `suspendAtomic`'s commit, the
+ * serializer acquire would wait for the very coroutine running this call.
+ */
+private fun refuseFrameUnderAppliedTransaction(
+    sorted: List<Store<*>>,
+    id: String,
+): TransactionResult.Error? {
+    for (store in sorted) {
+        val applied = store.appliedTransactionNestedHere() ?: continue
+        return refusedUnderAppliedTransaction(store, applied, id, "open an atomic(...) frame", frameId = id)
+    }
+    return null
 }
 
 /**
@@ -133,13 +212,16 @@ private class FrameRoot(
  * A store whose thread already has an active transaction (an enclosing
  * `action` or `atomic` on this thread) gets a SAVEPOINT root — commit merges
  * into the enclosing scope, rollback discards only this frame's writes. All
- * other stores get fresh top-level roots.
+ * other stores get fresh top-level roots. A store that had no active
+ * transaction is added to [drainOnExit], whose drains [atomic] defers to the
+ * settle of this thread's outermost entry, once the whole frame has unwound.
  */
 @Suppress("LongParameterList")
 private fun <R> acquireAndRun(
     sorted: List<Store<*>>,
     index: Int,
     roots: MutableList<FrameRoot>,
+    drainOnExit: MutableList<Store<*>>,
     id: String,
     ownerThreadId: Long,
     marker: FrameMarker,
@@ -161,11 +243,12 @@ private fun <R> acquireAndRun(
     // enclosing action, or an outer frame that holds this store).
     val serializer = if (v.internalOwnsActiveTransaction()) null else v.asyncSerializer
     serializer?.blockingAcquire()
-    var openedTopLevel = false
     try {
         return v.runUnderLock {
             val priorActive = v.activeTransaction
-            openedTopLevel = priorActive == null
+            // A fresh top-level root makes this frame the store's holder. A store
+            // that already had a transaction leaves the drain to its holder.
+            if (priorActive == null) drainOnExit += v
             val root =
                 if (priorActive != null && priorActive.ownerThreadId == ownerThreadId) {
                     // Nested inside an enclosing action/atomic on this thread for this
@@ -179,26 +262,22 @@ private fun <R> acquireAndRun(
             v.internalSetActiveTransaction(root)
             roots.add(FrameRoot(v, root, v.internalFrameMiddlewareSession(root)))
             try {
-                acquireAndRun(sorted, index + 1, roots, id, ownerThreadId, marker, body)
+                acquireAndRun(sorted, index + 1, roots, drainOnExit, id, ownerThreadId, marker, body)
             } finally {
                 v.internalSetActiveTransaction(priorActive)
             }
         }
     } finally {
         serializer?.blockingRelease()
-        // Top-level exit for this store: drain deferred work (derived recomputes)
-        // queued during the frame. Runs after BOTH the transaction lock and the
-        // serializer are released — a recompute opens a fresh blocking action,
-        // which would otherwise contend with locks this frame still holds.
-        if (openedTopLevel) v.internalDrainPostCommitTasks()
     }
 }
 
 /**
  * Run the frame body between the per-store middleware phases, then commit all
- * roots in lock order (success) or roll all back in reverse lock order
- * (failure). The frame marker is installed around the BODY only — enrollment
- * enforcement never polices middleware hooks or commit fanout.
+ * roots — apply every one, then fan each out in lock order — (success) or
+ * roll all back in reverse lock order (failure). The frame marker is
+ * installed around the BODY only — enrollment enforcement never polices
+ * middleware hooks or commit fanout.
  */
 private fun <R> executeBody(
     roots: List<FrameRoot>,
@@ -225,19 +304,25 @@ private fun <R> executeBody(
         // so a validation middleware throwing on the last store still rolls
         // every store back.
         roots.forEach { it.session.fireCompleted() }
-        // Phase 3: commit in lock order. Store A's observer fanout completes
-        // before store B's commit applies.
-        roots.forEach { it.txn.commit() }
+        // Phase 3: apply EVERY store inside one write bracket, then fan each
+        // out in lock order: A's observers already see B applied.
+        commitFrame(roots.map(FrameRoot::txn))
         observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
         TransactionResult.Success(resultTxn, value)
     } catch (e: Throwable) {
-        // Reverse lock-order unwind: per-store error hooks, then rollback.
-        // Each step is isolated so one store's failure can't strand another's
-        // pending writes.
+        // Reverse lock-order unwind of every root still open: per-store error
+        // hooks, then rollback. Each step is isolated so one store's failure
+        // can't strand another's pending writes. A root that already applied
+        // (it committed, or failed in its own fanout) gets no error hook — its
+        // values stand, as after a single action's commit failure — and
+        // neither does one whose own apply failed; only the roots the commit
+        // never reached (and every root, when the body or a hook threw) do.
         for (i in roots.indices.reversed()) {
             val entry = roots[i]
-            runCatching { entry.session.fireError(e) }
-            runCatching { entry.txn.rollback() }
+            if (entry.txn.status == TransactionStatus.Active) {
+                runCatching { entry.session.fireError(e) }
+                runCatching { entry.txn.rollback() }
+            }
         }
         observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, e) } }
         // Contract violations are programming errors — fail loud instead of

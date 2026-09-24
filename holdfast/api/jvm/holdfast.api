@@ -15,12 +15,47 @@ public final class com/vynatix/holdfast/DerivedKt {
 	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
 }
 
+public abstract interface class com/vynatix/holdfast/DerivedState : com/vynatix/holdfast/Disposable, com/vynatix/holdfast/State {
+	public fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/DerivedState;
+}
+
+public final class com/vynatix/holdfast/DerivedState$DefaultImpls {
+	public static fun getValue (Lcom/vynatix/holdfast/DerivedState;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/DerivedState;
+}
+
+public final class com/vynatix/holdfast/DerivedStateKt {
+	public static final fun derivedState (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/DerivedState;
+	public static final fun merged (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function2;)Lcom/vynatix/holdfast/DerivedState;
+	public static final fun observableBacking (Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/MutableState;
+}
+
 public abstract interface class com/vynatix/holdfast/Disposable {
 	public abstract fun dispose ()V
 }
 
 public final class com/vynatix/holdfast/EffectKt {
 	public static final fun effect (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
+}
+
+public final class com/vynatix/holdfast/EncodedSnapshotView {
+	public final fun contains (Ljava/lang/String;)Z
+	public final fun get (Ljava/lang/String;)Ljava/lang/String;
+	public final fun getFamilies ()Lcom/vynatix/holdfast/EncodedSnapshotView$Families;
+	public final fun getStateNames ()Ljava/util/Set;
+	public final fun put (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun remove (Ljava/lang/String;)Z
+	public final fun rename (Ljava/lang/String;Ljava/lang/String;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/EncodedSnapshotView$Families {
+	public final fun contains (Ljava/lang/String;)Z
+	public final fun get (Ljava/lang/String;)Ljava/util/Map;
+	public final fun getNames ()Ljava/util/Set;
+	public final fun put (Ljava/lang/String;Ljava/util/Map;)V
+	public final fun remove (Ljava/lang/String;)Z
+	public final fun rename (Ljava/lang/String;Ljava/lang/String;)Z
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class com/vynatix/holdfast/Eventful {
@@ -48,6 +83,22 @@ public final class com/vynatix/holdfast/EventfulSupport : com/vynatix/holdfast/E
 }
 
 public abstract interface annotation class com/vynatix/holdfast/ExperimentalStoreApi : java/lang/annotation/Annotation {
+}
+
+public final class com/vynatix/holdfast/FanoutMarkers {
+	public static final field INSTANCE Lcom/vynatix/holdfast/FanoutMarkers;
+	public final fun current ()Ljava/util/Set;
+	public final fun install (Ljava/util/Set;)Ljava/util/Set;
+}
+
+public final class com/vynatix/holdfast/FrameApply {
+	public final fun getApplied ()Ljava/util/List;
+	public final fun getFailure ()Ljava/lang/Throwable;
+}
+
+public final class com/vynatix/holdfast/FrameCommitKt {
+	public static final fun applyFrameCommit (Ljava/util/List;)Lcom/vynatix/holdfast/FrameApply;
+	public static final fun fanOutApplied (Lcom/vynatix/holdfast/Transaction;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)V
 }
 
 public class com/vynatix/holdfast/FrameContractException : java/lang/IllegalStateException {
@@ -129,6 +180,53 @@ public final class com/vynatix/holdfast/FramePolicy$Companion {
 public abstract interface class com/vynatix/holdfast/Initializer : kotlin/jvm/functions/Function0 {
 }
 
+public final class com/vynatix/holdfast/KeyedAddress {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFamily ()Ljava/lang/String;
+	public final fun getKey ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/vynatix/holdfast/KeyedMembershipListener {
+	public fun onEntryAdded (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+	public fun onEntryEvicted (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+}
+
+public final class com/vynatix/holdfast/KeyedMembershipListener$DefaultImpls {
+	public static fun onEntryAdded (Lcom/vynatix/holdfast/KeyedMembershipListener;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+	public static fun onEntryEvicted (Lcom/vynatix/holdfast/KeyedMembershipListener;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+}
+
+public final class com/vynatix/holdfast/KeyedRegistryKt {
+	public static final fun internalKeyedAddress (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/KeyedAddress;
+	public static final fun internalKeyedFamily (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)Lcom/vynatix/holdfast/KeyedState;
+	public static final fun internalObserveKeyedMembership (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/KeyedMembershipListener;)Lcom/vynatix/holdfast/Disposable;
+}
+
+public abstract interface class com/vynatix/holdfast/KeyedState {
+	public abstract fun contains (Ljava/lang/Object;)Z
+	public abstract fun evict (Ljava/lang/Object;)V
+	public abstract fun evictAll ()V
+	public abstract fun get (Ljava/lang/Object;)Lcom/vynatix/holdfast/State;
+	public abstract fun getEntries ()Ljava/util/Map;
+	public abstract fun getOrNull (Ljava/lang/Object;)Lcom/vynatix/holdfast/State;
+	public fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
+}
+
+public final class com/vynatix/holdfast/KeyedState$DefaultImpls {
+	public static fun getValue (Lcom/vynatix/holdfast/KeyedState;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
+}
+
+public final class com/vynatix/holdfast/KeyedStateKt {
+	public static final fun keyedState (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/KeyedStateProvider;
+	public static synthetic fun keyedState$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/KeyedStateProvider;
+}
+
+public final class com/vynatix/holdfast/KeyedStateProvider {
+	public final fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
+}
+
 public class com/vynatix/holdfast/Middleware {
 	public fun <init> ()V
 	public final fun invoke (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function0;)V
@@ -169,10 +267,15 @@ public final class com/vynatix/holdfast/MutableState : com/vynatix/holdfast/Stat
 	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 	public final fun publishToBridge (Ljava/lang/Object;)V
 	public final fun setBridge (Lcom/vynatix/holdfast/Bridge;)V
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/vynatix/holdfast/MutableStateKt {
 	public static final fun getObserverCount (Lcom/vynatix/holdfast/State;)I
+}
+
+public final class com/vynatix/holdfast/NoWriteRegionKt {
+	public static final fun internalRefuseInitializerWrite (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)V
 }
 
 public abstract interface class com/vynatix/holdfast/Observable {
@@ -183,23 +286,227 @@ public abstract interface class com/vynatix/holdfast/Publisher {
 	public abstract fun publish (Ljava/lang/Object;)Z
 }
 
+public final class com/vynatix/holdfast/Redacted : com/vynatix/holdfast/SnapshotEntry {
+	public static final field INSTANCE Lcom/vynatix/holdfast/Redacted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/ResetKt {
+	public static final fun reset (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
+public abstract class com/vynatix/holdfast/RestoreIssue {
+	public abstract fun getReason ()Ljava/lang/String;
+	public abstract fun getStateName ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/RestoreIssue$NoCodec : com/vynatix/holdfast/RestoreIssue {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/vynatix/holdfast/RestoreIssue$NoCodec;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/RestoreIssue$NoCodec;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/RestoreIssue$NoCodec;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getReason ()Ljava/lang/String;
+	public fun getStateName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/RestoreIssue$TypeMismatch : com/vynatix/holdfast/RestoreIssue {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lcom/vynatix/holdfast/RestoreIssue$TypeMismatch;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/RestoreIssue$TypeMismatch;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/RestoreIssue$TypeMismatch;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getReason ()Ljava/lang/String;
+	public final fun getSnapshotType ()Ljava/lang/String;
+	public fun getStateName ()Ljava/lang/String;
+	public final fun getStateType ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/RestoreIssue$Undecodable : com/vynatix/holdfast/RestoreIssue {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/vynatix/holdfast/RestoreIssue$Undecodable;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/RestoreIssue$Undecodable;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/RestoreIssue$Undecodable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getReason ()Ljava/lang/String;
+	public fun getStateName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/RestoreIssue$UnknownState : com/vynatix/holdfast/RestoreIssue {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/vynatix/holdfast/RestoreIssue$UnknownState;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/RestoreIssue$UnknownState;Ljava/lang/String;ILjava/lang/Object;)Lcom/vynatix/holdfast/RestoreIssue$UnknownState;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getReason ()Ljava/lang/String;
+	public fun getStateName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/RestorePolicy : java/lang/Enum {
+	public static final field BestEffort Lcom/vynatix/holdfast/RestorePolicy;
+	public static final field IgnoreUnknown Lcom/vynatix/holdfast/RestorePolicy;
+	public static final field Strict Lcom/vynatix/holdfast/RestorePolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/vynatix/holdfast/RestorePolicy;
+	public static fun values ()[Lcom/vynatix/holdfast/RestorePolicy;
+}
+
+public final class com/vynatix/holdfast/RestoreRejectedException : java/lang/IllegalStateException {
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getPolicy ()Lcom/vynatix/holdfast/RestorePolicy;
+}
+
+public final class com/vynatix/holdfast/RestoreReport {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getKept ()Ljava/util/Set;
+	public final fun getRestored ()Ljava/util/Set;
+	public final fun getSterilized ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/vynatix/holdfast/SchemaVersioned {
+	public abstract fun getSchemaVersion ()I
+	public abstract fun migrate (ILcom/vynatix/holdfast/EncodedSnapshotView;)V
+}
+
+public final class com/vynatix/holdfast/SealedStatesKt {
+	public static final fun getInternalQualifiedName (Lcom/vynatix/holdfast/State;)Ljava/lang/String;
+	public static final fun internalForbidStructuralWrites (Lcom/vynatix/holdfast/Transaction;Ljava/lang/String;)V
+	public static final fun internalSealedState (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;)Lcom/vynatix/holdfast/MutableState;
+	public static final fun internalStageSealed (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/MutableState;Ljava/lang/Object;)V
+	public static final fun internalTopLevelAction (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
+public final class com/vynatix/holdfast/SettleScope {
+	public final fun isOpen ()Z
+	public final fun settle ()V
+}
+
+public final class com/vynatix/holdfast/SettleScopeKt {
+	public static final fun internalDrainPostCommitTasksWhenSettled (Lcom/vynatix/holdfast/Store;)V
+	public static final fun internalSettling (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/holdfast/SettleScopes {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SettleScopes;
+	public final fun current ()Lcom/vynatix/holdfast/SettleScope;
+	public final fun install (Lcom/vynatix/holdfast/SettleScope;)Lcom/vynatix/holdfast/SettleScope;
+	public final fun open ()Lcom/vynatix/holdfast/SettleScope;
+}
+
+public abstract interface class com/vynatix/holdfast/SnapshotEntry {
+}
+
+public final class com/vynatix/holdfast/SnapshotEntry$Absent : com/vynatix/holdfast/SnapshotEntry {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotEntry$Absent;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/SnapshotEntry$Present : com/vynatix/holdfast/SnapshotEntry {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lcom/vynatix/holdfast/SnapshotEntry$Present;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/SnapshotEntry$Present;Ljava/lang/Object;ILjava/lang/Object;)Lcom/vynatix/holdfast/SnapshotEntry$Present;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/SnapshotFormatException : java/lang/IllegalArgumentException {
+}
+
 public final class com/vynatix/holdfast/SnapshotKt {
 	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;
+	public static final fun snapshot (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/StoreSnapshot;
+}
+
+public final class com/vynatix/holdfast/SnapshotMigrationException : java/lang/IllegalStateException {
+	public final fun getSnapshotVersion ()I
+	public final fun getStoreVersion ()I
+}
+
+public abstract class com/vynatix/holdfast/SnapshotScope {
+	public final fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$All : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$All;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$Raw : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$Raw;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$UserAuthored : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$UserAuthored;
 }
 
 public abstract interface class com/vynatix/holdfast/State {
 	public abstract fun getValue ()Ljava/lang/Object;
 }
 
+public abstract interface class com/vynatix/holdfast/StateCodec {
+	public abstract fun decode (Ljava/lang/String;)Ljava/lang/Object;
+	public abstract fun encode (Ljava/lang/Object;)Ljava/lang/String;
+}
+
 public abstract interface class com/vynatix/holdfast/StateDelegate {
 	public abstract fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/State;
+	public fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
+}
+
+public final class com/vynatix/holdfast/StateDelegate$DefaultImpls {
+	public static fun provideDelegate (Lcom/vynatix/holdfast/StateDelegate;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
+}
+
+public abstract class com/vynatix/holdfast/StateTag {
+	public final fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/StateTag$Remote : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$Remote;
+}
+
+public final class com/vynatix/holdfast/StateTag$Secret : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$Secret;
+}
+
+public final class com/vynatix/holdfast/StateTag$UserAuthored : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$UserAuthored;
+}
+
+public final class com/vynatix/holdfast/StateTagsKt {
+	public static final fun displayValue (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)Ljava/lang/Object;
+	public static final fun getTags (Lcom/vynatix/holdfast/State;)Ljava/util/Set;
+	public static final fun taggedStates (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StateTag;)Ljava/util/List;
 }
 
 public abstract class com/vynatix/holdfast/Store {
 	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
 	public fun <init> ()V
 	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public final fun bindClock (Lkotlin/time/Clock;)V
 	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
 	public final fun bridge (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Bridge;)V
 	public final fun clearMiddleware ()V
@@ -207,6 +514,8 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun dispose ()V
 	public final fun getActiveTransaction ()Lcom/vynatix/holdfast/Transaction;
 	public final fun getAsyncSerializer ()Lcom/vynatix/holdfast/Store$AsyncSerializer;
+	public fun getClock ()Lkotlin/time/Clock;
+	public final fun getInternalBoundClock ()Lkotlin/time/Clock;
 	public final fun getLockOrderKey ()J
 	public final fun getProperties ()Ljava/util/Map;
 	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;
@@ -218,6 +527,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun internalDrainPostCommitTasks ()V
 	public final fun internalFrameMiddlewareSession (Lcom/vynatix/holdfast/Transaction;)Lcom/vynatix/holdfast/FrameMiddlewareSession;
 	public final fun internalOwnsActiveTransaction ()Z
+	public final fun internalReportUncaughtFailure (Ljava/lang/Throwable;)V
 	public final fun internalSetActiveTransaction (Lcom/vynatix/holdfast/Transaction;)V
 	public final fun invoke (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public final fun isDisposed ()Z
@@ -226,6 +536,8 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun observeFrom (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Observable;)Lcom/vynatix/holdfast/Disposable;
 	protected fun onDispose ()V
 	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
+	public final fun registerDerivedBackingState (Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;Z)Lcom/vynatix/holdfast/MutableState;
+	public static synthetic fun registerDerivedBackingState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
 	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
 	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
 	public final fun removeState (Ljava/lang/String;)V
@@ -235,13 +547,20 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
 	public final fun snapshotMiddleware ()Ljava/util/List;
 	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
+	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
 	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
+	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
 	public final fun update (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)V
 }
 
 public abstract interface class com/vynatix/holdfast/Store$AsyncSerializer {
 	public abstract fun blockingAcquire ()V
 	public abstract fun blockingRelease ()V
+	public fun tryBlockingAcquire ()Z
+}
+
+public final class com/vynatix/holdfast/Store$AsyncSerializer$DefaultImpls {
+	public static fun tryBlockingAcquire (Lcom/vynatix/holdfast/Store$AsyncSerializer;)Z
 }
 
 public final class com/vynatix/holdfast/Store$Companion {
@@ -250,6 +569,30 @@ public final class com/vynatix/holdfast/Store$Companion {
 }
 
 public abstract interface annotation class com/vynatix/holdfast/StoreActionDsl : java/lang/annotation/Annotation {
+}
+
+public abstract interface class com/vynatix/holdfast/StoreAttachment {
+	public fun getPersistenceKeys ()Ljava/util/Set;
+	public fun onStoreDisposed ()V
+	public fun onStoreReset ()V
+}
+
+public final class com/vynatix/holdfast/StoreAttachment$DefaultImpls {
+	public static fun getPersistenceKeys (Lcom/vynatix/holdfast/StoreAttachment;)Ljava/util/Set;
+	public static fun onStoreDisposed (Lcom/vynatix/holdfast/StoreAttachment;)V
+	public static fun onStoreReset (Lcom/vynatix/holdfast/StoreAttachment;)V
+}
+
+public final class com/vynatix/holdfast/StoreAttachmentKey {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun getName ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/StoreAttachmentsKt {
+	public static final fun internalAttachIfAbsent (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreAttachmentKey;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/StoreAttachment;
+	public static final fun internalAttachment (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreAttachmentKey;)Lcom/vynatix/holdfast/StoreAttachment;
+	public static final fun internalAttachments (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 }
 
 public abstract interface annotation class com/vynatix/holdfast/StoreInternalApi : java/lang/annotation/Annotation {
@@ -263,8 +606,24 @@ public final class com/vynatix/holdfast/StoreLock {
 }
 
 public final class com/vynatix/holdfast/StoreSnapshot {
+	public static final field Companion Lcom/vynatix/holdfast/StoreSnapshot$Companion;
+	public final fun encode (Z)Ljava/lang/String;
+	public static synthetic fun encode$default (Lcom/vynatix/holdfast/StoreSnapshot;ZILjava/lang/Object;)Ljava/lang/String;
+	public final fun entry (Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/SnapshotEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun get (Lcom/vynatix/holdfast/State;)Ljava/lang/Object;
+	public final fun getSchemaVersion ()I
 	public final fun getSize ()I
 	public final fun getStateNames ()Ljava/util/Set;
+	public final fun getUnencodableStateNames ()Ljava/util/Set;
+	public fun hashCode ()I
+	public final fun keysOf (Lcom/vynatix/holdfast/KeyedState;)Ljava/util/Set;
+	public final fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/StoreSnapshot$Companion {
+	public final fun decode (Ljava/lang/String;)Lcom/vynatix/holdfast/StoreSnapshot;
 }
 
 public final class com/vynatix/holdfast/Transaction {
@@ -276,6 +635,7 @@ public final class com/vynatix/holdfast/Transaction {
 	public final fun getFrameId ()Ljava/lang/String;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getModifiedStates ()Ljava/util/Set;
+	public final fun getStagedEvictions ()Ljava/util/Set;
 	public final fun getStatus ()Lcom/vynatix/holdfast/TransactionStatus;
 	public final fun rollback ()V
 	public final fun stagePendingEvent (Lkotlinx/coroutines/flow/MutableSharedFlow;Ljava/lang/Object;)V
@@ -372,7 +732,7 @@ public final class com/vynatix/holdfast/bridge/BooleanCodec : com/vynatix/holdfa
 	public fun encode (Z)Ljava/lang/String;
 }
 
-public abstract interface class com/vynatix/holdfast/bridge/Codec {
+public abstract interface class com/vynatix/holdfast/bridge/Codec : com/vynatix/holdfast/StateCodec {
 	public abstract fun decode (Ljava/lang/String;)Ljava/lang/Object;
 	public abstract fun encode (Ljava/lang/Object;)Ljava/lang/String;
 }

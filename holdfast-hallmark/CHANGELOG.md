@@ -8,12 +8,47 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`Store.boxed(validator, codec, tags, initial)` and
+  `Store.boxedHandle(validator, codec, tags, initial)`**
+  (`@ExperimentalStoreApi`, issue #20 R1/R3) — the boxed factories through
+  `Store.state`'s experimental overload: a snapshot codec (wrap a primitive
+  codec in `BoxedCodec`) and state tags. Calls that pass neither resolve to
+  the stable factories. For a `StateTag.Secret` state, a validation failure
+  — the initializer, a write through the `ValidatingTransformer`,
+  `BoxedHandle.civilize` and `assign` — throws a `HallmarkException` whose
+  violations keep their code, path and rule but read
+  "`<code>` rejected the value (withheld: a Secret state)" and carry no
+  arguments, where hallmark's rules may quote the value ("got 42").
+  `:holdfast-hallmark-coroutines`' `suspendValidateAndMutate` withholds the
+  value the same way for a Secret state (`SuspendBoxedSecretRedactionTest`).
+  A `ValidatingTransformer` constructed by hand does not know its state's
+  tags and keeps hallmark's messages (pinned by `BoxedSecretRedactionTest`);
+  so does a validator you call yourself (`validator of primitive`).
+
+- **`NonEmptyList<Violation>.withheld()`** (`@StoreInternalApi`, companion
+  modules only) — the violations without the rejected value, as the Secret
+  paths above throw them; `:holdfast-hallmark-coroutines` uses it.
+
+- **`BoxedHandleDelegate.provideDelegate(thisRef, property)`**: `boxedHandle`
+  forwards the new `StateDelegate.provideDelegate` of `:holdfast` (issue #20,
+  R5), so a `val email by boxedHandle(…) { … }` state is declared when its
+  store is constructed and a never-read handle's state is captured by
+  `snapshot()`. `boxed(…)` returns the `state(…)` delegate itself and needs no
+  change. As with any declared state, a never-read `boxed`/`boxedHandle` state
+  whose initial value fails validation now makes `snapshot()` throw
+  `HallmarkException`.
+
 - `shouldBeBoxedAs` test matcher moved here from `:holdfast-testing` (package
   `com.vynatix.holdfast.hallmark`, previously
   `com.vynatix.holdfast.testing.matcher`), so `:holdfast-testing` no longer
   depends on the unpublished `com.vynatix:hallmark` artifact.
 
 ### Changed
+
+- `shouldBeBoxedAs` withholds both values from its failure message for a
+  `StateTag.Secret` state (issue #20, R3): it reads "Boxed mismatch on a
+  Secret state: values withheld (from `<Wrapper>`)". A non-Secret state's
+  message is unchanged.
 
 - The module is excluded from the default build; opt in with
   `-Pholdfast.includeHallmark=true` after publishing the sibling

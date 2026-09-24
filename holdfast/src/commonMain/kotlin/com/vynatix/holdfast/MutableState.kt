@@ -3,6 +3,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import kotlinx.atomicfu.atomic
 
 /**
  * The concrete implementation of [State] used by [Store]. Carries:
@@ -62,6 +63,62 @@ class MutableState<T : Any>(
     @kotlin.concurrent.Volatile
     private var currentValue: T = initialValue
 
+    /**
+     * The declaration that gives this state its store-side name and kind: for
+     * a registered state, the one it was materialized from; for a
+     * `DerivedState`'s backing state, the unregistered
+     * [StateKind.ReadOnlyDerived] declaration `createDerivedState` sets; for
+     * a sealed state, the unregistered [StateKind.Sealed] one
+     * `internalSealedState` sets. `null`
+     * only for any other `MutableState` constructed by hand, outside any store
+     * registry. Set before the state is published.
+     */
+    @kotlin.concurrent.Volatile
+    internal var declaration: StateDeclaration<T>? = null
+
+    /**
+     * Write brackets around every assignment of [currentValue] (see
+     * ConsistentRead.kt): [writesBegun] is bumped before a write starts and
+     * [writesEnded] after it finishes, so the two differ exactly while a
+     * write is in progress. A commit opens the bracket on every state it
+     * applies before assigning any of them, which is what lets a reader take
+     * a cut of several states that no commit is half-way through.
+     */
+    internal val writesBegun = atomic(0L)
+
+    /** See [writesBegun]. */
+    internal val writesEnded = atomic(0L)
+
+    /**
+     * How many derived-state computes, on any thread, are reading this state
+     * from a committed cut right now ([ComputeReads]). While it is zero,
+     * [value] skips the thread-local lookup of the cut.
+     */
+    internal val cutReaders = atomic(0)
+
+    /**
+     * Set when this state is a keyed entry (`keyedState`) whose eviction has
+     * committed, and never cleared: the family no longer holds it, so it is a
+     * stale handle. Assigned inside the evicting commit's write bracket, so a
+     * consistent cut sees an entry evicted exactly when it sees the rest of
+     * that commit (KeyedCommit.kt). A retired state keeps its last value
+     * for reads, refuses every write entrypoint, and ignores inbound bridge
+     * values; its observers and bridge are shut down.
+     */
+    @kotlin.concurrent.Volatile
+    internal var retired: Boolean = false
+
+    /**
+     * Set when this is a sealed state (`internalSealedState`, SealedStates.kt):
+     * library machinery's own, which every store write entrypoint refuses —
+     * `mutate`, `update`, `bridge`, `observeFrom` — with the seal's teaching
+     * message, and whose inbound bridge values are dropped. Only its owner
+     * stages it (`internalStageSealed`). Set before the state is published,
+     * and never cleared.
+     */
+    @kotlin.concurrent.Volatile
+    internal var writeSeal: WriteSeal? = null
+
     @kotlin.concurrent.Volatile
     private var currentBridge: Bridge<T>? = null
 
@@ -83,19 +140,64 @@ class MutableState<T : Any>(
      *
      * Off-owner-thread reads only see the committed value, never another thread's
      * uncommitted pending writes.
+     *
+     * A read from inside a state initializer sees the committed value too, even on
+     * the owning thread: an initializer runs whenever its state is first needed —
+     * possibly inside an action, an `atomic(...)` frame or a `snapshot()` taken in
+     * one — and the value it returns is committed at once and survives a rollback,
+     * so it must not be computed from writes that may yet roll back. So does a
+     * read from inside a schema migration (`SchemaVersioned.migrate`), which
+     * runs before its restore's action opens, and one from the compute of a
+     * `derivedState`/`merged` recompute, which commits what it computes at once.
+     *
+     * The exception is an initializer `reset()` re-runs: it reads this state at
+     * its reset value when it is one of the declared states (or keyed
+     * entries) that reset is resetting, running this state's own initializer
+     * first if its reset is still pending (see [ResetPass]). That runs user
+     * code, so it happens before [stateLock] is taken. An initializer a
+     * sterile `restore()` re-runs — a Remote state's, or one the restore
+     * brought to life — reads the states that restore re-runs that way, and
+     * this store's other declared states (and entries) at the values the
+     * restore's transaction holds for them (restored, else an enclosing
+     * action's pending writes).
+     *
+     * The compute of a `derivedState`/`merged` reads its sources from one
+     * committed cut taken just before it runs ([ComputeReads]), where this
+     * thread holds no pending write for them, so it never reads one source
+     * after another thread's frame applied and another before.
      */
     override val value: T
-        get() =
-            stateLock.withLock {
+        get() {
+            val resetValue = owningStore.activeTransaction?.pendingReset?.valueFor(this)
+            if (resetValue != null) return afterGet(ComputeReads.uncommitted(resetValue))
+            // The cut's thread-local is read only while some compute reads
+            // this state from a cut, so an ordinary read pays one volatile
+            // read for it.
+            @Suppress("UNCHECKED_CAST")
+            val cut = if (cutReaders.value == 0) null else ComputeReads.cutValueOf(this) as T?
+            return stateLock.withLock {
                 val txn = owningStore.activeTransaction
                 if (txn != null && txn.ownerThreadId == currentThreadId()) {
                     val pending = txn.findPendingValue(this)
-                    if (pending != null) return@withLock afterGet(pending)
+                    // The thread-local is read only when there is a pending
+                    // value to hide, so an ordinary read pays nothing for it.
+                    if (pending != null && NoWriteRegion.current() == null) {
+                        return@withLock afterGet(ComputeReads.uncommitted(pending))
+                    }
                 }
-                afterGet(currentValue)
+                afterGet(cut ?: currentValue)
             }
+        }
 
-    private fun afterGet(rawValue: T): T = transformer?.takeIf { it.shouldTransform(rawValue) }?.get(rawValue) ?: rawValue
+    /**
+     * The `Transformer.get` view of [rawValue], a value this state stores: what
+     * [value] returns for it. `StoreSnapshot.get` reads captured raw values
+     * through it.
+     */
+    internal fun afterGet(rawValue: T): T {
+        val projection = transformer ?: return rawValue
+        return if (projection.shouldTransform(rawValue)) projection.get(rawValue) else rawValue
+    }
 
     /**
      * Pure: applies `transformer.set` to compute the post-set value to buffer in the
@@ -108,16 +210,27 @@ class MutableState<T : Any>(
      * Used by [Store.snapshot] to capture the on-disk-equivalent representation
      * (ciphertext, post-`transformer.set` form, etc.) so [Store.restore] can
      * round-trip without re-running `transformer.set`.
+     *
+     * A plain volatile read that never waits for a writer: a snapshot reads it
+     * through `readConsistent`, which validates it against the write brackets.
      */
     internal val rawCurrentValue: T
-        get() = stateLock.withLock { currentValue }
+        get() = currentValue
 
     /**
      * Commit pass 1 — **assignment only**. Writes `currentValue` and returns
-     * whether the value changed; runs NO user code, so it cannot throw and
-     * therefore cannot tear a commit part-way through its pending writes.
-     * [Transaction.commitDispatching] applies every pending write with this
-     * before any fanout begins.
+     * whether the value changed. Runs no user code except `equals` on a
+     * [distinct] state. A commit's apply pass ([applyFrameCommit], or
+     * [Transaction.commitDispatching] for one transaction) applies every
+     * pending write with this before any fanout begins — a frame's, every
+     * participant's.
+     *
+     * Core-only: it must be called inside the commit's write bracket, which
+     * the apply pass (FrameCommit.kt) opens on every pending state — of every
+     * participant, for a frame — before the first assignment and closes in a
+     * `finally` after the last (see ConsistentRead.kt). An unbracketed call
+     * lets a concurrent `snapshot()` see half of a commit. The bracket helpers
+     * are `internal`, so companion modules must not call this.
      *
      * If [distinct] is true and the new processed value is `==` to
      * `currentValue`, nothing is written and this returns `false` — the caller
@@ -137,7 +250,8 @@ class MutableState<T : Any>(
      * acquires `observersLock` then briefly `stateLock`.
      *
      * Never throws: a failing `transformer.get` is reported through
-     * [Store.uncaughtObserverHandler] and skips this state's observers. Commit
+     * [Store.uncaughtObserverHandler] (logged loudly while none is set) and
+     * skips this state's observers. Commit
      * fanout is post-commit side effect, so it must not be able to abort a
      * commit whose values are already applied.
      */
@@ -167,25 +281,45 @@ class MutableState<T : Any>(
     }
 
     private fun reportFanoutFailure(error: Throwable) {
-        owningStore.uncaughtObserverHandler?.invoke(error)
+        owningStore.internalReportUncaughtFailure(error)
     }
 
     /**
-     * Human-readable identity of the store that owns this state, for failure
-     * messages. Falls back to `"Store"` on targets without class simple names.
+     * Names the state — `MutableState(CounterStore.count)` — and never shows
+     * its value, so a state that reaches a log line or a failure message (a
+     * [Transaction.modifiedStates] set, say) cannot leak a
+     * [StateTag.Secret] value. A state constructed by hand, outside any
+     * store's declarations, names its store only.
      */
-    internal fun describeOwner(): String = owningStore::class.simpleName ?: "Store"
+    override fun toString(): String {
+        val name = declaration?.qualifiedName ?: "a state of ${owningStore.displayName}"
+        return "MutableState($name)"
+    }
 
     /**
      * Bridge-driven update: writes `currentValue` and notifies observers, but does
      * NOT call `currentBridge?.publish` — preventing a publish loop with the source
      * that originated this update. Bridges bypass the transactional path entirely;
      * they are an external sync mechanism.
+     *
+     * A value arriving for a [retired] keyed entry is dropped: the family no
+     * longer holds the entry, so nothing could read it back through it. So is
+     * one for a sealed state ([writeSeal]), which only its owner writes.
      */
     internal fun applyFromBridge(rawValue: T) {
+        if (retired || writeSeal != null) return
         val processed = beforeSet(rawValue)
-        stateLock.withLock {
-            currentValue = processed
+        // Before the bracket opens, as a commit counts itself (FrameCommit.kt):
+        // a capture that listed keyed entries learns that a write its cut may
+        // include landed since (KeyedRegistry.commitsApplied).
+        owningStore.registry.keyed.commitApplying()
+        writesBegun.incrementAndGet()
+        try {
+            stateLock.withLock {
+                currentValue = processed
+            }
+        } finally {
+            writesEnded.incrementAndGet()
         }
         notifyObservers(afterGet(processed))
     }
@@ -208,15 +342,21 @@ class MutableState<T : Any>(
      * Snapshotting under the lock keeps the subscription ordering that [observe]
      * depends on: a subscriber added under [observersLock] before this snapshot
      * is taken is guaranteed to appear in it.
+     *
+     * A throwing observer never stops the others: its exception goes to
+     * [Store.uncaughtObserverHandler], or is logged loudly while none is set —
+     * including the [IllegalStateException] an observer gets for writing back
+     * into its own store while that store's commit is notifying it. The one
+     * exception is a handler that itself throws: that propagates, ending the
+     * commit's fanout early (the commit's values stay applied).
      */
     private fun notifyObservers(value: T) {
-        val handler = owningStore.uncaughtObserverHandler
         val snapshot = observersLock.withLock { observers.toList() }
         snapshot.forEach { observer ->
             try {
                 observer(value)
             } catch (e: Throwable) {
-                handler?.invoke(e)
+                owningStore.internalReportUncaughtFailure(e)
             }
         }
     }
@@ -273,11 +413,22 @@ class MutableState<T : Any>(
      *
      * Setting to null detaches: the previous bridge's inbound observer is disposed
      * and no further commits are published.
+     *
+     * Setting it on an evicted keyed entry (a stale handle), or on a sealed
+     * state (library machinery's own, such as a hydrator's phase), throws
+     * [IllegalStateException], as `Store.bridge` does, and attaches nothing.
      */
     var bridge: Bridge<T>?
         get() = bridgeLock.withLock { currentBridge }
         set(value) =
             bridgeLock.withLock {
+                // A keyed entry retired by an eviction racing this call: its
+                // fanout's shutdownSilently may already have run, so nothing
+                // would ever detach a bridge attached now. The eviction retires
+                // the entry before that shutdown takes this lock, so either
+                // this sees it retired, or the shutdown detaches what this
+                // attaches.
+                refuseUnwritable(this)
                 // Dispose the previous inbound observer registration so the previous
                 // bridge does not keep driving applyFromBridge after replacement/null.
                 currentBridgeSubscription?.dispose()
@@ -292,24 +443,54 @@ class MutableState<T : Any>(
     /**
      * Internal entrypoint used by `Store.removeState`/`clearStates` to release
      * resources without firing any observer notifications. Drops the observer set
-     * and detaches any attached bridge (disposing its inbound subscription).
+     * and detaches any attached bridge (disposing its inbound subscription). A
+     * keyed entry (evicted, or its store disposed) also disposes the inbound
+     * subscriptions its `observeFrom` calls made ([KeyedEntry.closeInbound]).
+     *
+     * Every step runs even when an earlier one throws (a bridge subscription's
+     * `dispose`, say): the bridge is detached before its subscription is
+     * disposed. The first failure is rethrown afterwards, the others
+     * suppressed.
      */
     internal fun shutdownSilently() {
         observersLock.withLock { observers.clear() }
-        bridgeLock.withLock {
-            currentBridgeSubscription?.dispose()
-            currentBridgeSubscription = null
-            currentBridge = null
-        }
+        val bridgeFailure =
+            runCatching {
+                bridgeLock.withLock {
+                    val subscription = currentBridgeSubscription
+                    currentBridgeSubscription = null
+                    currentBridge = null
+                    subscription?.dispose()
+                }
+            }.exceptionOrNull()
+        val inboundFailure = runCatching { declaration?.keyed?.closeInbound() }.exceptionOrNull()
+        val first = bridgeFailure ?: inboundFailure ?: return
+        if (inboundFailure != null && inboundFailure !== first) first.addSuppressed(inboundFailure)
+        throw first
     }
 }
 
 /**
+ * Why a sealed state refuses a write ([MutableState.writeSeal]): its owner's
+ * teaching text, which `internalSealedState` (SealedStates.kt) was given.
+ */
+internal class WriteSeal(
+    val refusal: String,
+)
+
+/**
+ * Human-readable identity of the store that owns this state, for failure
+ * messages. Falls back to `"Store"` on targets without class simple names.
+ * (An extension, so the class stays within its function budget.)
+ */
+internal fun MutableState<*>.describeOwner(): String = owningStore.displayName
+
+/**
  * Test-only window onto the live observer count for a [State]. Convenience
  * extension so test code can read it from a [State] reference (the public
- * surface) without an explicit cast to [MutableState]. Throws if the [State]
- * was not produced by `store.state { … }` — only [MutableState] instances
- * carry an observer set.
+ * surface) without an explicit cast to [MutableState]; a [DerivedState] reads
+ * its backing state's. Throws for a State no store produced (a [computed]
+ * one) — only [MutableState] instances carry an observer set.
  *
  * Marked `@StoreInternalApi`: companion-module test code (e.g. `:holdfast-coroutines`)
  * uses it to verify that `Flow`/`StateFlow`/`effect` adapters dispose their
@@ -319,6 +500,6 @@ class MutableState<T : Any>(
 @StoreInternalApi
 val <T : Any> State<T>.observerCount: Int
     get() {
-        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (store.state { ... })")
+        val ms = observableBacking() ?: error("observerCount is only defined for a State a store produced")
         return ms.observerCount
     }

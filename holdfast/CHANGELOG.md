@@ -61,7 +61,139 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `RUNNABLE` where no profiler reports it as blocked. It now blocks on
   `kotlinx.atomicfu.locks.SynchronousMutex`, keeping its own reentrancy depth.
 
+- **A `derived()` recompute never blocks or spins on its host store.** The
+  recompute ran a blocking `action` on the store hosting the derived. For a
+  derived whose source lives on another store, that happened inside the
+  source's commit fanout with the source's `transactionLock` held, so a host
+  held with no transaction visible yet (its serializer taken, its action not
+  yet in its body) stalled the source's commit — a deadlock if that holder
+  then needed the source store. And when kotlinx `Mutex.unlock` handed the
+  host's serializer to a queued `suspendAction` that had not resumed yet, the
+  recompute spun on it — forever on a single-threaded event loop, where that
+  coroutine needed the spinning thread. The recompute now makes one
+  non-blocking top-level attempt; a busy host gets it handed to its current
+  holder, which runs it after releasing.
+
+- **`derived()` recompute failures reach `Store.uncaughtObserverHandler`.** A
+  throwing `compute` (or a middleware rejecting the recompute) used to vanish
+  inside the post-commit drain's `runCatching`, silently freezing the derived.
+  It now rolls back and goes to `Store.uncaughtObserverHandler`; the next
+  source commit recomputes normally. With no handler set (the default) the
+  failure is logged (see "post-commit failures are logged by default" under
+  Changed). Disposing a derived also drops a recompute that was already
+  queued.
+
+- **A `derived()` whose host store was disposed no longer throws into its
+  source's commit.** Its subscriptions live on the source store and outlive
+  the host, so a later source commit ran the recompute's blocking `action` on
+  the disposed host, and its `"store disposed"` went to the source's
+  `uncaughtObserverHandler`. The recompute now sees the host disposed and does
+  nothing.
+
+- **A `postCommit` from another thread can no longer be stranded.** A caller
+  could read an active transaction that was just ending, then enqueue after its
+  owner had cleared the slot and drained an empty queue, leaving the task queued
+  until some unrelated later transaction drained it. `postCommit` re-reads the
+  slot after enqueueing and drains itself if it emptied.
+
+- **`atomic` runs its post-commit work only once the whole frame has
+  unwound.** Each participant's queue drained at that participant's own unwind
+  step, while the frame still held the EARLIER participants' locks with their
+  finished roots installed. So an observer on a `derived` recompute that wrote
+  to an earlier participant hit that finished transaction: `mutate` threw, and
+  an `action` opened a savepoint of it whose writes never committed. The frame
+  now drains every store whose root it opened after releasing all of them.
+
+- **`:holdfast-testing`: closing an open `transaction(on = …)` runs the
+  post-commit work queued behind it.** Rollback and a throwing body never
+  drained the store's post-commit queue, and commit drained it while still
+  holding the store's lock, so a `derived` recompute that fired while the
+  transaction was open could be stranded. All three exits now drain after
+  releasing, like a production `action`.
+
+- **Two stores whose state initializers read each other no longer deadlock
+  (issue #20, R5).** An initializer ran under its store's `propertiesLock`, so
+  store A's initializer reading a never-read state of store B, while B's
+  initializer read one of A's on another thread, deadlocked AB-BA on the two
+  locks. Initializers no longer run under `propertiesLock`; each runs behind
+  a per-state latch: the first thread to need a state runs its initializer
+  once, and any other thread needing it meanwhile waits for that one (parked,
+  not spinning).
+
+- **`snapshot()` never captures a half-applied commit (issue #20, D7).** It
+  read each state's value one after the other, so a commit applying on another
+  thread meanwhile could land in the snapshot for some states and not others.
+  A commit now brackets its apply pass on every state it writes, and
+  `snapshot()` takes a lock-free cut that no bracket overlaps, retrying while
+  one is open; a writer never waits for a snapshot.
+
+- **A snapshot of a store with a `derived` state restores into another
+  instance.** The derived's backing state was captured under its synthesized
+  name (`__derived_N`), which no other instance declares, so restoring the
+  snapshot anywhere but its own store failed as an unknown state. Backing
+  states are now restored only into the store that captured them, and skipped
+  elsewhere (see the `BREAKING` entry below).
+
+- **`removeState`/`clearStates` see pending writes of enclosing
+  transactions.** They checked only the innermost transaction, so inside a
+  nested action (or an `atomic` frame's savepoint) they dropped a state the
+  enclosing action had written, and that write then committed into a state no
+  longer in the store. They now refuse a state with a pending write anywhere
+  in the active transaction's savepoint chain.
+
+- **A `derivedState`/`merged` over several stores never commits or shows a
+  torn pair (issue #20, R9).** A recompute racing another thread's `atomic`
+  frame over its sources could read one participant's new value with the
+  other's old one and commit it, until that frame's own recompute corrected
+  it; and an initial compute could do the same. Frames now apply every
+  participant inside one write bracket before any fans out (see the
+  `BREAKING` entry below), and every compute — the initial one too — reads
+  its sources from one committed cut taken just before it runs, which a
+  frame's apply is either wholly inside or wholly outside of: an outermost
+  frame's, or one whose participants all open a root of their own. A
+  participant that a frame nested in an action or another frame shares with
+  that enclosing entry joins as a savepoint, and its writes apply when the
+  enclosing transaction commits; enroll every store in the outermost frame
+  to keep the frame whole.
+  `DerivedConcurrencyTest` pins it under concurrent frames, a busy host and
+  racing creations; `ConsistentCutConcurrencyTest` pins the internal
+  multi-store cut (#21's T4 primitive) under concurrent `atomic` and
+  `suspendAtomic` frames.
+
+- **A derived state created from another action's uncommitted write catches
+  up.** Created on a thread holding an action that had written a state its
+  compute reads without listing it as a source, a `derivedState` kept the
+  value computed from that write when the action rolled back, until the next
+  commit that changed a source. An initial compute that reads any
+  uncommitted value — a pending write of any state, on any store — now
+  queues one recompute, which reads committed values once the outermost
+  action or frame on that thread has ended.
+
+- **A chain of derived states settles in order.** When one commit changed
+  the sources of a derived state and of another derived state it reads, the
+  reading one could recompute first, from the other's previous value, and
+  then again: its observers saw an intermediate value. Derived states now
+  settle lowest rank first (a derived state after every derived state it
+  reads), once each.
+
+- **An observer of an `atomic` participant reads the others' committed
+  values on every thread.** It used to read a later participant's
+  about-to-be-committed value only through the frame's pending writes, on the
+  frame's own thread; another thread — or `suspendAtomic`'s fanout after its
+  body resumed elsewhere — read the old value next to the new one.
+
 ### Changed
+
+- **BREAKING (behavior, experimental API): encoded keyed state families are
+  written back, and read strictly.**
+  The family objects under `states` that PR 6 reserved — read, kept for
+  reading, never written — are now keyed state families, strictly
+  `{"encodedKey": text | null}`: a decoded snapshot's `encode()` writes them
+  back, and a family object holding anything but text or `null` per entry
+  fails `StoreSnapshot.decode` with a `SnapshotFormatException`. A decoded
+  state's text under the name of a family the store declares is reported as
+  `RestoreIssue.Undecodable` (not a family), like a family under a state's
+  name.
 
 - **BREAKING (commit fanout order).** Observers for every state in a
   transaction now run before any bridge publishes, where fanout previously
@@ -83,7 +215,862 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   all committed writes rather than a per-write callback; `Store` gains
   `internalOwnsActiveTransaction`. Companion modules only.
 
+- **BREAKING (behavior): a `derived()` whose sources live on its own store
+  recomputes once per source commit, not once per changed source.** Each
+  source's observer queued its own recompute, so a commit touching N sources
+  ran `compute` N times and committed (and fanned out) the derived N times.
+  The recompute is now one task per derived, and `Store.postCommit`
+  deduplicates queued tasks by identity, so middleware and observers on such a
+  derived see one recompute transaction per source commit. The dedup needs a
+  transaction active on the derived's store: for sources on another store,
+  while the derived's store is idle, the recompute still runs inline from each
+  changed source's observer — once per changed source — until the 0.7.0
+  triage; the experimental `derivedState`/`merged` settle once per outermost
+  entry instead (issue #20, R9; see below).
+
+- **BREAKING (behavior): a `derived()` recompute can land after the
+  committing `action` returns, on another thread.** The post-commit drain used
+  to recompute with a blocking `action`, so the derived reflected the caller's
+  commit by the time `action` returned, and its middleware, observers and
+  bridge publish ran on the committing thread. The recompute now makes one
+  non-blocking attempt; if the derived's store is busy, it is handed to that
+  store's holder and runs on the holder's thread after the holder releases.
+  This applies even when the sources are on the same store — for example when
+  another thread's action or a queued `suspendAction` takes the store between
+  the commit and the drain. So `derived.value` can briefly lag its sources,
+  then converges. For a read-your-writes value, read the sources or use
+  `computed`.
+
+- **BREAKING (source): a `Store` subclass property named `clock` no longer
+  compiles.** It collides with the new `Store.clock` ("'clock' hides member of
+  supertype 'Store' and needs an 'override' modifier"), whatever its type and
+  visibility, including `val clock by state { … }`. Rename it, or `override` it
+  as a getter with `@OptIn(ExperimentalStoreApi::class)`. Inside a `Store`
+  subclass's body (initializers, `state { … }` lambdas, member functions) and
+  inside a lambda with a store receiver (`store.action { … }`, `store { … }`),
+  an unqualified `clock` that resolved to a companion-object, enclosing-class or
+  top-level declaration now resolves to `Store.clock`: a compile error without
+  the opt-in, a silent switch with it. See
+  [MIGRATING.md](../MIGRATING.md#source-break-storeclock-030).
+
+- **BREAKING (behavior): writing into a transaction that has already applied
+  is refused instead of silently lost (issue #20).** A commit applies its
+  writes, then notifies observers, bridges and event collectors while its
+  transaction is still the store's active one. An observer that wrote back
+  into the store it observes during that fanout staged into the finished
+  transaction, and the write was silently lost: `mutate`/`update` and `emit`
+  (on `EventfulStore` and `EventfulSupport`) landed in buffers nobody applies
+  again, and a nested `action` or `atomic` opened a savepoint that merged into
+  them. Now `mutate`, `update` and `emit` throw an `IllegalStateException`
+  that names the store and state and lists the fixes (write in the action
+  itself, derive the value, or run a follow-up action as an `action` on
+  another thread, or launched on `Store.scope` with a dispatcher that does not
+  run it inline — on `Dispatchers.Unconfined` or an immediate main dispatcher
+  the launched action runs inside the fanout and is refused too); thrown out
+  of an observer it reaches `uncaughtObserverHandler`. A nested `action` or
+  `atomic` returns `TransactionResult.Error` carrying it, without running its
+  body or middleware — the observer must check that result (e.g.
+  `getOrThrow()`); ignored, the write is still dropped without a log line.
+  The same holds for a participant of an `atomic` frame that already
+  committed while a later one fans out — whether its entry is a root of its
+  own or a savepoint of an enclosing action on the same thread, which used to
+  accept a nested `action`/`atomic`/`emit` and lose it — for a participant
+  already rolled back while the frame's error hooks run, and inside
+  `suspendAction` and `suspendAtomic` commits — their observers, bridge
+  publishes, event collectors resumed inline and frame observers, across
+  thread hops (see `:holdfast-coroutines`' changelog for the two remaining
+  gaps). Another thread's `action`/`atomic` is not affected: it waits for the
+  store and commits on its own, and so does its bare `mutate`/`update` during
+  a blocking commit. While a `suspendAction`/`suspendAtomic` holds the store,
+  though, a bare `mutate`/`update` from any thread stages into its
+  transaction (the suspending body may resume on any thread): before the
+  apply pass it joins the transaction, after it throws this error — with a
+  message saying a suspending transaction holds the store — until the
+  suspending call returns; write from other threads through `action { }`.
+  That check and the stage are atomic with the apply pass, so such a write is
+  applied with the commit or refused, never lost in between. A write into a
+  transaction committed or rolled back by hand now reports this error with
+  its status ("has already applied its writes (status: Committed)", or "has
+  already been rolled back (status: RolledBack)") where `mutate` used to
+  report "Cannot mutate state on a Committed/RolledBack transaction", and a
+  nested `action` there, which used to open a savepoint of the finished
+  transaction and return `Success`, returns it as an `Error`. Writes to
+  another store whose transaction has not applied still commit, as before. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-writes-from-an-observer-into-its-own-committing-store-040).
+
+- **BREAKING (behavior): post-commit failures are logged by default.** With no
+  `Store.uncaughtObserverHandler` set, a throwing observer callback, fanout
+  `Transformer.get`, `Bridge.publish` or `derived` recompute used to be dropped
+  without a trace. It is now logged: a line naming the store and pointing at
+  `uncaughtObserverHandler`, then the stack trace — on standard error on JVM
+  and Android, on standard output on iOS and wasmJs. The commit still stands and
+  the remaining observers still run. Set a handler to route these failures into
+  your own logging, or `{ }` to silence them. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-post-commit-failures-are-logged-by-default-040).
+
+- **BREAKING (behavior): states are declared when the store is constructed,
+  and `snapshot()` captures never-read ones (issue #20, R5).** `val x by state
+  { … }` used to register nothing until `x` was first read, so a snapshot of a
+  fresh (or partly used) store silently missed every state nobody had read yet,
+  and restoring into such a store failed on them. Delegating the property now
+  DECLARES the state on its store (through the new
+  `StateDelegate.provideDelegate`) without running the initializer; the state
+  is MATERIALIZED from its initializer on its first read, or when `snapshot()`
+  or `restore()` needs it. So:
+  - `snapshot()` runs the initializer of every declared state that was never
+    read, and its snapshot holds every declared state — at its initial value
+    if untouched. A throwing initializer makes `snapshot()` throw.
+  - `restore()` materializes a declared target itself; touching the states of
+    a fresh store before restoring into it is no longer needed.
+  - `removeState`/`clearStates` keep the declaration: the next read, or
+    snapshot, creates the state again from its initializer.
+  - `properties`, `getState` and `hasState` still report materialized states
+    only.
+
+  The store takes no lock to run an initializer (a first need inside an
+  action still runs it under that action's locks); it runs once per
+  materialization, on the thread that first needs the state. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-states-are-declared-eagerly-040).
+
+- **BREAKING (behavior): a state initializer may not write, and an
+  initializer cycle throws.** An initializer runs at an unpredictable moment —
+  a first read inside some action, a commit's fanout, or now a `snapshot()` —
+  so a write from it landed there. Inside an initializer, `mutate`/`update`,
+  `action`, `atomic` and `emit` (and `:holdfast-coroutines`' `suspendAction`
+  and `suspendAtomic`) now throw an `IllegalStateException` naming the state
+  being initialized; reading other states is fine. An initializer that needs
+  its own state — directly, or through other initializers, on one thread or
+  across threads — used to overflow the stack, or deadlock when two stores'
+  initializers needed each other on two threads; it now throws an
+  `IllegalStateException` naming the chain (`CycleStore.x → CycleStore.y →
+  CycleStore.x`). Both leave the state unmaterialized, so the next read runs
+  its initializer again.
+
+- **BREAKING (behavior): a state initializer reads committed values only.**
+  An initializer that ran inside an action — because that action was the
+  first to need its state — read the action's uncommitted writes, and seeded
+  the state from them. The seed was committed at once, visible to every
+  thread, and survived the action's rollback, so a rolled-back write could
+  leak into committed state for good; now that `snapshot()` and `restore()`
+  materialize never-read states, a snapshot taken inside an action could also
+  pair one state's committed value with another's value computed from a
+  pending write. Inside an initializer, a read of any state now returns its
+  committed value, even on the thread whose action has pending writes to it.
+  So `store action { a mutate 5; b.value }`, where `b`'s initializer reads
+  `a` and `b` was never read, seeds `b` from the committed `a` — as a fresh
+  store would — rather than from `5`. Reads outside initializers keep
+  read-your-own-writes.
+
+- **BREAKING (behavior): declaring a state name twice fails fast.** Two
+  properties with one name on one store — typically a subclass redeclaring a
+  state of its base class (`override val x by state { … }`) — silently shared
+  one state, created by whichever initializer ran first. The second
+  declaration now throws an `IllegalStateException` when the store is
+  constructed. The same declaration evaluated again still binds to the
+  existing state: a member property of a helper class instantiated twice over
+  one store, or a local delegated property (`val x by store.state { … }` in a
+  function) run twice.
+
+- **BREAKING (behavior): the backing states of `derived` leave
+  `StoreSnapshot.stateNames`.** They were captured as ordinary states under
+  their synthesized names. They are still captured — an undo on the same store
+  restores them in the restore's own commit — but they are no longer in
+  `stateNames` or `size`, and `restore` writes them back only into the store
+  instance that took the snapshot. An undo whose backing state
+  `removeState`/`clearStates` has dropped since skips it, where it used to
+  fail as an unknown state. `properties` and `getState` still list them
+  under their synthesized names. `derived` on a disposed store now throws
+  instead of registering its backing state there.
+
+- **BREAKING (behavior): `restore(snapshot)` ignores state names the store
+  does not declare** (issue #20, R1). It returned `TransactionResult.Error`
+  ("snapshot contains state 'x' not registered on this store"); it now
+  restores the states it does declare and leaves every declared state the
+  snapshot has no value for as it was, without firing its observers — the
+  experimental `RestorePolicy.IgnoreUnknown`. Pass `RestorePolicy.Strict` to
+  the experimental overload for the old strictness. Three smaller changes come
+  with it: a value whose class the target state cannot hold (a `String` for an
+  `Int` state, from another store class's snapshot) now fails the restore,
+  naming the state, instead of being staged and failing later at a read;
+  never-read target states are materialized before the restore's action
+  opens, so at top level their initializers no longer run under the store's
+  `transactionLock`; and the restore's transaction id is `Restore`. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-restore-ignores-unknown-state-names-050).
+
+- **BREAKING (behavior): `StoreSnapshot` has value equality.** `equals` and
+  `hashCode` were identity. Two captured snapshots are now equal when they hold
+  the same state names with `==` raw values, whichever store instances took
+  them (so a store after `reset()` and a fresh one have `==` snapshots), and
+  two decoded snapshots when they hold the same text; the backing states of
+  `derived`, and which codecs the states declare, take no part (so equal
+  snapshots from stores with different codecs can encode differently).
+  `toString()` lists the state names, never a value.
+
+- **`:holdfast-testing`: `shouldMatchSnapshotOf` compares every declared
+  state**, read or not, since snapshots now cover them; two stores that only
+  differed in which states had been read no longer mismatch on state names.
+  The backing states of `derived` are not compared.
+
+- **`MutableState.toString()` names the state** — `MutableState(CounterStore.count)`
+  (`MutableState(a state of CounterStore)` for one constructed by hand)
+  instead of the default identity string. It never shows the value, so a
+  modified-states set in a log line cannot leak a `Secret` value (it never
+  showed values before either).
+
+- **`Store.state`'s delegate reads take no lock once the state exists.** A read
+  used to look the state up by name under `propertiesLock` every time. And
+  `removeState`/`clearStates` shut a removed state's observers and bridge down
+  after releasing that lock, as `dispose()` always did.
+
+- **BREAKING (behavior, misuse only): a `derived()` source that no store
+  produced fails with `IllegalArgumentException`.** A `computed { }` state
+  (or any foreign `State`) passed as a source of `derived` (or
+  `:holdfast-coroutines`' `suspendDerived`) used to fail with a bare
+  `ClassCastException`; it now fails with an `IllegalArgumentException` that
+  says why (a `computed` state has no commits to follow) and what to list
+  instead — before the initial compute runs, so a refused call registers no
+  backing state and subscribes to no source. A `derivedState`/`merged` state
+  is accepted as a source.
+
+- **BREAKING (behavior): an `atomic` frame applies every participant before
+  any fans out (issue #20, R9).** Participants used to commit one after the
+  other in lock order, each fanning out — observers, bridge publishes,
+  events — before the next one applied. Now every participant's writes are
+  assigned inside one write bracket spanning all their states, and only then
+  does each fan out, in lock order; `FrameObserver.onFrameCommitted` still
+  fires last. What changes for observers of a participant:
+  - a write into a LATER participant (`b`, while `a` fans out) is refused
+    like any write into an applied transaction — `mutate`/`update`/`emit`
+    throw an `IllegalStateException` that reaches `uncaughtObserverHandler`,
+    a nested `action`/`atomic` returns `TransactionResult.Error` — where it
+    used to stage into that participant's still-open root and commit with the
+    frame (the same already held for earlier participants). Make the write
+    part of the frame body, or derive the value;
+  - every thread reads every participant's committed value during the
+    fanout (see Fixed);
+  - a participant whose fanout fails (a throwing `uncaughtObserverHandler`)
+    no longer keeps the later ones from committing: they have applied
+    already, so they fan out and commit, and the frame returns the failure
+    as an `Error` (`FrameObserver.onFrameRolledBack` fires, although every
+    participant's values stand). It used to roll them back. An apply that
+    throws (a `distinct` state's `equals`) still commits the participants
+    applied before it and rolls the rest back — now including every
+    participant joined as a savepoint of an enclosing action or frame, whose
+    writes used to be merged into that enclosing transaction first, and so
+    committed with it although the frame reported an error;
+  - `onTransactionError` fires only on the participants that roll back. A
+    participant that committed — or failed in its own apply or fanout — no
+    longer gets it after another participant's apply or fanout failed, as a
+    single `action`'s commit failure reaches no middleware either.
+  See [MIGRATING.md](../MIGRATING.md#behavior-change-frames-apply-whole-derived-states-settle-once-per-entry-060).
+
+- **BREAKING (behavior): `derivedState`/`merged` settle once per outermost
+  entry (issue #20, R9; answers #20's open question 2: coalescing is not a
+  mode).** Every `action`, `atomic`, `suspendAction` and `suspendAtomic`
+  (and so `reset()` and `restore`) is an entry; one nested in another joins
+  the outermost one on its thread. A derived state whose sources an entry —
+  and everything nested in it — changes recomputes once, after the outermost
+  entry has exited and released every store: however many sources, stores,
+  nested actions or frame participants. It used to recompute after each
+  source commit, so a derived state over sources written by two actions
+  nested in a third recomputed twice, and inside the outer action it already
+  reflected the first write. Now, inside an entry, a derived state reflects
+  none of that entry's writes; read the sources, or a `computed { }` state,
+  for them. An initial compute that read no uncommitted value no longer
+  queues a catch-up recompute (see Fixed for one that did). A recompute
+  queued by a store's last commit before that store is disposed from its
+  own observer runs when the entry settles, no longer inside `dispose()`.
+  The legacy `derived` keeps its per-commit recompute (once per changed
+  source for a source on another store while its own store is idle) until
+  the 0.7.0 triage.
+
+- **BREAKING (behavior): an `atomic` frame's post-commit work runs once the
+  outermost entry on its thread has exited.** The `derived` recomputes (and
+  hand-offs) queued on the stores whose roots a frame opened were drained
+  when the frame exited; a frame nested in an action or another frame now
+  leaves them to the settle of the outermost one, which runs after that has
+  released every store. A frame that is itself the outermost entry drains
+  exactly as before.
+
 ### Added
+
+- **Sealed states, and hooks for machinery that drives a store**
+  (`@StoreInternalApi`, issue #20, R8; plan PR 13): what `:holdfast-coroutines`'
+  hydrator is built on (see its changelog). Nothing here is user surface, and
+  nothing changes for a store without a hydrator.
+  - `internalSealedState(name, initial, refusal)`: a new `distinct` state of the
+    store that library machinery keeps for itself. It commits, rolls back and
+    fires its observers like a declared state, but `mutate`, `update`,
+    `bridge`, `observeFrom` (and setting `MutableState.bridge`) refuse it with
+    `IllegalStateException` — "Cannot write `Store.name`: " plus its owner's
+    teaching text — and an inbound bridge value for it is dropped. It is never
+    registered: `snapshot()` never captures it (`StoreSnapshot.entry`/`get`
+    refuse it with `IllegalArgumentException`, even when a declared state has
+    its name), `restore` and `reset()` never write it, and `properties`,
+    `taggedStates`, `removeState` and `clearStates` never see it. A new internal
+    `StateKind.Sealed` names it in messages.
+  - `internalStageSealed(state, value)`: its owner stages it into the store's
+    transaction open on this thread (or a `suspendAction`'s), where it commits
+    or rolls back with that transaction; refused outside one, into a
+    transaction closed to writes (an observer of its commit), from a no-write
+    region, and inside an `atomic` frame that does not enroll the store.
+  - `internalTopLevelAction(id, body)`: a top-level transaction, middleware
+    chain included, for a caller that already holds the store's serializer —
+    the hydration gate. It takes `transactionLock`, refuses to open under an
+    active transaction, joins (or opens) the thread's settle scope, and
+    leaves the post-commit drain to its caller: `Store.tryTopLevelAction`'s
+    list of top-level holders that drain after they release now names the
+    gate.
+  - `Transaction.internalForbidStructuralWrites(reason)`: `removeState` and
+    `clearStates` throw `IllegalStateException` with `reason` on that
+    transaction's owner thread while it, or a savepoint of it, is the store's
+    active transaction — they drop states at once, where its rollback cannot
+    reach (a hydrator's `adopt { }`).
+  - `State.internalQualifiedName`: `Store.name` for a message (`Store.docs[*]`
+    for a keyed entry), never a value.
+  `DisposedEntrypointTest` has rows for the three store entrypoints;
+  `SealedStateTest` pins the rest. iOS unverified until a macOS run.
+
+- **Keyed state families** (experimental, issue #20, R7; plan PR 12):
+  `val docs by keyedState<K, T>(transformer, distinct, codec, keyCodec, tags) { key -> … }`
+  declares, on its store and under the property's name, a family of
+  ordinary states, one per key. `KeyedStateProvider.provideDelegate`
+  declares it when the store is constructed, running no initializer;
+  families and states share the store's names (a second declaration of a
+  name fails, unless the same declaration runs again), and the refused tag
+  combinations fail the family's declaration.
+  - `KeyedState<K, T>`: `docs[key]` returns the key's entry — created the
+    first time from the family's initializer, through the same latch,
+    no-write region and cycle detection as a declared state's first read
+    (it runs once, reads committed values, may not write; a throwing one
+    creates nothing) — and the same `State` while it lives. `getOrNull`,
+    `contains` and `entries` (live entries, in creation order) never create
+    one. Creating an entry is not a write: a rollback leaves it live at its
+    initial value. Entries are kept by the family, outside the declared
+    states: `properties`, `getState`, `removeState` and `clearStates` never
+    see one.
+  - `evict(key)`/`evictAll()` are transactional: staged like `mutate` into
+    the store's transaction on this thread (else a one-shot action),
+    dropping its pending write to the entry; the transaction reads its own
+    staged evictions, and the last operation on an entry wins (a later
+    `docs[key]` or write cancels the eviction; inside a
+    `suspendAction`/`suspendAtomic` body only a write does, since a `get`
+    there could come from another coroutine on the body's thread, and a
+    `get` from an `atomic` frame body that does not enroll the store leaves
+    the enclosing action's eviction staged, as the frame's rollback could
+    not undo the cancel), also across savepoint merges. The commit applies the evictions in its apply pass, inside the
+    same write bracket as its writes, so a consistent cut never sees one
+    without the other; the fanout then shuts each evicted entry down —
+    observers dropped silently, bridge detached, the inbound subscriptions
+    its `observeFrom` calls made disposed — before any observer runs.
+    Rollback discards them. An evicted entry's `State` is a stale handle:
+    reads keep its last value, `mutate`/`update`/`bridge`/`observeFrom`
+    throw `IllegalStateException` (so does setting `MutableState.bridge`
+    on one directly, checked under the bridge lock so an attach racing the
+    eviction never leaks a subscription), and an inbound bridge value is
+    dropped.
+    Every other entry keeps its observers and bridges. An eviction from the
+    store's own commit fanout is deferred through the post-commit queue —
+    the one write that defers instead of failing (D16): once the commit has
+    released the store, the entries live at the call (not evicted
+    meanwhile, never one created after it) are evicted by a transaction of
+    their own, id `Evict`, that never waits for the store. It runs through
+    the never-blocking `tryTopLevelAction` and is handed to the store's
+    holder when the store is busy, so a suspending call's drain never spins
+    waiting for the coroutine it just handed the store's mutex to. Another thread's
+    eviction while a `suspendAction`/`suspendAtomic` holds the store joins
+    its transaction before it applies and is refused after (the known
+    foreign-thread staging gap, pinned by a test).
+  - `Transaction.stagedEvictions`: the entries a transaction evicts, next to
+    and disjoint from `modifiedStates` (owner thread only).
+  - Snapshots: `snapshot()` captures every live entry of every family its
+    scope captures (`UserAuthored`: the `UserAuthored` families), under the
+    family's name, which `stateNames` lists; captured equality compares the
+    families' keys and raw values. A capture reads entries in its one
+    consistent cut and lists them again when, between its listing and its
+    cut, an entry of a family it captures came to life while a commit (or
+    an inbound bridge write) of a captured store applied, so it never shows
+    a write without an entry created before it; after a few such retries it holds entry creation back
+    on the captured stores for its listing and cut (which run no user code),
+    so it always completes. It never blocks a writer.
+    `StoreSnapshot.keysOf(family)` lists a snapshot's keys, and
+    `snapshot[docs[key]]`/`entry(...)` reads one entry (a capture answers
+    its own store's families; decoded text, any store's, by family name and
+    the key its `keyCodec` encodes). `encode()` writes a family with a
+    `codec` and a `keyCodec` as `{"encodedKey": text | null}` under its name
+    in `states`, sorted by encoded key; a family without both is listed in
+    `skipped` and `unencodableStateNames`; two keys encoding to one text fail
+    the encode. `restore` creates the entries a snapshot holds that are not
+    live (before its action opens, as it materializes declared targets) and
+    stages their values raw, the policy applying to each entry (an issue
+    names the family, never the key); it never evicts. A `Secret` family's
+    values are withheld as a Secret state's are — `null` on the wire,
+    `Redacted` outside `SnapshotScope.Raw`, `<redacted>` in `render()` — but
+    its keys are written and rendered; a `Remote` family is left out of `encode()` unless
+    `includeRemote`, and a sterile restore drops its entries and resets its
+    live ones.
+  - `reset()` (and a sterile restore, for `Remote` families) re-runs the
+    initializer of every live entry, reading reset values like a declared
+    state's, stages the result raw where it differs, and never evicts
+    (`ResetPass.addLiveKeyedEntries`); an entry its transaction evicts is
+    left to the eviction, and read at its committed value. An entry an
+    initializer creates during the pass is reset too (its initializer runs
+    twice), as is, in a sterile restore, a non-`Remote` entry the restore
+    brought to life, so the store holds what a fresh store's first reads
+    would.
+  - An evicted entry's shutdown runs every step even when one throws: its
+    bridge is detached and every `observeFrom` subscription disposed, and
+    the failures are reported through `uncaughtObserverHandler` once every
+    evicted entry is shut down.
+  - `EncodedSnapshotView.Families` is editable in `SchemaVersioned.migrate`:
+    `get(name)` (a copy of the family's encoded entries), `put`, `remove`,
+    `rename` and `contains`, beside the existing `names`.
+  - Names, never keys: an entry prints as `MutableState(Store.docs[*])`,
+    no library message names a key, and `ProfilingMiddleware` counts writes
+    to any entry under `docs[*]`. `State.tags` of an entry is its family's,
+    and `taggedStates` lists the live entries of families carrying the tag.
+  - `@StoreInternalApi` for issue #21: `Store.internalKeyedAddress(state)`
+    (`KeyedAddress(family, key)` of an entry, `null` for any other state;
+    answers after eviction and dispose) and
+    `Store.internalObserveKeyedMembership(KeyedMembershipListener)` (told of
+    every entry created, and evicted — at the start of the evicting
+    commit's fanout; one entry's two callbacks are serialized, added always
+    first and never after its eviction, but different entries of one key
+    are not ordered, so a listener tracks entries by identity), and
+    `Store.internalKeyedFamily(name)`.
+  - `:holdfast-testing`: an entry's write is an `EmissionEvent` naming the
+    entry's `State`, like any state's (find it by identity); a `Secret`
+    family's entries record `Redacted`, and nothing the harness prints
+    names a key. `shouldMatchSnapshotOf` compares keyed state families entry
+    by entry (key sets, then each entry's value; failure lines never name a
+    key, nor a Secret family's value) and fails on a name that is neither a
+    state nor a family of both stores, instead of passing it unchecked. A
+    bridge attached to an entry is not wrapped, so its publishes and inbound
+    values are not recorded.
+  - Tests: `KeyedStateTest`, `KeyedStateEvictionTest`,
+    `KeyedStateSnapshotTest`, `KeyedStateResetHookTest`,
+    `KeyedStateFrameTest`, `KeyedStateConcurrencyTest` (JVM),
+    `KeyedEvictSuspendGapTest` and `KeyedDeferredEvictionTest` (JVM,
+    `:holdfast-coroutines`), `KeyedStateTimelineTest` and
+    `KeyedSnapshotMatcherTest` (`:holdfast-testing`), a family-editing
+    `migrate` test, and `DisposedEntrypointTest` rows.
+
+- **Settle scopes and frame commit hooks** (`@StoreInternalApi`, issue #20
+  plan PR 11; `:holdfast-coroutines` and `:holdfast-testing` drive them, and
+  issue #21's `Root` builds on them):
+  - `SettleScope` — the derived-state recomputes and frame post-commit
+    drains one outermost entry queued: `settle()` runs them all (store drains
+    first, then recomputes lowest rank first, work queued meanwhile
+    included) and closes the scope, `isOpen`. A task, or a frame's drain of
+    one store, that one settle already ran 1,000 times — a feedback loop
+    through a derived state's observer, or through frames that legacy
+    `derived` observers open on each other's stores — is not run again: the
+    task is handed to its host's post-commit queue and the store's queue is
+    left to its next holder, so a settle always ends. The cut is reported
+    once per settle through that store's `uncaughtObserverHandler` (logged
+    while none is set): the work left over waits for the store's next
+    holder, so on an idle host a derived state lags its sources until then
+    (`DerivedState` and GUIDE §16.5 document it).
+  - `SettleScopes.current()`/`install(scope)`/`open()` — the thread-local
+    slot, which `:holdfast-coroutines` keeps coherent across dispatch.
+  - `internalSettling { }` — run a block as an entry (the harness's open
+    transactions); `Store.internalDrainPostCommitTasksWhenSettled()` — a
+    frame's owed drain, deferred to the settle.
+  - `applyFrameCommit(transactions)` → `FrameApply(applied, failure)` and
+    `Transaction.fanOutApplied(fanout, drainEvents)` — a frame's apply pass
+    over all its participants in one write bracket, then each participant's
+    fanout. `Transaction.commitDispatching` runs the two for one transaction.
+  - Internal: `captureConsistent(stores, scope)` — snapshots of several
+    stores from one consistent cut (#21's T4 primitive); `snapshot()` is its
+    one-store case.
+  - `:holdfast-testing`: an open transaction's `commit()` and `rollback()`
+    (and a throwing body's cleanup) are entries: the derived states the
+    commit changes a source of settle once, in rank order, after the lock is
+    released.
+
+- **Store attachments** (`@StoreInternalApi`, issue #20 plan PR 10; the slot
+  `:holdfast-coroutines`' hydration and issue #21's tree membership build on):
+  - `StoreAttachment` — library machinery attached to one store for its
+    lifetime. Every member has a default: `onStoreReset()`, `onStoreDisposed()`
+    and `persistenceKeys` (the keys the attachment persists its store under,
+    for #21's T6 self-check; empty by default).
+  - `StoreAttachmentKey<A>(name)` — the typed address of one kind of
+    attachment; keys compare by identity, never by name.
+  - `Store.internalAttachIfAbsent(key) { create }` returns the attachment
+    under `key`, attaching the one `create` builds when there is none. Racing
+    callers get one winner, and only the winner's `create` runs: under the
+    slot's own lock, which takes neither `transactionLock` nor the registry
+    lock (an attach from inside an action still runs it under that action's
+    locks). In the store's lock order the slot lock comes after
+    `transactionLock`, `middlewareLock` and initializer latches and before
+    the registry lock, so `create` may only build the attachment, register
+    internal states and attach under other keys — no action, `reset`,
+    `restore`, `dispose` or middleware change on the store, no first read of
+    one of its states, no other store, no waiting for another thread. A
+    `create` attaching its own key throws; one that throws attaches nothing
+    and runs again next time. Attaching works from a
+    base class's `init` block, before the subclass has declared its states —
+    the slot is independent of the state registry, so an attachment made
+    there looks the store's declarations up later (#21 T3). Throws on a
+    disposed store.
+  - `Store.internalAttachment(key)` and `Store.internalAttachments()` (attach
+    order) read without a lock and never throw: after `dispose()` they answer
+    `null` and an empty list.
+  - `reset()` tells every attachment, in attach order, inside the reset's
+    transaction once the declared states' resets are staged — on the
+    resetting thread and outside the no-write region, so an attachment reads
+    the reset values and what it stages commits or rolls back with the reset
+    (also for a reset staged into an `atomic` frame's root). A throwing
+    `onStoreReset` rolls the whole reset back. A sterile `restore` tells no
+    attachment.
+  - `dispose()` closes the slot under `transactionLock` (a reset in progress
+    has finished telling the attachments, and one that runs afterwards tells
+    none), drops the attachments, then — as its last step, after `onDispose`,
+    holding no lock it took (though under any lock its caller holds: from
+    inside an action, observer or reset of the store, that includes its
+    `transactionLock`; only a top-level `dispose()` leaves `onStoreDisposed`
+    free to call into other stores) — tells each once, in attach order. A
+    throwing `onStoreDisposed` goes to `uncaughtObserverHandler` (or, with
+    none set, the default log, under a dispose line of its own naming the
+    store and the attachment rather than the post-commit one) and the rest
+    are still told; a handler that throws there is ignored, and `dispose()`
+    itself still never throws. An attach racing `dispose()` either lands
+    before the close, and is told, or fails with "store disposed".
+
+- **Derived states and `merged`** (`@ExperimentalStoreApi`, issue #20 R6):
+  - `DerivedState<T>` — a sealed, read-only `State<T>` that is its own
+    `Disposable`, returned by the two builders below. Declare one with `by`
+    (its `getValue` operator returns the `DerivedState` itself) or `=`.
+    `mutate`, `update`, `bridge` and `observeFrom` on it (or on its backing
+    state) throw `IllegalStateException`. `dispose()` stops recomputation and
+    releases the source subscriptions; the value stays readable. A disposed
+    host stops recomputing, and the next commit of a source on another store
+    drops that subscription.
+  - `derivedState(vararg sources) { … }` — computed from `sources` (states of
+    any store, `derived` and derived states included; a `computed` one or an
+    empty list is an `IllegalArgumentException`) and recomputed ONCE per
+    commit that changes a source, however many sources it changes and on
+    whichever store: the recompute is queued on the committing store's
+    post-commit queue, runs once that commit has released its store (never
+    inside its fanout), and commits through the never-blocking top-level
+    attempt `derived` uses, handing off to a busy host. Sources on two stores
+    written in one `atomic` frame recompute once, after the frame unwinds.
+    The value commits in a transaction of its own on the host (middleware
+    sees it), into an unregistered `distinct` backing state, so observers
+    fire only when it changes. A throwing compute is reported through
+    `uncaughtObserverHandler` and keeps the previous value. A recompute never
+    commits writes that may still roll back: its compute reads committed
+    values only, never the pending writes of an action on its thread, and may
+    not write (a write, `action`, `atomic`, `reset()`, `restore` or `emit` from
+    it throws, reported like any failing recompute). A source commit nested in
+    a blocking action (or a frame inside one) on another source's store
+    recomputes once that action ends. A `suspendAction`/`suspendAtomic`
+    holding a source's store never holds a recompute back, even one parked on
+    the recomputing thread (Android's main thread, `runBlocking`, wasmJs): it
+    recomputes at once from committed values, and again after that action
+    commits. A source value that arrives outside a commit (`bridge`,
+    `observeFrom`) recomputes at once on an idle host. The derived state
+    subscribes to its sources before its initial compute, so a source commit
+    landing during that compute is recomputed rather than lost; created
+    inside an action on its store or a source's store, it sees that action's
+    pending writes and recomputes from committed values once the action ends,
+    rollback included.
+  - `merged(local, remote) { l, r -> … }` — a derived state over two
+    different states the store declares: the user's side and sync's.
+    Another store's state, a `derived`, derived, `computed` or internal
+    state, or the same state twice is an `IllegalArgumentException` naming
+    it; the inputs' tags are the caller's to choose (`UserAuthored` for
+    `local` and `Remote` for `remote` is the advice, not a check). An
+    adoption that writes `remote` leaves `local` and its observers alone and
+    recomputes the merge once.
+  - Tags: a derived state carries `StateTag.Secret` when a source does
+    (transitively), never `UserAuthored` or `Remote`. It is not store state:
+    `snapshot()`, `encode()`, `restore`, `reset()`, `properties` and
+    `taggedStates` never see it (a typed snapshot read of it is refused), and
+    it recomputes after `reset()`/`restore` write its sources.
+  - Known gaps until frames settle derivations (R9, 0.6.0) — both closed by
+    the settle entries under Fixed: a recompute that races another thread's
+    `atomic` frame over sources on two stores could commit a torn pair,
+    which that frame's own recompute then corrected; and the initial
+    compute, when it read a state it does not list as a source on a thread
+    holding an action on that state's store, read the action's uncommitted
+    writes — if that action rolled back, the value stayed as computed until
+    the next commit that changed a source.
+  - `Store.dispose()` drains its post-commit queue instead of clearing it. A
+    store disposed from inside its own commit's fanout, or racing that commit
+    from another thread, still runs the recompute that commit queued for a
+    derived state hosted on another, live store, on the calling thread. A
+    recompute hosted on the disposed store does nothing.
+  - Observation paths resolve a derived state to its backing through the
+    new `@StoreInternalApi` `State<T>.observableBacking()` (a `MutableState`
+    itself, a derived state's backing, `null` for a `computed` one):
+    `effect`, `observerCount`, `State.tags`, `derived` sources,
+    `:holdfast-coroutines`' flows and `suspendDerived` sources, and
+    `:holdfast-testing`'s timeline lookups (`emissions`, `bridgeEvents`,
+    `bridge` and the `emitted` matchers resolve a derived-state property to
+    the backing state its recompute's `EmissionEvent` names, recorded with
+    its committed old value); `:holdfast-compose`'s `collectAsState` works
+    through `effect`. The legacy `derived` `Pair` API is unchanged until the
+    0.7.0 triage.
+  - GUIDE §16.5 documents all of it, with a compiled example.
+
+- **`StateDelegate.provideDelegate(thisRef, property)`** — a default member
+  (returning the delegate itself) that the delegate `Store.state` returns
+  overrides to declare the state on its store when the property is delegated.
+  Additive: `StateDelegate` stays a `fun interface`, and `state(…)` keeps its
+  signature and return type. A wrapping delegate should forward it (as
+  `:holdfast-hallmark`'s `boxedHandle` does) so its state is declared
+  eagerly; one that only forwards `getValue` declares on first read.
+
+- **`Store.registerDerivedBackingState(name, initial, sources, distinct)`**
+  (`@StoreInternalApi`) — registers the backing state of a `derived`/
+  `suspendDerived`, which `snapshot()` captures but hides from `stateNames`
+  and `restore()` writes back only into the same instance. Throws on a
+  disposed store. `registerInternalState` stays for compatibility; its KDoc no
+  longer claims Kotlin identifiers cannot start with `__` (they can: the
+  synthesized names are chosen to be unlikely, and a collision now fails
+  fast). Companion modules only.
+
+- **`Store.internalRefuseInitializerWrite(attempt)`** (`@StoreInternalApi`) —
+  throws when a state initializer is running on the calling thread;
+  `:holdfast-coroutines` polices `suspendAction`/`suspendAtomic` with it.
+  Companion modules only.
+
+- **`Store.internalReportUncaughtFailure(error)`** (`@StoreInternalApi`) — the
+  one reporting path for post-commit failures: `uncaughtObserverHandler` when
+  set, the default log otherwise. `:holdfast-coroutines` reports its suspending
+  bridge-publish failures through it. Companion modules only.
+
+- **`FanoutMarkers`** (`@StoreInternalApi`) — a thread-local marker naming the
+  transactions (roots, or a nested frame's savepoints) whose suspending commit
+  the current thread is running.
+  `:holdfast-coroutines` installs it around the commit phase of
+  `suspendAction`/`suspendAtomic` and keeps it coherent across dispatch, so a
+  blocking `action`/`atomic` from inside that commit is recognised as nested
+  and refused instead of waiting for the serializer the commit holds.
+  Companion modules only.
+
+- **`Store.clock` and `Store.bindClock(clock)`** (`@ExperimentalStoreApi`,
+  issue #20 R10) — time as an input. Store code reads `clock.now()` instead of
+  `Clock.System.now()`, so a timestamp stamped in an action, or an initial value
+  computed from the time, is deterministic under a fixed test clock. `clock`
+  resolves like `scope`: a subclass getter override, then the clock bound with
+  `bindClock`, then `Clock.System`. `bindClock(null)` unbinds; `bindClock` throws
+  on a disposed store, while reading `clock` never throws. State initializers
+  read it lazily, when the state is first needed (its first read, or
+  `snapshot()`/`restore()`), so bind before that. The
+  library's own timestamps (`Transaction.endTime`, `TimingMiddleware`,
+  `ProfilingMiddleware`) keep using the system clocks. `Store.internalBoundClock`
+  (`@StoreInternalApi`) exposes the raw binding for the test harness.
+
+- **`:holdfast-testing`: `storeTest { }` teardown restores the clock binding of
+  every tracked store.** Tracking a store (with `track`, or by an
+  auto-registering extension such as `store.read { }`; a bare
+  `store.action { }` resolves to the `Store` member and does not track)
+  remembers its `bindClock` binding. Teardown puts it back, also when the body
+  failed, and again once the test's un-joined child coroutines have finished.
+  A clock bound after tracking therefore does not leak into the next test
+  through a singleton store. Bind after tracking: a clock bound before the store
+  is first tracked counts as the pre-test binding and is kept, and a store the
+  test never tracks is not restored. Work in `backgroundScope` or on scopes
+  outside the test is not waited for, so join it before the body ends. A store
+  disposed during the test is skipped.
+
+- **`Store.reset()`** (`@ExperimentalStoreApi`, issue #20 R4) — puts every
+  declared state back to what its initializer computes, in one transaction,
+  so every declared state holds the raw value a newly constructed store's
+  holds once read (so the two stores' snapshots are `==`, and
+  `shouldMatchSnapshotOf` against a new store passes) — except a state whose
+  initializer reads a `derived` state computed from states the reset changes,
+  which reads the derived's pre-reset value. The store keeps each
+  state's initializer for its lifetime, and `reset()` runs them again in
+  declaration order. An initializer that reads another declared state of the
+  store reads that state's reset value, running that initializer first if it
+  has not run yet (so forward references work); anything else it reads, such
+  as another store's state or a `derived` state, it reads at the committed
+  value. The results are staged raw, without `Transformer.set`, like initial
+  values (an encrypted state is not encrypted twice), and only where they
+  differ (`==`) from what the transaction holds, so observers and bridges fire
+  once for each changed state and never for an unchanged one, even with
+  `distinct = false`. Never-read and removed states are materialized first,
+  before the transaction opens; `derived` states are not reset and recompute
+  after the commit. Once the reset has decided a state's value,
+  `removeState`/`clearStates` refuse that state with `IllegalStateException`
+  until the reset's transaction ends. Middleware sees one transaction (id `Reset`); inside an
+  action the reset is a savepoint, and inside `atomic(...)` it joins the
+  frame. A throwing initializer or an initializer cycle rolls the whole reset
+  back and returns `TransactionResult.Error`. Like `action`, it throws on a
+  disposed store, from inside an initializer, inside a `suspendAtomic`
+  body that enrolls the store (`FrameInteropException`), and inside an
+  `atomic`/`suspendAtomic` body that does not enroll it
+  (`UnenrolledStoreException`, unless the frame's policy allows unenrolled
+  writes). See GUIDE §16.1.
+
+- **`StateCodec<T>`** (issue #20, R1) — turns a state's raw stored value into
+  text and back, so a snapshot can leave memory. `bridge.Codec<T>` now extends
+  it, binary-compatibly (`Codec` keeps its own `encode`/`decode` members and
+  gains the supertype), so `StringCodec`, `IntCodec`, `LongCodec`,
+  `BooleanCodec` and every `KvBridge` codec are state codecs. Stable from this
+  release, unlike the rest of the snapshot-encoding surface: a recorded
+  exception to the roadmap's soak rule, since `Codec`'s contract already fixes
+  its shape.
+
+- **Snapshots that leave memory** (`@ExperimentalStoreApi`, issue #20 R1):
+  - `Store.state(transformer, distinct, codec, tags, initialize)` — an
+    overload of `state` that gives the state a `StateCodec` (and state tags;
+    see "State tags" below). A call that passes neither (`state { … }`,
+    `state(transformer = t) { … }`) still resolves to the stable overload and
+    needs no opt-in. It throws on a disposed store.
+  - `StoreSnapshot.encode(includeRemote = false)` and
+    `StoreSnapshot.decode(text)` — canonical text in the v1 store format,
+    `{"format":"holdfast.store","v":1,"schema":N,"states":{…},"skipped":[…]}`:
+    each state with a codec as its codec's text, states sorted by name, one
+    fixed escaping (unpaired surrogates escaped). A state without a codec is
+    listed in `unencodableStateNames` and `skipped`, never written; `derived`
+    states are never encoded. `decode` skips fields it does not know, rejects
+    containers nested deeper than 64 levels without deep recursion, and throws
+    `SnapshotFormatException`, whose message names the problem, an offset
+    and possibly a state name but never quotes a state's value, and which has
+    no cause. `includeRemote` decides whether `Remote` states are written
+    (see "State tags" below). `schemaVersion` is the
+    schema version of the store captured (see "Schema versions" below).
+  - `StoreSnapshot.entry(state)` / `snapshot[state]` — typed reads through a
+    `State`: `SnapshotEntry.Present(value)` (the `Transformer.get` view, so an
+    encrypted state reads plaintext), `SnapshotEntry.Absent`, or `Redacted` (a
+    value withheld from the text, or a `Secret` state's value). A captured snapshot answers the states of
+    the store instance that took it and throws `IllegalArgumentException` for
+    another instance's; a decoded one answers any store's state by name,
+    through that state's codec. Both work after the store is disposed.
+    `render()` shows the stored values for debugging.
+  - `restore(snapshot, policy, sterile = false): TransactionResult<RestoreReport>`
+    (`sterile`: see "State tags" below) with
+    `RestorePolicy` (`Strict`, `IgnoreUnknown`, `BestEffort`),
+    `RestoreReport` (`restored`, `kept`, `issues`, and `sterilized`), `RestoreIssue`
+    (`UnknownState`, `NoCodec`, `Undecodable`, `TypeMismatch`) and
+    `RestoreRejectedException`. The restore decides everything before its
+    action opens — materializing never-read targets and running codecs, at top
+    level without holding the store's locks — then stages the raw values in
+    one action; a rejected restore changes nothing, and inside `atomic(...)`
+    it aborts the frame. A type witness rejects a captured value whose class
+    the target state cannot hold: a different class is refused only when
+    either class is a built-in value type (`String`, `Boolean`, `Char`, a
+    primitive number), so subclasses and sealed siblings always pass, and
+    snapshots of the same store class, or decoded ones, are not checked. That
+    skip trusts the class, not its type arguments: a generic store's
+    `Box<Int>` snapshot restores unchecked into a `Box<String>`, and the wrong
+    value surfaces as a `ClassCastException` where the state is read.
+  - No exception these APIs throw carries a state's value in its message or
+    cause chain.
+  - GUIDE §16.2 documents all of it, with a compiled, plugin-free
+    `KSerializerCodec` recipe for `kotlinx.serialization` types (the library
+    takes no new dependency).
+
+- **Schema versions** (`@ExperimentalStoreApi`, issue #20 R2):
+  - `SchemaVersioned` — an interface a `Store` subclass implements to number
+    its schema (`val schemaVersion: Int`, at least 1) and upcast older
+    snapshots (`fun migrate(from: Int, view: EncodedSnapshotView)`). A store
+    that does not implement it is at version 1. `Store` itself gains no
+    member. `snapshot()` records the store's version in
+    `StoreSnapshot.schemaVersion`, `encode()` writes it as `"schema"`, and a
+    version below 1 makes `snapshot()` throw and `restore` fail.
+  - `restore` (both overloads) now checks the snapshot's version against the
+    store's before anything else, under every policy. At the same version
+    the snapshot restores as it is. An older decoded snapshot is upcast by
+    `migrate`, once, on a copy of its encoded text, and the restore reads the
+    edited copy. A newer snapshot, a captured snapshot of another version
+    (raw values cannot be migrated; restore `decode(snapshot.encode())`
+    instead), or a throwing `migrate` fails the restore with the new
+    `SnapshotMigrationException` (`snapshotVersion`, `storeVersion`), naming
+    the store and both versions. Nothing changes, and a refused snapshot runs
+    no initializer or codec. Typed reads (`snapshot[state]`, `entry(state)`)
+    never migrate: they read a decoded snapshot's text as written. A decoded snapshot with `"schema"` above 1 no
+    longer restores into a store that does not implement `SchemaVersioned`.
+  - `EncodedSnapshotView` — the text `migrate` edits: each state's codec
+    text (or `null` for a withheld value) by name, through `stateNames`,
+    `contains`, `get`, `put`, `remove` and `rename`, plus a read-only
+    `families` section naming keyed state families (which keyed states, R7,
+    will fill). The view is a copy, valid only while `migrate` runs.
+  - `migrate` runs while the restore plans, before its action opens, in the
+    same no-write region as state initializers: it reads committed values,
+    and any store write from it (`mutate`, `action`, `atomic`, `restore`,
+    `reset()`, `emit`, and `:holdfast-coroutines`' `suspendAction`/
+    `suspendAtomic` reached through `runBlocking`) throws. Its own exception is never attached to the
+    `SnapshotMigrationException`, since its message may quote an encoded
+    value; a library exception raised inside it (a refused write, a misuse of
+    the view) is.
+  - GUIDE §16.3 documents all of it, with a compiled three-schema example.
+
+- **State tags, snapshot scopes and redaction** (`@ExperimentalStoreApi`,
+  issue #20 R3):
+  - `StateTag` — `Secret`, `UserAuthored` and `Remote`: a closed set that is
+    not exhaustive (an abstract class with an internal constructor, so a
+    later tag breaks no `when` with an `else`). Declared with
+    `state(tags = setOf(…)) { … }` (the set is copied); `Secret` with
+    `UserAuthored`, and `UserAuthored` with `Remote`, fail the declaration
+    with an `IllegalArgumentException` naming the state. `State.tags` reads
+    a state's tags (and keeps answering after dispose); `Store.taggedStates(tag)`
+    lists a store's states carrying one, in declaration order, materializing
+    never-read ones first. A `derived`/`suspendDerived` state is `Secret`
+    when any of its sources is, and never `UserAuthored` or `Remote`.
+  - `Secret` values are withheld, never scrambled: reads (`value`,
+    observers, `effect`, `derived`) stay plaintext, and a captured snapshot
+    keeps the raw value, so `restore(snapshot)` puts it back. `encode()`
+    writes it as `null` in every scope (its codec never sees it); a
+    captured snapshot's `render()` shows `<redacted>`; `entry(state)`
+    returns `Redacted` (and `snapshot[state]` `null`) unless the snapshot
+    was captured with `SnapshotScope.Raw`, and a decoded snapshot never
+    decodes a `Secret` state's text. `:holdfast-testing` records `Redacted` in timeline events
+    (`EmissionEvent`, `BridgePublished`, `BridgeObserved`) and bridge
+    views, refuses value matchers on a `Secret` state with a teaching error
+    (`emitted(prop, value)` throws `IllegalArgumentException`; the bridge
+    value matchers `IllegalStateException`), and keeps `Secret` values out
+    of `shouldMatch`/`shouldMatchExactly`/`shouldMatchSnapshotOf` failure
+    messages. The built-in middleware never showed a state value; tests now
+    pin that for blocking actions, `atomic`, `suspendAction` and
+    `suspendAtomic`.
+  - `SnapshotScope` — `All` (what `snapshot()` captures), `UserAuthored`
+    (exactly the states and keyed state families tagged `UserAuthored`,
+    running only their never-read initializers, no `derived` state), `Raw`
+    (typed reads return `Secret` plaintext, in memory only). `snapshot(scope)` captures in a scope; the
+    scope plays no part in equality.
+  - `encode(includeRemote = false)` now leaves `Remote` states out (neither
+    written nor listed as skipped) unless `includeRemote` is `true`; decoded
+    text carries no tags and is written back as it was read.
+  - Sterile restore: `restore(snapshot, policy, sterile = true)` drops the
+    snapshot's `Remote` entries and resets every `Remote` state to its
+    initial value in the restore's one transaction, through the reset pass
+    (initializers re-run, output staged raw and only where it differs; a
+    never-read `Remote` state is materialized before the action opens); its
+    `Remote` entries are never decoded or type-checked. A `Remote`
+    initializer reads the other `Remote` states at their reset values and
+    the store's other declared states at the values the restore leaves them
+    (restored, else an enclosing action's pending write, else committed), as
+    a fresh store holding them would. A declared state the restore itself
+    brings to life (never read before, materialized by the restore from
+    pre-restore values, not restored, not written since) is recomputed by the
+    same pass from the restored values; a state live before the restore
+    keeps its value. `derived` states are not written back by a sterile
+    restore; they recompute from the restored sources.
+    `RestoreReport.sterilized` lists the reset states, and
+    `removeState`/`clearStates` refuse a state the pass re-ran until the
+    restore's transaction ends. A throwing initializer rolls the whole
+    restore back.
+  - `State<*>.displayValue(value)` (`@StoreInternalApi`) — what
+    `:holdfast-testing` records a state's value as in timeline events and
+    bridge histories (`Redacted` for a `Secret` state). Companion modules
+    only.
+  - GUIDE §16.4 documents all of it, and answers the issue's first open
+    question: redaction is a tag honoured where values are read out of a
+    snapshot, rendered, encoded and recorded, not a `RedactingTransformer`
+    (reads must stay plaintext, and the transformer slot belongs to
+    `EncryptingTransformer`). `EncryptingTransformer`'s KDoc no longer calls
+    the plaintext transient, and says encryption is not redaction.
+
+- **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
+  non-blocking acquire for the store's non-blocking paths (the `derived`
+  recompute hand-off). It has a default that delegates to `blockingAcquire()`,
+  so existing serializers keep compiling, but that default blocks; a serializer
+  a `derived` state can meet should override it.
 
 - **`ProfilingMiddleware`** (`com.vynatix.holdfast.middleware`) — drop-in
   transaction profiler. Records per-transaction monotonic-clock duration,

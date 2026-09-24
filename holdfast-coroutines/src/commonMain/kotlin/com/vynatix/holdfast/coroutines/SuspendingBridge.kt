@@ -42,10 +42,19 @@ interface SuspendingBridge<T : Any> : Bridge<T> {
      * external write is initiated; the suspendAction commit phase wraps every
      * call in `withContext(NonCancellable)` so partial-commit cannot happen.
      *
-     * Throwing surfaces as a failed transaction commit. Implementations that
-     * also publish failures on a hot `errors` flow (e.g. [SuspendingKvBridge])
-     * may suppress the throw and emit on the flow instead — the contract is
-     * that **either the value was accepted or an error was surfaced**.
+     * Throwing cannot fail the commit — its values are already applied: under
+     * `suspendAction`/`suspendAtomic` the exception goes to the store's
+     * `uncaughtObserverHandler` (logged while none is set), and the remaining
+     * states still publish. Implementations that also publish failures on a
+     * hot `errors` flow (e.g. [SuspendingKvBridge]) may suppress the throw and
+     * emit on the flow instead — the contract is that **either the value was
+     * accepted or an error was surfaced**.
+     *
+     * This runs inside the store's commit, which still holds the store: do not
+     * write back into it from here. A `mutate` throws; a blocking `action`
+     * returns an `Error` — except on iOS and wasmJs inside a nested
+     * `withContext(dispatcher)`, where it is not recognised and waits for this
+     * very commit forever.
      */
     suspend fun publishAwaited(value: T)
 

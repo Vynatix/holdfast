@@ -2,9 +2,11 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.fanOutApplied
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -17,23 +19,46 @@ import kotlin.coroutines.cancellation.CancellationException
  * callers use the natural `Mutex.lock(owner)` suspending wait. Shared between
  * the two suspending entry points so a suspendAtomic and a suspendAction on
  * the same store block each other.
+ *
+ * Every blocking acquire locks with a fresh owner token. They used to share
+ * one process-wide owner, and kotlinx `Mutex.tryLock(owner)` does not return
+ * `false` when that owner already holds the mutex — it THROWS
+ * `IllegalStateException`. So while one thread's blocking action held the
+ * serializer, a second thread's blocking action on the same store failed with
+ * a raw mutex error instead of waiting its turn.
  */
 internal class MutexSerializer : Store.AsyncSerializer {
     val mutex = Mutex()
 
+    /**
+     * Owner token of the blocking caller currently holding [mutex], or `null`.
+     * Written only by that caller after it wins the lock and cleared by the
+     * same caller before it unlocks, so it is never contended; `@Volatile`
+     * publishes the value alongside the mutex handover.
+     */
+    @kotlin.concurrent.Volatile
+    private var blockingHolder: Any? = null
+
     override fun blockingAcquire() {
-        while (!mutex.tryLock(SPIN_OWNER)) {
+        val token = Any()
+        while (!mutex.tryLock(token)) {
             com.vynatix.holdfast.platform
                 .threadYield()
         }
+        blockingHolder = token
+    }
+
+    override fun tryBlockingAcquire(): Boolean {
+        val token = Any()
+        val acquired = mutex.tryLock(token)
+        if (acquired) blockingHolder = token
+        return acquired
     }
 
     override fun blockingRelease() {
-        runCatching { mutex.unlock(SPIN_OWNER) }
-    }
-
-    private companion object {
-        private val SPIN_OWNER = Any()
+        val token = blockingHolder ?: return
+        blockingHolder = null
+        runCatching { mutex.unlock(token) }
     }
 }
 
@@ -82,19 +107,87 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
  * deadlock or re-enter the lock.
  *
  * Publish failures are isolated per state and reported through
- * [com.vynatix.holdfast.Store.uncaughtObserverHandler], matching the sync path:
- * a bridge is external sync, so a failed write cannot undo values that are
- * already committed, nor stop the remaining states from publishing.
+ * [com.vynatix.holdfast.Store.uncaughtObserverHandler] (logged loudly while no
+ * handler is set), matching the sync path: a bridge is external sync, so a
+ * failed write cannot undo values that are already committed, nor stop the
+ * remaining states from publishing.
  *
- * Shared between [suspendAction] and [suspendAtomic] so the commit-phase
- * ordering contract is single-sourced.
+ * The transaction stays installed as the store's active one until
+ * [suspendAction]/[suspendAtomic] unwinds, but from the end of the apply pass it
+ * refuses further writes. Code running inside this commit — an observer, a
+ * bridge publish, an event collector the emit resumes inline — that writes back
+ * into the store (or emits on it) gets an `IllegalStateException`, and a
+ * blocking `action`/`atomic` it opens on the store returns an `Error`, instead
+ * of staging into a transaction that is never applied again — or, for the
+ * blocking calls, waiting for the serializer this very commit holds. The whole
+ * commit runs under [inSuspendingCommitOf], which is how the store recognises
+ * that code across thread hops. (A bare `mutate`/`update` from another thread
+ * is refused too while the store is held: see `Store.stagesInto`.)
+ *
+ * Used by [suspendAction]. [suspendAtomic] applies all its roots first and
+ * then fans each out with [suspendingFanOut]. Both paths go through
+ * [fanOutThenPublish], so the commit-phase ordering contract is written in one
+ * place.
+ */
+internal suspend fun suspendingCommit(txn: Transaction) {
+    // inSuspendingCommitOf adds txn to any marker an enclosing suspending
+    // commit on this coroutine already carries.
+    inSuspendingCommitOf(listOf(txn)) { commitThenPublish(txn) }
+}
+
+/**
+ * Run [block], a suspending commit phase, with the core's [FanoutMarkers]
+ * naming [roots] — added to any roots an enclosing suspending commit on this
+ * coroutine already marks — on every thread it resumes on. A savepoint in
+ * [roots] (a nested [suspendAtomic]'s entry for a store its enclosing frame
+ * holds) marks that savepoint: once it has committed into the enclosing root,
+ * a blocking call from this commit that reaches its store is recognised as
+ * nested too. [suspendAtomic] marks every participant for its whole commit, so
+ * a later participant's fanout also counts as nested for an earlier,
+ * already-applied one, and so do its frame observers.
+ */
+internal suspend fun <T> inSuspendingCommitOf(
+    roots: Collection<Transaction>,
+    block: suspend () -> T,
+): T {
+    val marked = FanoutMarkers.current().orEmpty() + roots
+    return withFanoutMarker(marked, block)
+}
+
+/** The body of [suspendingCommit]: apply and fan out, then publish, then drain events. */
+private suspend fun commitThenPublish(txn: Transaction) {
+    fanOutThenPublish { fanout, drainEvents -> txn.commitDispatching(fanout, drainEvents) }
+}
+
+/**
+ * The per-store fanout of a [suspendAtomic] participant that
+ * [com.vynatix.holdfast.applyFrameCommit] has already applied, with every
+ * other participant:
+ * observers, then the suspending bridge publishes, then the suspending event
+ * drain — the [suspendingCommit] contract without the apply pass. The caller
+ * runs it inside the frame's [inSuspendingCommitOf].
+ */
+internal suspend fun suspendingFanOut(txn: Transaction) {
+    fanOutThenPublish { fanout, drainEvents -> txn.fanOutApplied(fanout, drainEvents) }
+}
+
+/**
+ * Run [dispatch] — a commit's synchronous part, which calls its fanout with
+ * the writes that changed a state and its event drain with the staged events
+ * — then publish to bridges (awaiting a [SuspendingBridge]) and emit the
+ * events suspendingly.
  */
 @Suppress("UNCHECKED_CAST")
-internal suspend fun suspendingCommit(txn: Transaction) {
+private suspend fun fanOutThenPublish(
+    dispatch: (
+        fanout: (List<Pair<MutableState<*>, Any>>) -> Unit,
+        drainEvents: (List<Pair<MutableSharedFlow<*>, Any>>) -> Unit,
+    ) -> Unit,
+) {
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
     val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
-    txn.commitDispatching(
-        fanout = { committed ->
+    dispatch(
+        { committed ->
             // Step 2: observers for every state whose value actually changed.
             // Deduped `distinct` states never reach here, so they correctly skip
             // the bridge publish too.
@@ -104,7 +197,7 @@ internal suspend fun suspendingCommit(txn: Transaction) {
                 publishQueue += ms to value
             }
         },
-        drainEvents = { snapshot ->
+        { snapshot ->
             eventsQueue.addAll(snapshot)
         },
     )
@@ -121,7 +214,7 @@ internal suspend fun suspendingCommit(txn: Transaction) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            ms.owningStore.uncaughtObserverHandler?.invoke(e)
+            ms.owningStore.internalReportUncaughtFailure(e)
         }
     }
     // Step 3b: events drain via suspending emit, honoring SUSPEND back-pressure.
