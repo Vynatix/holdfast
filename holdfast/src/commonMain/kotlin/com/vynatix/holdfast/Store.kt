@@ -74,7 +74,8 @@ class FrameMiddlewareSession internal constructor(
  *    store taking any lock to run it; other threads needing that state meanwhile wait
  *    for it. First needed inside an action (or by [restore]), it runs under that
  *    action's locks. Initializers may read committed values of states, but not write
- *    (see [state]).
+ *    (see [state]). The initializer is retained: the experimental [reset] runs it
+ *    again, inside its own action.
  *
  * Typical subclass:
  * ```
@@ -171,11 +172,12 @@ abstract class Store<Self : Store<Self>> {
      *  3. **System** — [Clock.System].
      *
      * State initializers run lazily, when the state is first needed — its first
-     * read, or a [snapshot]/[restore] that captures or writes it — so an
-     * initializer that reads `clock` sees the resolution in force at that moment:
-     * bind before anything first reads or snapshots such a state (for a singleton
-     * store, before anything touches it). A materialized state keeps its value;
-     * rebinding the clock never re-runs an initializer.
+     * read, or a [snapshot]/[restore] that captures or writes it — and [reset]
+     * runs every declared state's initializer again, so an initializer that
+     * reads `clock` sees the resolution in force at that moment: bind before
+     * anything first reads, snapshots or resets such a state (for a singleton
+     * store, before anything touches it). A materialized state keeps its value
+     * until a [reset]; rebinding the clock never re-runs an initializer.
      *
      * The library's own timestamps ([Transaction.endTime], `TimingMiddleware`,
      * `ProfilingMiddleware`) do not read this clock — it is an input for store code
@@ -323,8 +325,8 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Snapshot view of every state currently materialized on this store, keyed
      * by property name. A declared state appears once it has been created —
-     * by its first read, or by [snapshot] or [restore] — and a state removed
-     * with [removeState] disappears until it is created again. The backing
+     * by its first read, or by [snapshot], [restore] or [reset] — and a state
+     * removed with [removeState] disappears until it is created again. The backing
      * states of [derived] (and `:holdfast-coroutines`' `suspendDerived`)
      * appear too, under their synthesized names. The map is a copy — modifying
      * it does not affect the store. The contained `State<*>` references are
@@ -958,8 +960,8 @@ abstract class Store<Self : Store<Self>> {
      * name while the store is being constructed, without running
      * [initialize]. The state is MATERIALIZED — a [MutableState] created from
      * [initialize] — the first time it is needed: on the first read of the
-     * property, or when [snapshot] or [restore] captures or writes it.
-     * Subsequent reads return the same instance.
+     * property, when [snapshot] or [restore] captures or writes it, or when
+     * [reset] resets it. Subsequent reads return the same instance.
      *
      *  - Pass a [transformer] to normalize on write or project on read.
      *  - Pass [distinct] = true to skip observer fanout and bridge publish when a
@@ -968,16 +970,16 @@ abstract class Store<Self : Store<Self>> {
      *    contract.
      *
      * [initialize] runs at most once per materialization, on the thread that
-     * first needs the state. The store takes no lock to run it (in particular
-     * not its registry lock, `propertiesLock`); it holds only the state's own
-     * latch, and other threads needing the state meanwhile wait for it. It
-     * does run under whatever locks its caller already holds: first needed
-     * inside an action, an `atomic(...)` frame, an observer during commit
-     * fanout, [restore], or a [snapshot] taken inside an action, it runs under
-     * that action's `transactionLock` (and, from the action body, its
-     * `middlewareLock`), so a slow initializer there holds up every other
-     * action on that store, and an initializer must not block on another
-     * thread's store work.
+     * first needs the state ([reset] also runs it again; see below). The store
+     * takes no lock to run it (in particular not its registry lock,
+     * `propertiesLock`); it holds only the state's own latch, and other
+     * threads needing the state meanwhile wait for it. It does run under
+     * whatever locks its caller already holds: first needed inside an action,
+     * an `atomic(...)` frame, an observer during commit fanout, [restore], or
+     * a [snapshot] taken inside an action, it runs under that action's
+     * `transactionLock` (and, from the action body, its `middlewareLock`), so
+     * a slow initializer there holds up every other action on that store, and
+     * an initializer must not block on another thread's store work.
      *
      * [initialize] may read other states (which materializes them in turn),
      * and sees their committed values only — never the pending writes of an
@@ -985,10 +987,19 @@ abstract class Store<Self : Store<Self>> {
      * the initial value is committed at once and survives that action's
      * rollback, so it must not be computed from writes that may roll back.
      * A store write from inside it — `mutate`/`update`, `action`, `atomic`,
-     * `emit` — throws [IllegalStateException], and so does an initializer
-     * that (directly or through other initializers, on this thread or across
-     * threads) needs its own state. An initializer that throws propagates to
-     * the read that ran it, and runs again on the next read.
+     * `reset()`, `emit` — throws [IllegalStateException], and so does an
+     * initializer that (directly or through other initializers, on this
+     * thread or across threads) needs its own state. An initializer that
+     * throws propagates to the read that ran it, and runs again on the next
+     * read.
+     *
+     * The store retains [initialize] for its lifetime: a state dropped with
+     * [removeState] is created from it again, and the experimental [reset]
+     * re-runs it to put the state back to its initial value. Re-run by a
+     * reset, it reads the other declared states of this store at their reset
+     * values, and everything else at committed values; it runs without the
+     * latch, inside the reset's action and under its locks, and its result is
+     * staged into that action, so it rolls back with it.
      *
      * Each name is declared once per store: a second property with the same
      * name (for example a subclass redeclaring a base class's state) fails
@@ -1257,7 +1268,7 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Look up a materialized state by its property name. Returns null if it
      * has not been materialized yet: a declared state is created by its first
-     * read, or by [snapshot] or [restore], not by this lookup. Caller MUST NOT
+     * read, or by [snapshot], [restore] or [reset], not by this lookup. Caller MUST NOT
      * cast the returned [State] back to [MutableState].
      */
     fun getState(name: String): State<*>? {
@@ -1274,12 +1285,16 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Drop the named state from the registry and silently dispose its observers
      * and bridge. Its declaration stays: a subsequent delegate read — or
-     * [snapshot]/[restore] — recreates the state from its initializer. (A
+     * [snapshot]/[restore]/[reset] — recreates the state from its initializer. (A
      * derived backing or internally registered state has no initializer to
      * recreate it from, and goes with its declaration.)
      *
-     * Throws [IllegalStateException] if the state has pending writes in an active
-     * transaction (caller must commit or roll back first).
+     * Throws [IllegalStateException] if the state has pending writes in the
+     * active transaction or one enclosing it (caller must commit or roll back
+     * first), or while an open experimental [reset] holds it: once a reset has
+     * decided a state's value — staged it, or left it because it already held
+     * its reset value — it holds the state until its transaction (or the
+     * action or frame it joined) commits or rolls back.
      */
     fun removeState(name: String) {
         checkNotDisposed()
@@ -1300,12 +1315,13 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Drop every materialized state and silently dispose all observers and
      * bridges. Declarations stay: subsequent delegate reads — or
-     * [snapshot]/[restore] — recreate fresh states from their initializers.
+     * [snapshot]/[restore]/[reset] — recreate fresh states from their initializers.
      * (Derived backing and internally registered states have no initializer
      * and go with their declarations.)
      *
-     * Throws [IllegalStateException] if any state has pending writes in an active
-     * transaction.
+     * Throws [IllegalStateException] if any state has pending writes in the
+     * active transaction or one enclosing it, or while an open experimental
+     * [reset] holds one (see [removeState]).
      */
     fun clearStates() {
         checkNotDisposed()
@@ -1320,13 +1336,28 @@ abstract class Store<Self : Store<Self>> {
         removed.forEach { it.shutdownSilently() }
     }
 
+    /** The caller holds the registry lock, under which a reset takes its hold (`ResetPass.hold`). */
     private fun checkNoPendingWrites(
         state: MutableState<*>,
         name: String,
     ) {
-        val txn = _activeTransaction ?: return
-        if (state in txn.pendingWrites) {
-            error("Cannot remove state '$name' with pending writes in an active transaction; commit or rollback first")
+        val active = _activeTransaction ?: return
+        var txn: Transaction? = active
+        while (txn != null) {
+            if (state in txn.pendingWrites) {
+                error(
+                    "Cannot remove state '$name' with pending writes in an active transaction; " +
+                        "commit or rollback first",
+                )
+            }
+            txn = txn.parent
+        }
+        val root = active.root
+        if (!root.closedToWrites && state in root.resetHeld) {
+            error(
+                "Cannot remove state '$name' while a reset() in the active transaction holds it; " +
+                    "commit or rollback first",
+            )
         }
     }
 

@@ -111,10 +111,18 @@ class MutableState<T : Any>(
      * possibly inside an action, an `atomic(...)` frame or a `snapshot()` taken in
      * one — and the value it returns is committed at once and survives a rollback,
      * so it must not be computed from writes that may yet roll back.
+     *
+     * The exception is an initializer `reset()` re-runs: it reads this state at
+     * its reset value when it is one of the declared states that reset is
+     * resetting, running this state's own initializer first if its reset is
+     * still pending (see [ResetPass]). That runs user code, so it happens before
+     * [stateLock] is taken.
      */
     override val value: T
-        get() =
-            stateLock.withLock {
+        get() {
+            val resetValue = owningStore.activeTransaction?.pendingReset?.valueFor(this)
+            if (resetValue != null) return afterGet(resetValue)
+            return stateLock.withLock {
                 val txn = owningStore.activeTransaction
                 if (txn != null && txn.ownerThreadId == currentThreadId()) {
                     val pending = txn.findPendingValue(this)
@@ -124,6 +132,7 @@ class MutableState<T : Any>(
                 }
                 afterGet(currentValue)
             }
+        }
 
     private fun afterGet(rawValue: T): T = transformer?.takeIf { it.shouldTransform(rawValue) }?.get(rawValue) ?: rawValue
 

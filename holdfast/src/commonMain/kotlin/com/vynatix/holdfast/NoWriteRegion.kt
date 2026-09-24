@@ -8,37 +8,52 @@ import com.vynatix.holdfast.platform.setInitializerLocal
 
 /**
  * One state initializer running on this thread, linked to the initializer
- * whose read started it ([parent]), if any.
+ * whose read started it ([parent]), if any. [reset] is the [ResetPass]
+ * re-running it, or `null` when it runs to materialize its state.
  */
 internal class InitializingFrame(
     val declaration: StateDeclaration<*>,
     val parent: InitializingFrame?,
+    val reset: ResetPass? = null,
 )
 
 /**
  * The thread-local region in which state initializers run. Initializers may
  * read states — which materializes them in turn — and see committed values
  * only: [MutableState.value] skips the pending writes of an action on this
- * thread while a region is open. A store write from one is refused:
- * `mutate`/`update`, `action`, `atomic`, `emit`, and `:holdfast-coroutines`'
- * `suspendAction`/`suspendAtomic` all throw inside it, naming the state being
- * initialized.
+ * thread while a region is open. The one exception is an initializer that
+ * `reset()` re-runs ([runForReset]): it reads its store's declared states at
+ * their reset values (see [ResetPass]). A store write from one is refused:
+ * `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`, and
+ * `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all throw inside it,
+ * naming the state being initialized.
  */
 internal object NoWriteRegion {
     /** The innermost initializer running on this thread, or `null`. */
     fun current(): InitializingFrame? = currentInitializerLocal() as InitializingFrame?
 
-    /** Run [block] as [decl]'s initializer. */
+    /** Run [block] as [decl]'s initializer, materializing its state. */
     fun <R> run(
         decl: StateDeclaration<*>,
         block: () -> R,
+    ): R = enter(InitializingFrame(decl, current()), block)
+
+    /** Run [block] as [decl]'s initializer, re-run by [pass] to reset its state. */
+    fun <R> runForReset(
+        decl: StateDeclaration<*>,
+        pass: ResetPass,
+        block: () -> R,
+    ): R = enter(InitializingFrame(decl, current(), pass), block)
+
+    private fun <R> enter(
+        frame: InitializingFrame,
+        block: () -> R,
     ): R {
-        val prior = current()
-        setInitializerLocal(InitializingFrame(decl, prior))
+        setInitializerLocal(frame)
         try {
             return block()
         } finally {
-            setInitializerLocal(prior)
+            setInitializerLocal(frame.parent)
         }
     }
 
@@ -72,11 +87,11 @@ internal fun initializerWriteMessage(
     initializing: StateDeclaration<*>,
 ): String =
     "Cannot $attempt: the initializer of ${initializing.qualifiedName} is running on this thread. A state " +
-        "initializer runs lazily — at the state's first read, or when snapshot() or restore() needs the state — " +
-        "so a write from it would land at an unpredictable moment, inside whatever action, commit or snapshot " +
-        "first needed the state. Initializers may read other states, but not write them, open an action or an " +
-        "atomic(...) frame, or emit events. Fix: compute the initial value from what the initializer can read, " +
-        "and make the write in an action once the store exists."
+        "initializer runs lazily — at the state's first read, when snapshot() or restore() needs the state, or " +
+        "when reset() re-runs it — so a write from it would land at an unpredictable moment, inside whatever " +
+        "action, commit or snapshot first needed the state. Initializers may read other states, but not write " +
+        "them, open an action or an atomic(...) frame, reset a store, or emit events. Fix: compute the initial " +
+        "value from what the initializer can read, and make the write in an action once the store exists."
 
 internal fun sameThreadCycleMessage(decl: StateDeclaration<*>): String {
     val stack = NoWriteRegion.stack()

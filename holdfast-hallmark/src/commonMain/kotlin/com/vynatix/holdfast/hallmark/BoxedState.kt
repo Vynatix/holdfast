@@ -25,7 +25,9 @@ import com.vynatix.holdfast.Store
  * materialized, not when the store is constructed: on its first read, or
  * when `snapshot()` (which then throws) or `restore()` (which then returns
  * [com.vynatix.holdfast.TransactionResult.Error]) needs a state that was
- * never read (see [com.vynatix.holdfast.Store.state]).
+ * never read (see [com.vynatix.holdfast.Store.state]). The experimental
+ * `reset()` runs the initializer again whenever it resets the state, so it
+ * fails the same way and returns [com.vynatix.holdfast.TransactionResult.Error].
  *
  * Note: an `assign` infix that writes a raw primitive directly
  * (`email assign "..."`) was deferred to a future release — it would require

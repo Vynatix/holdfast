@@ -50,9 +50,9 @@ class StoreSnapshot internal constructor(
  * initializer runs now, exactly as its first read would run it — so an
  * untouched store's snapshot already holds every state, at its initial value.
  * `snapshot()` takes no store lock for this, but called from inside an action
- * it runs the initializer under that action's locks. An initializer sees
- * committed values only (see [Store.state]). A throwing initializer makes
- * `snapshot()` throw.
+ * it runs the initializer under that action's locks. An initializer run this
+ * way sees committed values only (see [Store.state]). A throwing initializer
+ * makes `snapshot()` throw.
  *
  * The values are one consistent cut: a commit applying while the snapshot is
  * taken is either wholly in it or not in it at all. A snapshot taken inside an
@@ -87,11 +87,12 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
  *
  * A target state this store declares but has not materialized yet is
  * materialized first, inside the action (under its lock) and before anything
- * is staged; like every initializer, it sees committed values only, never
- * this restore's writes or those of an enclosing action. Derived backing
- * states in the snapshot are restored only when this is the store instance
- * that took it (undo); into any other store they are skipped, and so is one
- * that `removeState`/`clearStates` has dropped since.
+ * is staged; like any initializer run to materialize its state, it sees
+ * committed values only, never this restore's writes or those of an
+ * enclosing action. Derived backing states in the snapshot are restored only
+ * when this is the store instance that took it (undo); into any other store
+ * they are skipped, and so is one that `removeState`/`clearStates` has
+ * dropped since.
  *
  * Throws (caught by the wrapping action and surfaced as
  * [TransactionResult.Error]) if the snapshot contains a state name this store

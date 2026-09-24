@@ -47,6 +47,7 @@ class DisposedEntrypointTest {
             },
             Entrypoint("snapshot") { p, _ -> p.snapshot() },
             Entrypoint("restore") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1))) },
+            Entrypoint("reset") { p, _ -> p.reset() },
             Entrypoint("registerDerivedBackingState") { p, _ -> p.registerDerivedBackingState("__probe", 0, emptyList()) },
             Entrypoint("properties") { p, _ -> p.properties },
             Entrypoint("getState") { p, _ -> p.getState("n") },

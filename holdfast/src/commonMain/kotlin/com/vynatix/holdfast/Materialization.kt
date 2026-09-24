@@ -22,9 +22,11 @@ import kotlinx.atomicfu.locks.SynchronousMutex
 
 /**
  * The live state of [decl], created from its initializer on first need. At
- * most one thread runs the initializer at a time; the others wait for it. A
- * throwing initializer propagates to its caller and publishes nothing, so the
- * next read runs it again.
+ * most one thread materializes it at a time; the others wait for it. (The
+ * experimental `reset()` re-runs the initializer without this latch, so that
+ * re-run can overlap a materialization on another thread.) A throwing
+ * initializer propagates to its caller and publishes nothing, so the next
+ * read runs it again.
  *
  * @throws IllegalStateException when the store is disposed, or when the
  *   initializer would (transitively) need this very state: an initializer

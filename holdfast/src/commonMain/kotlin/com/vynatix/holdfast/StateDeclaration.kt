@@ -8,7 +8,7 @@ import kotlin.reflect.KProperty
 // A state is DECLARED when its property is delegated (`val x by state { … }`
 // calls `provideDelegate` while the store is being constructed) and
 // MATERIALIZED when its `MutableState` is created from the initializer: on the
-// first read of the property, or when `snapshot()`/`restore()` needs it.
+// first read of the property, or when `snapshot()`/`restore()`/`reset()` needs it.
 // Declaring runs no user code; materializing runs the initializer once, on one
 // thread, without taking any store lock itself (see Materialization.kt).
 

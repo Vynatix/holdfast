@@ -78,7 +78,7 @@ for the full consistency contract.
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-store `atomic` frames, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, `reset()` to initial values (experimental), derived state, cross-store `atomic` frames, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
 | [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers. |

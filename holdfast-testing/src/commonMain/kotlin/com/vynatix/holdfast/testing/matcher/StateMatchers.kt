@@ -73,12 +73,14 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatch(builder: StateMatcher<V>.() 
  *
  * KMP note: a Store declares every state when it is constructed, but
  * materializes one only when it is first needed — on the first delegate read
- * of its property, or by `snapshot()`/`restore()`. `shouldMatchExactly` checks
- * `store.properties.keys`, which lists materialized states only, so a
+ * of its property, or by `snapshot()`/`restore()`/`reset()`. `shouldMatchExactly`
+ * checks `store.properties.keys`, which lists materialized states only, so a
  * declared-but-never-touched state is invisible to the matcher. In practice
  * this is benign — tests reach this matcher only after exercising the store
  * (which touches every state of interest), and listing a never-touched state
  * in [builder] materializes it anyway, because `prop.get(store)` reads it.
+ * After a `reset()` every declared state is materialized, so
+ * `shouldMatchExactly` must assert all of them.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(store).apply(builder)

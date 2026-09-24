@@ -134,6 +134,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   states are now restored only into the store that captured them, and skipped
   elsewhere (see the `BREAKING` entry below).
 
+- **`removeState`/`clearStates` see pending writes of enclosing
+  transactions.** They checked only the innermost transaction, so inside a
+  nested action (or an `atomic` frame's savepoint) they dropped a state the
+  enclosing action had written, and that write then committed into a state no
+  longer in the store. They now refuse a state with a pending write anywhere
+  in the active transaction's savepoint chain.
+
 ### Changed
 
 - **BREAKING (commit fanout order).** Observers for every state in a
@@ -395,6 +402,36 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   test never tracks is not restored. Work in `backgroundScope` or on scopes
   outside the test is not waited for, so join it before the body ends. A store
   disposed during the test is skipped.
+
+- **`Store.reset()`** (`@ExperimentalStoreApi`, issue #20 R4) — puts every
+  declared state back to what its initializer computes, in one transaction,
+  so every declared state holds the raw value a newly constructed store's
+  holds once read (`StoreSnapshot` has no value equality;
+  `shouldMatchSnapshotOf` compares the two) — except a state whose
+  initializer reads a `derived` state computed from states the reset changes,
+  which reads the derived's pre-reset value. The store keeps each
+  state's initializer for its lifetime, and `reset()` runs them again in
+  declaration order. An initializer that reads another declared state of the
+  store reads that state's reset value, running that initializer first if it
+  has not run yet (so forward references work); anything else it reads, such
+  as another store's state or a `derived` state, it reads at the committed
+  value. The results are staged raw, without `Transformer.set`, like initial
+  values (an encrypted state is not encrypted twice), and only where they
+  differ (`==`) from what the transaction holds, so observers and bridges fire
+  once for each changed state and never for an unchanged one, even with
+  `distinct = false`. Never-read and removed states are materialized first,
+  before the transaction opens; `derived` states are not reset and recompute
+  after the commit. Once the reset has decided a state's value,
+  `removeState`/`clearStates` refuse that state with `IllegalStateException`
+  until the reset's transaction ends. Middleware sees one transaction (id `Reset`); inside an
+  action the reset is a savepoint, and inside `atomic(...)` it joins the
+  frame. A throwing initializer or an initializer cycle rolls the whole reset
+  back and returns `TransactionResult.Error`. Like `action`, it throws on a
+  disposed store, from inside an initializer, inside a `suspendAtomic`
+  body that enrolls the store (`FrameInteropException`), and inside an
+  `atomic`/`suspendAtomic` body that does not enroll it
+  (`UnenrolledStoreException`, unless the frame's policy allows unenrolled
+  writes). See GUIDE §16.1.
 
 - **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
   non-blocking acquire for the store's non-blocking paths (the `derived`

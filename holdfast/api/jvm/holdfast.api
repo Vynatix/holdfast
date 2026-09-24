@@ -193,6 +193,10 @@ public abstract interface class com/vynatix/holdfast/Publisher {
 	public abstract fun publish (Ljava/lang/Object;)Z
 }
 
+public final class com/vynatix/holdfast/ResetKt {
+	public static final fun reset (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
 public final class com/vynatix/holdfast/SnapshotKt {
 	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;

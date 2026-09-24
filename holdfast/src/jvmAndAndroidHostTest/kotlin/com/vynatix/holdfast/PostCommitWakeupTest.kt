@@ -28,20 +28,27 @@ private fun busyFor(nanos: Long) {
  * now re-reads the slot after enqueueing and drains itself if it emptied.
  *
  * Probabilistic by nature: with the re-check removed, a run stranded roughly
- * 10 to 50 of its 20,000 posts in development; with it, none. The last
- * assertion guards the stress itself, so a timing change that stops posts
- * from landing behind a live transaction fails instead of passing vacuously;
- * the two completion counts guard against a worker stopping early.
+ * 10 to 50 of its first 20,000 posts in development; with it, none. The stress
+ * guards itself: it runs at least [MIN_ITERATIONS] rounds and keeps going until
+ * at least [MIN_QUEUED] posts landed behind a live transaction — the path the
+ * race lives on — so a timing change that stops posts from landing there fails
+ * instead of passing vacuously. Under load fewer posts land there per round
+ * (one full-check run saw 156 of 20,000), so a fixed round count made that
+ * guard flaky; the guard fails only once [MAX_ITERATIONS] rounds could not
+ * reach [MIN_QUEUED]. The two completion counts guard against a worker
+ * stopping early.
  */
 @OptIn(StoreInternalApi::class)
 class PostCommitWakeupTest {
     @Test
     fun `a postCommit racing the owner's action exit is never stranded`() {
         val store = WakeupCounter()
-        val iterations = 20_000
         val ownerNanos = 2_000L
         val start = CyclicBarrier(2)
         val end = CyclicBarrier(2)
+        // Set by the poster before the round's end barrier, which publishes it
+        // to the owner: both workers stop after the same round.
+        val stop = AtomicBoolean(false)
         val stranded = AtomicInteger()
         val queuedBehindTransaction = AtomicInteger()
         val ownerActionsDone = AtomicInteger()
@@ -55,12 +62,12 @@ class PostCommitWakeupTest {
             val owner =
                 daemon("postcommit-owner") {
                     try {
-                        repeat(iterations) {
+                        do {
                             start.await(10, TimeUnit.SECONDS)
                             store action { busyFor(ownerNanos) }
                             ownerActionsDone.incrementAndGet()
                             end.await(10, TimeUnit.SECONDS)
-                        }
+                        } while (!stop.get())
                     } catch (e: Throwable) {
                         failures += e
                     }
@@ -69,7 +76,8 @@ class PostCommitWakeupTest {
                 daemon("postcommit-poster") {
                     try {
                         val random = ThreadLocalRandom.current()
-                        repeat(iterations) { i ->
+                        var i = 0
+                        do {
                             val ran = AtomicBoolean(false)
                             start.await(10, TimeUnit.SECONDS)
                             // Wait for the owner to be inside its action (or already past
@@ -78,12 +86,15 @@ class PostCommitWakeupTest {
                             busyFor(random.nextLong(2 * ownerNanos))
                             if (store.activeTransaction != null) queuedBehindTransaction.incrementAndGet()
                             store.postCommit { ran.set(true) }
+                            i++
+                            val covered = i >= MIN_ITERATIONS && queuedBehindTransaction.get() >= MIN_QUEUED
+                            if (covered || i >= MAX_ITERATIONS) stop.set(true)
                             end.await(10, TimeUnit.SECONDS)
                             // Both the owner's action (and its drain) and this postCommit
                             // have returned: the task must have run by now.
                             if (!ran.get()) stranded.incrementAndGet()
                             postsDone.incrementAndGet()
-                        }
+                        } while (!stop.get())
                     } catch (e: Throwable) {
                         failures += e
                     }
@@ -95,12 +106,25 @@ class PostCommitWakeupTest {
         // The first failure queued is the root cause: the other worker's barrier
         // wait only times out about ten seconds later.
         failures.firstOrNull()?.let { throw AssertionError("a stress worker failed: $it", it) }
-        assertEquals(iterations, ownerActionsDone.get(), "the owner did not finish the stress")
-        assertEquals(iterations, postsDone.get(), "the poster did not finish the stress")
+        val rounds = postsDone.get()
+        assertEquals(rounds, ownerActionsDone.get(), "the owner and the poster ran different numbers of rounds")
+        assertTrue(rounds >= MIN_ITERATIONS, "the stress stopped after $rounds of at least $MIN_ITERATIONS rounds")
         assertEquals(0, stranded.get(), "postCommit tasks stranded in the queue after the owner exited")
         assertTrue(
-            queuedBehindTransaction.get() > iterations / 100,
-            "the stress never exercised the queued path (${queuedBehindTransaction.get()} of $iterations)",
+            queuedBehindTransaction.get() >= MIN_QUEUED,
+            "the stress never exercised the queued path: ${queuedBehindTransaction.get()} of $rounds posts " +
+                "landed behind a live transaction, fewer than $MIN_QUEUED even after the $MAX_ITERATIONS-round cap",
         )
+    }
+
+    private companion object {
+        /** Rounds every run makes, whatever the coverage. */
+        const val MIN_ITERATIONS = 20_000
+
+        /** Posts that must land behind a live transaction before the stress may stop. */
+        const val MIN_QUEUED = MIN_ITERATIONS / 100
+
+        /** The cap: about 8s unloaded, well inside the watchdog. */
+        const val MAX_ITERATIONS = 10 * MIN_ITERATIONS
     }
 }

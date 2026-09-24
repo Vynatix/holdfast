@@ -229,6 +229,25 @@ class MemoryLifecycleTest {
     }
 
     @Test
+    fun removeStateInsideANestedActionRefusesAStateTheEnclosingActionWrote() {
+        val v = LifecycleVault()
+        var removeCaught: Throwable? = null
+        var clearCaught: Throwable? = null
+        v action {
+            a mutate 7
+            action {
+                // a's pending write is in the enclosing transaction, not this savepoint.
+                removeCaught = runCatching { removeState("a") }.exceptionOrNull()
+                clearCaught = runCatching { clearStates() }.exceptionOrNull()
+            }
+        }
+        assertIs<IllegalStateException>(removeCaught, "the enclosing action's pending write refuses removeState")
+        assertIs<IllegalStateException>(clearCaught, "the enclosing action's pending write refuses clearStates")
+        assertEquals(7, v.a.value, "a stayed in the store and its write committed")
+        assertTrue("a" in v.properties.keys)
+    }
+
+    @Test
     fun uncaughtObserverHandlerReceivesObserverExceptionsOnCommitFire() {
         // A10 contract: observer exceptions on commit-fire never abort the commit;
         // a non-null uncaughtObserverHandler captures them (with no handler they

@@ -132,6 +132,28 @@ class Transaction internal constructor(
     internal var applied: Boolean = false
 
     /**
+     * The `reset()` staging into this transaction right now, or `null`: which
+     * of its store's declared states still await their reset, and the reset
+     * values of those already staged (see [ResetPass]). Installed and cleared
+     * by `stageResetOfDeclaredStates` on the owner thread, so a read the
+     * reset's re-run initializers make resolves a pending state first
+     * ([MutableState.value]). Every other read pays one volatile read for it.
+     */
+    @kotlin.concurrent.Volatile
+    internal var pendingReset: ResetPass? = null
+
+    /**
+     * Every state a `reset()` staging into this transaction's chain has
+     * resolved — staged, or left alone because it already held its reset
+     * value. Used on the [root] only, and guarded by its store's registry lock:
+     * `removeState`/`clearStates` refuse a state in it until the root applies
+     * or ends, so no state the reset decided on is dropped and re-created from
+     * pre-reset values before the reset commits. Dropped with the root, so
+     * never cleared.
+     */
+    internal val resetHeld: MutableSet<MutableState<*>> = HashSet()
+
+    /**
      * The thread running this transaction's commit fanout right now — observer
      * callbacks, bridge publishes and the synchronous event drain — or
      * [NOT_FANNING_OUT]. Set right after the apply pass and cleared when

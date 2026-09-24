@@ -35,7 +35,9 @@ fun interface Initializer<T : Any> : () -> T
  * Read-only contract for a piece of store state. Read `value` to see the
  * post-`transformer.get` view; on the owner thread of an active transaction,
  * `value` reflects pending writes (read-your-own-writes) — except inside a
- * state initializer, which reads committed values only (see [Store.state]).
+ * state initializer, which reads committed values only, or, when the
+ * experimental `reset()` re-runs it, its own store's declared states at their
+ * reset values and everything else at committed values (see [Store.state]).
  */
 interface State<T : Any> {
     val value: T
