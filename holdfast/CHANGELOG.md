@@ -329,6 +329,30 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   under their synthesized names. `derived` on a disposed store now throws
   instead of registering its backing state there.
 
+- **BREAKING (behavior): `restore(snapshot)` ignores state names the store
+  does not declare** (issue #20, R1). It returned `TransactionResult.Error`
+  ("snapshot contains state 'x' not registered on this store"); it now
+  restores the states it does declare and leaves every declared state the
+  snapshot has no value for as it was, without firing its observers — the
+  experimental `RestorePolicy.IgnoreUnknown`. Pass `RestorePolicy.Strict` to
+  the experimental overload for the old strictness. Three smaller changes come
+  with it: a value whose class the target state cannot hold (a `String` for an
+  `Int` state, from another store class's snapshot) now fails the restore,
+  naming the state, instead of being staged and failing later at a read;
+  never-read target states are materialized before the restore's action
+  opens, so at top level their initializers no longer run under the store's
+  `transactionLock`; and the restore's transaction id is `Restore`. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-restore-ignores-unknown-state-names-050).
+
+- **BREAKING (behavior): `StoreSnapshot` has value equality.** `equals` and
+  `hashCode` were identity. Two captured snapshots are now equal when they hold
+  the same state names with `==` raw values, whichever store instances took
+  them (so a store after `reset()` and a fresh one have `==` snapshots), and
+  two decoded snapshots when they hold the same text; the backing states of
+  `derived`, and which codecs the states declare, take no part (so equal
+  snapshots from stores with different codecs can encode differently).
+  `toString()` lists the state names, never a value.
+
 - **`:holdfast-testing`: `shouldMatchSnapshotOf` compares every declared
   state**, read or not, since snapshots now cover them; two stores that only
   differed in which states had been read no longer mismatch on state names.
@@ -406,8 +430,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 - **`Store.reset()`** (`@ExperimentalStoreApi`, issue #20 R4) — puts every
   declared state back to what its initializer computes, in one transaction,
   so every declared state holds the raw value a newly constructed store's
-  holds once read (`StoreSnapshot` has no value equality;
-  `shouldMatchSnapshotOf` compares the two) — except a state whose
+  holds once read (so the two stores' snapshots are `==`, and
+  `shouldMatchSnapshotOf` against a new store passes) — except a state whose
   initializer reads a `derived` state computed from states the reset changes,
   which reads the derived's pre-reset value. The store keeps each
   state's initializer for its lifetime, and `reset()` runs them again in
@@ -432,6 +456,63 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `atomic`/`suspendAtomic` body that does not enroll it
   (`UnenrolledStoreException`, unless the frame's policy allows unenrolled
   writes). See GUIDE §16.1.
+
+- **`StateCodec<T>`** (issue #20, R1) — turns a state's raw stored value into
+  text and back, so a snapshot can leave memory. `bridge.Codec<T>` now extends
+  it, binary-compatibly (`Codec` keeps its own `encode`/`decode` members and
+  gains the supertype), so `StringCodec`, `IntCodec`, `LongCodec`,
+  `BooleanCodec` and every `KvBridge` codec are state codecs. Stable from this
+  release, unlike the rest of the snapshot-encoding surface: a recorded
+  exception to the roadmap's soak rule, since `Codec`'s contract already fixes
+  its shape.
+
+- **Snapshots that leave memory** (`@ExperimentalStoreApi`, issue #20 R1):
+  - `Store.state(transformer, distinct, codec, initialize)` — an overload of
+    `state` that gives the state a `StateCodec`. A call that passes no `codec`
+    (`state { … }`, `state(transformer = t) { … }`) still resolves to the
+    stable overload and needs no opt-in. It throws on a disposed store.
+  - `StoreSnapshot.encode(includeRemote = false)` and
+    `StoreSnapshot.decode(text)` — canonical text in the v1 store format,
+    `{"format":"holdfast.store","v":1,"schema":N,"states":{…},"skipped":[…]}`:
+    each state with a codec as its codec's text, states sorted by name, one
+    fixed escaping (unpaired surrogates escaped). A state without a codec is
+    listed in `unencodableStateNames` and `skipped`, never written; `derived`
+    states are never encoded. `decode` skips fields it does not know, rejects
+    containers nested deeper than 64 levels without deep recursion, and throws
+    `SnapshotFormatException`, whose message names the problem, an offset
+    and possibly a state name but never quotes a state's value, and which has
+    no cause. `includeRemote` is
+    reserved for state tags and changes nothing yet. `schemaVersion` is 1 for
+    every captured snapshot.
+  - `StoreSnapshot.entry(state)` / `snapshot[state]` — typed reads through a
+    `State`: `SnapshotEntry.Present(value)` (the `Transformer.get` view, so an
+    encrypted state reads plaintext), `SnapshotEntry.Absent`, or `Redacted` (a
+    value withheld from the text). A captured snapshot answers the states of
+    the store instance that took it and throws `IllegalArgumentException` for
+    another instance's; a decoded one answers any store's state by name,
+    through that state's codec. Both work after the store is disposed.
+    `render()` shows the stored values for debugging.
+  - `restore(snapshot, policy): TransactionResult<RestoreReport>` with
+    `RestorePolicy` (`Strict`, `IgnoreUnknown`, `BestEffort`),
+    `RestoreReport` (`restored`, `kept`, `issues`), `RestoreIssue`
+    (`UnknownState`, `NoCodec`, `Undecodable`, `TypeMismatch`) and
+    `RestoreRejectedException`. The restore decides everything before its
+    action opens — materializing never-read targets and running codecs, at top
+    level without holding the store's locks — then stages the raw values in
+    one action; a rejected restore changes nothing, and inside `atomic(...)`
+    it aborts the frame. A type witness rejects a captured value whose class
+    the target state cannot hold: a different class is refused only when
+    either class is a built-in value type (`String`, `Boolean`, `Char`, a
+    primitive number), so subclasses and sealed siblings always pass, and
+    snapshots of the same store class, or decoded ones, are not checked. That
+    skip trusts the class, not its type arguments: a generic store's
+    `Box<Int>` snapshot restores unchecked into a `Box<String>`, and the wrong
+    value surfaces as a `ClassCastException` where the state is read.
+  - No exception these APIs throw carries a state's value in its message or
+    cause chain.
+  - GUIDE §16.2 documents all of it, with a compiled, plugin-free
+    `KSerializerCodec` recipe for `kotlinx.serialization` types (the library
+    takes no new dependency).
 
 - **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
   non-blocking acquire for the store's non-blocking paths (the `derived`

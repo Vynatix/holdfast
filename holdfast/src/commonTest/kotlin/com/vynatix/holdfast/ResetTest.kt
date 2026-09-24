@@ -245,6 +245,7 @@ class ResetTest {
             assertIs<TransactionResult.Success<Unit>>(store.reset())
 
             assertEquals(fresh.snapshot().rawValues, store.snapshot().rawValues, "reset == a fresh store")
+            assertEquals(fresh.snapshot(), store.snapshot(), "R4 acceptance, literally: the snapshots compare equal")
             assertEquals(4, store.snapshot().rawValues["nameLength"], "the never-read state read the reset name")
             assertEquals("hello, anon", store.greeting.value, "a cross reference reads the reset value")
             assertEquals(42, store.total.value, "a forward reference reads the reset value")

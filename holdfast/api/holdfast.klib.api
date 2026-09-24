@@ -19,6 +19,18 @@ open annotation class com.vynatix.holdfast/StoreInternalApi : kotlin/Annotation 
     constructor <init>() // com.vynatix.holdfast/StoreInternalApi.<init>|<init>(){}[0]
 }
 
+final enum class com.vynatix.holdfast/RestorePolicy : kotlin/Enum<com.vynatix.holdfast/RestorePolicy> { // com.vynatix.holdfast/RestorePolicy|null[0]
+    enum entry BestEffort // com.vynatix.holdfast/RestorePolicy.BestEffort|null[0]
+    enum entry IgnoreUnknown // com.vynatix.holdfast/RestorePolicy.IgnoreUnknown|null[0]
+    enum entry Strict // com.vynatix.holdfast/RestorePolicy.Strict|null[0]
+
+    final val entries // com.vynatix.holdfast/RestorePolicy.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast/RestorePolicy> // com.vynatix.holdfast/RestorePolicy.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): com.vynatix.holdfast/RestorePolicy // com.vynatix.holdfast/RestorePolicy.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<com.vynatix.holdfast/RestorePolicy> // com.vynatix.holdfast/RestorePolicy.values|values#static(){}[0]
+}
+
 final enum class com.vynatix.holdfast/TransactionStatus : kotlin/Enum<com.vynatix.holdfast/TransactionStatus> { // com.vynatix.holdfast/TransactionStatus|null[0]
     enum entry Active // com.vynatix.holdfast/TransactionStatus.Active|null[0]
     enum entry Committed // com.vynatix.holdfast/TransactionStatus.Committed|null[0]
@@ -51,7 +63,7 @@ abstract fun interface com.vynatix.holdfast/Disposable { // com.vynatix.holdfast
     abstract fun dispose() // com.vynatix.holdfast/Disposable.dispose|dispose(){}[0]
 }
 
-abstract interface <#A: kotlin/Any> com.vynatix.holdfast.bridge/Codec { // com.vynatix.holdfast.bridge/Codec|null[0]
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast.bridge/Codec : com.vynatix.holdfast/StateCodec<#A> { // com.vynatix.holdfast.bridge/Codec|null[0]
     abstract fun decode(kotlin/String): #A // com.vynatix.holdfast.bridge/Codec.decode|decode(kotlin.String){}[0]
     abstract fun encode(#A): kotlin/String // com.vynatix.holdfast.bridge/Codec.encode|encode(1:0){}[0]
 }
@@ -68,6 +80,11 @@ abstract interface <#A: kotlin/Any> com.vynatix.holdfast/Eventful { // com.vynat
 abstract interface <#A: kotlin/Any> com.vynatix.holdfast/State { // com.vynatix.holdfast/State|null[0]
     abstract val value // com.vynatix.holdfast/State.value|{}value[0]
         abstract fun <get-value>(): #A // com.vynatix.holdfast/State.value.<get-value>|<get-value>(){}[0]
+}
+
+abstract interface <#A: kotlin/Any> com.vynatix.holdfast/StateCodec { // com.vynatix.holdfast/StateCodec|null[0]
+    abstract fun decode(kotlin/String): #A // com.vynatix.holdfast/StateCodec.decode|decode(kotlin.String){}[0]
+    abstract fun encode(#A): kotlin/String // com.vynatix.holdfast/StateCodec.encode|encode(1:0){}[0]
 }
 
 abstract interface <#A: kotlin/Any> com.vynatix.holdfast/Transformer { // com.vynatix.holdfast/Transformer|null[0]
@@ -92,6 +109,27 @@ abstract interface com.vynatix.holdfast/FrameObserver { // com.vynatix.holdfast/
     open fun onFrameCommitted(kotlin/String) // com.vynatix.holdfast/FrameObserver.onFrameCommitted|onFrameCommitted(kotlin.String){}[0]
     open fun onFrameRolledBack(kotlin/String, kotlin/Throwable) // com.vynatix.holdfast/FrameObserver.onFrameRolledBack|onFrameRolledBack(kotlin.String;kotlin.Throwable){}[0]
     open fun onFrameStarted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameStarted|onFrameStarted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
+}
+
+sealed interface <#A: out kotlin/Any> com.vynatix.holdfast/SnapshotEntry { // com.vynatix.holdfast/SnapshotEntry|null[0]
+    final class <#A1: out kotlin/Any> Present : com.vynatix.holdfast/SnapshotEntry<#A1> { // com.vynatix.holdfast/SnapshotEntry.Present|null[0]
+        constructor <init>(#A1) // com.vynatix.holdfast/SnapshotEntry.Present.<init>|<init>(1:0){}[0]
+
+        final val value // com.vynatix.holdfast/SnapshotEntry.Present.value|{}value[0]
+            final fun <get-value>(): #A1 // com.vynatix.holdfast/SnapshotEntry.Present.value.<get-value>|<get-value>(){}[0]
+
+        final fun component1(): #A1 // com.vynatix.holdfast/SnapshotEntry.Present.component1|component1(){}[0]
+        final fun copy(#A1 = ...): com.vynatix.holdfast/SnapshotEntry.Present<#A1> // com.vynatix.holdfast/SnapshotEntry.Present.copy|copy(1:0){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/SnapshotEntry.Present.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/SnapshotEntry.Present.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/SnapshotEntry.Present.toString|toString(){}[0]
+    }
+
+    final object Absent : com.vynatix.holdfast/SnapshotEntry<kotlin/Nothing> { // com.vynatix.holdfast/SnapshotEntry.Absent|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/SnapshotEntry.Absent.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/SnapshotEntry.Absent.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/SnapshotEntry.Absent.toString|toString(){}[0]
+    }
 }
 
 sealed interface <#A: out kotlin/Any?> com.vynatix.holdfast/TransactionResult { // com.vynatix.holdfast/TransactionResult|null[0]
@@ -180,6 +218,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun <#A1: kotlin/Any> registerDerivedBackingState(kotlin/String, #A1, kotlin.collections/List<com.vynatix.holdfast/State<*>>, kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Store.registerDerivedBackingState|registerDerivedBackingState(kotlin.String;0:0;kotlin.collections.List<com.vynatix.holdfast.State<*>>;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> registerInternalState(kotlin/String, #A1, com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Store.registerInternalState|registerInternalState(kotlin.String;0:0;com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> state(com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/Initializer<#A1>): com.vynatix.holdfast/StateDelegate<#A1> // com.vynatix.holdfast/Store.state|state(com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean;com.vynatix.holdfast.Initializer<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> state(com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/StateCodec<#A1>? = ..., com.vynatix.holdfast/Initializer<#A1>): com.vynatix.holdfast/StateDelegate<#A1> // com.vynatix.holdfast/Store.state|state(com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean;com.vynatix.holdfast.StateCodec<0:0>?;com.vynatix.holdfast.Initializer<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Store.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> invoke(kotlin/Function1<#A, #A1>): #A1 // com.vynatix.holdfast/Store.invoke|invoke(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun <#A1: kotlin/Any?> runUnderLock(kotlin/Function0<#A1>): #A1 // com.vynatix.holdfast/Store.runUnderLock|runUnderLock(kotlin.Function0<0:0>){0§<kotlin.Any?>}[0]
@@ -422,6 +461,28 @@ final class com.vynatix.holdfast/FramePolicy { // com.vynatix.holdfast/FramePoli
     }
 }
 
+final class com.vynatix.holdfast/RestoreRejectedException : kotlin/IllegalStateException { // com.vynatix.holdfast/RestoreRejectedException|null[0]
+    final val issues // com.vynatix.holdfast/RestoreRejectedException.issues|{}issues[0]
+        final fun <get-issues>(): kotlin.collections/List<com.vynatix.holdfast/RestoreIssue> // com.vynatix.holdfast/RestoreRejectedException.issues.<get-issues>|<get-issues>(){}[0]
+    final val policy // com.vynatix.holdfast/RestoreRejectedException.policy|{}policy[0]
+        final fun <get-policy>(): com.vynatix.holdfast/RestorePolicy // com.vynatix.holdfast/RestoreRejectedException.policy.<get-policy>|<get-policy>(){}[0]
+}
+
+final class com.vynatix.holdfast/RestoreReport { // com.vynatix.holdfast/RestoreReport|null[0]
+    final val issues // com.vynatix.holdfast/RestoreReport.issues|{}issues[0]
+        final fun <get-issues>(): kotlin.collections/List<com.vynatix.holdfast/RestoreIssue> // com.vynatix.holdfast/RestoreReport.issues.<get-issues>|<get-issues>(){}[0]
+    final val kept // com.vynatix.holdfast/RestoreReport.kept|{}kept[0]
+        final fun <get-kept>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/RestoreReport.kept.<get-kept>|<get-kept>(){}[0]
+    final val restored // com.vynatix.holdfast/RestoreReport.restored|{}restored[0]
+        final fun <get-restored>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/RestoreReport.restored.<get-restored>|<get-restored>(){}[0]
+
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/RestoreReport.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast/RestoreReport.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreReport.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast/SnapshotFormatException : kotlin/IllegalArgumentException // com.vynatix.holdfast/SnapshotFormatException|null[0]
+
 final class com.vynatix.holdfast/StoreLock { // com.vynatix.holdfast/StoreLock|null[0]
     constructor <init>() // com.vynatix.holdfast/StoreLock.<init>|<init>(){}[0]
 
@@ -431,10 +492,26 @@ final class com.vynatix.holdfast/StoreLock { // com.vynatix.holdfast/StoreLock|n
 }
 
 final class com.vynatix.holdfast/StoreSnapshot { // com.vynatix.holdfast/StoreSnapshot|null[0]
+    final val schemaVersion // com.vynatix.holdfast/StoreSnapshot.schemaVersion|{}schemaVersion[0]
+        final fun <get-schemaVersion>(): kotlin/Int // com.vynatix.holdfast/StoreSnapshot.schemaVersion.<get-schemaVersion>|<get-schemaVersion>(){}[0]
     final val size // com.vynatix.holdfast/StoreSnapshot.size|{}size[0]
         final fun <get-size>(): kotlin/Int // com.vynatix.holdfast/StoreSnapshot.size.<get-size>|<get-size>(){}[0]
     final val stateNames // com.vynatix.holdfast/StoreSnapshot.stateNames|{}stateNames[0]
         final fun <get-stateNames>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/StoreSnapshot.stateNames.<get-stateNames>|<get-stateNames>(){}[0]
+    final val unencodableStateNames // com.vynatix.holdfast/StoreSnapshot.unencodableStateNames|{}unencodableStateNames[0]
+        final fun <get-unencodableStateNames>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/StoreSnapshot.unencodableStateNames.<get-unencodableStateNames>|<get-unencodableStateNames>(){}[0]
+
+    final fun <#A1: kotlin/Any> entry(com.vynatix.holdfast/State<#A1>): com.vynatix.holdfast/SnapshotEntry<#A1> // com.vynatix.holdfast/StoreSnapshot.entry|entry(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> get(com.vynatix.holdfast/State<#A1>): #A1? // com.vynatix.holdfast/StoreSnapshot.get|get(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun encode(kotlin/Boolean = ...): kotlin/String // com.vynatix.holdfast/StoreSnapshot.encode|encode(kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/StoreSnapshot.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast/StoreSnapshot.hashCode|hashCode(){}[0]
+    final fun render(): kotlin/String // com.vynatix.holdfast/StoreSnapshot.render|render(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/StoreSnapshot.toString|toString(){}[0]
+
+    final object Companion { // com.vynatix.holdfast/StoreSnapshot.Companion|null[0]
+        final fun decode(kotlin/String): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/StoreSnapshot.Companion.decode|decode(kotlin.String){}[0]
+    }
 }
 
 final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transaction|null[0]
@@ -504,6 +581,80 @@ open class com.vynatix.holdfast/FrameContractException : kotlin/IllegalStateExce
     constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameContractException.<init>|<init>(kotlin.String){}[0]
 }
 
+sealed class com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue|null[0]
+    abstract val reason // com.vynatix.holdfast/RestoreIssue.reason|{}reason[0]
+        abstract fun <get-reason>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.reason.<get-reason>|<get-reason>(){}[0]
+    abstract val stateName // com.vynatix.holdfast/RestoreIssue.stateName|{}stateName[0]
+        abstract fun <get-stateName>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.stateName.<get-stateName>|<get-stateName>(){}[0]
+
+    final class NoCodec : com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue.NoCodec|null[0]
+        constructor <init>(kotlin/String) // com.vynatix.holdfast/RestoreIssue.NoCodec.<init>|<init>(kotlin.String){}[0]
+
+        final val reason // com.vynatix.holdfast/RestoreIssue.NoCodec.reason|{}reason[0]
+            final fun <get-reason>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.NoCodec.reason.<get-reason>|<get-reason>(){}[0]
+        final val stateName // com.vynatix.holdfast/RestoreIssue.NoCodec.stateName|{}stateName[0]
+            final fun <get-stateName>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.NoCodec.stateName.<get-stateName>|<get-stateName>(){}[0]
+
+        final fun component1(): kotlin/String // com.vynatix.holdfast/RestoreIssue.NoCodec.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): com.vynatix.holdfast/RestoreIssue.NoCodec // com.vynatix.holdfast/RestoreIssue.NoCodec.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/RestoreIssue.NoCodec.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/RestoreIssue.NoCodec.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreIssue.NoCodec.toString|toString(){}[0]
+    }
+
+    final class TypeMismatch : com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue.TypeMismatch|null[0]
+        constructor <init>(kotlin/String, kotlin/String, kotlin/String) // com.vynatix.holdfast/RestoreIssue.TypeMismatch.<init>|<init>(kotlin.String;kotlin.String;kotlin.String){}[0]
+
+        final val reason // com.vynatix.holdfast/RestoreIssue.TypeMismatch.reason|{}reason[0]
+            final fun <get-reason>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.reason.<get-reason>|<get-reason>(){}[0]
+        final val snapshotType // com.vynatix.holdfast/RestoreIssue.TypeMismatch.snapshotType|{}snapshotType[0]
+            final fun <get-snapshotType>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.snapshotType.<get-snapshotType>|<get-snapshotType>(){}[0]
+        final val stateName // com.vynatix.holdfast/RestoreIssue.TypeMismatch.stateName|{}stateName[0]
+            final fun <get-stateName>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.stateName.<get-stateName>|<get-stateName>(){}[0]
+        final val stateType // com.vynatix.holdfast/RestoreIssue.TypeMismatch.stateType|{}stateType[0]
+            final fun <get-stateType>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.stateType.<get-stateType>|<get-stateType>(){}[0]
+
+        final fun component1(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.component1|component1(){}[0]
+        final fun component2(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.component2|component2(){}[0]
+        final fun component3(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.component3|component3(){}[0]
+        final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/String = ...): com.vynatix.holdfast/RestoreIssue.TypeMismatch // com.vynatix.holdfast/RestoreIssue.TypeMismatch.copy|copy(kotlin.String;kotlin.String;kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/RestoreIssue.TypeMismatch.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/RestoreIssue.TypeMismatch.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreIssue.TypeMismatch.toString|toString(){}[0]
+    }
+
+    final class Undecodable : com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue.Undecodable|null[0]
+        constructor <init>(kotlin/String, kotlin/String) // com.vynatix.holdfast/RestoreIssue.Undecodable.<init>|<init>(kotlin.String;kotlin.String){}[0]
+
+        final val reason // com.vynatix.holdfast/RestoreIssue.Undecodable.reason|{}reason[0]
+            final fun <get-reason>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.Undecodable.reason.<get-reason>|<get-reason>(){}[0]
+        final val stateName // com.vynatix.holdfast/RestoreIssue.Undecodable.stateName|{}stateName[0]
+            final fun <get-stateName>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.Undecodable.stateName.<get-stateName>|<get-stateName>(){}[0]
+
+        final fun component1(): kotlin/String // com.vynatix.holdfast/RestoreIssue.Undecodable.component1|component1(){}[0]
+        final fun component2(): kotlin/String // com.vynatix.holdfast/RestoreIssue.Undecodable.component2|component2(){}[0]
+        final fun copy(kotlin/String = ..., kotlin/String = ...): com.vynatix.holdfast/RestoreIssue.Undecodable // com.vynatix.holdfast/RestoreIssue.Undecodable.copy|copy(kotlin.String;kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/RestoreIssue.Undecodable.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/RestoreIssue.Undecodable.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreIssue.Undecodable.toString|toString(){}[0]
+    }
+
+    final class UnknownState : com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue.UnknownState|null[0]
+        constructor <init>(kotlin/String) // com.vynatix.holdfast/RestoreIssue.UnknownState.<init>|<init>(kotlin.String){}[0]
+
+        final val reason // com.vynatix.holdfast/RestoreIssue.UnknownState.reason|{}reason[0]
+            final fun <get-reason>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.UnknownState.reason.<get-reason>|<get-reason>(){}[0]
+        final val stateName // com.vynatix.holdfast/RestoreIssue.UnknownState.stateName|{}stateName[0]
+            final fun <get-stateName>(): kotlin/String // com.vynatix.holdfast/RestoreIssue.UnknownState.stateName.<get-stateName>|<get-stateName>(){}[0]
+
+        final fun component1(): kotlin/String // com.vynatix.holdfast/RestoreIssue.UnknownState.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): com.vynatix.holdfast/RestoreIssue.UnknownState // com.vynatix.holdfast/RestoreIssue.UnknownState.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/RestoreIssue.UnknownState.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast/RestoreIssue.UnknownState.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreIssue.UnknownState.toString|toString(){}[0]
+    }
+}
+
 final object com.vynatix.holdfast.bridge/BooleanCodec : com.vynatix.holdfast.bridge/Codec<kotlin/Boolean> { // com.vynatix.holdfast.bridge/BooleanCodec|null[0]
     final fun decode(kotlin/String): kotlin/Boolean // com.vynatix.holdfast.bridge/BooleanCodec.decode|decode(kotlin.String){}[0]
     final fun encode(kotlin/Boolean): kotlin/String // com.vynatix.holdfast.bridge/BooleanCodec.encode|encode(kotlin.Boolean){}[0]
@@ -541,6 +692,12 @@ final object com.vynatix.holdfast/FrameObservers { // com.vynatix.holdfast/Frame
     final fun unregister(com.vynatix.holdfast/FrameObserver) // com.vynatix.holdfast/FrameObservers.unregister|unregister(com.vynatix.holdfast.FrameObserver){}[0]
 }
 
+final object com.vynatix.holdfast/Redacted : com.vynatix.holdfast/SnapshotEntry<kotlin/Nothing> { // com.vynatix.holdfast/Redacted|null[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/Redacted.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast/Redacted.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/Redacted.toString|toString(){}[0]
+}
+
 final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCount|@com.vynatix.holdfast.State<0:0>{0§<kotlin.Any>}observerCount[0]
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.holdfast/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
 
@@ -549,6 +706,7 @@ final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/reset(): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/reset|reset@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot, com.vynatix.holdfast/RestorePolicy): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast/RestoreReport> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot;com.vynatix.holdfast.RestorePolicy){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapshot(): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/Transformer<#A>).com.vynatix.holdfast/then(com.vynatix.holdfast/Transformer<#A>): com.vynatix.holdfast/Transformer<#A> // com.vynatix.holdfast/then|then@com.vynatix.holdfast.Transformer<0:0>(com.vynatix.holdfast.Transformer<0:0>){0§<kotlin.Any>}[0]

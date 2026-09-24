@@ -49,6 +49,12 @@ internal class StateDeclaration<T : Any>(
     val transformer: Transformer<T>?,
     val distinct: Boolean,
     /**
+     * How a snapshot encodes this state's raw value, or `null` when it cannot
+     * leave memory: `snapshot().encode()` lists the state as unencodable
+     * instead. Always `null` for an eagerly registered state.
+     */
+    val codec: StateCodec<T>?,
+    /**
      * The delegated property this declaration came from, or `null` for an
      * eagerly registered state. A second declaration of [name] from the same
      * property binds to this declaration instead of failing
@@ -96,6 +102,7 @@ internal class DeclaringStateDelegate<T : Any>(
     private val store: Store<*>,
     private val transformer: Transformer<T>?,
     private val distinct: Boolean,
+    private val codec: StateCodec<T>?,
     private val initializer: Initializer<T>,
     private val declaration: StateDeclaration<T>? = null,
 ) : StateDelegate<T> {
@@ -108,7 +115,7 @@ internal class DeclaringStateDelegate<T : Any>(
         property: KProperty<*>,
     ): StateDelegate<T> {
         store.checkNotDisposed()
-        return DeclaringStateDelegate(store, transformer, distinct, initializer, declare(thisRef, property))
+        return DeclaringStateDelegate(store, transformer, distinct, codec, initializer, declare(thisRef, property))
     }
 
     override fun getValue(
@@ -140,6 +147,7 @@ internal class DeclaringStateDelegate<T : Any>(
                 initializer = initializer,
                 transformer = transformer,
                 distinct = distinct,
+                codec = codec,
                 property = property,
                 local = thisRef == null,
             ),

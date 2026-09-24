@@ -190,6 +190,35 @@ needed. What changes (issue #20, R5):
   `:holdfast-hallmark`'s `boxedHandle` does); otherwise their state is
   declared only on its first read, and a snapshot taken before that misses it.
 
+## Behavior change: `restore` ignores unknown state names (0.5.0)
+
+`store.restore(snapshot)` used to return `TransactionResult.Error` when the
+snapshot held a state name the store does not declare — a state renamed or
+removed since the snapshot was taken, or one of another store class. It now
+ignores that name, restores the rest, and leaves every declared state the
+snapshot has no value for as it was, without firing its observers (issue #20,
+R1). That is what restoring a persisted snapshot after an app update needs.
+
+- **Relied on the error to detect a mismatched snapshot?** Use the
+  experimental overload with the strict policy, which fails as before and
+  names every offending state:
+  `store.restore(snapshot, RestorePolicy.Strict)` (opt in with
+  `@OptIn(ExperimentalStoreApi::class)`). Or read what was skipped from the
+  `RestoreReport` that `restore(snapshot, RestorePolicy.IgnoreUnknown)`
+  returns.
+- **Restoring another store class's snapshot?** A value whose class differs
+  from the class of the value its target state holds now fails the restore,
+  naming the state, when either class is a built-in value type (`String`,
+  `Boolean`, `Char`, a primitive number): a `String` restored into a state
+  holding an `Int` or a `List`, say, or a data-class value restored into an
+  `Int` state. Before, such a value was written and threw
+  `ClassCastException` at a later read. Values of two other classes
+  (subclasses, sealed siblings) are still written unchecked. See GUIDE §16.2,
+  "The type witness".
+- **Comparing snapshots?** They now have value equality: `==` compares state
+  names and raw values, not identity. Code that kept snapshots in a set or
+  as map keys by identity should wrap them.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

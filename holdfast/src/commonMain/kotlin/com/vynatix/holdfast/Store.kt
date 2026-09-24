@@ -72,8 +72,8 @@ class FrameMiddlewareSession internal constructor(
  *    Post-commit failures go to [uncaughtObserverHandler], or are logged.
  *  - A state's initializer runs once, when the state is first needed, without the
  *    store taking any lock to run it; other threads needing that state meanwhile wait
- *    for it. First needed inside an action (or by [restore]), it runs under that
- *    action's locks. Initializers may read committed values of states, but not write
+ *    for it. First needed inside an action (or by a [snapshot] or [restore] called
+ *    in one), it runs under that action's locks. Initializers may read committed values of states, but not write
  *    (see [state]). The initializer is retained: the experimental [reset] runs it
  *    again, inside its own action.
  *
@@ -975,11 +975,12 @@ abstract class Store<Self : Store<Self>> {
      * `propertiesLock`); it holds only the state's own latch, and other
      * threads needing the state meanwhile wait for it. It does run under
      * whatever locks its caller already holds: first needed inside an action,
-     * an `atomic(...)` frame, an observer during commit fanout, [restore], or
-     * a [snapshot] taken inside an action, it runs under that action's
-     * `transactionLock` (and, from the action body, its `middlewareLock`), so
-     * a slow initializer there holds up every other action on that store, and
-     * an initializer must not block on another thread's store work.
+     * an `atomic(...)` frame, an observer during commit fanout, or a
+     * [snapshot] or [restore] called inside an action, it runs under that
+     * action's `transactionLock` (and, from the action body, its
+     * `middlewareLock`), so a slow initializer there holds up every other
+     * action on that store, and an initializer must not block on another
+     * thread's store work.
      *
      * [initialize] may read other states (which materializes them in turn),
      * and sees their committed values only — never the pending writes of an
@@ -1009,12 +1010,45 @@ abstract class Store<Self : Store<Self>> {
      * over this store — binds to the existing state instead. The owning store
      * is always the receiver of `state(…)`, never the object the property
      * belongs to.
+     *
+     * A state declared here has no codec: a snapshot can hold it in memory,
+     * but `snapshot().encode()` lists it as unencodable. Declare it with the
+     * `codec` overload to give it a text encoding.
      */
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
         initialize: Initializer<T>,
-    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, initialize)
+    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, initialize)
+
+    /**
+     * Declare a state property that can leave memory: exactly the stable
+     * [state] above, plus a [codec] that [StoreSnapshot.encode] writes the
+     * state's raw value with and [StoreSnapshot.decode]/[restore] read it
+     * back with (`val count by state(codec = IntCodec) { 0 }`). Any
+     * `bridge.Codec` is a [StateCodec]. A state declared without one (here or
+     * through the stable overload) is captured in memory like any other, but
+     * `encode()` lists it in [StoreSnapshot.unencodableStateNames] instead of
+     * writing it.
+     *
+     * Calls that pass no [codec] (`state { … }`, `state(transformer = t) { … }`)
+     * resolve to the stable overload, which needs no opt-in: Kotlin prefers the
+     * candidate that leaves fewer parameters to their defaults.
+     *
+     * Experimental (issue #20, R1): later releases add parameters here.
+     *
+     * @throws IllegalStateException if the store is disposed.
+     */
+    @ExperimentalStoreApi
+    fun <T : Any> state(
+        transformer: Transformer<T>? = null,
+        distinct: Boolean = false,
+        codec: StateCodec<T>? = null,
+        initialize: Initializer<T>,
+    ): StateDelegate<T> {
+        checkNotDisposed()
+        return DeclaringStateDelegate(this, transformer, distinct, codec, initialize)
+    }
 
     /**
      * Create-or-fetch a state under an arbitrary name. Kept for companion

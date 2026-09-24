@@ -134,7 +134,15 @@ class MutableState<T : Any>(
             }
         }
 
-    private fun afterGet(rawValue: T): T = transformer?.takeIf { it.shouldTransform(rawValue) }?.get(rawValue) ?: rawValue
+    /**
+     * The `Transformer.get` view of [rawValue], a value this state stores: what
+     * [value] returns for it. `StoreSnapshot.get` reads captured raw values
+     * through it.
+     */
+    internal fun afterGet(rawValue: T): T {
+        val projection = transformer ?: return rawValue
+        return if (projection.shouldTransform(rawValue)) projection.get(rawValue) else rawValue
+    }
 
     /**
      * Pure: applies `transformer.set` to compute the post-set value to buffer in the

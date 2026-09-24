@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.bridge.IntCodec
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.time.Clock
@@ -45,8 +46,10 @@ class DisposedEntrypointTest {
             Entrypoint("state declaration (provideDelegate)") { p, _ ->
                 p.state { 0 }.provideDelegate(null, DisposedProbe::n)
             },
+            Entrypoint("state declaration with a codec (experimental overload)") { p, _ -> p.state(codec = IntCodec) { 0 } },
             Entrypoint("snapshot") { p, _ -> p.snapshot() },
             Entrypoint("restore") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1))) },
+            Entrypoint("restore with a policy") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1)), RestorePolicy.BestEffort) },
             Entrypoint("reset") { p, _ -> p.reset() },
             Entrypoint("registerDerivedBackingState") { p, _ -> p.registerDerivedBackingState("__probe", 0, emptyList()) },
             Entrypoint("properties") { p, _ -> p.properties },

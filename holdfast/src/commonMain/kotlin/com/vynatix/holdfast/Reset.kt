@@ -16,8 +16,8 @@ package com.vynatix.holdfast
  * transaction: each state's initializer (the `{ … }` of `state { … }`) runs
  * again and its result is staged back into the state. On success every
  * declared state holds the raw value a freshly constructed store's state holds
- * once read (the value `snapshot()` captures for it; [StoreSnapshot] itself
- * has no value equality) — except a state whose initializer reads a `derived`
+ * once read (the value `snapshot()` captures for it, so the two stores'
+ * snapshots compare equal) — except a state whose initializer reads a `derived`
  * state computed from states this reset changes (see "Fresh-store order") —
  * and on failure no state's value changes (states it materialized first stay
  * materialized; see below).

@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots
 
 ---
 
@@ -194,7 +194,7 @@ how that run differs.) The store takes no lock to run it — only the state's
 own latch (§10.2) — and another thread needing the state meanwhile waits for
 it. It does run under whatever locks its caller already holds: first needed
 inside an action, an `atomic(...)` frame, an observer during commit fanout,
-`restore()`, or a `snapshot()` taken inside an action, it runs under that
+or a `snapshot()`/`restore()` called inside an action, it runs under that
 action's locks, and when `reset()` re-runs it, it always runs under the reset
 action's locks. So keep initializers cheap and never make one wait for another
 thread's store work. It may read other states (materializing them in turn),
@@ -1005,7 +1005,7 @@ cd.dispose()
 | `holdfast action { … }` | `transactionLock` | yes | The only entry point; nested actions reuse the same lock |
 | `holdfast.middlewares(...)` | `middlewareLock` | yes | Reading the chain is also under this lock |
 | `holdfast.state(…)` (declaration, at construction) | `propertiesLock` | yes | Registers the name; runs no user code |
-| First read of a state (materialization) | per-state initializer latch | no — re-entering it is an initializer cycle, which throws | The initializer runs outside `propertiesLock`, holding its own latch plus whatever the reading thread already holds (the `transactionLock` when first needed inside an action or `atomic(...)` frame (every participant's `transactionLock`), an observer during commit fanout, `restore()`, or a `snapshot()` taken inside an action, and `middlewareLock` too from an action body); `propertiesLock` is taken briefly to publish. After that, no lock for the delegate |
+| First read of a state (materialization) | per-state initializer latch | no — re-entering it is an initializer cycle, which throws | The initializer runs outside `propertiesLock`, holding its own latch plus whatever the reading thread already holds (the `transactionLock` when first needed inside an action or `atomic(...)` frame (every participant's `transactionLock`), an observer during commit fanout, or a `snapshot()`/`restore()` called inside an action, and `middlewareLock` too from an action body); `propertiesLock` is taken briefly to publish. After that, no lock for the delegate |
 | `MutableState.value` read | `stateLock` (per state) | yes | Plus optional pending-write peek if owner thread |
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
@@ -1158,7 +1158,7 @@ never T1's pending writes.
 | `IllegalStateException: Cannot write S.x: the initializer of S.y is running on this thread …` (or `open an action on S`, `open an atomic(...) frame`, `reset S`, `emit an event on S`) | A state initializer writes, or opens an action or frame; initializers run whenever the state is first needed — including inside `snapshot()`, and again inside `reset()` | Compute the initial value from what the initializer can read; make the write in an action once the store exists — see §4.1 |
 | `IllegalStateException: State initializer cycle: S.x → S.y → S.x` (or `… cycle across threads …`) | Initializers that need each other's states | Give one state of the cycle an initial value that does not read the others; compute the rest from it |
 | `IllegalStateException: S already declares a state named 'x' …` when constructing a store | Two properties with one name on one store — typically a subclass redeclaring a base class's state | Give one of them another name |
-| A custom delegate's state is missing from `snapshot()` (and `restore()` into a fresh store returns `Error: snapshot contains state 'x' not registered on this store`) | The delegate wraps `state(…)` but forwards only `getValue`, so the state is declared on first read instead of at construction | Forward `provideDelegate(thisRef, property)` to the wrapped delegate — see §4.1 |
+| A custom delegate's state is missing from `snapshot()` (and `restore()` into a fresh store silently leaves it at its initial value: the one-argument `restore` ignores names the store has not declared) | The delegate wraps `state(…)` but forwards only `getValue`, so the state is declared on first read instead of at construction | Forward `provideDelegate(thisRef, property)` to the wrapped delegate — see §4.1 |
 | `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
 | `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
@@ -1173,7 +1173,8 @@ never T1's pending writes.
 
 | Member | Signature | Description |
 |---|---|---|
-| `state` | `fun <T> state(transformer: Transformer<T>? = null, distinct: Boolean = false, init: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `init` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
+| `state` | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `initialize` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
+| `state` (with a codec) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with; a call that passes no `codec` resolves to the stable overload and needs no opt-in; throws on a disposed store (§16.2) |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
@@ -1186,6 +1187,7 @@ never T1's pending writes.
 | `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`), and again at every `reset()` (§16.1). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
 | `bindClock` | `fun bindClock(clock: Clock?)` *(experimental)* | Binds a clock (level 2), e.g. a fixed test clock; `null` unbinds. Throws on a disposed store. `storeTest` restores each tracked store's binding to its value at first `track` (`store.action {}` doesn't auto-track), so bind after tracking |
 | `reset` | `fun <V : Store<V>> V.reset(): TransactionResult<Unit>` *(experimental, extension)* | Puts every declared state back to its initializer's value in one transaction: initializers re-run (reading each other's reset values), results staged raw, only changed states staged and fired; a throwing initializer rolls it all back (§16.1) |
+| `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
@@ -1295,10 +1297,14 @@ capability is independently usable; pick the ones you need.
 class StoreSnapshot internal constructor(…) {
     val stateNames: Set<String>   // every declared state; not the backing states of derived
     val size: Int
+    // equals/hashCode compare values; toString lists state names only.
+    // Experimental (§16.2): schemaVersion, unencodableStateNames, encode, entry, get,
+    // render, and StoreSnapshot.decode(text).
 }
 
 fun <V : Store<V>> V.snapshot(): StoreSnapshot
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>   // RestorePolicy.IgnoreUnknown
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>   // experimental, §16.2
 ```
 
 `snapshot` captures the raw stored value of every declared state (see §4.1
@@ -1317,7 +1323,8 @@ snapshot, and skips one that `removeState`/`clearStates` has dropped since.
 action, it is a savepoint: its writes commit, or roll back, with the
 enclosing action), bypassing `transformer.set` so asymmetric transformers
 (encryption, JSON codecs) round-trip losslessly; a declared target that is
-not materialized yet is materialized first.
+not materialized yet is materialized first, before the `action` opens (at top
+level that takes no lock of the store).
 
 ```kotlin
 val snap = holdfast.snapshot()
@@ -1326,8 +1333,15 @@ holdfast.restore(snap)               // count + label back to snapshot values
 ```
 
 Restore-time bridge publish: yes. Detach bridges first if the snapshot
-shouldn't echo back to your persistence layer. Restore of an unknown state
-name throws (caught by the wrapping action → `TransactionResult.Error`).
+shouldn't echo back to your persistence layer. A state name the store does not
+declare is ignored, and a declared state the snapshot holds no value for keeps
+its value without its observers firing (`RestorePolicy.IgnoreUnknown`). A value
+the target state cannot hold — a snapshot of another store class with a
+`String` where this store's state holds an `Int` — fails the restore with
+`TransactionResult.Error`, and nothing changes. Snapshots compare by value:
+two snapshots holding the same states with equal raw values are `==`, whichever
+store instances took them. To pick another restore policy, turn a snapshot into
+text and back, or read one state's value from it, see the experimental §16.2.
 
 To go back to the initial values rather than to a captured snapshot, use the
 experimental `reset()` (§16.1).
@@ -1492,7 +1506,7 @@ interface KvStore {
     fun snapshot(): Map<String, String>
 }
 
-interface Codec<T : Any> {
+interface Codec<T : Any> : StateCodec<T> {       // every Codec is a StateCodec (§16.2)
     fun encode(value: T): String
     fun decode(string: String): T
 }
@@ -2081,8 +2095,10 @@ storeTest {
 Issue #20 lets an app boot its stores from captured state instead of a
 hand-written `seed()` function per store. The pieces land one at a time, and
 each section below covers one. Everything in this chapter is
-`@ExperimentalStoreApi`: opt in with `@OptIn(ExperimentalStoreApi::class)`,
-and expect names and behavior to change in any 0.x release.
+`@ExperimentalStoreApi` except `StateCodec` and what §16.2 says of the stable
+one-argument `restore(snapshot)` and of `StoreSnapshot` equality (§14.1): opt
+in with `@OptIn(ExperimentalStoreApi::class)`, and expect names and behavior
+to change in any 0.x release.
 
 The chapter builds on two things covered earlier. A store knows every state
 it declares from the moment it is constructed, and keeps each state's
@@ -2099,9 +2115,9 @@ fun <V : Store<V>> V.reset(): TransactionResult<Unit>
 `reset()` puts every declared state back to what its initializer computes,
 in one transaction. Afterwards every declared state holds the raw value a
 newly constructed store's state holds once read. In tests,
-`:holdfast-testing`'s `shouldMatchSnapshotOf` against a new store passes.
-`StoreSnapshot` has no value equality, so do not compare two snapshots with
-`==`.
+`:holdfast-testing`'s `shouldMatchSnapshotOf` against a new store passes, and
+so does `store.snapshot() == NewStore().snapshot()`: snapshots compare by
+value (§16.2).
 
 The one exception is an initializer that reads a `derived` state computed
 from states this reset changes. A `derived` recomputes only after the reset
@@ -2172,6 +2188,189 @@ fun signOut(session: SessionStore) {
   because a blocking action there would deadlock), and inside a frame body
   that does not enroll the store (`UnenrolledStoreException`, unless the
   frame's policy allows unenrolled writes).
+
+### 16.2 Encoding snapshots: codecs, restore policies, typed reads
+
+```kotlin
+interface StateCodec<T : Any> {                 // stable; every bridge.Codec is one
+    fun encode(value: T): String
+    fun decode(string: String): T
+}
+
+// Store member: the stable state(...) plus a codec.
+@ExperimentalStoreApi
+fun <T : Any> state(
+    transformer: Transformer<T>? = null,
+    distinct: Boolean = false,
+    codec: StateCodec<T>? = null,
+    initialize: Initializer<T>,
+): StateDelegate<T>
+
+class StoreSnapshot {                           // members added to §14.1's
+    @ExperimentalStoreApi val schemaVersion: Int
+    @ExperimentalStoreApi val unencodableStateNames: Set<String>
+    @ExperimentalStoreApi fun encode(includeRemote: Boolean = false): String
+    @ExperimentalStoreApi fun <T : Any> entry(state: State<T>): SnapshotEntry<T>
+    @ExperimentalStoreApi operator fun <T : Any> get(state: State<T>): T?
+    @ExperimentalStoreApi fun render(): String
+    @ExperimentalStoreApi companion object {
+        @ExperimentalStoreApi fun decode(text: String): StoreSnapshot
+    }
+}
+
+sealed interface SnapshotEntry<out T : Any> {
+    data class Present<out T : Any>(val value: T) : SnapshotEntry<T>
+    data object Absent : SnapshotEntry<Nothing>
+}
+data object Redacted : SnapshotEntry<Nothing>
+
+enum class RestorePolicy { Strict, IgnoreUnknown, BestEffort }
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>
+class RestoreReport { val restored: Set<String>; val kept: Set<String>; val issues: List<RestoreIssue> }
+sealed class RestoreIssue { UnknownState, NoCodec, Undecodable, TypeMismatch }  // stateName + reason
+class RestoreRejectedException : IllegalStateException { val policy; val issues }
+class SnapshotFormatException : IllegalArgumentException
+```
+
+A snapshot holds raw values in memory. To write one to disk, or hand it to
+another process, give its states a codec: `snapshot().encode()` turns the
+snapshot into text, and `StoreSnapshot.decode(text)` turns the text back into
+a snapshot that `restore` accepts, in a new store instance or after a restart.
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+class SettingsStore : Store<SettingsStore>() {
+    val theme by state(codec = StringCodec) { "light" }
+    val fontSize by state(codec = IntCodec) { 14 }
+    val draft by state { "" }        // no codec: captured in memory, never encoded
+}
+
+@OptIn(ExperimentalStoreApi::class)
+fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
+    // Say `from` holds theme = "dark", fontSize = 16, draft = "unsent".
+    val snapshot = from.snapshot()
+    println("font size ${snapshot[from.fontSize]}")   // typed read (an Int?): "font size 16"
+    val text = snapshot.encode()
+    // {"format":"holdfast.store","v":1,"schema":1,
+    //  "states":{"fontSize":"16","theme":"dark"},"skipped":["draft"]}
+    return to.restore(StoreSnapshot.decode(text), RestorePolicy.Strict).getOrThrow()
+    // restored = [fontSize, theme], kept = [draft]: `to` keeps its own draft.
+}
+```
+
+- **Codecs.** `StateCodec<T>` turns a value into text and back. It is stable,
+  although the rest of this chapter is experimental: `bridge.Codec` extends
+  it, so `StringCodec`, `IntCodec`, `LongCodec`, `BooleanCodec` and your own
+  `KvBridge` codecs work unchanged. A codec sees the state's raw stored value,
+  after `Transformer.set`: an `EncryptingTransformer` state is encoded as its
+  ciphertext, and restoring that ciphertext does not encrypt it again.
+- **Declaring.** `state(codec = …) { … }` is an experimental overload of
+  `state`. A call that passes no codec, such as `state { … }` or
+  `state(transformer = t) { … }`, still resolves to the stable overload and
+  needs no opt-in.
+- **Encoding.** `encode()` writes version 1 of the store format:
+  `{"format":"holdfast.store","v":1,"schema":1,"states":{…},"skipped":[…]}`.
+  `states` maps each state with a codec to its codec text. `skipped` names the
+  states without one, which are also listed in `unencodableStateNames`: their
+  values stay out of the text. The text is canonical: states sorted by name,
+  no whitespace, one fixed escaping (an unpaired surrogate is written as its
+  `\u` escape, so the text is valid Unicode). A snapshot therefore always
+  encodes to the same text. Equality ignores codecs, though: equal snapshots
+  from stores whose states declare different codecs can encode differently.
+  `derived` states are never encoded; they recompute
+  from their sources. `schemaVersion` is 1 for every capture today.
+  `includeRemote` is reserved for state tags and changes nothing yet.
+- **Decoding.** `decode` throws `SnapshotFormatException` for text it cannot
+  read. The message names the problem, a character offset and possibly a
+  state name, but never quotes a state's value, and the exception has no
+  cause. Fields the reader does not
+  know are skipped, so text from a later Holdfast that adds fields still
+  reads. Containers nested more than 64 levels deep are rejected without
+  deep recursion.
+- **Restoring.** The one-argument `restore(snapshot)` uses
+  `RestorePolicy.IgnoreUnknown`. The experimental `restore(snapshot, policy)`
+  lets you choose, and returns a `RestoreReport`. An entry the restore cannot
+  apply is a `RestoreIssue`: a name the store does not declare
+  (`UnknownState`), text for a state without a codec (`NoCodec`), text the
+  codec rejects (`Undecodable`), or a value of the wrong class
+  (`TypeMismatch`). `Strict` fails on any issue, `IgnoreUnknown` only on
+  issues other than `UnknownState`, and `BestEffort` skips every bad entry and
+  reports it. A failed restore returns `TransactionResult.Error` carrying a
+  `RestoreRejectedException` that names each state, and nothing changes.
+  Inside an `atomic(...)` frame, that error aborts the whole frame. Under
+  every policy, a declared state the snapshot holds no value for keeps its
+  value, and its observers do not fire.
+- **Order of work.** A restore runs the user code its plan needs before its
+  action opens, so at top level it holds no lock of the store: initializers
+  of never-read target states, and the codecs decoding a decoded snapshot's
+  text. The action then stages the raw values in one
+  transaction, whose id is `Restore`; middleware, observers and bridges run
+  in it, as for any action. (A target state that a concurrent
+  `removeState`/`clearStates` drops after that is materialized again inside
+  the action, under its locks; an internal state dropped that way fails the
+  restore.)
+- **The type witness.** A state's declared type is erased at runtime, so a
+  captured value is checked against the class of the value the state holds.
+  The same class always fits. A different class is rejected only when either
+  class is a built-in value type (`String`, `Boolean`, `Char` or a primitive
+  number), so subclasses, sealed siblings and different `List`
+  implementations always pass. As a result, a state declared as `Any`,
+  `Number` or `Comparable` can be refused a value of another built-in type.
+  No check runs for a snapshot taken by an instance of the same store class
+  (or a superclass), or for decoded values, which the state's own codec
+  produced. The skip trusts the class, not its type arguments: for a generic
+  store class (`class Box<T : Any> : Store<Box<T>>`), a `Box<Int>` snapshot
+  restores unchecked into a `Box<String>`, and the wrong value surfaces later
+  as a `ClassCastException` where the state is read. The same holds for
+  states whose declarations differ between instances of one class, such as
+  function-local delegated properties. Restore such snapshots only into
+  instances with the same type arguments.
+- **Typed reads.** `snapshot[state]` returns the value the snapshot holds for
+  `state`, typed by the state. It returns the `Transformer.get` view, so an
+  encrypted state reads as plaintext. `entry(state)` distinguishes
+  `Present(value)` from `Absent` and `Redacted` (a value withheld from the
+  text). A captured snapshot answers the states of the store instance that
+  took it, and throws `IllegalArgumentException` for another instance's
+  state. A decoded snapshot answers any store's state by name, decoding the
+  text with that state's codec; it throws `SnapshotFormatException` when the
+  codec cannot decode the text, or when the snapshot holds a keyed state
+  family, not a single value, under the state's name. Both keep working
+  after the store is disposed.
+- **Equality.** Snapshots compare by value. Two captured snapshots are equal
+  when they hold the same state names with `==` raw values, whichever
+  instances took them and whatever codecs their states declare. Two decoded
+  snapshots are equal when they hold the same text. A captured snapshot never
+  equals a decoded one: compare their `encode()` output instead. That output
+  survives the round trip exactly:
+  `StoreSnapshot.decode(s.encode()).encode() == s.encode()`. `toString()`
+  lists state names only. `render()` shows the stored values, for debugging.
+- **Values stay out of failures.** No exception these APIs throw carries a
+  state's value in its message or cause chain. A codec exception is reported
+  by its class name only, because its message may quote the text it failed on.
+
+A `kotlinx.serialization` type needs no plugin to be a codec. Wrap its
+`KSerializer`:
+
+```kotlin
+class KSerializerCodec<T : Any>(
+    private val serializer: KSerializer<T>,
+    private val json: Json = Json,
+) : StateCodec<T> {
+    override fun encode(value: T): String = json.encodeToString(serializer, value)
+    override fun decode(string: String): T = json.decodeFromString(serializer, string)
+}
+
+@OptIn(ExperimentalStoreApi::class)
+class InboxStore : Store<InboxStore>() {
+    val pinned by state(codec = KSerializerCodec(ListSerializer(String.serializer()))) {
+        emptyList<String>()
+    }
+}
+```
+
+The recipe needs only the `kotlinx-serialization-json` runtime. A class
+annotated `@Serializable` needs the serialization compiler plugin to generate
+its `serializer()`, and then works the same way.
 
 ---
 

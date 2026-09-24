@@ -47,6 +47,47 @@ private class CryptoVault : Store<CryptoVault>() {
     val plain by state { "p" }
 }
 
+/** Clears every state as a restore's action starts: after the restore planned it, before it stages. */
+private class ClearOnRestore : Middleware<SnapshotVault>() {
+    override fun onTransactionStarted(context: MiddlewareContext<SnapshotVault>) {
+        if (context.transaction.id == "Restore") context.store.clearStates()
+    }
+}
+
+/** A value-preserving transformer, only so the stable overload gets a transformer argument. */
+private object Identity : Transformer<String> {
+    override fun set(value: String): String = value
+
+    override fun get(value: String): String = value
+}
+
+/**
+ * Every stable spelling of `state(…)`. This file has no `ExperimentalStoreApi`
+ * opt-in, so it compiles only while each call resolves to the stable
+ * three-parameter `state` rather than the experimental overload that adds a
+ * `codec` parameter (Kotlin picks the candidate that leaves fewer parameters
+ * to their defaults): the source-compatibility guard for that overload.
+ */
+private class StableOverloadStore : Store<StableOverloadStore>() {
+    val bare by state { 0 }
+    val positionalTransformer by state(Identity) { "a" }
+    val namedTransformer by state(transformer = Identity) { "b" }
+    val namedDistinct by state(distinct = true) { 1 }
+    val both by state(Identity, true) { "c" }
+    val allNamed by state(transformer = Identity, distinct = false, initialize = { "d" })
+}
+
+class StableStateOverloadTest {
+    @Test fun everyStableSpellingDeclaresAState() {
+        val store = StableOverloadStore()
+        assertEquals(
+            setOf("bare", "positionalTransformer", "namedTransformer", "namedDistinct", "both", "allNamed"),
+            store.snapshot().stateNames,
+        )
+        assertEquals("d", store.allNamed.value)
+    }
+}
+
 class SnapshotCaptureTest {
     @Test fun snapshotContainsCurrentRawValues() {
         val v = SnapshotVault()
@@ -179,12 +220,26 @@ class SnapshotRestoreTest {
         sub2.dispose()
     }
 
-    @Test fun restoreOfUnknownStateNameRollsBack() {
+    @Test fun restoreIgnoresAnUnknownStateName() {
         val v = SnapshotVault()
-        val foreign = StoreSnapshot(mapOf("not-here" to 42))
+        val seen = mutableListOf<Int>()
+        val sub = v.n effect { seen += this }
+        seen.clear()
+        val foreign = StoreSnapshot(mapOf("not-here" to 42, "s" to "restored"))
         val r = v.restore(foreign)
-        assertIs<TransactionResult.Error>(r)
-        assertEquals(0, v.n.value, "no states changed; transaction rolled back")
+        sub.dispose()
+        assertIs<TransactionResult.Success<Unit>>(r, "an unknown name is ignored, not an error")
+        assertEquals("restored", v.s.value, "the known name is restored")
+        assertEquals(0, v.n.value, "a state the snapshot has no value for keeps its own")
+        assertEquals(emptyList(), seen, "and its observer stays silent")
+    }
+
+    @Test fun restoreRejectsAValueOfAnotherBuiltInTypeAndRollsBack() {
+        val v = SnapshotVault()
+        val r = v.restore(StoreSnapshot(mapOf("s" to "restored", "n" to "not-an-int")))
+        assertIs<TransactionResult.Error>(r, "a String cannot be an Int state's value")
+        assertTrue(r.exception.message!!.contains("'n'"), "the failure names the state: ${r.exception.message}")
+        assertEquals("init", v.s.value, "nothing was changed")
     }
 
     @Test fun restoreRoundTripsAsymmetricTransformerWithoutDoubleEncrypting() {
@@ -252,7 +307,7 @@ class SnapshotRestoreTest {
 
         val target = FailingInitStore(failInit = true)
         val r = target.restore(snap)
-        assertIs<TransactionResult.Error>(r, "the initializer runs inside the restore's action")
+        assertIs<TransactionResult.Error>(r, "a failing initializer, run before the action opens, is reported by the restore's action")
         assertEquals("initializer fails", r.exception.message)
         assertEquals(0, target.ok.value, "nothing was staged")
 
@@ -262,11 +317,12 @@ class SnapshotRestoreTest {
     }
 
     @Test fun restoreTargetInitializersNeverSeeTheRestoresOwnWrites() {
-        // Untouched store: restore materializes a and b itself, and the unknown
-        // name fails the restore after both are materialized. b's initializer
-        // must read the committed a = 0, never the a = 5 this restore stages.
+        // Untouched store: restore materializes a and b itself before its
+        // action opens, and b's mistyped value fails the restore after both
+        // are materialized. b's initializer must read the committed a = 0,
+        // never the a = 5 this restore stages.
         val v = ChainedInitStore()
-        val r = v.restore(StoreSnapshot(mapOf("a" to 5, "b" to 7, "ghost" to 0)))
+        val r = v.restore(StoreSnapshot(mapOf("a" to 5, "b" to "seven")))
         assertIs<TransactionResult.Error>(r)
         assertEquals(1, v.b.value, "b was seeded from the committed a")
         assertEquals(0, v.a.value, "the failed restore rolled back")
@@ -328,6 +384,27 @@ class SnapshotRestoreTest {
             assertIs<TransactionResult.Success<Unit>>(v.restore(snap))
             assertEquals(2, v.n.value, "the declared states are restored")
             assertEquals(setOf("n", "s", "items"), v.properties.keys, "the dropped backing state was not revived")
+        } finally {
+            d.dispose()
+        }
+    }
+
+    @Test fun anUndoSkipsADerivedBackingStateDroppedAfterThePlan() {
+        val v = SnapshotVault()
+        val (_, d) = v.derived(v.n) { n.value * 2 }
+        try {
+            v action { n mutate 2 }
+            val snap = v.snapshot()
+            v action { n mutate 5 }
+            v.middlewares(ClearOnRestore())
+
+            assertIs<TransactionResult.Success<Unit>>(v.restore(snap))
+            assertEquals(2, v.n.value, "the declared states are materialized again and restored")
+            assertEquals(
+                setOf("n", "s", "items"),
+                v.properties.keys,
+                "the backing dropped after the plan is skipped, not revived",
+            )
         } finally {
             d.dispose()
         }

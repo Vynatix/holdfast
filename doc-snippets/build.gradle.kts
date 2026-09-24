@@ -27,6 +27,8 @@ dependencies {
     testImplementation(project(":holdfast-compose"))
     testImplementation(project(":holdfast-testing"))
     testImplementation(kotlin("test"))
+    // The GUIDE §16.2 KSerializerCodec recipe: runtime only, no serialization compiler plugin.
+    testImplementation(libs.kotlinx.serialization.json)
 }
 
 tasks.test {

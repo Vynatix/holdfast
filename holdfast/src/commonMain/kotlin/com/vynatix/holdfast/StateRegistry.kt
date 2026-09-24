@@ -60,7 +60,12 @@ internal class StateRegistry(
 
     /**
      * Make [state] the live state of [decl]. Refused on a disposed store, so
-     * an initializer that outlives `dispose()` cannot re-register anything.
+     * an initializer that outlives `dispose()` cannot re-register anything,
+     * and for a declaration this store no longer holds: an eagerly registered
+     * state that `removeState`/`clearStates` dropped (which also drops its
+     * declaration) is not created again by a caller that looked it up before
+     * the drop — a restore that planned it, say — as a state no declaration
+     * lists.
      */
     fun <T : Any> publish(
         decl: StateDeclaration<T>,
@@ -68,6 +73,10 @@ internal class StateRegistry(
     ) {
         lock.withLock {
             check(!store.isDisposed) { "store disposed" }
+            check(declarations[decl.name] === decl) {
+                "${store.displayName} no longer declares a state named '${decl.name}' (it was removed); " +
+                    "cannot create it again"
+            }
             states[decl.name] = state
             decl.materialized = state
         }
@@ -106,6 +115,7 @@ internal class StateRegistry(
                     initializer = { initial },
                     transformer = transformer,
                     distinct = distinct,
+                    codec = null,
                     property = null,
                     local = false,
                     sources = sources,

@@ -11,6 +11,8 @@ android-targetSdk = "37"
 java-target = "21"
 kotlinx-coroutines = "1.10.2"
 kotlinx-datetime = "0.7.1"
+# Test-only, for the GUIDE §16.2 KSerializerCodec recipe twin in :doc-snippets (no artifact depends on it).
+kotlinx-serialization = "1.11.0"
 atomicfu = "0.32.1"
 kotest = "5.9.1"
 detekt = "2.0.0-alpha.3"
@@ -40,6 +42,7 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 
 [plugins]
