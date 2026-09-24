@@ -103,7 +103,8 @@ suspend fun <R> suspendAtomic(
     require(stores.isNotEmpty()) { "suspendAtomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
-    // A state initializer may read states but not write them (Store.state).
+    // A state initializer or a schema migration (SchemaVersioned.migrate) may
+    // read states but not write them (Store.state).
     sorted.first().internalRefuseInitializerWrite("open a suspendAtomic(...) frame")
 
     // Nested-frame safety (interop flavor + lock order), BEFORE any lock is

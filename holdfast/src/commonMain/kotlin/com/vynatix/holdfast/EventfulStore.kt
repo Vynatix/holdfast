@@ -92,7 +92,8 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
      * thrown out of an observer, it reaches [uncaughtObserverHandler].
      *
      * Also throws [IllegalStateException] from inside a state initializer, in
-     * an action or not (see [Store.state]).
+     * an action or not (see [Store.state]), or a schema migration
+     * ([SchemaVersioned.migrate]).
      */
     final override fun emit(event: E) {
         // Before the transaction check: an initializer emits outside any action too.

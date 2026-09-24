@@ -116,7 +116,8 @@ class EventfulSupport<E : Any>(
      * [Store.uncaughtObserverHandler].
      *
      * Also throws [IllegalStateException] from inside a state initializer, in
-     * an action or not (see [Store.state]).
+     * an action or not (see [Store.state]), or a schema migration
+     * ([SchemaVersioned.migrate]).
      */
     override fun emit(event: E) {
         val store =

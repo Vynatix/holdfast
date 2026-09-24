@@ -3,34 +3,70 @@ package com.vynatix.holdfast
 import com.vynatix.holdfast.platform.currentInitializerLocal
 import com.vynatix.holdfast.platform.setInitializerLocal
 
-// The no-write region state initializers run in, and the teaching messages
-// built from this thread's stack of running initializers (issue #20, D3).
+// The no-write region state initializers and schema migrations run in, and
+// the teaching messages built from this thread's stack of running
+// initializers (issue #20, D3 and D12).
 
 /**
- * One state initializer running on this thread, linked to the initializer
- * whose read started it ([parent]), if any. [reset] is the [ResetPass]
+ * One no-write region open on this thread, linked to the region it opened
+ * inside ([parent]), if any: an initializer, or a store's `migrate`.
+ */
+internal sealed class NoWriteFrame(
+    val parent: NoWriteFrame?,
+) {
+    /** The exception refusing [attempt] ("write X.y") while this region is the innermost. */
+    abstract fun refusal(attempt: String): IllegalStateException
+}
+
+/**
+ * One state initializer running on this thread. [reset] is the [ResetPass]
  * re-running it, or `null` when it runs to materialize its state.
  */
 internal class InitializingFrame(
     val declaration: StateDeclaration<*>,
-    val parent: InitializingFrame?,
+    parent: NoWriteFrame?,
     val reset: ResetPass? = null,
-)
+) : NoWriteFrame(parent) {
+    override fun refusal(attempt: String): IllegalStateException {
+        val message = initializerWriteMessage(attempt, declaration)
+        return IllegalStateException(message)
+    }
+}
 
 /**
- * The thread-local region in which state initializers run. Initializers may
- * read states — which materializes them in turn — and see committed values
- * only: [MutableState.value] skips the pending writes of an action on this
- * thread while a region is open. The one exception is an initializer that
- * `reset()` re-runs ([runForReset]): it reads its store's declared states at
- * their reset values (see [ResetPass]). A store write from one is refused:
- * `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`, and
- * `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all throw inside it,
- * naming the state being initialized.
+ * [SchemaVersioned.migrate] of [store] running on this thread, upcasting a
+ * snapshot from schema version [from] to [to]. Keeps the refusal it last
+ * threw ([refused]): its message names only stores and states, so the
+ * restore that runs the migration may attach it to its failure.
+ */
+internal class MigratingFrame(
+    val store: Store<*>,
+    val from: Int,
+    val to: Int,
+    parent: NoWriteFrame?,
+) : NoWriteFrame(parent) {
+    var refused: IllegalStateException? = null
+        private set
+
+    override fun refusal(attempt: String): IllegalStateException =
+        IllegalStateException(migrateWriteMessage(attempt, this)).also { refused = it }
+}
+
+/**
+ * The thread-local region in which state initializers, and schema migrations
+ * ([SchemaVersioned.migrate]), run. Code inside it may read states — which
+ * materializes them in turn — and sees committed values only:
+ * [MutableState.value] skips the pending writes of an action on this thread
+ * while a region is open. The one exception is an initializer that `reset()`
+ * re-runs ([runForReset]): it reads its store's declared states at their
+ * reset values (see [ResetPass]). A store write from inside it is refused:
+ * `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`, `restore`, and
+ * `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all throw inside
+ * it, naming the state being initialized or the store migrating.
  */
 internal object NoWriteRegion {
-    /** The innermost initializer running on this thread, or `null`. */
-    fun current(): InitializingFrame? = currentInitializerLocal() as InitializingFrame?
+    /** The innermost region open on this thread, or `null`. */
+    fun current(): NoWriteFrame? = currentInitializerLocal() as NoWriteFrame?
 
     /** Run [block] as [decl]'s initializer, materializing its state. */
     fun <R> run(
@@ -45,8 +81,14 @@ internal object NoWriteRegion {
         block: () -> R,
     ): R = enter(InitializingFrame(decl, current(), pass), block)
 
+    /** Run [block] as the migration [frame] describes. */
+    fun <R> runMigration(
+        frame: MigratingFrame,
+        block: () -> R,
+    ): R = enter(frame, block)
+
     private fun <R> enter(
-        frame: InitializingFrame,
+        frame: NoWriteFrame,
         block: () -> R,
     ): R {
         setInitializerLocal(frame)
@@ -57,25 +99,30 @@ internal object NoWriteRegion {
         }
     }
 
-    /** Throw if an initializer is running on this thread; [attempt] names the refused call ("write X.y"). */
+    /** Throw if a region is open on this thread; [attempt] names the refused call ("write X.y"). */
     inline fun refuse(attempt: () -> String) {
         val frame = current() ?: return
-        throw IllegalStateException(initializerWriteMessage(attempt(), frame.declaration))
+        throw frame.refusal(attempt())
     }
 
     /** The initializers running on this thread, outermost first. */
     fun stack(): List<StateDeclaration<*>> {
-        val innermostFirst = generateSequence(current()) { it.parent }.map { it.declaration }.toList()
+        val innermostFirst =
+            generateSequence(current()) { it.parent }
+                .filterIsInstance<InitializingFrame>()
+                .map { it.declaration }
+                .toList()
         return innermostFirst.asReversed()
     }
 }
 
 /**
- * Refuse a store write from inside a state initializer: throws when a state
- * initializer is running on this thread, naming [attempt] and the state being
- * initialized. For `:holdfast-coroutines`' suspending entrypoints, which
- * police what the blocking ones police. It only reads a thread-local, so it
- * works on a disposed store too; the caller does its own disposed check.
+ * Refuse a store write from inside a state initializer (or a schema
+ * migration): throws when one is running on this thread, naming [attempt]
+ * and the state being initialized (or the store migrating). For
+ * `:holdfast-coroutines`' suspending entrypoints, which police what the
+ * blocking ones police. It only reads a thread-local, so it works on a
+ * disposed store too; the caller does its own disposed check.
  */
 @StoreInternalApi
 fun Store<*>.internalRefuseInitializerWrite(attempt: String) {
@@ -92,6 +139,18 @@ internal fun initializerWriteMessage(
         "action, commit or snapshot first needed the state. Initializers may read other states, but not write " +
         "them, open an action or an atomic(...) frame, reset a store, or emit events. Fix: compute the initial " +
         "value from what the initializer can read, and make the write in an action once the store exists."
+
+internal fun migrateWriteMessage(
+    attempt: String,
+    migrating: MigratingFrame,
+): String =
+    "Cannot $attempt: ${migrating.store.displayName}.migrate(from = ${migrating.from}) is running on this " +
+        "thread, upcasting a snapshot from schema version ${migrating.from} to ${migrating.to}. migrate runs " +
+        "while restore() plans, before the restore's action opens, so a write from it would land outside that " +
+        "restore's transaction, and stay when the restore fails. migrate may read states, but not write them, " +
+        "open an action or an atomic(...) frame, restore or reset a store, or emit events. Fix: make every " +
+        "change to the snapshot through the EncodedSnapshotView migrate is given, and make any other write in " +
+        "an action once the restore has returned."
 
 internal fun sameThreadCycleMessage(decl: StateDeclaration<*>): String {
     val stack = NoWriteRegion.stack()

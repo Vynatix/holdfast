@@ -23,6 +23,22 @@ public final class com/vynatix/holdfast/EffectKt {
 	public static final fun effect (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 }
 
+public final class com/vynatix/holdfast/EncodedSnapshotView {
+	public final fun contains (Ljava/lang/String;)Z
+	public final fun get (Ljava/lang/String;)Ljava/lang/String;
+	public final fun getFamilies ()Lcom/vynatix/holdfast/EncodedSnapshotView$Families;
+	public final fun getStateNames ()Ljava/util/Set;
+	public final fun put (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun remove (Ljava/lang/String;)Z
+	public final fun rename (Ljava/lang/String;Ljava/lang/String;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/EncodedSnapshotView$Families {
+	public final fun getNames ()Ljava/util/Set;
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class com/vynatix/holdfast/Eventful {
 	public abstract fun emit (Ljava/lang/Object;)V
 	public abstract fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
@@ -285,6 +301,11 @@ public final class com/vynatix/holdfast/RestoreReport {
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class com/vynatix/holdfast/SchemaVersioned {
+	public abstract fun getSchemaVersion ()I
+	public abstract fun migrate (ILcom/vynatix/holdfast/EncodedSnapshotView;)V
+}
+
 public abstract interface class com/vynatix/holdfast/SnapshotEntry {
 }
 
@@ -313,6 +334,11 @@ public final class com/vynatix/holdfast/SnapshotKt {
 	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;
+}
+
+public final class com/vynatix/holdfast/SnapshotMigrationException : java/lang/IllegalStateException {
+	public final fun getSnapshotVersion ()I
+	public final fun getStoreVersion ()I
 }
 
 public abstract interface class com/vynatix/holdfast/State {

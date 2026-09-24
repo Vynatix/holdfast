@@ -6,10 +6,13 @@ package com.vynatix.holdfast
 // R1; plan D10).
 //
 // The PLAN runs before the restore's action opens — at top level, holding no
-// lock of the store — because it runs user code: it materializes every target
-// state a never-read one would need (its initializer), and decodes a decoded
-// snapshot's texts (the states' codecs). It also checks each captured value
-// against its target (the type witness below) and applies the policy. The
+// lock of the store — because it runs user code. It first checks the
+// snapshot's schema version against the store's (StoreSchema.kt), which
+// upcasts an older decoded snapshot through the store's `migrate`; then it
+// materializes every target state a never-read one would need (its
+// initializer), and decodes a decoded snapshot's texts (the states' codecs).
+// It also checks each captured value against its target (the type witness
+// below) and applies the policy. The
 // ACTION then only stages the planned raw values, or throws the planned
 // failure, so a rejected restore changes nothing and middleware still sees it
 // as one failed transaction — inside an atomic(...) frame, one that aborts the
@@ -51,7 +54,7 @@ private class PlannedWrite(
  * is [result] of the restore's report: plan, then stage.
  *
  * @throws IllegalStateException like [Store.action]: when the store is
- *   disposed, or inside a state initializer.
+ *   disposed, or inside a state initializer or a schema migration.
  */
 internal fun <V : Store<V>, R> V.runRestore(
     snapshot: StoreSnapshot,
@@ -113,16 +116,24 @@ private class RestorePlanner(
      */
     private val trusted = (content as? CapturedContent)?.originClass?.isInstance(store) == true
 
-    /** Materialize every target and decide every entry. Throws what a target's initializer throws. */
+    /**
+     * Check the schema version, then materialize every target and decide every
+     * entry. Throws a [SnapshotMigrationException] for a snapshot the store's
+     * schema refuses (or its `migrate` fails on), before any other user code
+     * runs, and what a target's initializer throws.
+     */
     fun plan() {
+        val schema = StoreSchema(store)
         when (content) {
             is CapturedContent -> {
+                schema.checkCaptured(content.schema)
                 content.rawValues.forEach { (name, raw) -> planCaptured(name, raw) }
                 if (content.originKey == store.lockOrderKey) planBackings(content)
             }
             is DecodedContent -> {
-                content.body.states.forEach { (name, text) -> planDecoded(name, text) }
-                content.body.families.keys.forEach { name ->
+                val body = schema.upcast(content.body)
+                body.states.forEach { (name, text) -> planDecoded(name, text) }
+                body.families.keys.forEach { name ->
                     if (target(name) != null) issues += RestoreIssue.Undecodable(name, FAMILY_REASON)
                 }
             }

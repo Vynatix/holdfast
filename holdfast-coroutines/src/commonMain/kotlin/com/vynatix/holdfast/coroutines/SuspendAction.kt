@@ -62,7 +62,8 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
-    // A state initializer may read states but not write them (Store.state).
+    // A state initializer or a schema migration (SchemaVersioned.migrate) may
+    // read states but not write them (Store.state).
     internalRefuseInitializerWrite("run suspendAction")
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic

@@ -35,10 +35,9 @@ internal class CapturedContent(
     val originClass: KClass<*>? = null,
     /** The codec of each state in [rawValues] that has one. */
     val codecs: Map<String, StateCodec<*>> = emptyMap(),
+    /** The schema version of the store captured ([SchemaVersioned]); 1 for a snapshot made by hand. */
+    override val schema: Int = DEFAULT_SCHEMA_VERSION,
 ) : SnapshotContent() {
-    /** Captured stores have no schema versions yet: every capture is version 1. */
-    override val schema: Int get() = CAPTURED_SCHEMA_VERSION
-
     override val names: Set<String> get() = rawValues.keys
 
     override val unencodable: Set<String> get() = rawValues.keys - codecs.keys
@@ -63,9 +62,6 @@ internal class DecodedContent(
     /** Families a newer writer wrote are kept for reading but never written back (see SnapshotEnvelope.kt). */
     override fun toBody(): StoreBody = body.copy(families = emptyMap())
 }
-
-/** The schema version of every captured snapshot, until stores can declare one. */
-internal const val CAPTURED_SCHEMA_VERSION = 1
 
 /**
  * [raw] encoded by [codec], for state [name]. A throwing codec is reported

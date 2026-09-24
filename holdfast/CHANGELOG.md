@@ -482,8 +482,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     `SnapshotFormatException`, whose message names the problem, an offset
     and possibly a state name but never quotes a state's value, and which has
     no cause. `includeRemote` is
-    reserved for state tags and changes nothing yet. `schemaVersion` is 1 for
-    every captured snapshot.
+    reserved for state tags and changes nothing yet. `schemaVersion` is the
+    schema version of the store captured (see "Schema versions" below).
   - `StoreSnapshot.entry(state)` / `snapshot[state]` — typed reads through a
     `State`: `SnapshotEntry.Present(value)` (the `Transformer.get` view, so an
     encrypted state reads plaintext), `SnapshotEntry.Absent`, or `Redacted` (a
@@ -513,6 +513,41 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   - GUIDE §16.2 documents all of it, with a compiled, plugin-free
     `KSerializerCodec` recipe for `kotlinx.serialization` types (the library
     takes no new dependency).
+
+- **Schema versions** (`@ExperimentalStoreApi`, issue #20 R2):
+  - `SchemaVersioned` — an interface a `Store` subclass implements to number
+    its schema (`val schemaVersion: Int`, at least 1) and upcast older
+    snapshots (`fun migrate(from: Int, view: EncodedSnapshotView)`). A store
+    that does not implement it is at version 1. `Store` itself gains no
+    member. `snapshot()` records the store's version in
+    `StoreSnapshot.schemaVersion`, `encode()` writes it as `"schema"`, and a
+    version below 1 makes `snapshot()` throw and `restore` fail.
+  - `restore` (both overloads) now checks the snapshot's version against the
+    store's before anything else, under every policy. At the same version
+    the snapshot restores as it is. An older decoded snapshot is upcast by
+    `migrate`, once, on a copy of its encoded text, and the restore reads the
+    edited copy. A newer snapshot, a captured snapshot of another version
+    (raw values cannot be migrated; restore `decode(snapshot.encode())`
+    instead), or a throwing `migrate` fails the restore with the new
+    `SnapshotMigrationException` (`snapshotVersion`, `storeVersion`), naming
+    the store and both versions. Nothing changes, and a refused snapshot runs
+    no initializer or codec. Typed reads (`snapshot[state]`, `entry(state)`)
+    never migrate: they read a decoded snapshot's text as written. A decoded snapshot with `"schema"` above 1 no
+    longer restores into a store that does not implement `SchemaVersioned`.
+  - `EncodedSnapshotView` — the text `migrate` edits: each state's codec
+    text (or `null` for a withheld value) by name, through `stateNames`,
+    `contains`, `get`, `put`, `remove` and `rename`, plus a read-only
+    `families` section naming keyed state families (which keyed states, R7,
+    will fill). The view is a copy, valid only while `migrate` runs.
+  - `migrate` runs while the restore plans, before its action opens, in the
+    same no-write region as state initializers: it reads committed values,
+    and any store write from it (`mutate`, `action`, `atomic`, `restore`,
+    `reset()`, `emit`, and `:holdfast-coroutines`' `suspendAction`/
+    `suspendAtomic` reached through `runBlocking`) throws. Its own exception is never attached to the
+    `SnapshotMigrationException`, since its message may quote an encoded
+    value; a library exception raised inside it (a refused write, a misuse of
+    the view) is.
+  - GUIDE §16.3 documents all of it, with a compiled three-schema example.
 
 - **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
   non-blocking acquire for the store's non-blocking paths (the `derived`

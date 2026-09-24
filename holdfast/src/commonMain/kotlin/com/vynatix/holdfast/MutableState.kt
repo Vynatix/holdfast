@@ -110,7 +110,9 @@ class MutableState<T : Any>(
      * the owning thread: an initializer runs whenever its state is first needed —
      * possibly inside an action, an `atomic(...)` frame or a `snapshot()` taken in
      * one — and the value it returns is committed at once and survives a rollback,
-     * so it must not be computed from writes that may yet roll back.
+     * so it must not be computed from writes that may yet roll back. So does a
+     * read from inside a schema migration (`SchemaVersioned.migrate`), which
+     * runs before its restore's action opens.
      *
      * The exception is an initializer `reset()` re-runs: it reads this state at
      * its reset value when it is one of the declared states that reset is

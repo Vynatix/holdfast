@@ -1,10 +1,11 @@
 package com.vynatix.holdfast.platform
 
 /**
- * Thread-local slot naming the state initializers running on the current
- * thread (see `com.vynatix.holdfast.NoWriteRegion`): the innermost one, which
- * links to the initializer whose read started it. Typed as `Any?` so the
- * platform actuals stay dependency-free; the single reader/writer casts.
+ * Thread-local slot naming the state initializers (and schema migrations)
+ * running on the current thread (see `com.vynatix.holdfast.NoWriteRegion`):
+ * the innermost one, which links to the one it started inside. Typed as
+ * `Any?` so the platform actuals stay dependency-free; the single
+ * reader/writer casts.
  *
  * wasmJs note: the actual there is a plain global `var` — the platform is
  * single-threaded by assumption (`currentThreadId()` returns `0` for everyone),

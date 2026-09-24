@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions
 
 ---
 
@@ -254,9 +254,10 @@ when (result) {
 **Returns** `TransactionResult` (sealed: `Success | Error`). A failure inside
 the body, a middleware hook or the commit is captured into `Error`, not
 thrown. `action` itself throws `IllegalStateException` when called on a
-disposed store or from inside a state initializer (§4.1), and inside an
-`atomic(...)` frame it can throw the frame's contract exceptions or escalate
-an inner error (§15.1–15.2).
+disposed store or from inside a state initializer (§4.1) or a schema
+migration (`SchemaVersioned.migrate`, §16.3), and inside an `atomic(...)`
+frame it can throw the frame's contract exceptions or escalate an inner error
+(§15.1–15.2).
 
 **Nested actions** form a savepoint chain. The inner `action` becomes a
 child transaction whose `parent` is the outer's. Inner commit merges the
@@ -287,10 +288,11 @@ holdfast action {
 
 **Inside an active transaction owned by the current thread**: buffers the
 write. Reads on the same thread (`count.value`) see the pending write
-(read-your-own-writes) — except inside a state initializer, which reads
-committed values only, or, when `reset()` re-runs it, its store's reset values
-(§4.1/§16.1). Reads on other threads still see the committed value, never the
-pending one.
+(read-your-own-writes) — except inside a state initializer or a schema
+migration (`SchemaVersioned.migrate`, run by a `restore` called in the
+action), which read committed values only, or, in an initializer `reset()`
+re-runs, its store's reset values (§4.1/§16.1/§16.3). Reads on other
+threads still see the committed value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
@@ -528,10 +530,11 @@ Three things to internalize:
    leak. No rolled-back leak. Same-value commits re-fire by default; states
    declared `state(distinct = true) { … }` dedup them.
 2. **Read-your-own-writes is owner-thread-only.** The thread executing the
-   action sees its own pending writes (except inside a state initializer,
-   which reads committed values only, or, when `reset()` re-runs it, its
-   store's reset values — §4.1/§16.1). Other threads see committed
-   values only — they cannot witness "in-flight" mutations.
+   action sees its own pending writes (except inside a state initializer or
+   a schema migration, which read committed values only, or, in an
+   initializer `reset()` re-runs, its store's reset values —
+   §4.1/§16.1/§16.3). Other threads see committed values only — they cannot
+   witness "in-flight" mutations.
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
@@ -921,10 +924,12 @@ holdfast action {
 This is the only place reads see uncommitted values, and only on the
 thread executing the action. From any other thread, `count.value` returns
 the last committed value until this action commits. A state initializer
-(§4.1) is the one exception on the action's own thread: one that runs inside
-the action — because the action is the first to need its state — reads
-committed values, not the action's pending writes. (One that `reset()` re-runs
-reads its store's reset values instead, §16.1.)
+(§4.1) and a schema migration (§16.3) are the exceptions on the action's own
+thread. An initializer that runs inside the action, because the action is the
+first to need its state, and a `migrate` that a `restore` called in the action
+runs, both read committed values, not the action's pending writes. (An
+initializer that `reset()` re-runs reads its store's reset values instead,
+§16.1.)
 
 ### 9.8 Savepoint semantics
 
@@ -1159,6 +1164,8 @@ never T1's pending writes.
 | `IllegalStateException: State initializer cycle: S.x → S.y → S.x` (or `… cycle across threads …`) | Initializers that need each other's states | Give one state of the cycle an initial value that does not read the others; compute the rest from it |
 | `IllegalStateException: S already declares a state named 'x' …` when constructing a store | Two properties with one name on one store — typically a subclass redeclaring a base class's state | Give one of them another name |
 | A custom delegate's state is missing from `snapshot()` (and `restore()` into a fresh store silently leaves it at its initial value: the one-argument `restore` ignores names the store has not declared) | The delegate wraps `state(…)` but forwards only `getValue`, so the state is declared on first read instead of at construction | Forward `provideDelegate(thisRef, property)` to the wrapped delegate — see §4.1 |
+| After an app update, a renamed codec state starts at its initial value (a `RestoreReport` lists its old name as `UnknownState`; `RestorePolicy.Strict` fails) | The rename shipped without a new schema version, so nothing moved the old name's text | Implement `SchemaVersioned`, raise `schemaVersion`, and `view.rename(old, new)` in `migrate` — see §16.3 |
+| `SnapshotMigrationException: Cannot restore a snapshot of schema version N into S, whose schema version is M …` | Text a newer release of S wrote, restored by an older one; a captured snapshot of a store of another schema; or S's `migrate` threw | A store cannot read a later schema of itself; for a captured snapshot, restore `StoreSnapshot.decode(snapshot.encode())`; fix a throwing `migrate` — see §16.3 |
 | `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
 | `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
@@ -1187,7 +1194,8 @@ never T1's pending writes.
 | `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`), and again at every `reset()` (§16.1). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
 | `bindClock` | `fun bindClock(clock: Clock?)` *(experimental)* | Binds a clock (level 2), e.g. a fixed test clock; `null` unbinds. Throws on a disposed store. `storeTest` restores each tracked store's binding to its value at first `track` (`store.action {}` doesn't auto-track), so bind after tracking |
 | `reset` | `fun <V : Store<V>> V.reset(): TransactionResult<Unit>` *(experimental, extension)* | Puts every declared state back to its initializer's value in one transaction: initializers re-run (reading each other's reset values), results staged raw, only changed states staged and fired; a throwing initializer rolls it all back (§16.1) |
-| `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2) |
+| `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3) |
+| `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
@@ -1222,7 +1230,7 @@ manages them.
 
 | Member | Signature | Description |
 |---|---|---|
-| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer, which reads committed values only, or, re-run by `reset()`, its store's reset values — §4.1/§9.7/§16.1) |
+| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer or a schema migration (`SchemaVersioned.migrate`), which read committed values only, or, in an initializer re-run by `reset()`, its store's reset values — §4.1/§9.7/§16.1/§16.3) |
 | `observe` | `fun observe(observer: (T) -> Unit): Disposable` | Subscribe with initial fire |
 | `bridge` | `var bridge: Bridge<T>?` | Get/set the bridge; setting installs an observer on it |
 
@@ -1339,9 +1347,10 @@ its value without its observers firing (`RestorePolicy.IgnoreUnknown`). A value
 the target state cannot hold — a snapshot of another store class with a
 `String` where this store's state holds an `Int` — fails the restore with
 `TransactionResult.Error`, and nothing changes. Snapshots compare by value:
-two snapshots holding the same states with equal raw values are `==`, whichever
-store instances took them. To pick another restore policy, turn a snapshot into
-text and back, or read one state's value from it, see the experimental §16.2.
+two snapshots at the same schema version (§16.3) holding the same states with
+equal raw values are `==`, whichever store instances took them. To pick
+another restore policy, turn a snapshot into text and back, or read one
+state's value from it, see the experimental §16.2.
 
 To go back to the initial values rather than to a captured snapshot, use the
 experimental `reset()` (§16.1).
@@ -2183,11 +2192,12 @@ fun signOut(session: SessionStore) {
   state's failure does not exempt that state: as in a new store, its
   initializer runs again when it is next read or its turn comes, and fails
   the reset if it throws again. `reset()` throws, like `action`, on a
-  disposed store, when called from inside an initializer, inside a
-  `suspendAtomic` body that enrolls the store (`FrameInteropException`,
-  because a blocking action there would deadlock), and inside a frame body
-  that does not enroll the store (`UnenrolledStoreException`, unless the
-  frame's policy allows unenrolled writes).
+  disposed store, when called from inside an initializer or a schema
+  migration (§16.3), inside a `suspendAtomic` body that enrolls the store
+  (`FrameInteropException`, because a blocking action there would
+  deadlock), and inside a frame body that does not enroll the store
+  (`UnenrolledStoreException`, unless the frame's policy allows unenrolled
+  writes).
 
 ### 16.2 Encoding snapshots: codecs, restore policies, typed reads
 
@@ -2278,7 +2288,9 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   encodes to the same text. Equality ignores codecs, though: equal snapshots
   from stores whose states declare different codecs can encode differently.
   `derived` states are never encoded; they recompute
-  from their sources. `schemaVersion` is 1 for every capture today.
+  from their sources. `schema` is the store's schema version, which
+  `schemaVersion` reads back: 1 unless the store implements
+  `SchemaVersioned` (§16.3).
   `includeRemote` is reserved for state tags and changes nothing yet.
 - **Decoding.** `decode` throws `SnapshotFormatException` for text it cannot
   read. The message names the problem, a character offset and possibly a
@@ -2299,16 +2311,17 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   `RestoreRejectedException` that names each state, and nothing changes.
   Inside an `atomic(...)` frame, that error aborts the whole frame. Under
   every policy, a declared state the snapshot holds no value for keeps its
-  value, and its observers do not fire.
+  value, and its observers do not fire. A snapshot of another schema version
+  than the store's is migrated first, or refused (§16.3).
 - **Order of work.** A restore runs the user code its plan needs before its
-  action opens, so at top level it holds no lock of the store: initializers
-  of never-read target states, and the codecs decoding a decoded snapshot's
-  text. The action then stages the raw values in one
-  transaction, whose id is `Restore`; middleware, observers and bridges run
-  in it, as for any action. (A target state that a concurrent
-  `removeState`/`clearStates` drops after that is materialized again inside
-  the action, under its locks; an internal state dropped that way fails the
-  restore.)
+  action opens, so at top level it holds no lock of the store: the store's
+  `migrate` for an older decoded snapshot (§16.3), initializers of never-read
+  target states, and the codecs decoding a decoded snapshot's text. The
+  action then stages the raw values in one transaction, whose id is
+  `Restore`; middleware, observers and bridges run in it, as for any action.
+  (A target state that a concurrent `removeState`/`clearStates` drops after
+  that is materialized again inside the action, under its locks; an internal
+  state dropped that way fails the restore.)
 - **The type witness.** A state's declared type is erased at runtime, so a
   captured value is checked against the class of the value the state holds.
   The same class always fits. A different class is rejected only when either
@@ -2332,13 +2345,15 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   text). A captured snapshot answers the states of the store instance that
   took it, and throws `IllegalArgumentException` for another instance's
   state. A decoded snapshot answers any store's state by name, decoding the
-  text with that state's codec; it throws `SnapshotFormatException` when the
-  codec cannot decode the text, or when the snapshot holds a keyed state
-  family, not a single value, under the state's name. Both keep working
-  after the store is disposed.
+  text with that state's codec. It reads the text as written, without a
+  schema check or `migrate` (§16.3). It throws `SnapshotFormatException`
+  when the codec cannot decode the text, or when the snapshot holds a keyed
+  state family, not a single value, under the state's name. Both keep
+  working after the store is disposed.
 - **Equality.** Snapshots compare by value. Two captured snapshots are equal
-  when they hold the same state names with `==` raw values, whichever
-  instances took them and whatever codecs their states declare. Two decoded
+  when they are at the same schema version (`schemaVersion`, §16.3) and hold
+  the same state names with `==` raw values, whichever instances took them
+  and whatever codecs their states declare. Two decoded
   snapshots are equal when they hold the same text. A captured snapshot never
   equals a decoded one: compare their `encode()` output instead. That output
   survives the round trip exactly:
@@ -2371,6 +2386,129 @@ class InboxStore : Store<InboxStore>() {
 The recipe needs only the `kotlinx-serialization-json` runtime. A class
 annotated `@Serializable` needs the serialization compiler plugin to generate
 its `serializer()`, and then works the same way.
+
+### 16.3 Schema versions and migration
+
+```kotlin
+@ExperimentalStoreApi
+interface SchemaVersioned {                     // implemented by a Store subclass
+    val schemaVersion: Int                      // at least 1; a store without SchemaVersioned is at 1
+    fun migrate(from: Int, view: EncodedSnapshotView)
+}
+
+@ExperimentalStoreApi
+class EncodedSnapshotView {                     // a copy of the snapshot's text, valid while migrate runs
+    val stateNames: Set<String>
+    val families: Families                      // keyed state families, by name (read-only for now)
+    operator fun contains(name: String): Boolean
+    operator fun get(name: String): String?     // codec text; null when withheld or absent
+    fun put(name: String, text: String?)        // null withholds the value
+    fun remove(name: String): Boolean
+    fun rename(from: String, to: String): Boolean
+    class Families { val names: Set<String> }
+}
+
+@ExperimentalStoreApi
+class SnapshotMigrationException : IllegalStateException {
+    val snapshotVersion: Int
+    val storeVersion: Int
+}
+```
+
+Text that one release of an app saved has to restore in the next, even
+after states were renamed or their codecs changed. A store whose schema
+changes implements `SchemaVersioned`: it numbers its schema, and its
+`migrate` upcasts an older snapshot's encoded text before the restore reads
+it.
+
+```kotlin
+// Schema 1, the first release, saved:
+// {"format":"holdfast.store","v":1,"schema":1,"states":{"fontSize":"16","theme":"dark"},"skipped":[]}
+@OptIn(ExperimentalStoreApi::class)
+class ReaderSettings : Store<ReaderSettings>(), SchemaVersioned {
+    val theme by state(codec = StringCodec) { "day" }
+    val textSize by state(codec = IntCodec) { 14 }
+
+    override val schemaVersion: Int get() = 3
+
+    override fun migrate(from: Int, view: EncodedSnapshotView) {
+        if (from < 2) view.rename("fontSize", "textSize")                   // schema 2 renamed it
+        if (from < 3 && view["theme"] == "dark") view.put("theme", "night") // schema 3 respelled it
+    }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+fun boot(saved: String): ReaderSettings {
+    val settings = ReaderSettings()
+    settings.restore(StoreSnapshot.decode(saved), RestorePolicy.Strict).getOrThrow()
+    return settings   // from the text above: textSize = 16, theme = "night"
+}
+```
+
+- **Versions.** A store that does not implement `SchemaVersioned` is at
+  version 1, and so is every snapshot it takes, so a store's first changed
+  schema is 2. `snapshot()` records the store's version as `schemaVersion`,
+  and `encode()` writes it as `"schema"`. Raise the version whenever text an
+  earlier release saved would no longer restore as it is: a state renamed or
+  removed, or a codec whose text changed. Keep `schemaVersion` constant,
+  because every `snapshot()` and restore reads it. It must be at least 1:
+  otherwise `snapshot()` throws `IllegalStateException`, and a restore
+  returns an `Error` carrying one.
+- **The restore checks the version first.** Before anything else, under
+  every policy, a restore compares the snapshot's version with the store's.
+  At the same version, the snapshot restores as it is and `migrate` does not
+  run. An older decoded snapshot is upcast: `migrate` runs once, with `from`
+  set to the snapshot's version, on a copy of its text, and the restore then
+  reads the edited copy with the store's codecs and policy. The snapshot
+  itself does not change. A newer snapshot fails the restore with a
+  `SnapshotMigrationException` that names the store and both versions,
+  because a store cannot know what a later schema means. Nothing changes, and
+  no initializer or codec runs.
+- **Captured snapshots are not migrated.** A captured snapshot holds raw
+  values, and `migrate` edits text. So a captured snapshot of another version
+  (taken from a store of another class) fails the restore the same way.
+  Restore `StoreSnapshot.decode(snapshot.encode())` instead, which migrates
+  the states that have a codec.
+- **Typed reads are not migrated.** Only a restore checks the version and
+  runs `migrate`. `snapshot[state]` and `entry(state)` on a decoded snapshot
+  of another version read its text as written: a renamed state is `Absent`
+  under its new name (above, `StoreSnapshot.decode(saved)[settings.textSize]`
+  is `null`, and `[settings.theme]` is `"dark"`), a changed codec may read
+  stale text wrongly or throw `SnapshotFormatException`, and a newer snapshot
+  is not refused. To read migrated values, restore the snapshot into the
+  store first, then read the store.
+- **One call covers every step.** `migrate` runs once per restore, not once
+  per version, so write it as a ladder, oldest step first: `if (from < 2) …`,
+  then `if (from < 3) …`, as above.
+- **The view holds text.** A renamed state has no codec under its old name,
+  so `migrate` edits the codecs' text, never decoded values. `get` returns a
+  state's text, or `null` when the snapshot withholds the value or has no
+  entry for the state (`contains` tells them apart). `put` sets a state's
+  text; `null` withholds the value, so the restore leaves that state as it
+  is. `remove` drops an entry, and that state keeps its value too. `rename`
+  moves an entry, replacing any entry under the new name, and returns `false`
+  when there is nothing to move. A state the old store could not encode has
+  no entry. `stateNames` is a copy, so you can edit the view while iterating
+  it. `families` names the keyed state families the text holds, read-only
+  until keyed states arrive. The view is valid only while `migrate` runs: an
+  edit after it returns throws `IllegalStateException`.
+- **No writes.** `migrate` runs while the restore plans, before its action
+  opens, so at top level it holds no lock of the store. It may read states,
+  and reads committed values, but may not write any store: `mutate`,
+  `update`, `action`, `atomic`, `restore`, `reset()` and `emit` (and
+  `:holdfast-coroutines`' `suspendAction`/`suspendAtomic`) throw
+  `IllegalStateException` in it.
+- **A failed migration changes nothing.** A throwing `migrate` fails the
+  restore with a `SnapshotMigrationException` that names the store, both
+  versions and the class of the exception. The exception itself is not
+  attached, because its message may quote an encoded value. An exception the
+  library threw inside `migrate`, such as a refused write or a `put` under a
+  keyed family's name, is attached as the cause, because its message names
+  only stores and states.
+- **A rename needs a new version.** Without `SchemaVersioned`, or with a
+  `migrate` that misses the rename, the old name is a
+  `RestoreIssue.UnknownState`. `IgnoreUnknown` skips and reports it, and the
+  renamed state keeps its value. `Strict` fails the restore.
 
 ---
 

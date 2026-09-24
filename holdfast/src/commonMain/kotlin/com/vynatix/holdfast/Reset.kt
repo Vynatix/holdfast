@@ -77,7 +77,8 @@ package com.vynatix.holdfast
  * Experimental (issue #20): the semantics above may still change.
  *
  * @throws IllegalStateException like [Store.action]: if the store is disposed,
- *   or when called from inside a state initializer. `reset()` is a blocking
+ *   or when called from inside a state initializer or a schema migration
+ *   ([SchemaVersioned.migrate]). `reset()` is a blocking
  *   action: inside a `:holdfast-coroutines` `suspendAtomic` body that enrolls
  *   this store it throws `FrameInteropException`, and inside an [atomic] body
  *   that does not enroll it, `UnenrolledStoreException` (unless the frame's
@@ -206,7 +207,8 @@ internal class ResetPass(
      *   in this pass: an initializer cycle.
      */
     fun <T : Any> valueFor(state: MutableState<T>): T? {
-        val decl = state.declaration?.takeIf { NoWriteRegion.current()?.reset === this } ?: return null
+        val runningHere = (NoWriteRegion.current() as? InitializingFrame)?.reset === this
+        val decl = state.declaration?.takeIf { runningHere } ?: return null
 
         @Suppress("UNCHECKED_CAST")
         val known = resolved[decl] as T?

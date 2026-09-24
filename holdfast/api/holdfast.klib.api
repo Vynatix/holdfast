@@ -111,6 +111,13 @@ abstract interface com.vynatix.holdfast/FrameObserver { // com.vynatix.holdfast/
     open fun onFrameStarted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameStarted|onFrameStarted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
 }
 
+abstract interface com.vynatix.holdfast/SchemaVersioned { // com.vynatix.holdfast/SchemaVersioned|null[0]
+    abstract val schemaVersion // com.vynatix.holdfast/SchemaVersioned.schemaVersion|{}schemaVersion[0]
+        abstract fun <get-schemaVersion>(): kotlin/Int // com.vynatix.holdfast/SchemaVersioned.schemaVersion.<get-schemaVersion>|<get-schemaVersion>(){}[0]
+
+    abstract fun migrate(kotlin/Int, com.vynatix.holdfast/EncodedSnapshotView) // com.vynatix.holdfast/SchemaVersioned.migrate|migrate(kotlin.Int;com.vynatix.holdfast.EncodedSnapshotView){}[0]
+}
+
 sealed interface <#A: out kotlin/Any> com.vynatix.holdfast/SnapshotEntry { // com.vynatix.holdfast/SnapshotEntry|null[0]
     final class <#A1: out kotlin/Any> Present : com.vynatix.holdfast/SnapshotEntry<#A1> { // com.vynatix.holdfast/SnapshotEntry.Present|null[0]
         constructor <init>(#A1) // com.vynatix.holdfast/SnapshotEntry.Present.<init>|<init>(1:0){}[0]
@@ -407,6 +414,27 @@ final class com.vynatix.holdfast.middleware/TransactionSample { // com.vynatix.h
     final fun toString(): kotlin/String // com.vynatix.holdfast.middleware/TransactionSample.toString|toString(){}[0]
 }
 
+final class com.vynatix.holdfast/EncodedSnapshotView { // com.vynatix.holdfast/EncodedSnapshotView|null[0]
+    final val families // com.vynatix.holdfast/EncodedSnapshotView.families|{}families[0]
+        final fun <get-families>(): com.vynatix.holdfast/EncodedSnapshotView.Families // com.vynatix.holdfast/EncodedSnapshotView.families.<get-families>|<get-families>(){}[0]
+    final val stateNames // com.vynatix.holdfast/EncodedSnapshotView.stateNames|{}stateNames[0]
+        final fun <get-stateNames>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/EncodedSnapshotView.stateNames.<get-stateNames>|<get-stateNames>(){}[0]
+
+    final fun contains(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.contains|contains(kotlin.String){}[0]
+    final fun get(kotlin/String): kotlin/String? // com.vynatix.holdfast/EncodedSnapshotView.get|get(kotlin.String){}[0]
+    final fun put(kotlin/String, kotlin/String?) // com.vynatix.holdfast/EncodedSnapshotView.put|put(kotlin.String;kotlin.String?){}[0]
+    final fun remove(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.remove|remove(kotlin.String){}[0]
+    final fun rename(kotlin/String, kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.rename|rename(kotlin.String;kotlin.String){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/EncodedSnapshotView.toString|toString(){}[0]
+
+    final class Families { // com.vynatix.holdfast/EncodedSnapshotView.Families|null[0]
+        final val names // com.vynatix.holdfast/EncodedSnapshotView.Families.names|{}names[0]
+            final fun <get-names>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/EncodedSnapshotView.Families.names.<get-names>|<get-names>(){}[0]
+
+        final fun toString(): kotlin/String // com.vynatix.holdfast/EncodedSnapshotView.Families.toString|toString(){}[0]
+    }
+}
+
 final class com.vynatix.holdfast/FrameInteropException : com.vynatix.holdfast/FrameContractException { // com.vynatix.holdfast/FrameInteropException|null[0]
     constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameInteropException.<init>|<init>(kotlin.String){}[0]
 }
@@ -482,6 +510,13 @@ final class com.vynatix.holdfast/RestoreReport { // com.vynatix.holdfast/Restore
 }
 
 final class com.vynatix.holdfast/SnapshotFormatException : kotlin/IllegalArgumentException // com.vynatix.holdfast/SnapshotFormatException|null[0]
+
+final class com.vynatix.holdfast/SnapshotMigrationException : kotlin/IllegalStateException { // com.vynatix.holdfast/SnapshotMigrationException|null[0]
+    final val snapshotVersion // com.vynatix.holdfast/SnapshotMigrationException.snapshotVersion|{}snapshotVersion[0]
+        final fun <get-snapshotVersion>(): kotlin/Int // com.vynatix.holdfast/SnapshotMigrationException.snapshotVersion.<get-snapshotVersion>|<get-snapshotVersion>(){}[0]
+    final val storeVersion // com.vynatix.holdfast/SnapshotMigrationException.storeVersion|{}storeVersion[0]
+        final fun <get-storeVersion>(): kotlin/Int // com.vynatix.holdfast/SnapshotMigrationException.storeVersion.<get-storeVersion>|<get-storeVersion>(){}[0]
+}
 
 final class com.vynatix.holdfast/StoreLock { // com.vynatix.holdfast/StoreLock|null[0]
     constructor <init>() // com.vynatix.holdfast/StoreLock.<init>|<init>(){}[0]

@@ -719,7 +719,8 @@ abstract class Store<Self : Store<Self>> {
      * is not nested, and simply runs once the commit has finished.
      *
      * @throws IllegalStateException when called from inside a state
-     *   initializer (see [state]): initializers may read states but not write.
+     *   initializer (see [state]) or a schema migration
+     *   (`SchemaVersioned.migrate`): both may read states but not write.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
@@ -1169,8 +1170,8 @@ abstract class Store<Self : Store<Self>> {
      *   applied but is still committing (bridge publishes, event emits), and
      *   this thread is not part of that commit: write from other threads
      *   through [action], which waits for the store. Also thrown from inside
-     *   a state initializer (see [state]): initializers may read states but
-     *   not write.
+     *   a state initializer (see [state]) or a schema migration
+     *   (`SchemaVersioned.migrate`): both may read states but not write.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         val state = writableState()

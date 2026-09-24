@@ -16,7 +16,8 @@ import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
  * destination declares under a name the snapshot holds is restored, a name
  * the destination does not declare is ignored (or rejected, under
  * [RestorePolicy.Strict]), and a declared state the snapshot holds no value
- * for keeps its own.
+ * for keeps its own. A snapshot of another schema version than the
+ * destination's is migrated first, or refused (see [SchemaVersioned]).
  *
  * The backing states of `derived` (and `:holdfast-coroutines`'
  * `suspendDerived`) are captured too, so an undo restores them with their
@@ -37,9 +38,10 @@ import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
  * codec is not written; its name is listed in [unencodableStateNames].
  *
  * **Equality.** Snapshots compare by value: two captured snapshots are equal
- * when they hold the same state names with `==` raw values (whichever store
- * instances took them; which states have a codec, and which codec, plays no
- * part), and two decoded ones when they hold the same encoded text. A
+ * when they are at the same [schemaVersion] and hold the same state names
+ * with `==` raw values (whichever store instances took them; which states
+ * have a codec, and which codec, plays no part), and two decoded ones when
+ * they hold the same encoded text. A
  * captured snapshot never equals a decoded one; compare their [encode]d text
  * instead. [toString] lists state names only, never values.
  */
@@ -65,11 +67,14 @@ class StoreSnapshot internal constructor(
     val size: Int get() = stateNames.size
 
     /**
-     * The schema version of the store this snapshot was taken from: always 1
-     * for a captured snapshot; for a decoded one, the version its text
-     * records. Restore does not check it yet.
+     * The schema version of the store this snapshot was taken from: for a
+     * captured snapshot, the store's [SchemaVersioned.schemaVersion] (1 for a
+     * store that does not implement [SchemaVersioned]); for a decoded one, the
+     * version its text records. [encode] writes it. A [restore] into a store
+     * of another schema version migrates an older decoded snapshot and
+     * refuses the rest (see [SchemaVersioned]).
      *
-     * Experimental (issue #20).
+     * Experimental (issue #20, R2).
      */
     @ExperimentalStoreApi
     val schemaVersion: Int get() = content.schema
@@ -123,6 +128,11 @@ class StoreSnapshot internal constructor(
      * store's state by its name, decoding the text with that state's
      * [StateCodec]. Either kind keeps answering after its store is disposed.
      *
+     * A decoded snapshot is read as its text was written: a typed read neither
+     * checks its [schemaVersion] nor runs [SchemaVersioned.migrate]. Only a
+     * [restore] does that, so to read an older snapshot's values under the
+     * current schema, restore it and read the store.
+     *
      * Experimental (issue #20, R1).
      *
      * @throws IllegalArgumentException for a state of another store instance
@@ -140,7 +150,8 @@ class StoreSnapshot internal constructor(
     /**
      * The value this snapshot holds for [state], or `null` when it holds none
      * (or withholds it): [entry]'s [SnapshotEntry.Present] value. Typed by the
-     * state: `snapshot[store.count]` is an `Int?`.
+     * state: `snapshot[store.count]` is an `Int?`. Like [entry], it reads a
+     * decoded snapshot's text as written, without migrating it.
      *
      * Experimental (issue #20, R1).
      *
@@ -193,7 +204,9 @@ class StoreSnapshot internal constructor(
 }
 
 /**
- * Capture the current raw value of every declared state on this store.
+ * Capture the current raw value of every declared state on this store, at
+ * the store's schema version ([StoreSnapshot.schemaVersion]: its
+ * [SchemaVersioned.schemaVersion], or 1).
  *
  * A declared state that has never been read is materialized first: its
  * initializer runs now, exactly as its first read would run it — so an
@@ -210,11 +223,13 @@ class StoreSnapshot internal constructor(
  * The returned snapshot is detached from the store — mutations after `snapshot()`
  * do not affect previously-captured snapshots.
  *
- * @throws IllegalStateException if the store is disposed, or an initializer
- *   cycle is found (see [Store.state]); an exception thrown by an initializer
- *   propagates as is.
+ * @throws IllegalStateException if the store is disposed, an initializer
+ *   cycle is found (see [Store.state]), or the store declares a schema version
+ *   below 1; an exception thrown by an initializer propagates as is.
  */
 fun <V : Store<V>> V.snapshot(): StoreSnapshot {
+    checkNotDisposed()
+    val schema = StoreSchema(this).version
     materializeDeclaredStates()
     val captured = registry.materializedInOrder()
     val values = readConsistent(captured.map { it.second })
@@ -226,7 +241,7 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
         into[decl.name] = values[i]
         decl.codec?.let { codecs[decl.name] = it }
     }
-    return StoreSnapshot(CapturedContent(declared, backings, lockOrderKey, this::class, codecs))
+    return StoreSnapshot(CapturedContent(declared, backings, lockOrderKey, this::class, codecs, schema))
 }
 
 /**
@@ -262,7 +277,9 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
  * type witness), or a decoded entry its state has no codec for or cannot
  * decode — a [RestoreRejectedException] naming each such state. Use the
  * experimental overload to choose another [RestorePolicy] and get a
- * [RestoreReport] of what was ignored.
+ * [RestoreReport] of what was ignored. A snapshot of another schema version
+ * than this store's is migrated first, or refused with a
+ * [SnapshotMigrationException] (see the experimental [SchemaVersioned]).
  *
  * Bridges that were attached when restore is called WILL receive the restored
  * value via their `publish` (commit-time bridge fanout). To avoid this,
@@ -270,7 +287,7 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot {
  *
  * @throws IllegalStateException like [Store.action]: if the store is
  *   disposed, or when called from inside a state initializer (see
- *   [Store.state]).
+ *   [Store.state]) or a schema migration.
  */
 fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> = runRestore(snapshot, IgnoreUnknown) { }
 
@@ -307,10 +324,20 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * properties. Restore such snapshots only into instances with the same type
  * arguments.
  *
- * Experimental (issue #20, R1).
+ * Schema versions come first. Before anything else, the restore compares
+ * [StoreSnapshot.schemaVersion] with this store's ([SchemaVersioned]; 1 for
+ * a store that does not implement it). An older decoded snapshot is upcast
+ * by [SchemaVersioned.migrate], on a copy of its text, and the restore then
+ * reads the migrated entries. A newer snapshot, a captured one of another
+ * version, or a throwing `migrate` fails the restore under every policy with
+ * a [SnapshotMigrationException] naming the store and both versions, and
+ * nothing changes.
+ *
+ * Experimental (issue #20, R1; schema versions R2).
  *
  * @throws IllegalStateException like [Store.action]: if the store is
- *   disposed, or when called from inside a state initializer.
+ *   disposed, or when called from inside a state initializer or a
+ *   [SchemaVersioned.migrate].
  */
 @ExperimentalStoreApi
 fun <V : Store<V>> V.restore(

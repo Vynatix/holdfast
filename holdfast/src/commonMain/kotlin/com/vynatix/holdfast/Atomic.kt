@@ -66,9 +66,10 @@ import kotlin.uuid.Uuid
  * commit is notifying it — behaves like a nested `action` there: it returns
  * [TransactionResult.Error] carrying an [IllegalStateException], before any
  * lock is taken or any body or middleware runs, because its savepoint could
- * never commit. From inside a state initializer, `atomic` throws
- * [IllegalStateException] before taking anything: initializers may read
- * states but not write (see [Store.state]).
+ * never commit. From inside a state initializer or a schema migration
+ * ([SchemaVersioned.migrate]), `atomic` throws [IllegalStateException]
+ * before taking anything: both may read states but not write (see
+ * [Store.state]).
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
