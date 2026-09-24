@@ -12,6 +12,10 @@ private class DisposedProbe : Store<DisposedProbe>() {
     val n by state { 0 }
 }
 
+private object ProbeAttachment : StoreAttachment
+
+private val probeAttachmentKey = StoreAttachmentKey<ProbeAttachment>("probe")
+
 /**
  * One public entrypoint and a call to it. [call] gets the disposed probe and its
  * `n` state, read before `dispose()` so the state is registered and a row that
@@ -74,6 +78,9 @@ class DisposedEntrypointTest {
             Entrypoint("middlewares") { p, _ -> p.middlewares() },
             Entrypoint("clearMiddleware") { p, _ -> p.clearMiddleware() },
             Entrypoint("bindClock") { p, _ -> p.bindClock(Clock.System) },
+            Entrypoint("internalAttachIfAbsent") { p, _ ->
+                p.internalAttachIfAbsent(probeAttachmentKey) { error("created after dispose") }
+            },
         )
 
     private val exempt =
@@ -81,6 +88,9 @@ class DisposedEntrypointTest {
             Entrypoint("clock") { p, _ -> p.clock },
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
+            // Lock-free reads of the attachment slot, which dispose() empties.
+            Entrypoint("internalAttachment (null)") { p, _ -> check(p.internalAttachment(probeAttachmentKey) == null) },
+            Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },
             // A State extension, not a Store entrypoint: it reads the state's declaration.
             Entrypoint("State.tags") { _, s -> s.tags },
             Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->

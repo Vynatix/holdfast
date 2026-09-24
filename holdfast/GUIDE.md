@@ -1034,8 +1034,13 @@ The library acquires locks in this consistent global order; respect it
 when extending:
 
 ```
-transactionLock  →  middlewareLock  →  initializer latch  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
+transactionLock  →  middlewareLock  →  initializer latch  →  attachment slot lock  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
 ```
+
+The attachment slot lock is internal: companion modules take it through the
+`@StoreInternalApi` `internalAttachIfAbsent`, whose `create` runs under it
+and may take only the locks to its right (registering an internal state
+takes `propertiesLock`).
 
 Of these, only adjacent acquisitions actually nest in practice; the
 critical AB-BA candidate fixed in earlier work was `stateLock ↔
@@ -1173,6 +1178,7 @@ never T1's pending writes.
 | `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it; the write could never commit | Write in the action itself, derive the value (`computed`/`derived`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4 |
 | `IllegalStateException: Cannot write S.x: a suspendAction or suspendAtomic holds S …` | A bare `mutate`/`update` from another thread while a `suspendAction`/`suspendAtomic` on S is committing | Write through `S action { … }`, which waits for the store — see §8.2 |
 | `Holdfast: a post-commit side effect of S failed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | An effect, bridge publish or `derived` recompute threw after its commit; with no `uncaughtObserverHandler` set, the failure is logged | Fix the thrower, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
+| `Holdfast: library machinery attached to S (…) failed in onStoreDisposed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | Library machinery attached to S (an internal `StoreAttachment` of a companion module) threw while `S.dispose()` told it; with no `uncaughtObserverHandler` set, the failure is logged. S is disposed regardless | Report it to the module the named attachment comes from, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
 | `IllegalStateException: Cannot write S.x: the initializer of S.y is running on this thread …` (or `open an action on S`, `open an atomic(...) frame`, `reset S`, `emit an event on S`) | A state initializer writes, or opens an action or frame; initializers run whenever the state is first needed — including inside `snapshot()`, and again inside `reset()` | Compute the initial value from what the initializer can read; make the write in an action once the store exists — see §4.1 |
 | `IllegalStateException: State initializer cycle: S.x → S.y → S.x` (or `… cycle across threads …`) | Initializers that need each other's states | Give one state of the cycle an initial value that does not read the others; compute the rest from it |
 | `IllegalStateException: S already declares a state named 'x' …` when constructing a store | Two properties with one name on one store — typically a subclass redeclaring a base class's state | Give one of them another name |
@@ -1200,7 +1206,7 @@ never T1's pending writes.
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
-| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action. Also receives a throwing dispose notification of library machinery attached to the store (an internal `StoreAttachment`), reported as `dispose()`'s last step on the disposing thread, holding no lock `dispose()` took; a throwing handler is ignored there, as `dispose()` never throws |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |

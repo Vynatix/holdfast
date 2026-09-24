@@ -97,6 +97,37 @@ internal fun suspendingCommitWriteMessage(
         "action itself or derive the value instead."
 
 /**
+ * The refusal text for a write of [state] into [txn], which is closed to
+ * writes: the observer case, or — when a suspending commit holds the store and
+ * this thread is not part of it — the foreign-thread case.
+ */
+@OptIn(StoreInternalApi::class)
+internal fun Store<*>.appliedWriteMessage(
+    txn: Transaction,
+    state: MutableState<*>,
+): String {
+    val attempt = "write ${describeState(state)}"
+    return if (suspendingOwner != null && txn.rolledBackIn == null && !txn.fanningOutHere()) {
+        suspendingCommitWriteMessage(attempt, displayName, txn)
+    } else {
+        appliedTransactionMessage(attempt, displayName, txn)
+    }
+}
+
+/**
+ * `Store.property` for failure messages, or a generic phrase for a state
+ * with no declaration (a `MutableState` constructed by hand). Reads the
+ * state's declaration back-link, so it takes no lock: this runs on the
+ * refusal path, possibly inside a `Bridge.publish` that holds the state's
+ * bridge lock, where waiting for any store-side lock could invert an
+ * order another thread holds.
+ */
+internal fun Store<*>.describeState(state: MutableState<*>): String {
+    val name = state.declaration?.name
+    return if (name != null) "$displayName.$name" else "a state of $displayName"
+}
+
+/**
  * Accessors for the thread-local commit-fanout marker: the transactions whose
  * suspending commit the current thread is running — its observers, bridge
  * publishes, event emits and frame observers. They are roots, or savepoints

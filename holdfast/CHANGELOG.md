@@ -381,6 +381,55 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **Store attachments** (`@StoreInternalApi`, issue #20 plan PR 10; the slot
+  `:holdfast-coroutines`' hydration and issue #21's tree membership build on):
+  - `StoreAttachment` — library machinery attached to one store for its
+    lifetime. Every member has a default: `onStoreReset()`, `onStoreDisposed()`
+    and `persistenceKeys` (the keys the attachment persists its store under,
+    for #21's T6 self-check; empty by default).
+  - `StoreAttachmentKey<A>(name)` — the typed address of one kind of
+    attachment; keys compare by identity, never by name.
+  - `Store.internalAttachIfAbsent(key) { create }` returns the attachment
+    under `key`, attaching the one `create` builds when there is none. Racing
+    callers get one winner, and only the winner's `create` runs: under the
+    slot's own lock, which takes neither `transactionLock` nor the registry
+    lock (an attach from inside an action still runs it under that action's
+    locks). In the store's lock order the slot lock comes after
+    `transactionLock`, `middlewareLock` and initializer latches and before
+    the registry lock, so `create` may only build the attachment, register
+    internal states and attach under other keys — no action, `reset`,
+    `restore`, `dispose` or middleware change on the store, no first read of
+    one of its states, no other store, no waiting for another thread. A
+    `create` attaching its own key throws; one that throws attaches nothing
+    and runs again next time. Attaching works from a
+    base class's `init` block, before the subclass has declared its states —
+    the slot is independent of the state registry, so an attachment made
+    there looks the store's declarations up later (#21 T3). Throws on a
+    disposed store.
+  - `Store.internalAttachment(key)` and `Store.internalAttachments()` (attach
+    order) read without a lock and never throw: after `dispose()` they answer
+    `null` and an empty list.
+  - `reset()` tells every attachment, in attach order, inside the reset's
+    transaction once the declared states' resets are staged — on the
+    resetting thread and outside the no-write region, so an attachment reads
+    the reset values and what it stages commits or rolls back with the reset
+    (also for a reset staged into an `atomic` frame's root). A throwing
+    `onStoreReset` rolls the whole reset back. A sterile `restore` tells no
+    attachment.
+  - `dispose()` closes the slot under `transactionLock` (a reset in progress
+    has finished telling the attachments, and one that runs afterwards tells
+    none), drops the attachments, then — as its last step, after `onDispose`,
+    holding no lock it took (though under any lock its caller holds: from
+    inside an action, observer or reset of the store, that includes its
+    `transactionLock`; only a top-level `dispose()` leaves `onStoreDisposed`
+    free to call into other stores) — tells each once, in attach order. A
+    throwing `onStoreDisposed` goes to `uncaughtObserverHandler` (or, with
+    none set, the default log, under a dispose line of its own naming the
+    store and the attachment rather than the post-commit one) and the rest
+    are still told; a handler that throws there is ignored, and `dispose()`
+    itself still never throws. An attach racing `dispose()` either lands
+    before the close, and is told, or fails with "store disposed".
+
 - **Derived states and `merged`** (`@ExperimentalStoreApi`, issue #20 R6):
   - `DerivedState<T>` — a sealed, read-only `State<T>` that is its own
     `Disposable`, returned by the two builders below. Declare one with `by`

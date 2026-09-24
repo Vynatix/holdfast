@@ -484,6 +484,30 @@ public final class com/vynatix/holdfast/Store$Companion {
 public abstract interface annotation class com/vynatix/holdfast/StoreActionDsl : java/lang/annotation/Annotation {
 }
 
+public abstract interface class com/vynatix/holdfast/StoreAttachment {
+	public fun getPersistenceKeys ()Ljava/util/Set;
+	public fun onStoreDisposed ()V
+	public fun onStoreReset ()V
+}
+
+public final class com/vynatix/holdfast/StoreAttachment$DefaultImpls {
+	public static fun getPersistenceKeys (Lcom/vynatix/holdfast/StoreAttachment;)Ljava/util/Set;
+	public static fun onStoreDisposed (Lcom/vynatix/holdfast/StoreAttachment;)V
+	public static fun onStoreReset (Lcom/vynatix/holdfast/StoreAttachment;)V
+}
+
+public final class com/vynatix/holdfast/StoreAttachmentKey {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun getName ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/StoreAttachmentsKt {
+	public static final fun internalAttachIfAbsent (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreAttachmentKey;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/StoreAttachment;
+	public static final fun internalAttachment (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreAttachmentKey;)Lcom/vynatix/holdfast/StoreAttachment;
+	public static final fun internalAttachments (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
+}
+
 public abstract interface annotation class com/vynatix/holdfast/StoreInternalApi : java/lang/annotation/Annotation {
 }
 

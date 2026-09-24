@@ -114,7 +114,8 @@ private class Reset<V : Store<V>>(
 
 /**
  * Stage the reset of every declared state of this store into [txn] (see
- * [reset] for what a reset stages), then run the reset's extension points.
+ * [reset] for what a reset stages), then tell the store's attachments
+ * ([ResetPass.notifyAttachments]), whose writes join [txn] too.
  * [txn] must be this store's active transaction — a transaction [reset]'s
  * action opened, or an `atomic` frame's root for this store, so that one frame
  * can reset several stores with one transaction per store (the shape of
@@ -127,7 +128,8 @@ private class Reset<V : Store<V>>(
  * left as it was — it is held until [txn]'s root applies or ends, and
  * `removeState`/`clearStates` refuse it (see [Transaction.resetHeld]).
  *
- * Throws what a re-run initializer throws, and [IllegalStateException] for an
+ * Throws what a re-run initializer or an attachment's
+ * [StoreAttachment.onStoreReset] throws, and [IllegalStateException] for an
  * initializer cycle or when [txn] is closed to writes; what was staged by then
  * stays in [txn], and the caller rolls it back.
  */
@@ -238,13 +240,19 @@ internal class ResetPass(
     }
 
     /**
-     * Extension point for store attachments (plan PR 10): tell each attachment
-     * that its store was reset, inside the reset's transaction and after every
-     * state's reset is staged, so what it stages commits or rolls back with
-     * the reset.
+     * Tell each of [store]'s attachments, in attach order, that the store was
+     * reset ([StoreAttachment.onStoreReset]). Runs once [stageAll] has staged
+     * every state's reset and [Transaction.pendingReset] is cleared: inside
+     * the reset's transaction, on its owner thread, and in no [NoWriteRegion]
+     * frame — so an attachment reads the reset values through the
+     * transaction, and what it stages is part of the reset and commits or
+     * rolls back with it. A throwing attachment propagates, the attachments
+     * after it are not told, and the caller rolls the reset back. None is
+     * told once the store has been disposed (from inside an earlier one).
      */
+    @OptIn(StoreInternalApi::class)
     fun notifyAttachments() {
-        // No store attachments exist yet.
+        store.attachmentSlot.forEachWhileOpen { it.onStoreReset() }
     }
 
     /**

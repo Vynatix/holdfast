@@ -231,6 +231,14 @@ abstract class Store<Self : Store<Self>> {
     private val disposedFlag = atomic(false)
 
     /**
+     * This store's [StoreAttachment]s. Initialized with the store's own fields,
+     * before any subclass code runs, and independent of the state registry,
+     * so a base class's `init` block can attach before the subclass has
+     * declared its states.
+     */
+    internal val attachmentSlot = AttachmentSlot(this)
+
+    /**
      * Whether [dispose] has been called on this store. Once `true`, every public
      * mutation entrypoint (`action`, `mutate`, `update`, `effect`, `bridge`,
      * `observeFrom`, `removeState`, `clearStates`, etc.) and every state-registry
@@ -259,6 +267,12 @@ abstract class Store<Self : Store<Self>> {
      *    `dispose()` returns, on the calling thread: that derived state's
      *    compute, its host's middleware and its host's observers then run inside
      *    `dispose()`. A recompute hosted on this store does nothing.
+     *  - Library machinery attached to the store (`@StoreInternalApi`
+     *    [StoreAttachment]s) is told last, once each, on the calling thread,
+     *    holding no lock `dispose()` took (but under any lock its caller
+     *    holds, e.g. the `transactionLock` of an action of this store that
+     *    calls `dispose()`); a throwing one is reported to
+     *    [uncaughtObserverHandler].
      *
      * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
@@ -271,9 +285,15 @@ abstract class Store<Self : Store<Self>> {
         // Drop in-flight transactional state so any pending writes can never be applied.
         // Acquire the transaction lock briefly so a racing action that's mid-flight
         // (under the lock) finishes before we reach into shared structures.
-        transactionLock.withLock {
-            _activeTransaction = null
-        }
+        val attachments =
+            transactionLock.withLock {
+                _activeTransaction = null
+                // Closed under the lock: a reset still telling the attachments
+                // (it holds this lock) has finished, and a reset that runs
+                // after it finds none left to tell, so the dispose notification
+                // below is the last call every attachment gets.
+                attachmentSlot.close()
+            }
         // Drain, not clear, outside the lock: this store's queue can hold the
         // recomputes of derived states hosted on OTHER, live stores (a
         // DerivedState queues its recompute on the store whose commit changed
@@ -292,11 +312,16 @@ abstract class Store<Self : Store<Self>> {
         middlewareLock.withLock { middlewareList.clear() }
         // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
         runCatching { onDispose() }
+        // Last, holding no lock dispose() took (a caller inside an action of
+        // this store still holds its transactionLock and middlewareLock): an
+        // attachment hears of a store that is completely torn down.
+        attachmentSlot.notifyDisposed(attachments)
     }
 
     /**
      * Subclass hook invoked once, AFTER the base `dispose()` has cleared all states,
-     * observers, bridges, and middleware. Override to release subclass-owned resources
+     * observers, bridges, and middleware, and BEFORE the store's attachments
+     * ([StoreAttachment]) are told. Override to release subclass-owned resources
      * (e.g. `EventfulStore` resets its events SharedFlow). Default no-op.
      *
      * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
@@ -359,8 +384,9 @@ abstract class Store<Self : Store<Self>> {
     private val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * Handler for failures in post-commit side effects, which cannot undo a
-     * commit whose values are already applied:
+     * Handler for failures the store cannot propagate: those of post-commit
+     * side effects, which cannot undo a commit whose values are already
+     * applied, and of dispose notifications:
      *  - a commit-fire observer callback that throws — including the
      *    [IllegalStateException] a callback gets for writing back into this
      *    store (or emitting on it) while this store's commit is notifying it
@@ -372,7 +398,9 @@ abstract class Store<Self : Store<Self>> {
      *    `SuspendingBridge.publishAwaited`;
      *  - a failed [derived] recompute — a throwing `compute`, or a middleware
      *    rejecting it: rolled back, and the derived keeps its value until the
-     *    next source commit.
+     *    next source commit;
+     *  - a throwing `onStoreDisposed` of library machinery attached to the
+     *    store (an `@StoreInternalApi` [StoreAttachment]), told by [dispose].
      *
      * If null (the default), each failure is logged loudly instead: a line
      * naming this store, then the exception's stack trace — on standard error
@@ -395,6 +423,13 @@ abstract class Store<Self : Store<Self>> {
      * on another store. There, a throwing handler fails no action: the drain
      * swallows it, or the source's store reports it as that observer's failure.
      *
+     * A failed dispose notification is reported by [dispose] as its last step,
+     * on the disposing thread, holding no lock `dispose()` took (but under any
+     * lock its caller holds). A handler that throws there is ignored, since
+     * `dispose()` never throws, and the store's other attachments are still
+     * told. With no handler, it is logged with a line of its own, naming the
+     * attachment.
+     *
      * Note: this handler does NOT capture exceptions thrown from the initial-fire
      * call inside [State.effect]/[MutableState.observe]. Those propagate to the
      * caller (subscribing is synchronous from the caller's perspective; their bug
@@ -407,24 +442,32 @@ abstract class Store<Self : Store<Self>> {
      * Report a post-commit failure (see [uncaughtObserverHandler] for the
      * kinds) to [uncaughtObserverHandler], or, while none is set, log it loudly
      * through the platform's default output with a message naming this store.
-     * Every such failure in the library goes through here, including
+     * Every post-commit failure in the library goes through here, including
      * `:holdfast-coroutines`' suspending bridge publishes. A throwing handler
      * propagates, exactly as when fanout invoked it directly. Works on a
-     * disposed store.
+     * disposed store. (A failed dispose notification goes to the same handler
+     * through [reportUncaughtFailure], with a log line of its own.)
      */
     @StoreInternalApi
     fun internalReportUncaughtFailure(error: Throwable) {
-        val handler = uncaughtObserverHandler
-        if (handler != null) {
-            handler(error)
-        } else {
-            logUncaughtFailure(
-                "Holdfast: a post-commit side effect of $displayName failed (an observer callback, a bridge " +
-                    "publish or a derived recompute); the commit itself stands. Set uncaughtObserverHandler on " +
-                    "the store to handle these failures yourself, or to silence them.",
-                error,
-            )
+        reportUncaughtFailure(error) {
+            "Holdfast: a post-commit side effect of $displayName failed (an observer callback, a bridge " +
+                "publish or a derived recompute); the commit itself stands. Set uncaughtObserverHandler on " +
+                "the store to handle these failures yourself, or to silence them."
         }
+    }
+
+    /**
+     * Hand [error] to [uncaughtObserverHandler], or, while none is set, log it
+     * through the platform's default output under [unhandledMessage]. A
+     * throwing handler propagates.
+     */
+    internal fun reportUncaughtFailure(
+        error: Throwable,
+        unhandledMessage: () -> String,
+    ) {
+        val handler = uncaughtObserverHandler
+        if (handler != null) handler(error) else logUncaughtFailure(unhandledMessage(), error)
     }
 
     /**
@@ -1292,36 +1335,6 @@ abstract class Store<Self : Store<Self>> {
         // pendingLock: a foreign thread's write racing the apply pass is either
         // applied with it or refused here, never lost in between.
         check(txn.stagePendingWrite(state, raw)) { appliedWriteMessage(txn, state) }
-    }
-
-    /**
-     * The refusal text for a write into [txn], which is closed to writes: the
-     * observer case, or — when a suspending commit holds the store and this
-     * thread is not part of it — the foreign-thread case.
-     */
-    private fun appliedWriteMessage(
-        txn: Transaction,
-        state: MutableState<*>,
-    ): String {
-        val attempt = "write ${describeState(state)}"
-        return if (suspendingOwner != null && txn.rolledBackIn == null && !txn.fanningOutHere()) {
-            suspendingCommitWriteMessage(attempt, displayName, txn)
-        } else {
-            appliedTransactionMessage(attempt, displayName, txn)
-        }
-    }
-
-    /**
-     * `Store.property` for failure messages, or a generic phrase for a state
-     * with no declaration (a `MutableState` constructed by hand). Reads the
-     * state's declaration back-link, so it takes no lock: this runs on the
-     * refusal path, possibly inside a `Bridge.publish` that holds the state's
-     * bridge lock, where waiting for any store-side lock could invert an
-     * order another thread holds.
-     */
-    private fun describeState(state: MutableState<*>): String {
-        val name = state.declaration?.name
-        return if (name != null) "$displayName.$name" else "a state of $displayName"
     }
 
     /**
