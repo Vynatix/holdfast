@@ -255,7 +255,8 @@ abstract class Store<Self : Store<Self>> {
      *  - Every state-mutation API throws `IllegalStateException("store disposed")`.
      *  - Every state-registry read API throws.
      *  - All registered observers are dropped; all bridges are detached; every state
-     *    declaration is dropped with its initializer.
+     *    declaration is dropped with its initializer, and every keyed state
+     *    family with its entries (their `observeFrom` subscriptions disposed).
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
@@ -374,7 +375,8 @@ abstract class Store<Self : Store<Self>> {
      * by its first read, or by [snapshot], [restore] or [reset] — and a state
      * removed with [removeState] disappears until it is created again. The backing
      * states of [derived] (and `:holdfast-coroutines`' `suspendDerived`)
-     * appear too, under their synthesized names. The map is a copy — modifying
+     * appear too, under their synthesized names; the entries of a keyed state
+     * family ([keyedState]) do not. The map is a copy — modifying
      * it does not affect the store. The contained `State<*>` references are
      * LIVE — reading `.value` reflects the current state. Callers MUST NOT cast
      * these back to `MutableState` to bypass the transactional API; doing so
@@ -966,7 +968,7 @@ abstract class Store<Self : Store<Self>> {
         if (escalate) throw exception
     }
 
-    private fun unenrolledMessage(
+    internal fun unenrolledMessage(
         frame: FrameMarker,
         via: String,
     ): String {
@@ -1084,11 +1086,11 @@ abstract class Store<Self : Store<Self>> {
      * the initial value is committed at once and survives that action's
      * rollback, so it must not be computed from writes that may roll back.
      * A store write from inside it — `mutate`/`update`, `action`, `atomic`,
-     * `reset()`, `emit` — throws [IllegalStateException], and so does an
-     * initializer that (directly or through other initializers, on this
-     * thread or across threads) needs its own state. An initializer that
-     * throws propagates to the read that ran it, and runs again on the next
-     * read.
+     * `reset()`, `emit`, `KeyedState.evict`/`evictAll` — throws
+     * [IllegalStateException], and so does an initializer that (directly or
+     * through other initializers, on this thread or across threads) needs its
+     * own state. An initializer that throws propagates to the read that ran
+     * it, and runs again on the next read.
      *
      * The store retains [initialize] for its lifetime: a state dropped with
      * [removeState] is created from it again, and the experimental [reset]
@@ -1228,7 +1230,8 @@ abstract class Store<Self : Store<Self>> {
      * On detach, the previous bridge's inbound observer is disposed.
      *
      * @throws IllegalStateException for a [DerivedState] ([derivedState],
-     *   [merged]), which is read-only.
+     *   [merged]), which is read-only, and for an evicted keyed entry's stale
+     *   handle.
      */
     infix fun <T : Any> State<T>.bridge(bridge: Bridge<T>?) {
         checkNotDisposed()
@@ -1240,15 +1243,18 @@ abstract class Store<Self : Store<Self>> {
      * when an external system only needs to push values into the state (e.g. an
      * admin override channel) and the state should not echo back via `publish`.
      *
-     * Returns a [Disposable] that detaches the inbound subscription.
+     * Returns a [Disposable] that detaches the inbound subscription. For an
+     * entry of a keyed state family ([keyedState]), evicting the entry
+     * disposes the subscription too.
      *
      * @throws IllegalStateException for a [DerivedState] ([derivedState],
-     *   [merged]), which is read-only.
+     *   [merged]), which is read-only, and for an evicted keyed entry's stale
+     *   handle.
      */
     infix fun <T : Any> State<T>.observeFrom(observable: Observable<T>): Disposable {
         checkNotDisposed()
         val ms = this.getMutableState()
-        return observable.observe { value -> ms.applyFromBridge(value) }
+        return ms.trackInbound(observable.observe { value -> ms.applyFromBridge(value) })
     }
 
     /**
@@ -1296,7 +1302,8 @@ abstract class Store<Self : Store<Self>> {
      *   a state initializer (see [state]), a schema migration
      *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
      *   recompute: all three may read states but not write. And for a
-     *   [DerivedState] ([derivedState], [merged]), which is read-only.
+     *   [DerivedState] ([derivedState], [merged]), which is read-only, and
+     *   for the stale handle of an evicted keyed-state entry ([keyedState]).
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         val state = writableState()
@@ -1332,7 +1339,7 @@ abstract class Store<Self : Store<Self>> {
      * marker for the running body (planned with the 0.2.0 fail-fast guard)
      * would let a foreign bare write open its own action instead.
      */
-    private fun stagesInto(txn: Transaction): Boolean {
+    internal fun stagesInto(txn: Transaction): Boolean {
         val here = currentThreadId()
         return txn.ownerThreadId == here || suspendingOwner != null || txn.fanoutThreadId == here
     }
@@ -1392,7 +1399,7 @@ abstract class Store<Self : Store<Self>> {
      * writes.
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
-        refuseDerivedStateWrite(this)
+        refuseUnwritable(this)
         @Suppress("UNCHECKED_CAST")
         val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
         if (ms.owningStore !== this@Store) error("State must be created by this Store instance")

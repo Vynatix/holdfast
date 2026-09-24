@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families
 
 ---
 
@@ -1212,16 +1212,17 @@ never T1's pending writes.
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
 | `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`), and again at every `reset()` (§16.1), and a `Remote` state's at every sterile `restore()` (§16.4). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
 | `bindClock` | `fun bindClock(clock: Clock?)` *(experimental)* | Binds a clock (level 2), e.g. a fixed test clock; `null` unbinds. Throws on a disposed store. `storeTest` restores each tracked store's binding to its value at first `track` (`store.action {}` doesn't auto-track), so bind after tracking |
-| `reset` | `fun <V : Store<V>> V.reset(): TransactionResult<Unit>` *(experimental, extension)* | Puts every declared state back to its initializer's value in one transaction: initializers re-run (reading each other's reset values), results staged raw, only changed states staged and fired; a throwing initializer rolls it all back (§16.1) |
+| `reset` | `fun <V : Store<V>> V.reset(): TransactionResult<Unit>` *(experimental, extension)* | Puts every declared state, and every live keyed-state entry (never evicting one, §16.6), back to its initializer's value in one transaction: initializers re-run (reading each other's reset values), results staged raw, only changed states staged and fired; a throwing initializer rolls it all back (§16.1) |
 | `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3). `sterile = true` drops the snapshot's `Remote` entries and resets every `Remote` state to its initial value in the same transaction (§16.4) |
-| `snapshot` (with a scope) | `fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot` *(experimental, extension)* | `All` is `snapshot()`; `UserAuthored` captures only the `UserAuthored` states; `Raw` lets typed reads return a `Secret` state's plaintext, in memory only (§16.4) |
-| `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`), and the store's states carrying a tag in declaration order, never-read ones materialized first; `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
+| `snapshot` (with a scope) | `fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot` *(experimental, extension)* | `All` is `snapshot()`; `UserAuthored` captures only the states and keyed state families (§16.6) tagged `UserAuthored`; `Raw` lets typed reads return a `Secret` state's plaintext, in memory only (§16.4) |
+| `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`; a keyed-state entry's are its family's), and the store's states carrying a tag in declaration order, never-read ones materialized first, then the live entries of the keyed state families carrying it (none created, §16.6); `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
 | `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` that settles: recomputed once per outermost action or frame that changes a source (sources on any store; not a `computed` one), after it releases every store, from a committed cut of the sources, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
 | `merged` | `fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(local: State<L>, remote: State<R>, merge: (L, R) -> T): DerivedState<T>` *(experimental, extension)* | A `DerivedState` over two different states this store declares — the user's side (`local`, tag it `UserAuthored`) and sync's (`remote`, tag it `Remote`) — so an adoption writing `remote` never touches `local` and recomputes the merge once; carries neither tag; the input tags are not checked. Another store's, a derived, `computed` or internal input, or the same state twice, is an `IllegalArgumentException` (§16.5) |
+| `keyedState` | `fun <K : Any, T : Any> Store<*>.keyedState(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, keyCodec: StateCodec<K>? = null, tags: Set<StateTag> = emptySet(), initialize: (K) -> T): KeyedStateProvider<K, T>` *(experimental, extension)* | Declares a keyed state family with `val docs by keyedState<K, T> { key -> … }`: one state per key, created from the initializer at the key's first `docs[key]` and the same `State` while it lives; `getOrNull`/`contains`/`entries` never create one. `evict(key)`/`evictAll()` are staged like writes (from this store's own commit fanout, deferred until the commit ends) and leave a stale handle whose writes throw; other entries keep their observers and bridges. Snapshots capture every live entry (`keysOf`), `encode()` writes a family with a `codec` and a `keyCodec` as an object under its name, `restore` creates entries and never evicts, `reset()` re-runs live entries' initializers. Families and states share names; throws on a disposed store (§16.6) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute still waiting on this store, for a live store, runs inside it, on the calling thread (§16.5) |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
-| `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
+| `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it); the entries of a keyed state family are not properties (§16.6) |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read (or `snapshot()`/`restore()`/`reset()`) recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations). Both throw `IllegalStateException` for a state with a pending write in the active transaction or one enclosing it, or held by an open `reset()` (§16.1) or sterile `restore()` (§16.4) |
 
 ### Extensions on `State<T>` (member-extensions of `Store<Self>`)
@@ -1243,6 +1244,7 @@ never T1's pending writes.
 | `endTime` | `val endTime: Long?` | Epoch milliseconds at which status left `Active` |
 | `parent` | `val parent: Transaction?` *(opt-in)* | Outer transaction for savepoint chains |
 | `modifiedStates` | `val modifiedStates: Set<State<*>>` | Read-only view of pending-write keys (owner-thread only) |
+| `stagedEvictions` | `val stagedEvictions: Set<State<*>>` *(experimental)* | The keyed-state entries this transaction evicts when it commits (owner-thread only); disjoint from `modifiedStates` (§16.6) |
 | `commit` | `fun commit()` | Idempotent. No-op if not Active |
 | `rollback` | `fun rollback()` | Idempotent. No-op if not Active |
 
@@ -1256,7 +1258,7 @@ manages them.
 | `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer or a schema migration (`SchemaVersioned.migrate`), which read committed values only, or, in an initializer re-run by `reset()`, its store's reset values; in an initializer re-run by a sterile `restore()`, the `Remote` states' reset values and its store's other declared states at the values the restore's transaction holds for them, restored or an enclosing action's pending writes — §4.1/§9.7/§16.1/§16.3/§16.4) |
 | `observe` | `fun observe(observer: (T) -> Unit): Disposable` | Subscribe with initial fire |
 | `bridge` | `var bridge: Bridge<T>?` | Get/set the bridge; setting installs an observer on it |
-| `toString` | `override fun toString(): String` | Names the state (`MutableState(CounterStore.count)`), never its value (§16.4) |
+| `toString` | `override fun toString(): String` | Names the state (`MutableState(CounterStore.count)`), never its value (§16.4); a keyed-state entry by its family, never its key (`MutableState(DocsStore.docs[*])`, §16.6) |
 
 `MutableState` is the concrete state class. You will rarely instantiate
 it directly — `state { … }` does it for you.
@@ -1331,7 +1333,7 @@ class StoreSnapshot internal constructor(…) {
     val size: Int
     // equals/hashCode compare values; toString lists state names only.
     // Experimental (§16.2): schemaVersion, unencodableStateNames, encode, entry, get,
-    // render, and StoreSnapshot.decode(text).
+    // render, and StoreSnapshot.decode(text); keysOf(family) for keyed state families (§16.6).
 }
 
 fun <V : Store<V>> V.snapshot(): StoreSnapshot
@@ -1343,7 +1345,8 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, ste
 `snapshot` captures the raw stored value of every declared state (see §4.1
 for delegates that wrap `state(…)`) — a state nobody has read yet is
 materialized first (its initializer runs), so even an untouched store's
-snapshot is complete. The values form one consistent cut: a commit applying
+snapshot is complete — and of every live entry of a keyed state family
+(experimental, §16.6). The values form one consistent cut: a commit applying
 on another thread meanwhile is either wholly in the snapshot or not in it,
 and the snapshot never makes that writer wait. Taken inside an action, a
 snapshot holds committed values, not that action's pending writes —
@@ -2227,7 +2230,9 @@ in one transaction. Afterwards every declared state holds the raw value a
 newly constructed store's state holds once read. In tests,
 `:holdfast-testing`'s `shouldMatchSnapshotOf` against a new store passes, and
 so does `store.snapshot() == NewStore().snapshot()`: snapshots compare by
-value (§16.2).
+value (§16.2) — unless a keyed state family has live entries: `reset()`
+resets them but never evicts them, so `evictAll()` in the same action to
+match a new store (§16.6).
 
 The one exception is an initializer that reads a `derived` state (or a
 `derivedState`/`merged` one, §16.5) computed from states this reset changes. A `derived` recomputes only after the reset
@@ -2456,7 +2461,8 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   working after the store is disposed.
 - **Equality.** Snapshots compare by value. Two captured snapshots are equal
   when they are at the same schema version (`schemaVersion`, §16.3) and hold
-  the same state names with `==` raw values, whichever instances took them
+  the same state names with `==` raw values, and the same keyed state
+  families with the same keys and `==` raw values (§16.6), whichever instances took them
   and whatever codecs their states declare. Two decoded
   snapshots are equal when they hold the same text. A captured snapshot never
   equals a decoded one: compare their `encode()` output instead. That output
@@ -2504,13 +2510,13 @@ interface SchemaVersioned {                     // implemented by a Store subcla
 @ExperimentalStoreApi
 class EncodedSnapshotView {                     // a copy of the snapshot's text, valid while migrate runs
     val stateNames: Set<String>
-    val families: Families                      // keyed state families, by name (read-only for now)
+    val families: Families                      // keyed state families, by name: editable (§16.6)
     operator fun contains(name: String): Boolean
     operator fun get(name: String): String?     // codec text; null when withheld or absent
     fun put(name: String, text: String?)        // null withholds the value
     fun remove(name: String): Boolean
     fun rename(from: String, to: String): Boolean
-    class Families { val names: Set<String> }
+    class Families { val names: Set<String>; get/put/remove/rename/contains (§16.6) }
 }
 
 @ExperimentalStoreApi
@@ -2594,9 +2600,12 @@ fun boot(saved: String): ReaderSettings {
   moves an entry, replacing any entry under the new name, and returns `false`
   when there is nothing to move. A state the old store could not encode has
   no entry. `stateNames` is a copy, so you can edit the view while iterating
-  it. `families` names the keyed state families the text holds, read-only
-  until keyed states arrive. The view is valid only while `migrate` runs: an
-  edit after it returns throws `IllegalStateException`.
+  it. `families` holds the keyed state families the text holds, each one's
+  entries as encoded key to text: read one with `view.families["docs"]` (a
+  copy), and `put`, `remove` or `rename` a family (§16.6). A name holds
+  either a state's entry or a family, and an edit that would give one name
+  both throws `IllegalArgumentException`. The view is valid only while
+  `migrate` runs: an edit after it returns throws `IllegalStateException`.
 - **No writes.** `migrate` runs while the restore plans, before its action
   opens, so at top level it holds no lock of the store. It may read states,
   and reads committed values, but may not write any store: `mutate`,
@@ -2683,7 +2692,8 @@ fun saveAndReboot(mail: MailStore): MailStore {
   never overwrite what the user wrote: declare one state of each and combine
   them in a derived state). `state.tags` reads a state's tags, and
   `store.taggedStates(tag)` lists the store's states that carry one, in
-  declaration order, materializing never-read ones first. These two are the
+  declaration order, materializing never-read ones first, then the live
+  entries of the keyed state families that carry it (§16.6). These two are the
   one lookup every tag-driven feature uses. A `derived` (or `suspendDerived`)
   state with a Secret state among its `sources` is Secret too; a derived is
   never `UserAuthored` or `Remote`, and a `computed { }` state has no tags.
@@ -2735,9 +2745,10 @@ fun saveAndReboot(mail: MailStore): MailStore {
   logs.
 - **Scopes.** `snapshot()` is `snapshot(SnapshotScope.All)`: every declared
   state, Secret ones read as `Redacted`. `SnapshotScope.UserAuthored`
-  captures exactly the `UserAuthored` states, runs only their never-read
-  initializers and holds no `derived` state; restored, it leaves every other
-  state as it is. `SnapshotScope.Raw` captures what `All` does and reads a
+  captures exactly the states and keyed state families (§16.6) tagged
+  `UserAuthored`, runs only their never-read initializers and holds no
+  `derived` state; restored, it leaves every other state as it is.
+  `SnapshotScope.Raw` captures what `All` does and reads a
   Secret state's plaintext through `snapshot[state]`, in memory only: its
   encoded text, `render()` and `toString()` withhold Secret values as in any
   scope. The scope plays no part in equality.
@@ -2945,6 +2956,182 @@ fun pinThenAdopt(notes: NotesStore) {
   and a recompute still waiting on the disposed store (deferred to its
   holder) runs inside `dispose()`, on the calling thread. Disposing twice is
   safe.
+
+### 16.6 Keyed state families
+
+```kotlin
+// Store extension: a family of states, one per key; declare it with `by`.
+@ExperimentalStoreApi
+fun <K : Any, T : Any> Store<*>.keyedState(
+    transformer: Transformer<T>? = null,
+    distinct: Boolean = false,
+    codec: StateCodec<T>? = null,        // encodes an entry's raw value
+    keyCodec: StateCodec<K>? = null,     // encodes its key: a family needs both to be encoded
+    tags: Set<StateTag> = emptySet(),    // every entry's tags
+    initialize: (K) -> T,
+): KeyedStateProvider<K, T>              // provideDelegate declares the family, yields a KeyedState
+
+@ExperimentalStoreApi
+sealed interface KeyedState<K : Any, T : Any> {
+    operator fun get(key: K): State<T>   // creates the entry on first get; the same State while it lives
+    fun getOrNull(key: K): State<T>?     // never creates one
+    operator fun contains(key: K): Boolean
+    val entries: Map<K, State<T>>        // the live entries, in creation order
+    fun evict(key: K)                    // staged like a write: commits or rolls back with its transaction
+    fun evictAll()
+}
+
+class StoreSnapshot { fun <K : Any> keysOf(family: KeyedState<K, *>): Set<K> }   // added to §16.2's
+class Transaction { val stagedEvictions: Set<State<*>> }                         // next to modifiedStates
+class EncodedSnapshotView.Families {                                             // §16.3's, now editable
+    operator fun get(name: String): Map<String, String?>?                        // encoded key -> text (null: withheld)
+    fun put(name: String, entries: Map<String, String?>)
+    fun remove(name: String): Boolean
+    fun rename(from: String, to: String): Boolean
+    operator fun contains(name: String): Boolean
+}
+```
+
+A keyed state family is one state per key — a draft per document id, a
+cursor per feed — declared once, with one initializer that is given the key.
+Each entry is created the first time its key is asked for and lives until it
+is evicted; while it lives it is an ordinary state, so actions, rollback,
+frames, `effect`, `derived`, `derivedState` and bridges work on it unchanged.
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+class DraftsStore : Store<DraftsStore>() {
+    val drafts by keyedState<String, String>(codec = StringCodec, keyCodec = StringCodec) { "" }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+fun editThenClose(store: DraftsStore) {
+    val a = store.drafts["a"]
+    a effect { println("a = $this") }                      // "a = "
+    store action {
+        drafts["a"] mutate "hello"
+        drafts["b"] mutate "world"
+    }                                                       // "a = hello"
+    println(store.snapshot().encode())
+    // {"format":"holdfast.store","v":1,"schema":1,"states":{"drafts":{"a":"hello","b":"world"}},"skipped":[]}
+    store.drafts.evict("a")                                 // a's observer is dropped, silently
+    println(store.drafts.entries.keys)                      // "[b]"
+    println(store.drafts["a"] === a)                        // "false": a new entry, from the initializer
+}
+```
+
+- **Declaring.** `val docs by keyedState<K, T> { key -> … }` declares the
+  family under the property's name when the store is constructed, running no
+  initializer. Families and states share the store's names: declaring a
+  family under a state's name (or the reverse) fails, as a second state of
+  one name does, and the same declaration running again (a local delegated
+  property, a helper class instantiated twice) binds to the family declared
+  first. `transformer`, `distinct`, `codec` and `tags` mean what they mean
+  for `state(...)`, for every entry; the refused tag combinations (§16.4) fail
+  the family's declaration.
+- **Entries.** `docs[key]` returns the key's entry, creating it from the
+  initializer the first time — as a declared state is created at its first
+  read: the initializer runs once, on the calling thread, reads committed
+  values only and may not write (a write, action, `evict` or `reset()` from
+  it throws), a cycle through entries throws, and a throwing initializer
+  creates nothing and runs again next time. While the entry lives, every
+  `docs[key]` returns the same `State`. Creating an entry is not a write: it
+  happens at once, even inside an action, and a rollback leaves the entry
+  live at its initial value. `getOrNull`, `contains` and `entries` never
+  create one. An entry is not a property: `properties`, `getState`,
+  `removeState` and `clearStates` do not see it.
+- **Eviction is transactional.** `evict(key)` and `evictAll()` stage like
+  `mutate` (see the tables below) and drop the transaction's pending write to
+  the entry. The transaction's own reads see its staged evictions —
+  `contains`, `getOrNull` and `entries` leave the entry out — and the last
+  operation on an entry wins: `docs[key]`, or a write to the entry, after
+  `evict` in the same transaction cancels the eviction (the dropped write
+  stays dropped). Inside a `suspendAction`/`suspendAtomic` body only a write
+  cancels it: `docs[key]` there leaves the eviction staged, since nothing
+  tells the body's thread from another coroutine's on the same thread (any
+  coroutine at all on wasmJs). So does `docs[key]` from an `atomic` frame
+  body that does not enroll the store (unless the frame's policy allows
+  unenrolled writes): the eviction belongs to an enclosing action, which
+  commits whatever the frame does, so a cancel there would escape the
+  frame's rollback. A savepoint's evictions merge into its parent on commit and
+  vanish on rollback. The commit applies them with its writes, inside one
+  write bracket, so a `snapshot()` taken on another thread sees an eviction
+  exactly when it sees that commit's writes. `Transaction.stagedEvictions`
+  lists what a transaction evicts, for middleware; it is disjoint from
+  `modifiedStates`.
+- **Snapshots.** `snapshot()` captures every live entry of every family (a
+  `SnapshotScope.UserAuthored` capture, of the `UserAuthored` families), and
+  `snapshot.keysOf(docs)` lists its keys. Read one entry through its state:
+  `snapshot[docs[key]]` (which creates the entry in the store if it is not
+  live). `encode()` writes a family with both codecs as a JSON object under
+  its name, one member per entry — key text to value text, sorted — and
+  lists a family without both as skipped; two keys encoding to one text fail
+  the encode. `restore` creates the entries a snapshot holds that are not
+  live and stages their values raw; its policy applies to each entry (an
+  entry that cannot restore is an issue naming the family, never the key).
+  A restore never evicts: to make one exact, `docs.evictAll()` and `restore`
+  in one action — the restore's writes cancel the evictions of the entries
+  it holds. Entries a failed restore created stay live, at their initial
+  values, as states it materialized do. Creating an entry is no commit, so a
+  capture lists the entries again when some came to life while commits
+  applied; after a few such retries it holds the creation of new entries
+  back for the moment it takes to list them and read its cut. It never
+  blocks a writer, and a `docs[key]` creating an entry waits only for that
+  moment.
+- **Tags** apply to every entry, and `State.tags` of an entry is its
+  family's. A `Secret` family's values are withheld as a Secret state's are
+  (`null` on the wire, `Redacted` when read, `<redacted>` in `render()` and
+  test timelines) — but not its keys: keys are addresses, written by
+  `encode()`, shown by `render()` and returned by `keysOf`, so never make a
+  secret a key. A
+  `Remote` family is left out of `encode()` unless `includeRemote`, and a
+  sterile restore drops its entries from the snapshot and resets its live
+  ones instead. `taggedStates(tag)` lists the live entries of families
+  carrying `tag`.
+- **`reset()`** re-runs the initializer of every live entry — reading the
+  other states' reset values, as a declared state's does — stages the result
+  raw where it differs, and never evicts; an entry the same transaction has
+  staged for eviction is left to its eviction. An entry an initializer
+  creates during the reset (`docs[key]` of a key with no live entry) is
+  reset too, so its initializer runs twice: once as it comes to life, from
+  committed values, then again from the reset values.
+- **`migrate`** (§16.3) edits families as text: `view.families["notes"]`
+  returns a copy of a family's entries, and `put`, `remove` and `rename`
+  change them. The restore then reads each family with the store family's
+  `keyCodec` and `codec`.
+- **Names, never keys.** A key can be data (an email, an account id), so the
+  library never writes one into a message, a `toString` or a middleware
+  sample: an entry prints as `MutableState(Store.docs[*])`, and
+  `ProfilingMiddleware` counts writes to any entry under `docs[*]`. (A
+  snapshot's `encode()`, `render()` and `keysOf` are where keys do appear:
+  they are the snapshot's content, not a message.) In a `:holdfast-testing`
+  timeline an entry's write is an `EmissionEvent` naming the entry's `State`;
+  find it by identity (`it.state === store.docs["a"]`). A bridge attached to
+  an entry is not wrapped by the harness, so its publishes and inbound values
+  are not recorded. `shouldMatchSnapshotOf` compares families entry by entry
+  and never prints a key.
+
+When `evict` (or `evictAll`) is called:
+
+| Called | What happens |
+|---|---|
+| inside an action or frame of the store, on its thread | staged in that transaction: it commits, or rolls back, with it |
+| outside any action | runs as a one-shot action of its own, as `mutate` does |
+| while another thread's action holds the store | waits for the store, then runs as a one-shot action |
+| from this store's commit fanout (an observer, a bridge, an event collector) | deferred: once the commit has released the store, the entries live at the call (not evicted meanwhile) are evicted by a transaction of their own, id `Evict`, that never waits for the store — handed to the store's next holder, which runs it once it releases, when the store is busy — the one write that defers rather than failing (§4.4) |
+| from another thread while a `suspendAction`/`suspendAtomic` holds the store | joins that transaction before it applies, and throws `IllegalStateException` after — a known gap, closed when the planned "body is running" marker lands |
+| inside an `atomic` frame that does not enroll the store | throws `UnenrolledStoreException` (unless the policy allows unenrolled writes) |
+| from a state initializer, `migrate` or a derived state's compute | throws `IllegalStateException` |
+
+What an eviction's commit does:
+
+| | The evicted entry | Every other entry |
+|---|---|---|
+| its `State` | a stale handle: reads its last value; `mutate`, `update`, `bridge` and `observeFrom` throw `IllegalStateException` | live |
+| its observers | dropped, with no last notification | untouched |
+| its bridge | detached | untouched |
+| its `observeFrom` subscriptions | disposed | untouched |
+| the next `docs[key]` | creates a new entry, a new `State`, from the initializer | returns the same `State` |
 
 ---
 

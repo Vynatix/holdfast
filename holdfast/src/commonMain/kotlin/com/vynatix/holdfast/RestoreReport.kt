@@ -53,11 +53,14 @@ sealed class RestoreIssue {
     /** What is wrong, in words that never quote the value. */
     abstract val reason: String
 
-    /** The snapshot names a state this store does not declare (a state renamed or removed since, say). */
+    /**
+     * The snapshot names a state or keyed state family this store does not
+     * declare (one renamed or removed since, say).
+     */
     data class UnknownState(
         override val stateName: String,
     ) : RestoreIssue() {
-        override val reason: String get() = "the store declares no state of this name"
+        override val reason: String get() = "the store declares no state or keyed state family of this name"
     }
 
     /** A decoded snapshot holds text for a state declared without a codec, so nothing can decode it. */
@@ -67,7 +70,12 @@ sealed class RestoreIssue {
         override val reason: String get() = "the snapshot holds its encoded text, and the state has no codec"
     }
 
-    /** The entry cannot be turned into a value for the state: its codec threw, or it is not a single value. */
+    /**
+     * The entry cannot be turned into a value for the state or keyed state
+     * family: its codec or `keyCodec` threw, the family has no `keyCodec`, or
+     * its shape is wrong (a family under a state's name, or a single value
+     * under a family's).
+     */
     data class Undecodable(
         override val stateName: String,
         override val reason: String,
@@ -91,14 +99,20 @@ sealed class RestoreIssue {
 /**
  * What a successful [restore] did. Holds names only, never values.
  *
+ * A keyed state family ([keyedState]) is reported by its name, never by a
+ * key: it is in [restored] when the restore staged any of its entries, in
+ * [kept] when it staged none and skipped none, and in [sterilized] when a
+ * sterile restore reset it. Under a tolerant policy it can be in [restored]
+ * and also be the `stateName` of [issues] for the entries it skipped.
+ *
  * Experimental (issue #20, R1).
  */
 @ExperimentalStoreApi
 class RestoreReport internal constructor(
-    /** The states whose snapshot value the restore staged. */
+    /** The states (and keyed state families) whose snapshot value the restore staged. */
     val restored: Set<String>,
     /**
-     * The states this store declares that kept their value because the
+     * The states (and keyed state families) this store declares that kept their value because the
      * snapshot holds none for them: no entry at all, a state its store could
      * not encode ([StoreSnapshot.unencodableStateNames]), or a withheld one
      * (a Secret state's, in encoded text). A sterile restore's Remote states
@@ -110,7 +124,7 @@ class RestoreReport internal constructor(
     /** The entries the restore skipped, which its [RestorePolicy] tolerated. */
     val issues: List<RestoreIssue>,
     /**
-     * The [StateTag.Remote] states a sterile restore (`sterile = true`) reset
+     * The [StateTag.Remote] states (and keyed state families) a sterile restore (`sterile = true`) reset
      * to their initial values, whatever the snapshot held for them — each
      * one, whether or not its value changed. Empty for any other restore.
      *

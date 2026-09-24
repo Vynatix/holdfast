@@ -90,9 +90,11 @@ class SnapshotWireFormatTest {
                 StoreSnapshot.decode(HEADER + """"states":{},"skipped":[],"x":$deep}""")
             }
         assertTrue(inUnknownField.message!!.contains("nested deeper than 64"), inUnknownField.message)
+        // A keyed state family holds text or null per entry (R7), so a family
+        // nesting objects is refused at its first nested value, never recursed into.
         val deepFamily = "{\"k\":".repeat(depth) + "\"v\"" + "}".repeat(depth)
         val inFamily = assertFailsWith<SnapshotFormatException> { StoreSnapshot.decode(HEADER + """"states":{"f":$deepFamily}}""") }
-        assertTrue(inFamily.message!!.contains("nested deeper than 64"), inFamily.message)
+        assertTrue(inFamily.message!!.contains("expected a keyed state entry's text or null"), inFamily.message)
         // A document that opens as an object and nests objects deeply, through an unknown field.
         val deepObject = "{\"x\":".repeat(depth) + "1" + "}".repeat(depth)
         val atTop = assertFailsWith<SnapshotFormatException> { StoreSnapshot.decode(deepObject) }
@@ -168,21 +170,34 @@ class SnapshotWireFormatTest {
         assertEquals(emptyList(), wrong, "each malformed text fails with its own SnapshotFormatException")
     }
 
-    @Test fun familyObjectsAreReadButNeverWritten() {
-        val text = HEADER + """"states":{"docs":{"a":"1","b":null},"label":"x"},"skipped":[]}"""
+    @Test fun familyObjectsAreReadAndWrittenBackCanonically() {
+        val text = HEADER + """"states":{"label":"x","docs":{"b":null,"a":"1"}},"skipped":[]}"""
         val decoded = StoreSnapshot.decode(text)
 
         assertTrue("docs" in decoded.stateNames)
         assertEquals(
-            """{"format":"holdfast.store","v":1,"schema":1,"states":{"label":"x"},"skipped":[]}""",
+            """{"format":"holdfast.store","v":1,"schema":1,"states":{"docs":{"a":"1","b":null},"label":"x"},"skipped":[]}""",
             decoded.encode(),
+            "keyed state families (R7) are written back, their entries sorted by encoded key",
         )
         val store = WireStore()
         val report = store.restore(decoded).let { assertIs<TransactionResult.Success<Unit>>(it) }
         val reported = store.restore(decoded, RestorePolicy.BestEffort).getOrThrow()
         assertEquals(Unit, report.value)
-        assertEquals(listOf<RestoreIssue>(RestoreIssue.UnknownState("docs")), reported.issues, "no store declares families yet")
+        assertEquals(listOf<RestoreIssue>(RestoreIssue.UnknownState("docs")), reported.issues, "WireStore declares no family 'docs'")
         assertEquals("x", store.label.value)
+    }
+
+    @Test fun aFamilyHoldsOnlyTextOrNullPerEntry() {
+        val cases =
+            listOf(
+                HEADER + """"states":{"docs":{"a":1}},"skipped":[]}""" to "expected a keyed state entry's text or null",
+                HEADER + """"states":{"docs":{"a":"1","a":"2"}},"skipped":[]}""" to "duplicate key in keyed state family \"docs\"",
+            )
+        for ((text, expected) in cases) {
+            val failure = assertFailsWith<SnapshotFormatException> { StoreSnapshot.decode(text) }
+            assertTrue(expected in failure.message.orEmpty(), failure.message)
+        }
     }
 
     @Test fun aFamilyUnderAPlainStatesNameIsNotAValue() {

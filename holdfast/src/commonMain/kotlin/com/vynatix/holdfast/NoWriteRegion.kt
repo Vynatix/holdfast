@@ -84,9 +84,9 @@ internal class ComputingFrame(
  * other declared states as the restore's transaction holds them (restored,
  * else an enclosing action's pending writes). A store write from inside it
  * is refused: `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`,
- * `restore`, and `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all
- * throw inside it, naming the state being initialized, the store migrating or
- * the derived state recomputing.
+ * `restore`, `KeyedState.evict`/`evictAll`, and `:holdfast-coroutines`'
+ * `suspendAction`/`suspendAtomic` all throw inside it, naming the state being
+ * initialized, the store migrating or the derived state recomputing.
  */
 internal object NoWriteRegion {
     /** The innermost region open on this thread, or `null`. */

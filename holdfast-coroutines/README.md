@@ -61,7 +61,10 @@ nested `withContext(dispatcher)` inside the commit is not recognised and such
 a blocking call still waits forever. While a `suspendAction` holds the store,
 another thread's bare `mutate`/`update` is not isolated from it — before the
 commit applies it joins the transaction, after it throws — so write from other
-threads through `action { }`, which waits. A failing
+threads through `action { }`, which waits. (`KeyedState.evict`/`evictAll` from
+inside the commit are deferred until the suspending call releases the store;
+from another thread they have the same join-then-throw gap as bare `mutate`.)
+A failing
 `SuspendingBridge.publishAwaited` never undoes the commit; it goes to
 `Store.uncaughtObserverHandler` (logged while none is set). A
 `suspendAction` or `suspendAtomic` is an entry like `action`: the

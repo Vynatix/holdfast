@@ -18,9 +18,9 @@ package com.vynatix.holdfast
  *
  * | Scope | Captures | `snapshot[secret]` |
  * |---|---|---|
- * | [All] | every declared state | `null` ([Redacted]) |
- * | [UserAuthored] | the states tagged [StateTag.UserAuthored] | — (never Secret) |
- * | [Raw] | every declared state | the plaintext value |
+ * | [All] | every declared state and keyed state family | `null` ([Redacted]) |
+ * | [UserAuthored] | the states (and families) tagged [StateTag.UserAuthored] | — (never Secret) |
+ * | [Raw] | every declared state and keyed state family | the plaintext value |
  *
  * Whatever the scope, the capture's [StoreSnapshot.encode] writes a Secret
  * state as `null`, its [StoreSnapshot.render] and `toString` never show it,
@@ -46,9 +46,10 @@ abstract class SnapshotScope internal constructor(
     object All : SnapshotScope("All")
 
     /**
-     * Exactly the declared states tagged [StateTag.UserAuthored]: what the
-     * user authored, and what a persisted overlay writes. No `derived`
-     * backing state, and never a Secret one (the two tags exclude each other).
+     * Exactly the declared states — and the keyed state families, with every
+     * live entry — tagged [StateTag.UserAuthored]: what the user authored,
+     * and what a persisted overlay writes. No `derived` backing state, and
+     * never a Secret one (the two tags exclude each other).
      */
     @ExperimentalStoreApi
     object UserAuthored : SnapshotScope("UserAuthored")
@@ -80,32 +81,84 @@ internal val SnapshotScope.readsSecrets: Boolean
 internal fun Store<*>.captureSnapshot(scope: SnapshotScope): StoreSnapshot = captureConsistent(listOf(this), scope)[0]
 
 /**
- * The first half of capturing this store in [scope]: check it is not
- * disposed, read its schema version, materialize the declared states [scope]
- * captures, and list the states to read. [CapturePlan.build] turns the values
- * one cut read for them into the snapshot.
+ * The first half of capturing this store in [scope], the part that runs user
+ * code: check it is not disposed, read its schema version, and materialize
+ * the declared states [scope] captures. Returns the schema version, for
+ * [listCapture].
  */
-internal fun Store<*>.planCapture(scope: SnapshotScope): CapturePlan {
+internal fun Store<*>.prepareCapture(scope: SnapshotScope): Int {
     checkNotDisposed()
     val schema = StoreSchema(this).version
     materializeDeclaredStates { scope.captures(it) }
-    val captured = registry.materializedInOrder().filter { (decl, _) -> scope.captures(decl) }
-    return CapturePlan(this, scope, schema, captured)
+    return schema
 }
 
-/** One store's part of a capture: what [planCapture] listed, until a cut reads [states]. */
+/**
+ * The second half, which runs no user code: list the states to read — the
+ * declared states [scope] captures, then every live entry of the keyed state
+ * families it captures — noting first the counters that tell whether an
+ * entry can have come to life unlisted ([CaptureMembership]).
+ * [CapturePlan.build] turns the values one cut read for them into the
+ * snapshot.
+ */
+internal fun Store<*>.listCapture(
+    scope: SnapshotScope,
+    schema: Int,
+): CapturePlan {
+    checkNotDisposed()
+    val keyed = registry.keyed
+    val commits = keyed.commitsApplied
+    val declaredFamilies = keyed.familiesDeclaredVersion
+    val captured = registry.materializedInOrder().filter { (decl, _) -> scope.captures(decl) }
+    val families = keyed.familiesInOrder().filter { scope.captures(it) }
+    val versions = LongArray(families.size)
+    val entries =
+        families.flatMapIndexed { i, family ->
+            versions[i] = family.createdVersion
+            capturedEntries(family)
+        }
+    val membership = CaptureMembership(this, commits, declaredFamilies, families, versions)
+    return CapturePlan(this, scope, schema, captured + entries, families, membership)
+}
+
+/**
+ * The counters a [listCapture] noted before it listed: the store's
+ * [KeyedRegistry.commitsApplied] and [KeyedRegistry.familiesDeclaredVersion],
+ * then each captured family's [KeyedFamily.createdVersion].
+ */
+internal class CaptureMembership(
+    private val store: Store<*>,
+    private val commits: Long,
+    private val declaredFamilies: Long,
+    private val families: List<KeyedFamily<*, *>>,
+    private val versions: LongArray,
+) {
+    /** Whether a commit of the store has applied since. */
+    fun committedSince(): Boolean = store.registry.keyed.commitsApplied != commits
+
+    /** Whether a family was declared, or an entry of a captured family came to life, since. */
+    fun grewSince(): Boolean =
+        store.registry.keyed.familiesDeclaredVersion != declaredFamilies ||
+            families.indices.any { families[it].createdVersion != versions[it] }
+}
+
+/** One store's part of a capture: what [listCapture] listed, until a cut reads [states]. */
 internal class CapturePlan(
     private val store: Store<*>,
     private val scope: SnapshotScope,
     private val schema: Int,
     private val captured: List<Pair<StateDeclaration<*>, MutableState<*>>>,
+    private val families: List<KeyedFamily<*, *>>,
+    /** What tells whether the listing can have missed an entry. */
+    val membership: CaptureMembership,
 ) {
-    /** The states to read, in declaration order. */
+    /** The states to read: the declared states in declaration order, then the keyed entries. */
     val states: List<MutableState<*>> = captured.map { it.second }
 
     /** The snapshot holding [values], the raw values one consistent cut read for [states]. */
     fun build(values: List<Any>): StoreSnapshot {
         val content = Capture(scope)
+        families.forEach(content::addFamily)
         captured.forEachIndexed { i, (decl, _) -> content.add(decl, values[i]) }
         return StoreSnapshot(content.build(CaptureOrigin(store.lockOrderKey, store::class), schema))
     }
@@ -120,11 +173,25 @@ private class Capture(
     private val codecs = HashMap<String, StateCodec<*>>()
     private val secret = HashSet<String>()
     private val remote = HashSet<String>()
+    private val families = LinkedHashMap<String, Pair<KeyedFamily<*, *>, LinkedHashMap<Any, Any>>>()
+
+    /** Capture [family], with no entry yet: an empty family is captured too. */
+    fun addFamily(family: KeyedFamily<*, *>) {
+        families[family.name] = family to LinkedHashMap()
+        if (StateTag.Secret in family.tags) secret += family.name
+        if (StateTag.Remote in family.tags) remote += family.name
+    }
 
     fun add(
         decl: StateDeclaration<*>,
         raw: Any,
     ) {
+        val entry = decl.keyed
+        if (entry != null) {
+            // Evicted by a commit the cut includes: not in the snapshot.
+            if (raw !== RetiredEntry) families.getValue(entry.family.name).second[entry.key] = raw
+            return
+        }
         if (decl.kind == StateKind.DerivedBacking) {
             backings[decl.name] = raw
             return
@@ -138,5 +205,12 @@ private class Capture(
     fun build(
         origin: CaptureOrigin,
         schema: Int,
-    ): CapturedContent = CapturedContent(declared, backings, origin, codecs, schema, CaptureTags(scope, secret, remote))
+    ): CapturedContent {
+        val captured =
+            families.mapValues { (_, captured) ->
+                val (family, entries) = captured
+                CapturedFamily(entries, family.spec.codec, family.spec.keyCodec)
+            }
+        return CapturedContent(declared, backings, origin, codecs, schema, CaptureTags(scope, secret, remote), captured)
+    }
 }

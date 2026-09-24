@@ -49,6 +49,7 @@ data object Redacted : SnapshotEntry<Nothing>
 internal fun <T : Any> SnapshotContent.entryFor(state: State<T>): SnapshotEntry<T> {
     val readable = readableState(state)
     val decl = checkNotNull(readable.declaration)
+    if (decl.kind == StateKind.Keyed) return keyedEntryFor(readable, decl)
     return when (this) {
         is CapturedContent -> capturedEntry(readable, decl)
         is DecodedContent -> decodedEntry(readable, decl)
@@ -64,7 +65,8 @@ private fun <T : Any> readableState(state: State<T>): MutableState<T> {
     val decl = readable?.declaration
     require(readable != null && decl != null && decl.kind != StateKind.ReadOnlyDerived) {
         "Cannot read this State from a snapshot: a snapshot holds the states a store declares " +
-            "(`val x by state { … }`) and the states of derived(...), and this State is neither — a computed { } " +
+            "(`val x by state { … }` and the entries of `val x by keyedState { … }`) and the states of derived(...), " +
+            "and this State is none of those — a computed { } " +
             "state, for example, is recomputed on every read and has no value of its own to capture, and a " +
             "derivedState(...) or merged(...) state is recomputed from its sources: read those instead."
     }
@@ -146,7 +148,7 @@ private fun familyMismatch(decl: StateDeclaration<*>): SnapshotFormatException =
             "under '${decl.name}', not a single value.",
     )
 
-private fun foreignInstanceMessage(decl: StateDeclaration<*>): String =
+internal fun foreignInstanceMessage(decl: StateDeclaration<*>): String =
     "Cannot read ${decl.qualifiedName} from this snapshot: it was captured from another " +
         "${decl.store.displayName} instance, and a captured snapshot answers only the states of the store " +
         "instance that took it (reading by instance, not by name). Read it through that instance's states, or " +

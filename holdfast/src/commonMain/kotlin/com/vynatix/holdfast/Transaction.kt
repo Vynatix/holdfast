@@ -10,6 +10,7 @@ import kotlin.time.Clock
  *  - a [parent] reference forming the savepoint chain (null for top-level),
  *  - a buffer of pending writes ([pendingWrites]), staged by [ownerThreadId]
  *    (by any thread while a suspending action holds the store) under a lock,
+ *    and one of keyed-entry evictions ([stagedEvictions]),
  *  - a status ([TransactionStatus]) advancing Active → Committed/RolledBack/Failed.
  *
  * Top-level transactions apply their pending writes to state on [commit];
@@ -127,6 +128,20 @@ class Transaction internal constructor(
      * [Eventful.emit]'s signature is `(E)` and the channel is `MutableSharedFlow<E>`.
      */
     internal val pendingEvents: MutableList<Pair<MutableSharedFlow<*>, Any>> = mutableListOf()
+
+    /**
+     * Per-transaction buffer of keyed-entry evictions (`KeyedState.evict`):
+     * each entry's state, with `true` when this transaction evicts it and
+     * `false` when it cancels an eviction an enclosing transaction staged —
+     * the last operation on an entry wins (KeyedEviction.kt). Guarded by
+     * [pendingLock] like [pendingWrites], and disjoint from it: staging an
+     * eviction drops the entry's pending write, and a write to the entry
+     * cancels its eviction. A savepoint's commit merges it into the parent's
+     * (an evicted entry's pending write in the parent is dropped too), a
+     * top-level commit applies the `true` ones inside its write bracket, and
+     * rollback discards it.
+     */
+    internal val evictions: MutableMap<MutableState<*>, Boolean> = LinkedHashMap()
 
     /**
      * Set when this top-level transaction's writes are assigned in its apply
@@ -272,7 +287,10 @@ class Transaction internal constructor(
         state: MutableState<*>,
         rawValue: Any,
     ) {
-        pendingLock.withLock { pendingWrites[state] = rawValue }
+        pendingLock.withLock {
+            pendingWrites[state] = rawValue
+            cancelStagedEviction(state)
+        }
     }
 
     /**
@@ -292,6 +310,9 @@ class Transaction internal constructor(
         pendingLock.withLock {
             if (closedToWrites) return@withLock false
             pendingWrites[state] = raw
+            // A write to a keyed entry whose eviction is staged cancels it: the
+            // last operation on an entry wins.
+            cancelStagedEviction(state)
             true
         }
 
@@ -340,6 +361,34 @@ class Transaction internal constructor(
                 "modifiedStates may only be read on the transaction's owner thread"
             }
             return pendingLock.withLock { pendingWrites.keys.toSet() }
+        }
+
+    /**
+     * Read-only view of the keyed-state entries (`KeyedState.evict`,
+     * `evictAll`) this transaction evicts when it commits — its own staged
+     * evictions, not those of an enclosing transaction or of inner savepoints
+     * that have not committed into it yet. Disjoint from [modifiedStates]:
+     * evicting an entry drops the transaction's pending write to it, and
+     * writing the entry again cancels the eviction, and so does getting it —
+     * except where a get leaves the eviction staged: inside a
+     * `suspendAction`/`suspendAtomic` body, or an `atomic` frame body that
+     * does not enroll the store (see `KeyedState.get`). Owner-thread
+     * only; throws [IllegalStateException] from non-owner threads. Holds the
+     * entries' states, whose `toString` names the family, never the key.
+     *
+     * Experimental (issue #20, R7).
+     */
+    @ExperimentalStoreApi
+    val stagedEvictions: Set<State<*>>
+        get() {
+            check(
+                ownerThreadId ==
+                    com.vynatix.holdfast.platform
+                        .currentThreadId(),
+            ) {
+                "stagedEvictions may only be read on the transaction's owner thread"
+            }
+            return pendingLock.withLock { evictions.filterValues { it }.keys.toSet() }
         }
 
     /**
@@ -448,6 +497,7 @@ class Transaction internal constructor(
                 buffersClosed = true
                 pendingWrites.clear()
                 pendingEvents.clear()
+                evictions.clear()
             }
             updateStatus(TransactionStatus.RolledBack)
         } catch (e: CancellationException) {

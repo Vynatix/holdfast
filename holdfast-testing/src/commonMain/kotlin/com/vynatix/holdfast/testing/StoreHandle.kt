@@ -92,6 +92,11 @@ class StoreHandle<V : Store<V>> internal constructor(
      * track(v) replaces the wrapped reference with the unwrapped one and
      * subsequent BridgePublished/Observed events will not fire for that
      * state.
+     *
+     * Only [Store.properties] are walked, so a bridge attached to an entry of
+     * a keyed state family (`keyedState`) is never wrapped: its publishes and
+     * inbound values do not reach the timeline (its writes do, as
+     * EmissionEvents).
      */
     private val bridgeWrappers: MutableMap<State<*>, RecordingBridgeWrapper<*>> = mutableMapOf()
 
@@ -195,7 +200,8 @@ class StoreHandle<V : Store<V>> internal constructor(
      * store. Populated by the [Recorder] when bridges attached to tracked
      * states publish / observe — see [RecordingBridgeWrapper] for the wrap
      * strategy and the v1 limit (bridges attached AFTER `track(v)` are not
-     * wrapped).
+     * wrapped). A bridge on a keyed state family's entry is never wrapped, so
+     * its publishes and inbound values are not recorded.
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
         val target = PrivilegedHooks.recordedState(prop.get(store))

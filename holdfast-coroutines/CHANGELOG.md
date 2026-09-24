@@ -8,6 +8,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Keyed-state evictions under `suspendAction`/`suspendAtomic`** (issue #20,
+  R7; see `:holdfast`'s changelog): `KeyedState.evict`/`evictAll` stage like
+  `mutate`, so inside a suspending body they stage into its transaction and
+  commit or roll back with it, and from its commit's fanout (observers,
+  bridge publishes, event collectors, across thread hops) they are deferred
+  until the suspending call has released the store — then run by a
+  transaction that never waits for the store, so the drain in the call's
+  `finally` never spins waiting for the coroutine it just handed the
+  store's mutex to (`KeyedDeferredEvictionTest`). Inside a suspending body
+  only a write to an entry cancels its staged eviction, never a `get`:
+  another coroutine on the body's thread would look like the body. Another thread's
+  eviction while a suspending call holds the store joins its transaction
+  before it applies and is refused after — the foreign-thread staging gap
+  that bare `mutate` has, pinned by `KeyedEvictSuspendGapTest` until the
+  planned "body is running" marker closes it.
+
 - **`suspendAction` and `suspendAtomic` are settle entries** (issue #20, R9;
   see `:holdfast`'s changelog): the `derivedState`/`merged` states whose
   sources one of them — and everything nested in it: `suspendAction`s,

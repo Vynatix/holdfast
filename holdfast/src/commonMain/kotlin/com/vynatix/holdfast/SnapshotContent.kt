@@ -15,10 +15,10 @@ internal sealed class SnapshotContent {
     /** The schema version the snapshot was taken at. */
     abstract val schema: Int
 
-    /** Every state name the snapshot knows, with or without a value. */
+    /** Every state (and keyed state family) name the snapshot knows, with or without a value. */
     abstract val names: Set<String>
 
-    /** The states the snapshot's store declares but could not encode. */
+    /** The states (and keyed state families) the snapshot's store declares but could not encode. */
     abstract val unencodable: Set<String>
 
     /**
@@ -40,9 +40,12 @@ internal class CaptureOrigin(
 /** A capture's [SnapshotScope], and which of its states carry the tags a snapshot enforces. */
 internal class CaptureTags(
     val scope: SnapshotScope,
-    /** The captured states tagged [StateTag.Secret]: never encoded, rendered or (outside [SnapshotScope.Raw]) read. */
+    /**
+     * The captured states and keyed state families tagged [StateTag.Secret]:
+     * never encoded, rendered or (outside [SnapshotScope.Raw]) read.
+     */
     val secret: Set<String>,
-    /** The captured states tagged [StateTag.Remote]: encoded only with `includeRemote`. */
+    /** The captured states and keyed state families tagged [StateTag.Remote]: encoded only with `includeRemote`. */
     val remote: Set<String>,
 ) {
     companion object {
@@ -65,6 +68,8 @@ internal class CapturedContent(
     override val schema: Int = DEFAULT_SCHEMA_VERSION,
     /** The capture's scope and tagged states. */
     val tags: CaptureTags = CaptureTags.None,
+    /** The keyed state families captured, by name: each one's live entries (KeyedSnapshot.kt). */
+    val families: Map<String, CapturedFamily> = emptyMap(),
 ) : SnapshotContent() {
     /** [Store.lockOrderKey] of the store captured, or `null` for a snapshot made by hand. */
     val originKey: Long? get() = origin?.key
@@ -72,9 +77,10 @@ internal class CapturedContent(
     /** The class of the store captured, or `null` for a snapshot made by hand. */
     val originClass: KClass<*>? get() = origin?.storeClass
 
-    override val names: Set<String> get() = rawValues.keys
+    override val names: Set<String> get() = rawValues.keys + families.keys
 
-    override val unencodable: Set<String> get() = rawValues.keys - codecs.keys
+    override val unencodable: Set<String>
+        get() = rawValues.keys - codecs.keys + families.filterValues { !it.encodable }.keys
 
     override fun toBody(includeRemote: Boolean): StoreBody {
         val written = { name: String -> includeRemote || name !in tags.remote }
@@ -84,7 +90,11 @@ internal class CapturedContent(
             // A Secret value never reaches its codec: `null` is the withheld marker.
             texts[name] = if (name in tags.secret) null else encodeValue(name, codec, rawValues.getValue(name))
         }
-        return StoreBody(schema, texts, emptyMap(), unencodable.filterTo(LinkedHashSet(), written))
+        val familyTexts = LinkedHashMap<String, Map<String, String?>>()
+        for ((name, family) in families) {
+            if (written(name) && family.encodable) familyTexts[name] = family.encodeEntries(name, name in tags.secret)
+        }
+        return StoreBody(schema, texts, familyTexts, unencodable.filterTo(LinkedHashSet(), written))
     }
 }
 
@@ -99,11 +109,10 @@ internal class DecodedContent(
     override val unencodable: Set<String> get() = body.skipped
 
     /**
-     * Families a newer writer wrote are kept for reading but never written
-     * back (see SnapshotEnvelope.kt). The text carries no tags, so it is
-     * written back as it was read, whatever [includeRemote] says.
+     * The text carries no tags, so it is written back as it was read —
+     * keyed state families included — whatever [includeRemote] says.
      */
-    override fun toBody(includeRemote: Boolean): StoreBody = body.copy(families = emptyMap())
+    override fun toBody(includeRemote: Boolean): StoreBody = body
 }
 
 /**
@@ -137,7 +146,7 @@ internal fun SnapshotContent.render(): String =
         for (name in names.sorted()) {
             append("\n  ").append(name)
             when (this@render) {
-                is CapturedContent -> append(" = ").append(renderedValue(name in tags.secret, rawValues.getValue(name)))
+                is CapturedContent -> append(renderCaptured(name))
                 is DecodedContent -> append(renderDecoded(name))
             }
         }
@@ -151,9 +160,47 @@ private fun SnapshotContent.renderKind(): String =
         else -> ")"
     }
 
+private fun CapturedContent.renderCaptured(name: String): String {
+    val secret = name in tags.secret
+    val family = families[name] ?: return " = ${renderedValue(secret, rawValues.getValue(name))}"
+    return renderCapturedFamily(family, secret)
+}
+
 private fun DecodedContent.renderDecoded(name: String): String =
     when {
-        name in body.families -> " = <keyed state family>"
+        name in body.families -> renderDecodedFamily(body.families.getValue(name))
         name in body.skipped -> " (not encoded)"
         else -> body.states.getValue(name)?.let { " = " + buildString { appendJsonString(it) } } ?: " = $REDACTED_TEXT"
+    }
+
+/**
+ * How [StoreSnapshot.render] shows a captured family: its size, then one line
+ * per entry sorted by key — the key's `toString()` and the raw value, or
+ * `<redacted>` for a [secret] family's.
+ */
+internal fun renderCapturedFamily(
+    family: CapturedFamily,
+    secret: Boolean,
+): String =
+    buildString {
+        append(" = keyed state family (").append(family.entries.size).append(" entries)")
+        for ((key, raw) in family.entries.entries.sortedBy { it.key.toString() }) {
+            append("\n    [").append(key).append("] = ").append(renderedValue(secret, raw))
+        }
+    }
+
+/**
+ * How [StoreSnapshot.render] shows a decoded family: its size, then one line
+ * per entry sorted by encoded key — key and text as JSON strings, a withheld
+ * value as `<redacted>`.
+ */
+internal fun renderDecodedFamily(texts: Map<String, String?>): String =
+    buildString {
+        append(" = keyed state family (").append(texts.size).append(" entries)")
+        for (key in texts.keys.sorted()) {
+            append("\n    [")
+            appendJsonString(key)
+            append("] = ")
+            texts.getValue(key)?.let { appendJsonString(it) } ?: append(REDACTED_TEXT)
+        }
     }

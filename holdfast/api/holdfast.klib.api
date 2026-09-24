@@ -111,6 +111,11 @@ abstract interface com.vynatix.holdfast/FrameObserver { // com.vynatix.holdfast/
     open fun onFrameStarted(kotlin/String, kotlin.collections/List<com.vynatix.holdfast/Store<*>>) // com.vynatix.holdfast/FrameObserver.onFrameStarted|onFrameStarted(kotlin.String;kotlin.collections.List<com.vynatix.holdfast.Store<*>>){}[0]
 }
 
+abstract interface com.vynatix.holdfast/KeyedMembershipListener { // com.vynatix.holdfast/KeyedMembershipListener|null[0]
+    open fun onEntryAdded(kotlin/String, kotlin/Any, com.vynatix.holdfast/State<*>) // com.vynatix.holdfast/KeyedMembershipListener.onEntryAdded|onEntryAdded(kotlin.String;kotlin.Any;com.vynatix.holdfast.State<*>){}[0]
+    open fun onEntryEvicted(kotlin/String, kotlin/Any, com.vynatix.holdfast/State<*>) // com.vynatix.holdfast/KeyedMembershipListener.onEntryEvicted|onEntryEvicted(kotlin.String;kotlin.Any;com.vynatix.holdfast.State<*>){}[0]
+}
+
 abstract interface com.vynatix.holdfast/SchemaVersioned { // com.vynatix.holdfast/SchemaVersioned|null[0]
     abstract val schemaVersion // com.vynatix.holdfast/SchemaVersioned.schemaVersion|{}schemaVersion[0]
         abstract fun <get-schemaVersion>(): kotlin/Int // com.vynatix.holdfast/SchemaVersioned.schemaVersion.<get-schemaVersion>|<get-schemaVersion>(){}[0]
@@ -124,6 +129,18 @@ abstract interface com.vynatix.holdfast/StoreAttachment { // com.vynatix.holdfas
 
     open fun onStoreDisposed() // com.vynatix.holdfast/StoreAttachment.onStoreDisposed|onStoreDisposed(){}[0]
     open fun onStoreReset() // com.vynatix.holdfast/StoreAttachment.onStoreReset|onStoreReset(){}[0]
+}
+
+sealed interface <#A: kotlin/Any, #B: kotlin/Any> com.vynatix.holdfast/KeyedState { // com.vynatix.holdfast/KeyedState|null[0]
+    abstract val entries // com.vynatix.holdfast/KeyedState.entries|{}entries[0]
+        abstract fun <get-entries>(): kotlin.collections/Map<#A, com.vynatix.holdfast/State<#B>> // com.vynatix.holdfast/KeyedState.entries.<get-entries>|<get-entries>(){}[0]
+
+    abstract fun contains(#A): kotlin/Boolean // com.vynatix.holdfast/KeyedState.contains|contains(1:0){}[0]
+    abstract fun evict(#A) // com.vynatix.holdfast/KeyedState.evict|evict(1:0){}[0]
+    abstract fun evictAll() // com.vynatix.holdfast/KeyedState.evictAll|evictAll(){}[0]
+    abstract fun get(#A): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast/KeyedState.get|get(1:0){}[0]
+    abstract fun getOrNull(#A): com.vynatix.holdfast/State<#B>? // com.vynatix.holdfast/KeyedState.getOrNull|getOrNull(1:0){}[0]
+    open fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast/KeyedState<#A, #B> // com.vynatix.holdfast/KeyedState.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
 }
 
 sealed interface <#A: kotlin/Any> com.vynatix.holdfast/DerivedState : com.vynatix.holdfast/Disposable, com.vynatix.holdfast/State<#A> { // com.vynatix.holdfast/DerivedState|null[0]
@@ -320,6 +337,10 @@ final class <#A: com.vynatix.holdfast/StoreAttachment> com.vynatix.holdfast/Stor
     final fun toString(): kotlin/String // com.vynatix.holdfast/StoreAttachmentKey.toString|toString(){}[0]
 }
 
+final class <#A: kotlin/Any, #B: kotlin/Any> com.vynatix.holdfast/KeyedStateProvider { // com.vynatix.holdfast/KeyedStateProvider|null[0]
+    final fun provideDelegate(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast/KeyedState<#A, #B> // com.vynatix.holdfast/KeyedStateProvider.provideDelegate|provideDelegate(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+}
+
 final class <#A: kotlin/Any> com.vynatix.holdfast.bridge/KvBridge : com.vynatix.holdfast/Bridge<#A> { // com.vynatix.holdfast.bridge/KvBridge|null[0]
     constructor <init>(com.vynatix.holdfast.bridge/KvStore, kotlin/String, com.vynatix.holdfast.bridge/Codec<#A>) // com.vynatix.holdfast.bridge/KvBridge.<init>|<init>(com.vynatix.holdfast.bridge.KvStore;kotlin.String;com.vynatix.holdfast.bridge.Codec<1:0>){}[0]
 
@@ -473,6 +494,11 @@ final class com.vynatix.holdfast/EncodedSnapshotView { // com.vynatix.holdfast/E
         final val names // com.vynatix.holdfast/EncodedSnapshotView.Families.names|{}names[0]
             final fun <get-names>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/EncodedSnapshotView.Families.names.<get-names>|<get-names>(){}[0]
 
+        final fun contains(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.Families.contains|contains(kotlin.String){}[0]
+        final fun get(kotlin/String): kotlin.collections/Map<kotlin/String, kotlin/String?>? // com.vynatix.holdfast/EncodedSnapshotView.Families.get|get(kotlin.String){}[0]
+        final fun put(kotlin/String, kotlin.collections/Map<kotlin/String, kotlin/String?>) // com.vynatix.holdfast/EncodedSnapshotView.Families.put|put(kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String?>){}[0]
+        final fun remove(kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.Families.remove|remove(kotlin.String){}[0]
+        final fun rename(kotlin/String, kotlin/String): kotlin/Boolean // com.vynatix.holdfast/EncodedSnapshotView.Families.rename|rename(kotlin.String;kotlin.String){}[0]
         final fun toString(): kotlin/String // com.vynatix.holdfast/EncodedSnapshotView.Families.toString|toString(){}[0]
     }
 }
@@ -538,6 +564,17 @@ final class com.vynatix.holdfast/FramePolicy { // com.vynatix.holdfast/FramePoli
     }
 }
 
+final class com.vynatix.holdfast/KeyedAddress { // com.vynatix.holdfast/KeyedAddress|null[0]
+    final val family // com.vynatix.holdfast/KeyedAddress.family|{}family[0]
+        final fun <get-family>(): kotlin/String // com.vynatix.holdfast/KeyedAddress.family.<get-family>|<get-family>(){}[0]
+    final val key // com.vynatix.holdfast/KeyedAddress.key|{}key[0]
+        final fun <get-key>(): kotlin/Any // com.vynatix.holdfast/KeyedAddress.key.<get-key>|<get-key>(){}[0]
+
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/KeyedAddress.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast/KeyedAddress.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast/KeyedAddress.toString|toString(){}[0]
+}
+
 final class com.vynatix.holdfast/RestoreRejectedException : kotlin/IllegalStateException { // com.vynatix.holdfast/RestoreRejectedException|null[0]
     final val issues // com.vynatix.holdfast/RestoreRejectedException.issues|{}issues[0]
         final fun <get-issues>(): kotlin.collections/List<com.vynatix.holdfast/RestoreIssue> // com.vynatix.holdfast/RestoreRejectedException.issues.<get-issues>|<get-issues>(){}[0]
@@ -596,6 +633,7 @@ final class com.vynatix.holdfast/StoreSnapshot { // com.vynatix.holdfast/StoreSn
 
     final fun <#A1: kotlin/Any> entry(com.vynatix.holdfast/State<#A1>): com.vynatix.holdfast/SnapshotEntry<#A1> // com.vynatix.holdfast/StoreSnapshot.entry|entry(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> get(com.vynatix.holdfast/State<#A1>): #A1? // com.vynatix.holdfast/StoreSnapshot.get|get(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> keysOf(com.vynatix.holdfast/KeyedState<#A1, *>): kotlin.collections/Set<#A1> // com.vynatix.holdfast/StoreSnapshot.keysOf|keysOf(com.vynatix.holdfast.KeyedState<0:0,*>){0§<kotlin.Any>}[0]
     final fun encode(kotlin/Boolean = ...): kotlin/String // com.vynatix.holdfast/StoreSnapshot.encode|encode(kotlin.Boolean){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast/StoreSnapshot.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // com.vynatix.holdfast/StoreSnapshot.hashCode|hashCode(){}[0]
@@ -616,6 +654,8 @@ final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transacti
         final fun <get-id>(): kotlin/String // com.vynatix.holdfast/Transaction.id.<get-id>|<get-id>(){}[0]
     final val modifiedStates // com.vynatix.holdfast/Transaction.modifiedStates|{}modifiedStates[0]
         final fun <get-modifiedStates>(): kotlin.collections/Set<com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Transaction.modifiedStates.<get-modifiedStates>|<get-modifiedStates>(){}[0]
+    final val stagedEvictions // com.vynatix.holdfast/Transaction.stagedEvictions|{}stagedEvictions[0]
+        final fun <get-stagedEvictions>(): kotlin.collections/Set<com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Transaction.stagedEvictions.<get-stagedEvictions>|<get-stagedEvictions>(){}[0]
     final val status // com.vynatix.holdfast/Transaction.status|{}status[0]
         final fun <get-status>(): com.vynatix.holdfast/TransactionStatus // com.vynatix.holdfast/Transaction.status.<get-status>|<get-status>(){}[0]
 
@@ -805,6 +845,9 @@ final val com.vynatix.holdfast/tags // com.vynatix.holdfast/tags|@com.vynatix.ho
 final fun (com.vynatix.holdfast/State<*>).com.vynatix.holdfast/displayValue(kotlin/Any?): kotlin/Any? // com.vynatix.holdfast/displayValue|displayValue@com.vynatix.holdfast.State<*>(kotlin.Any?){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachments(): kotlin.collections/List<com.vynatix.holdfast/StoreAttachment> // com.vynatix.holdfast/internalAttachments|internalAttachments@com.vynatix.holdfast.Store<*>(){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalDrainPostCommitTasksWhenSettled() // com.vynatix.holdfast/internalDrainPostCommitTasksWhenSettled|internalDrainPostCommitTasksWhenSettled@com.vynatix.holdfast.Store<*>(){}[0]
+final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalKeyedAddress(com.vynatix.holdfast/State<*>): com.vynatix.holdfast/KeyedAddress? // com.vynatix.holdfast/internalKeyedAddress|internalKeyedAddress@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.State<*>){}[0]
+final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalKeyedFamily(kotlin/String): com.vynatix.holdfast/KeyedState<*, *>? // com.vynatix.holdfast/internalKeyedFamily|internalKeyedFamily@com.vynatix.holdfast.Store<*>(kotlin.String){}[0]
+final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalObserveKeyedMembership(com.vynatix.holdfast/KeyedMembershipListener): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/internalObserveKeyedMembership|internalObserveKeyedMembership@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.KeyedMembershipListener){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalRefuseInitializerWrite(kotlin/String) // com.vynatix.holdfast/internalRefuseInitializerWrite|internalRefuseInitializerWrite@com.vynatix.holdfast.Store<*>(kotlin.String){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/taggedStates(com.vynatix.holdfast/StateTag): kotlin.collections/List<com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/taggedStates|taggedStates@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StateTag){}[0]
 final fun (com.vynatix.holdfast/Transaction).com.vynatix.holdfast/fanOutApplied(kotlin/Function1<kotlin.collections/List<kotlin/Pair<com.vynatix.holdfast/MutableState<*>, kotlin/Any>>, kotlin/Unit>, kotlin/Function1<kotlin.collections/List<kotlin/Pair<kotlinx.coroutines.flow/MutableSharedFlow<*>, kotlin/Any>>, kotlin/Unit>?) // com.vynatix.holdfast/fanOutApplied|fanOutApplied@com.vynatix.holdfast.Transaction(kotlin.Function1<kotlin.collections.List<kotlin.Pair<com.vynatix.holdfast.MutableState<*>,kotlin.Any>>,kotlin.Unit>;kotlin.Function1<kotlin.collections.List<kotlin.Pair<kotlinx.coroutines.flow.MutableSharedFlow<*>,kotlin.Any>>,kotlin.Unit>?){}[0]
@@ -819,6 +862,7 @@ final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapsho
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapshot(com.vynatix.holdfast/SnapshotScope): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(com.vynatix.holdfast.SnapshotScope){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/StoreAttachment> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachIfAbsent(com.vynatix.holdfast/StoreAttachmentKey<#A>, kotlin/Function0<#A>): #A // com.vynatix.holdfast/internalAttachIfAbsent|internalAttachIfAbsent@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StoreAttachmentKey<0:0>;kotlin.Function0<0:0>){0§<com.vynatix.holdfast.StoreAttachment>}[0]
 final fun <#A: com.vynatix.holdfast/StoreAttachment> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachment(com.vynatix.holdfast/StoreAttachmentKey<#A>): #A? // com.vynatix.holdfast/internalAttachment|internalAttachment@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StoreAttachmentKey<0:0>){0§<com.vynatix.holdfast.StoreAttachment>}[0]
+final fun <#A: kotlin/Any, #B: kotlin/Any> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/keyedState(com.vynatix.holdfast/Transformer<#B>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/StateCodec<#B>? = ..., com.vynatix.holdfast/StateCodec<#A>? = ..., kotlin.collections/Set<com.vynatix.holdfast/StateTag> = ..., kotlin/Function1<#A, #B>): com.vynatix.holdfast/KeyedStateProvider<#A, #B> // com.vynatix.holdfast/keyedState|keyedState@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.Transformer<0:1>?;kotlin.Boolean;com.vynatix.holdfast.StateCodec<0:1>?;com.vynatix.holdfast.StateCodec<0:0>?;kotlin.collections.Set<com.vynatix.holdfast.StateTag>;kotlin.Function1<0:0,0:1>){0§<kotlin.Any>;1§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/observableBacking(): com.vynatix.holdfast/MutableState<#A>? // com.vynatix.holdfast/observableBacking|observableBacking@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/Transformer<#A>).com.vynatix.holdfast/then(com.vynatix.holdfast/Transformer<#A>): com.vynatix.holdfast/Transformer<#A> // com.vynatix.holdfast/then|then@com.vynatix.holdfast.Transformer<0:0>(com.vynatix.holdfast.Transformer<0:0>){0§<kotlin.Any>}[0]

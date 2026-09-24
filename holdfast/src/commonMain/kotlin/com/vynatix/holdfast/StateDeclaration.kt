@@ -36,6 +36,16 @@ internal enum class StateKind {
      * only its recompute writes it; every store write entrypoint refuses it.
      */
     ReadOnlyDerived,
+
+    /**
+     * One entry of a keyed state family (`keyedState`): created by the
+     * family's first `get` of its key, from the family's retained initializer,
+     * and kept in the family's own registry (KeyedRegistry.kt), never in the
+     * store's declarations — so `properties`, `stateNames` and the declared
+     * states' passes never list it. Its [StateDeclaration.keyed] names its
+     * family and key.
+     */
+    Keyed,
 }
 
 /**
@@ -47,7 +57,9 @@ internal enum class StateKind {
  * registry. The exception is a [StateKind.ReadOnlyDerived] declaration, which
  * only names and tags a `DerivedState`'s backing state: `createDerivedState`
  * sets it on a MutableState it builds by hand, it is never in the registry,
- * and its [materialized] stays `null`.
+ * and its [materialized] stays `null`. A [StateKind.Keyed] declaration is not
+ * in the registry either: its family holds it while the entry is live, and
+ * drops it when the entry is evicted (KeyedRegistry.kt).
  *
  * [latch] and [latchOwner] belong to the store's [InitializerGraph]: the
  * latch is held by the one thread running [initializer], and [latchOwner]
@@ -81,9 +93,12 @@ internal class StateDeclaration<T : Any>(
      * The state's [StateTag]s ([State.tags]): as declared, already validated
      * ([validateTags]); for a [StateKind.DerivedBacking] or
      * [StateKind.ReadOnlyDerived] state, the taint of its [sources]
-     * ([derivedTags]); empty for an internal state.
+     * ([derivedTags]); empty for an internal state; the family's tags for a
+     * [StateKind.Keyed] entry.
      */
     val tags: Set<StateTag> = emptySet(),
+    /** The family and key of a [StateKind.Keyed] entry; `null` for every other kind. */
+    val keyed: KeyedEntry? = null,
 ) {
     /** The live state, or `null` until materialized (and again after `removeState`/`clearStates`/`dispose`). */
     @kotlin.concurrent.Volatile
@@ -218,6 +233,14 @@ internal fun StateDeclaration<*>.describeSite(): String =
         else -> "a delegated property"
     }
 
+/**
+ * Whether a state of this kind holds a value store code writes, and a reset
+ * or restore stages: a declared state or a keyed entry — not a derived
+ * backing, an internal state or a derived state's backing.
+ */
+internal val StateKind.isWritable: Boolean
+    get() = this == StateKind.Declared || this == StateKind.Keyed
+
 /** A [StateKind] in words, for failure messages. */
 internal fun StateKind.describe(): String =
     when (this) {
@@ -225,4 +248,5 @@ internal fun StateKind.describe(): String =
         StateKind.DerivedBacking -> "derived backing state"
         StateKind.Internal -> "internal state"
         StateKind.ReadOnlyDerived -> "derived state (derivedState or merged)"
+        StateKind.Keyed -> "keyed state entry"
     }

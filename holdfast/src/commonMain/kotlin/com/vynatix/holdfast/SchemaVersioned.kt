@@ -69,9 +69,9 @@ interface SchemaVersioned {
      * it holds no lock of this store (called inside an action or an
      * `atomic(...)` frame, it runs under the locks those hold). It may read
      * states, and sees committed values, but may not write any store:
-     * `mutate`/`update`, `action`, `atomic`, `restore`, `reset()` and `emit`
-     * (and `:holdfast-coroutines`' `suspendAction`/`suspendAtomic`) throw
-     * [IllegalStateException] in it.
+     * `mutate`/`update`, `action`, `atomic`, `restore`, `reset()`, `emit` and
+     * `KeyedState.evict`/`evictAll` (and `:holdfast-coroutines`'
+     * `suspendAction`/`suspendAtomic`) throw [IllegalStateException] in it.
      *
      * A throwing `migrate` fails the restore with a
      * [SnapshotMigrationException] that names the store, both versions and

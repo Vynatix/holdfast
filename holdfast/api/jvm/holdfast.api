@@ -49,7 +49,12 @@ public final class com/vynatix/holdfast/EncodedSnapshotView {
 }
 
 public final class com/vynatix/holdfast/EncodedSnapshotView$Families {
+	public final fun contains (Ljava/lang/String;)Z
+	public final fun get (Ljava/lang/String;)Ljava/util/Map;
 	public final fun getNames ()Ljava/util/Set;
+	public final fun put (Ljava/lang/String;Ljava/util/Map;)V
+	public final fun remove (Ljava/lang/String;)Z
+	public final fun rename (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -173,6 +178,53 @@ public final class com/vynatix/holdfast/FramePolicy$Companion {
 }
 
 public abstract interface class com/vynatix/holdfast/Initializer : kotlin/jvm/functions/Function0 {
+}
+
+public final class com/vynatix/holdfast/KeyedAddress {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFamily ()Ljava/lang/String;
+	public final fun getKey ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/vynatix/holdfast/KeyedMembershipListener {
+	public fun onEntryAdded (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+	public fun onEntryEvicted (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+}
+
+public final class com/vynatix/holdfast/KeyedMembershipListener$DefaultImpls {
+	public static fun onEntryAdded (Lcom/vynatix/holdfast/KeyedMembershipListener;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+	public static fun onEntryEvicted (Lcom/vynatix/holdfast/KeyedMembershipListener;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/State;)V
+}
+
+public final class com/vynatix/holdfast/KeyedRegistryKt {
+	public static final fun internalKeyedAddress (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/KeyedAddress;
+	public static final fun internalKeyedFamily (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)Lcom/vynatix/holdfast/KeyedState;
+	public static final fun internalObserveKeyedMembership (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/KeyedMembershipListener;)Lcom/vynatix/holdfast/Disposable;
+}
+
+public abstract interface class com/vynatix/holdfast/KeyedState {
+	public abstract fun contains (Ljava/lang/Object;)Z
+	public abstract fun evict (Ljava/lang/Object;)V
+	public abstract fun evictAll ()V
+	public abstract fun get (Ljava/lang/Object;)Lcom/vynatix/holdfast/State;
+	public abstract fun getEntries ()Ljava/util/Map;
+	public abstract fun getOrNull (Ljava/lang/Object;)Lcom/vynatix/holdfast/State;
+	public fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
+}
+
+public final class com/vynatix/holdfast/KeyedState$DefaultImpls {
+	public static fun getValue (Lcom/vynatix/holdfast/KeyedState;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
+}
+
+public final class com/vynatix/holdfast/KeyedStateKt {
+	public static final fun keyedState (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/KeyedStateProvider;
+	public static synthetic fun keyedState$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/KeyedStateProvider;
+}
+
+public final class com/vynatix/holdfast/KeyedStateProvider {
+	public final fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/KeyedState;
 }
 
 public class com/vynatix/holdfast/Middleware {
@@ -557,6 +609,7 @@ public final class com/vynatix/holdfast/StoreSnapshot {
 	public final fun getStateNames ()Ljava/util/Set;
 	public final fun getUnencodableStateNames ()Ljava/util/Set;
 	public fun hashCode ()I
+	public final fun keysOf (Lcom/vynatix/holdfast/KeyedState;)Ljava/util/Set;
 	public final fun render ()Ljava/lang/String;
 	public fun toString ()Ljava/lang/String;
 }
@@ -574,6 +627,7 @@ public final class com/vynatix/holdfast/Transaction {
 	public final fun getFrameId ()Ljava/lang/String;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getModifiedStates ()Ljava/util/Set;
+	public final fun getStagedEvictions ()Ljava/util/Set;
 	public final fun getStatus ()Lcom/vynatix/holdfast/TransactionStatus;
 	public final fun rollback ()V
 	public final fun stagePendingEvent (Lkotlinx/coroutines/flow/MutableSharedFlow;Ljava/lang/Object;)V

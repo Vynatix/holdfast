@@ -152,11 +152,3 @@ internal fun SnapshotJsonReader.skipValue() {
         else -> skipScalar()
     }
 }
-
-/** Consume the next value and return its text exactly as written. */
-internal fun SnapshotJsonReader.captureValue(): String {
-    peek()
-    val start = position
-    skipValue()
-    return text.substring(start, position)
-}

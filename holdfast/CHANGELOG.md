@@ -184,6 +184,17 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **BREAKING (behavior, experimental API): encoded keyed state families are
+  written back, and read strictly.**
+  The family objects under `states` that PR 6 reserved — read, kept for
+  reading, never written — are now keyed state families, strictly
+  `{"encodedKey": text | null}`: a decoded snapshot's `encode()` writes them
+  back, and a family object holding anything but text or `null` per entry
+  fails `StoreSnapshot.decode` with a `SnapshotFormatException`. A decoded
+  state's text under the name of a family the store declares is reported as
+  `RestoreIssue.Undecodable` (not a family), like a family under a state's
+  name.
+
 - **BREAKING (commit fanout order).** Observers for every state in a
   transaction now run before any bridge publishes, where fanout previously
   interleaved per state. This is what the documented
@@ -482,6 +493,130 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   exactly as before.
 
 ### Added
+
+- **Keyed state families** (experimental, issue #20, R7; plan PR 12):
+  `val docs by keyedState<K, T>(transformer, distinct, codec, keyCodec, tags) { key -> … }`
+  declares, on its store and under the property's name, a family of
+  ordinary states, one per key. `KeyedStateProvider.provideDelegate`
+  declares it when the store is constructed, running no initializer;
+  families and states share the store's names (a second declaration of a
+  name fails, unless the same declaration runs again), and the refused tag
+  combinations fail the family's declaration.
+  - `KeyedState<K, T>`: `docs[key]` returns the key's entry — created the
+    first time from the family's initializer, through the same latch,
+    no-write region and cycle detection as a declared state's first read
+    (it runs once, reads committed values, may not write; a throwing one
+    creates nothing) — and the same `State` while it lives. `getOrNull`,
+    `contains` and `entries` (live entries, in creation order) never create
+    one. Creating an entry is not a write: a rollback leaves it live at its
+    initial value. Entries are kept by the family, outside the declared
+    states: `properties`, `getState`, `removeState` and `clearStates` never
+    see one.
+  - `evict(key)`/`evictAll()` are transactional: staged like `mutate` into
+    the store's transaction on this thread (else a one-shot action),
+    dropping its pending write to the entry; the transaction reads its own
+    staged evictions, and the last operation on an entry wins (a later
+    `docs[key]` or write cancels the eviction; inside a
+    `suspendAction`/`suspendAtomic` body only a write does, since a `get`
+    there could come from another coroutine on the body's thread, and a
+    `get` from an `atomic` frame body that does not enroll the store leaves
+    the enclosing action's eviction staged, as the frame's rollback could
+    not undo the cancel), also across savepoint merges. The commit applies the evictions in its apply pass, inside the
+    same write bracket as its writes, so a consistent cut never sees one
+    without the other; the fanout then shuts each evicted entry down —
+    observers dropped silently, bridge detached, the inbound subscriptions
+    its `observeFrom` calls made disposed — before any observer runs.
+    Rollback discards them. An evicted entry's `State` is a stale handle:
+    reads keep its last value, `mutate`/`update`/`bridge`/`observeFrom`
+    throw `IllegalStateException` (so does setting `MutableState.bridge`
+    on one directly, checked under the bridge lock so an attach racing the
+    eviction never leaks a subscription), and an inbound bridge value is
+    dropped.
+    Every other entry keeps its observers and bridges. An eviction from the
+    store's own commit fanout is deferred through the post-commit queue —
+    the one write that defers instead of failing (D16): once the commit has
+    released the store, the entries live at the call (not evicted
+    meanwhile, never one created after it) are evicted by a transaction of
+    their own, id `Evict`, that never waits for the store. It runs through
+    the never-blocking `tryTopLevelAction` and is handed to the store's
+    holder when the store is busy, so a suspending call's drain never spins
+    waiting for the coroutine it just handed the store's mutex to. Another thread's
+    eviction while a `suspendAction`/`suspendAtomic` holds the store joins
+    its transaction before it applies and is refused after (the known
+    foreign-thread staging gap, pinned by a test).
+  - `Transaction.stagedEvictions`: the entries a transaction evicts, next to
+    and disjoint from `modifiedStates` (owner thread only).
+  - Snapshots: `snapshot()` captures every live entry of every family its
+    scope captures (`UserAuthored`: the `UserAuthored` families), under the
+    family's name, which `stateNames` lists; captured equality compares the
+    families' keys and raw values. A capture reads entries in its one
+    consistent cut and lists them again when, between its listing and its
+    cut, an entry of a family it captures came to life while a commit (or
+    an inbound bridge write) of a captured store applied, so it never shows
+    a write without an entry created before it; after a few such retries it holds entry creation back
+    on the captured stores for its listing and cut (which run no user code),
+    so it always completes. It never blocks a writer.
+    `StoreSnapshot.keysOf(family)` lists a snapshot's keys, and
+    `snapshot[docs[key]]`/`entry(...)` reads one entry (a capture answers
+    its own store's families; decoded text, any store's, by family name and
+    the key its `keyCodec` encodes). `encode()` writes a family with a
+    `codec` and a `keyCodec` as `{"encodedKey": text | null}` under its name
+    in `states`, sorted by encoded key; a family without both is listed in
+    `skipped` and `unencodableStateNames`; two keys encoding to one text fail
+    the encode. `restore` creates the entries a snapshot holds that are not
+    live (before its action opens, as it materializes declared targets) and
+    stages their values raw, the policy applying to each entry (an issue
+    names the family, never the key); it never evicts. A `Secret` family's
+    values are withheld as a Secret state's are — `null` on the wire,
+    `Redacted` outside `SnapshotScope.Raw`, `<redacted>` in `render()` — but
+    its keys are written and rendered; a `Remote` family is left out of `encode()` unless
+    `includeRemote`, and a sterile restore drops its entries and resets its
+    live ones.
+  - `reset()` (and a sterile restore, for `Remote` families) re-runs the
+    initializer of every live entry, reading reset values like a declared
+    state's, stages the result raw where it differs, and never evicts
+    (`ResetPass.addLiveKeyedEntries`); an entry its transaction evicts is
+    left to the eviction, and read at its committed value. An entry an
+    initializer creates during the pass is reset too (its initializer runs
+    twice), as is, in a sterile restore, a non-`Remote` entry the restore
+    brought to life, so the store holds what a fresh store's first reads
+    would.
+  - An evicted entry's shutdown runs every step even when one throws: its
+    bridge is detached and every `observeFrom` subscription disposed, and
+    the failures are reported through `uncaughtObserverHandler` once every
+    evicted entry is shut down.
+  - `EncodedSnapshotView.Families` is editable in `SchemaVersioned.migrate`:
+    `get(name)` (a copy of the family's encoded entries), `put`, `remove`,
+    `rename` and `contains`, beside the existing `names`.
+  - Names, never keys: an entry prints as `MutableState(Store.docs[*])`,
+    no library message names a key, and `ProfilingMiddleware` counts writes
+    to any entry under `docs[*]`. `State.tags` of an entry is its family's,
+    and `taggedStates` lists the live entries of families carrying the tag.
+  - `@StoreInternalApi` for issue #21: `Store.internalKeyedAddress(state)`
+    (`KeyedAddress(family, key)` of an entry, `null` for any other state;
+    answers after eviction and dispose) and
+    `Store.internalObserveKeyedMembership(KeyedMembershipListener)` (told of
+    every entry created, and evicted — at the start of the evicting
+    commit's fanout; one entry's two callbacks are serialized, added always
+    first and never after its eviction, but different entries of one key
+    are not ordered, so a listener tracks entries by identity), and
+    `Store.internalKeyedFamily(name)`.
+  - `:holdfast-testing`: an entry's write is an `EmissionEvent` naming the
+    entry's `State`, like any state's (find it by identity); a `Secret`
+    family's entries record `Redacted`, and nothing the harness prints
+    names a key. `shouldMatchSnapshotOf` compares keyed state families entry
+    by entry (key sets, then each entry's value; failure lines never name a
+    key, nor a Secret family's value) and fails on a name that is neither a
+    state nor a family of both stores, instead of passing it unchecked. A
+    bridge attached to an entry is not wrapped, so its publishes and inbound
+    values are not recorded.
+  - Tests: `KeyedStateTest`, `KeyedStateEvictionTest`,
+    `KeyedStateSnapshotTest`, `KeyedStateResetHookTest`,
+    `KeyedStateFrameTest`, `KeyedStateConcurrencyTest` (JVM),
+    `KeyedEvictSuspendGapTest` and `KeyedDeferredEvictionTest` (JVM,
+    `:holdfast-coroutines`), `KeyedStateTimelineTest` and
+    `KeyedSnapshotMatcherTest` (`:holdfast-testing`), a family-editing
+    `migrate` test, and `DisposedEntrypointTest` rows.
 
 - **Settle scopes and frame commit hooks** (`@StoreInternalApi`, issue #20
   plan PR 11; `:holdfast-coroutines` and `:holdfast-testing` drive them, and
@@ -857,9 +992,9 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     pin that for blocking actions, `atomic`, `suspendAction` and
     `suspendAtomic`.
   - `SnapshotScope` — `All` (what `snapshot()` captures), `UserAuthored`
-    (exactly the `UserAuthored` states, running only their never-read
-    initializers, no `derived` state), `Raw` (typed reads return `Secret`
-    plaintext, in memory only). `snapshot(scope)` captures in a scope; the
+    (exactly the states and keyed state families tagged `UserAuthored`,
+    running only their never-read initializers, no `derived` state), `Raw`
+    (typed reads return `Secret` plaintext, in memory only). `snapshot(scope)` captures in a scope; the
     scope plays no part in equality.
   - `encode(includeRemote = false)` now leaves `Remote` states out (neither
     written nor listed as skipped) unless `includeRemote` is `true`; decoded

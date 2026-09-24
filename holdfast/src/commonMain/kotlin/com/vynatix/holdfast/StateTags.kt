@@ -11,7 +11,8 @@ package com.vynatix.holdfast
 
 /**
  * The tags this state carries: the ones its declaration gave it
- * (`state(tags = …) { … }`). A `derived` (or `:holdfast-coroutines`
+ * (`state(tags = …) { … }`), or, for an entry of a keyed state family, the
+ * family's (`keyedState(tags = …) { … }`). A `derived` (or `:holdfast-coroutines`
  * `suspendDerived`) state, and a [derivedState] or [merged] one, carries
  * [StateTag.Secret] when any of its sources does — only its listed sources
  * count, not what its `compute` reads — and never [StateTag.UserAuthored] or
@@ -34,7 +35,10 @@ val State<*>.tags: Set<StateTag>
  * Every state of this store that carries [tag] (see [State.tags]), in
  * declaration order: the declared states — a never-read one is materialized
  * first, its initializer running as its first read would — and, for
- * [StateTag.Secret], the `derived` states with a Secret source.
+ * [StateTag.Secret], the `derived` states with a Secret source; then every
+ * live entry of each keyed state family ([keyedState]) carrying [tag], family
+ * by family in declaration order, each family's entries in the order they
+ * were created (no entry is created for this).
  * Internal states registered by companion modules carry no tags. A
  * [DerivedState] ([derivedState], [merged]) is never listed: the store does
  * not register it.
@@ -48,9 +52,12 @@ val State<*>.tags: Set<StateTag>
 @ExperimentalStoreApi
 fun Store<*>.taggedStates(tag: StateTag): List<State<*>> {
     checkNotDisposed()
-    return declarations()
-        .filter { tag in it.tags }
-        .mapNotNull { decl -> decl.materialized ?: if (decl.kind == StateKind.Declared) materialize(decl) else null }
+    val declared =
+        declarations().filter { tag in it.tags }.mapNotNull { decl ->
+            decl.materialized ?: if (decl.kind == StateKind.Declared) materialize(decl) else null
+        }
+    val families = registry.keyed.familiesInOrder()
+    return declared + families.filter { tag in it.tags }.flatMap { it.entries.values }
 }
 
 /**

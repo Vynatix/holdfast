@@ -10,6 +10,13 @@ import kotlin.time.Clock
 /** The store every row runs against. */
 private class DisposedProbe : Store<DisposedProbe>() {
     val n by state { 0 }
+    val docs by keyedState<String, Int> { 0 }
+
+    /** A family not yet delegated, so a row can call its provideDelegate after dispose. */
+    val undeclared = keyedState<String, Int> { 0 }
+
+    /** `docs["k"]`, got before the store is disposed. */
+    var keyedEntry: State<Int>? = null
 }
 
 private object ProbeAttachment : StoreAttachment
@@ -81,6 +88,20 @@ class DisposedEntrypointTest {
             Entrypoint("internalAttachIfAbsent") { p, _ ->
                 p.internalAttachIfAbsent(probeAttachmentKey) { error("created after dispose") }
             },
+            Entrypoint("keyedState") { p, _ -> p.keyedState<String, Int> { 0 } },
+            Entrypoint("keyed family declaration (provideDelegate)") { p, _ ->
+                p.undeclared.provideDelegate(null, DisposedProbe::undeclared)
+            },
+            Entrypoint("KeyedState.get") { p, _ -> p.docs["k"] },
+            Entrypoint("KeyedState.getOrNull") { p, _ -> p.docs.getOrNull("k") },
+            Entrypoint("KeyedState.contains") { p, _ -> "k" in p.docs },
+            Entrypoint("KeyedState.entries") { p, _ -> p.docs.entries },
+            Entrypoint("KeyedState.evict") { p, _ -> p.docs.evict("k") },
+            Entrypoint("KeyedState.evictAll") { p, _ -> p.docs.evictAll() },
+            Entrypoint("internalObserveKeyedMembership") { p, _ ->
+                p.internalObserveKeyedMembership(object : KeyedMembershipListener {})
+            },
+            Entrypoint("internalKeyedFamily") { p, _ -> p.internalKeyedFamily("docs") },
         )
 
     private val exempt =
@@ -93,6 +114,11 @@ class DisposedEntrypointTest {
             Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },
             // A State extension, not a Store entrypoint: it reads the state's declaration.
             Entrypoint("State.tags") { _, s -> s.tags },
+            // Reads the state's declaration only, like State.tags.
+            Entrypoint("internalKeyedAddress (null for a declared state)") { p, s -> check(p.internalKeyedAddress(s) == null) },
+            Entrypoint("internalKeyedAddress (an entry's)") { p, _ ->
+                check(p.internalKeyedAddress(checkNotNull(p.keyedEntry)) == KeyedAddress("docs", "k"))
+            },
             Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->
                 p.internalRefuseInitializerWrite("probe")
             },
@@ -134,6 +160,7 @@ class DisposedEntrypointTest {
     private fun callOnDisposed(entry: Entrypoint) {
         val probe = DisposedProbe()
         val n = probe.n
+        probe.keyedEntry = probe.docs["k"]
         probe.dispose()
         entry.call(probe, n)
     }

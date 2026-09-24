@@ -94,6 +94,18 @@ class MutableState<T : Any>(
      */
     internal val cutReaders = atomic(0)
 
+    /**
+     * Set when this state is a keyed entry (`keyedState`) whose eviction has
+     * committed, and never cleared: the family no longer holds it, so it is a
+     * stale handle. Assigned inside the evicting commit's write bracket, so a
+     * consistent cut sees an entry evicted exactly when it sees the rest of
+     * that commit (KeyedCommit.kt). A retired state keeps its last value
+     * for reads, refuses every write entrypoint, and ignores inbound bridge
+     * values; its observers and bridge are shut down.
+     */
+    @kotlin.concurrent.Volatile
+    internal var retired: Boolean = false
+
     @kotlin.concurrent.Volatile
     private var currentBridge: Bridge<T>? = null
 
@@ -126,14 +138,15 @@ class MutableState<T : Any>(
      * `derivedState`/`merged` recompute, which commits what it computes at once.
      *
      * The exception is an initializer `reset()` re-runs: it reads this state at
-     * its reset value when it is one of the declared states that reset is
-     * resetting, running this state's own initializer first if its reset is
-     * still pending (see [ResetPass]). That runs user code, so it happens before
-     * [stateLock] is taken. An initializer a sterile `restore()` re-runs — a
-     * Remote state's, or one the restore brought to life — reads the states
-     * that restore re-runs that way, and this store's other declared states at
-     * the values the restore's transaction holds for them (restored, else an
-     * enclosing action's pending writes).
+     * its reset value when it is one of the declared states (or keyed
+     * entries) that reset is resetting, running this state's own initializer
+     * first if its reset is still pending (see [ResetPass]). That runs user
+     * code, so it happens before [stateLock] is taken. An initializer a
+     * sterile `restore()` re-runs — a Remote state's, or one the restore
+     * brought to life — reads the states that restore re-runs that way, and
+     * this store's other declared states (and entries) at the values the
+     * restore's transaction holds for them (restored, else an enclosing
+     * action's pending writes).
      *
      * The compute of a `derivedState`/`merged` reads its sources from one
      * committed cut taken just before it runs ([ComputeReads]), where this
@@ -275,9 +288,17 @@ class MutableState<T : Any>(
      * NOT call `currentBridge?.publish` — preventing a publish loop with the source
      * that originated this update. Bridges bypass the transactional path entirely;
      * they are an external sync mechanism.
+     *
+     * A value arriving for a [retired] keyed entry is dropped: the family no
+     * longer holds the entry, so nothing could read it back through it.
      */
     internal fun applyFromBridge(rawValue: T) {
+        if (retired) return
         val processed = beforeSet(rawValue)
+        // Before the bracket opens, as a commit counts itself (FrameCommit.kt):
+        // a capture that listed keyed entries learns that a write its cut may
+        // include landed since (KeyedRegistry.commitsApplied).
+        owningStore.registry.keyed.commitApplying()
         writesBegun.incrementAndGet()
         try {
             stateLock.withLock {
@@ -378,11 +399,21 @@ class MutableState<T : Any>(
      *
      * Setting to null detaches: the previous bridge's inbound observer is disposed
      * and no further commits are published.
+     *
+     * Setting it on an evicted keyed entry (a stale handle) throws
+     * [IllegalStateException], as `Store.bridge` does, and attaches nothing.
      */
     var bridge: Bridge<T>?
         get() = bridgeLock.withLock { currentBridge }
         set(value) =
             bridgeLock.withLock {
+                // A keyed entry retired by an eviction racing this call: its
+                // fanout's shutdownSilently may already have run, so nothing
+                // would ever detach a bridge attached now. The eviction retires
+                // the entry before that shutdown takes this lock, so either
+                // this sees it retired, or the shutdown detaches what this
+                // attaches.
+                refuseUnwritable(this)
                 // Dispose the previous inbound observer registration so the previous
                 // bridge does not keep driving applyFromBridge after replacement/null.
                 currentBridgeSubscription?.dispose()
@@ -397,15 +428,30 @@ class MutableState<T : Any>(
     /**
      * Internal entrypoint used by `Store.removeState`/`clearStates` to release
      * resources without firing any observer notifications. Drops the observer set
-     * and detaches any attached bridge (disposing its inbound subscription).
+     * and detaches any attached bridge (disposing its inbound subscription). A
+     * keyed entry (evicted, or its store disposed) also disposes the inbound
+     * subscriptions its `observeFrom` calls made ([KeyedEntry.closeInbound]).
+     *
+     * Every step runs even when an earlier one throws (a bridge subscription's
+     * `dispose`, say): the bridge is detached before its subscription is
+     * disposed. The first failure is rethrown afterwards, the others
+     * suppressed.
      */
     internal fun shutdownSilently() {
         observersLock.withLock { observers.clear() }
-        bridgeLock.withLock {
-            currentBridgeSubscription?.dispose()
-            currentBridgeSubscription = null
-            currentBridge = null
-        }
+        val bridgeFailure =
+            runCatching {
+                bridgeLock.withLock {
+                    val subscription = currentBridgeSubscription
+                    currentBridgeSubscription = null
+                    currentBridge = null
+                    subscription?.dispose()
+                }
+            }.exceptionOrNull()
+        val inboundFailure = runCatching { declaration?.keyed?.closeInbound() }.exceptionOrNull()
+        val first = bridgeFailure ?: inboundFailure ?: return
+        if (inboundFailure != null && inboundFailure !== first) first.addSuppressed(inboundFailure)
+        throw first
     }
 }
 

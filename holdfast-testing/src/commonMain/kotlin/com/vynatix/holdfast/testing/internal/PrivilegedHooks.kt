@@ -3,12 +3,14 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.KeyedState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
+import com.vynatix.holdfast.internalKeyedFamily
 import com.vynatix.holdfast.internalSettling
 import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
@@ -21,7 +23,7 @@ import kotlin.time.Clock
  * for these helpers rather than opt in directly — that way new dependencies on
  * store internals are visible at PR time.
  *
- * Four clusters of hooks live here:
+ * Five clusters of hooks live here:
  *  - **Recorder reads** — [snapshotCommittedStateValues] and [modifiedStates]
  *    let the timeline recorder observe committed values from inside a
  *    middleware hook without re-entering the read-your-own-writes overlay.
@@ -33,6 +35,8 @@ import kotlin.time.Clock
  *    checks [isSecret] first and withholds it (a failure message without the
  *    values, or a refused value matcher), so a `StateTag.Secret` value never
  *    reaches a timeline or an assertion message.
+ *  - **Keyed state families** — [keyedFamily] finds a family by name, for
+ *    the snapshot matcher to compare it entry by entry.
  *  - **Clock binding** — [boundClock] and [restoreBoundClock] let a handle
  *    remember a store's raw clock binding at track time and put it back at
  *    teardown.
@@ -106,6 +110,17 @@ internal object PrivilegedHooks {
     /** Whether [state] is tagged `StateTag.Secret` (a `derived` of one included). */
     @OptIn(ExperimentalStoreApi::class)
     fun isSecret(state: State<*>): Boolean = StateTag.Secret in state.tags
+
+    /**
+     * The keyed state family [store] declares under [name], or `null` (a
+     * state of that name included): how the snapshot matcher reaches a
+     * family, which `Store.getState` never returns.
+     */
+    @OptIn(ExperimentalStoreApi::class)
+    fun keyedFamily(
+        store: Store<*>,
+        name: String,
+    ): KeyedState<*, *>? = store.internalKeyedFamily(name)
 
     /**
      * What the harness may record or print of [value], a value of [state]:

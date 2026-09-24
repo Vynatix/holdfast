@@ -9,9 +9,12 @@ package com.vynatix.holdfast
  * user code — initializers run outside it (see Materialization.kt).
  */
 internal class StateRegistry(
-    private val store: Store<*>,
+    val store: Store<*>,
 ) {
     val lock = StoreLock()
+
+    /** The store's keyed state families, guarded by [lock] too: they share the declared states' names. */
+    val keyed = KeyedRegistry(this)
 
     /** Materialized states by name: what `Store.properties` copies. Guarded by [lock]. */
     val states = mutableMapOf<String, MutableState<*>>()
@@ -32,6 +35,8 @@ internal class StateRegistry(
      * state of its base class, two different properties with one name, or a
      * local property named like a member would otherwise silently share one
      * state and one initializer.
+     * A name a keyed state family ([KeyedRegistry]) holds fails too: states
+     * and families share the store's names.
      *
      * Local delegated properties are matched by name alone: Kotlin/Native
      * does not promise one property-reference instance per local declaration
@@ -42,6 +47,8 @@ internal class StateRegistry(
         lock.withLock {
             val existing = declarations[candidate.name]
             when {
+                keyed.family(candidate.name) != null ->
+                    throw IllegalStateException(keyed.clashMessage(candidate.name, "a keyed state family"))
                 existing == null -> candidate.also { declarations[it.name] = it }
                 repeats(existing, candidate) -> {
                     @Suppress("UNCHECKED_CAST")
@@ -73,6 +80,9 @@ internal class StateRegistry(
         decl: StateDeclaration<T>,
         state: MutableState<T>,
     ) {
+        // A keyed entry lives in its family, not among the declarations.
+        @Suppress("UNCHECKED_CAST")
+        (decl.keyed?.family as KeyedFamily<*, T>?)?.let { return it.publish(decl, state) }
         lock.withLock {
             check(!store.isDisposed) { "store disposed" }
             check(declarations[decl.name] === decl) {
@@ -103,6 +113,7 @@ internal class StateRegistry(
         sources: List<State<*>>,
     ): MutableState<T> =
         lock.withLock {
+            check(keyed.family(name) == null) { keyed.clashMessage(name, "a keyed state family") }
             val existing = declarations[name]
             if (existing != null) {
                 check(kind == StateKind.Internal && existing.kind == StateKind.Internal) {
@@ -160,12 +171,12 @@ internal class StateRegistry(
 
     /**
      * Drop every state and every declaration — the store is being disposed —
-     * and return the states that were live, for the caller to shut down
-     * outside [lock].
+     * and every keyed state family with its entries, and return the states
+     * that were live, for the caller to shut down outside [lock].
      */
     fun releaseAll(): List<MutableState<*>> =
         lock.withLock {
-            val live = states.values.toList()
+            val live = states.values.toList() + keyed.releaseAllLocked()
             states.clear()
             declarations.values.forEach { it.materialized = null }
             declarations.clear()

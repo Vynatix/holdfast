@@ -28,13 +28,16 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * What a transaction's apply pass left for its fanout: the writes that
  * changed a state ([committed], in pending-write order — deduped `distinct`
- * states are left out), the events to drain ([events]), and the store they
- * belong to, for failure messages ([storeLabel]).
+ * states are left out), the events to drain ([events]), the store they
+ * belong to, for failure messages ([storeLabel]), and the keyed entries the
+ * pass evicted ([evicted]), whose observers, bridges and inbound
+ * subscriptions the fanout shuts down before anything else (KeyedCommit.kt).
  */
 internal class AppliedWrites(
     val committed: List<Pair<MutableState<*>, Any>>,
     val events: List<Pair<MutableSharedFlow<*>, Any>>,
     val storeLabel: String?,
+    val evicted: List<MutableState<*>> = emptyList(),
 )
 
 /** Which pass of a commit was running when it threw. */
@@ -125,8 +128,18 @@ private fun applyBracketed(
     roots: List<Transaction>,
     applied: MutableList<Transaction>?,
 ): Throwable? {
-    // A stable copy: opening and closing must cover exactly the same states.
-    val states = if (roots.size == 1) roots[0].pendingWrites.keys.toList() else roots.flatMap { it.pendingWrites.keys }
+    // A stable copy: opening and closing must cover exactly the same states,
+    // the keyed entries each root evicts included (see bracketedStates).
+    val states = if (roots.size == 1) roots[0].bracketedStates() else roots.flatMap { it.bracketedStates() }
+    // Before any bracket opens: a capture that listed keyed entries learns
+    // that a commit applied since (KeyedRegistry.commitsApplied).
+    val stores =
+        if (roots.size == 1) {
+            listOfNotNull(states.firstOrNull()?.owningStore)
+        } else {
+            states.mapTo(LinkedHashSet()) { it.owningStore }
+        }
+    for (store in stores) store.registry.keyed.commitApplying()
     openWriteBracket(states)
     try {
         for (root in roots) {
@@ -160,6 +173,11 @@ private fun <R> List<Transaction>.withPendingLocks(
  * reading a sibling state sees the committed value directly. The events are
  * drained after the pending lock is released: `tryEmit` may invoke ready
  * collectors synchronously, and no internal lock is ever held across user code.
+ *
+ * Once every write is assigned, the keyed entries this transaction evicts
+ * are retired and dropped from their families ([retireEvictions]) — inside
+ * the same write bracket, so a consistent cut sees the evictions exactly
+ * when it sees the writes. Their shutdown is left to the fanout.
  */
 private fun Transaction.applyWrites(): Throwable? {
     val storeLabel = pendingWrites.keys.firstOrNull()?.describeOwner()
@@ -175,7 +193,7 @@ private fun Transaction.applyWrites(): Throwable? {
         recordEndTime()
         return failCommit(CommitPhase.APPLY, failure, storeLabel, committed)
     }
-    applyResult = AppliedWrites(committed, pendingEvents.toList(), storeLabel)
+    applyResult = AppliedWrites(committed, pendingEvents.toList(), storeLabel, retireEvictions())
     applied = true
     buffersClosed = true
     pendingWrites.clear()
@@ -188,8 +206,9 @@ private fun Transaction.applyWrites(): Throwable? {
  * parent's, under both pending locks (child before parent, the only nesting
  * order), since a foreign write may be staging there. Last write wins on a
  * state both hold, and the parent fires this savepoint's events after its own,
- * preserving stage order across the whole tree. Returns `null`, or the failure
- * after marking it Failed.
+ * preserving stage order across the whole tree. Its keyed-entry evictions
+ * merge the same way, last operation winning ([mergeEvictionsInto]). Returns
+ * `null`, or the failure after marking it Failed.
  */
 private fun Transaction.mergeIntoParent(): Throwable? {
     var storeLabel: String? = null
@@ -201,6 +220,7 @@ private fun Transaction.mergeIntoParent(): Throwable? {
                 parentTxn.pendingLock.withLock {
                     parentTxn.pendingWrites.putAll(pendingWrites)
                     parentTxn.pendingEvents.addAll(pendingEvents)
+                    mergeEvictionsInto(parentTxn)
                 }
                 buffersClosed = true
                 pendingWrites.clear()
@@ -213,9 +233,12 @@ private fun Transaction.mergeIntoParent(): Throwable? {
 }
 
 /**
- * The fanout pass of this applied top-level transaction: [fanout] with every
- * write that changed a state (observers, then bridge publishes), then the
- * staged events — through [drainEvents] when given, else `tryEmit` — then
+ * The fanout pass of this applied top-level transaction: first the keyed
+ * entries it evicted are shut down — their observers dropped, bridges
+ * detached and `observeFrom` subscriptions disposed, silently — and their
+ * families' membership listeners told ([shutDownEvicted]); then [fanout] with
+ * every write that changed a state (observers, then bridge publishes), then
+ * the staged events — through [drainEvents] when given, else `tryEmit` — then
  * Committed. A no-op for a transaction with no apply result: a savepoint, one
  * not applied, or one already fanned out.
  *
@@ -236,6 +259,7 @@ fun Transaction.fanOutApplied(
     fanoutThreadId = currentThreadId()
     val failure =
         runCatching {
+            if (writes.evicted.isNotEmpty()) shutDownEvicted(writes.evicted)
             if (writes.committed.isNotEmpty()) fanout(writes.committed)
             // Events drain AFTER observer fanout and AFTER bridge publishes: a
             // collector subscribed to both `state.asFlow()` and `store.events`

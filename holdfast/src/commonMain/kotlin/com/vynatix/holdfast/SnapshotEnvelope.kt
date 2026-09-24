@@ -6,13 +6,17 @@ package com.vynatix.holdfast
 //
 // `states` holds each encodable state's codec text by name; `null` stands for
 // a value withheld from the encoding (the redaction marker), and an object for
-// a keyed state family — reserved: read and kept, never written yet.
-// `skipped` names the states the store declares but could not encode (they
-// have no codec). Remote states are omitted from both unless the snapshot is
-// encoded with `includeRemote`. The writer is canonical: fields in this order, states and
-// skipped names sorted, no whitespace, fixed escaping (SnapshotJsonWriter.kt),
-// so equal bodies encode to equal text. The reader accepts any member order
-// and whitespace, and skips fields it does not know.
+// a keyed state family (R7): one member per entry, `{encodedKey: text|null}`,
+// the key as the family's keyCodec encodes it and the value as its codec
+// does (`null`: withheld). `skipped` names the states — and families — the
+// store declares but could not encode (they have no codec, or a family no
+// keyCodec). Remote states and families are omitted from both unless the
+// snapshot is encoded with `includeRemote`. The writer is canonical: fields in
+// this order, states, families' entries and skipped names sorted, no
+// whitespace, fixed escaping (SnapshotJsonWriter.kt), so equal bodies encode
+// to equal text. The reader accepts any member order and whitespace, and
+// skips fields it does not know; inside a family it reads only string or
+// `null` values.
 //
 // The body is a self-contained JSON object, written and read at the current
 // position of a writer or reader, so an enclosing document (a tree of stores)
@@ -30,8 +34,8 @@ internal data class StoreBody(
     val schema: Int,
     /** Codec text by state name; `null` for a value withheld from the encoding. */
     val states: Map<String, String?>,
-    /** Keyed state families by name, as the JSON object text a newer writer wrote. Read and kept, never written. */
-    val families: Map<String, String>,
+    /** Keyed state families by name: each one's entries, encoded key → codec text, `null` for a withheld value. */
+    val families: Map<String, Map<String, String?>>,
     /** The states the store declares but could not encode. */
     val skipped: Set<String>,
 )
@@ -47,9 +51,10 @@ internal fun SnapshotJsonWriter.writeStoreBody(body: StoreBody) {
     value(body.schema)
     name("states")
     beginObject()
-    for (state in body.states.keys.sorted()) {
+    for (state in (body.states.keys + body.families.keys).sorted()) {
         name(state)
-        value(body.states.getValue(state))
+        val family = body.families[state]
+        if (family != null) writeFamily(family) else value(body.states.getValue(state))
     }
     endObject()
     name("skipped")
@@ -112,12 +117,40 @@ private fun SnapshotJsonReader.readStates(into: BodyFields) {
         val name = nextName()
         if (name in into.states || name in into.families) snapshotFormatError("duplicate state \"$name\"", at)
         if (peek() == JsonKind.Object) {
-            into.families[name] = captureValue()
+            into.families[name] = readFamily(name)
         } else {
             into.states[name] = nextStringOrNull("a state's text, null or a family object")
         }
     }
     endContainer()
+}
+
+/** Write one keyed state family's entries as a JSON object, sorted by encoded key. */
+private fun SnapshotJsonWriter.writeFamily(entries: Map<String, String?>) {
+    beginObject()
+    for (key in entries.keys.sorted()) {
+        name(key)
+        value(entries.getValue(key))
+    }
+    endObject()
+}
+
+/**
+ * Read the keyed state family [family] at the reader's position: an object of
+ * encoded keys, each holding the entry's text or `null`. A failure names the
+ * family, never a key.
+ */
+private fun SnapshotJsonReader.readFamily(family: String): Map<String, String?> {
+    val entries = LinkedHashMap<String, String?>()
+    beginObject()
+    while (hasNext()) {
+        val at = position
+        val key = nextName()
+        if (key in entries) snapshotFormatError("duplicate key in keyed state family \"$family\"", at)
+        entries[key] = nextStringOrNull("a keyed state entry's text or null")
+    }
+    endContainer()
+    return entries
 }
 
 private fun SnapshotJsonReader.readSkipped(into: BodyFields) {
@@ -139,7 +172,7 @@ private class BodyFields(
     var version: Int? = null
     var schema: Int? = null
     val states = LinkedHashMap<String, String?>()
-    val families = LinkedHashMap<String, String>()
+    val families = LinkedHashMap<String, Map<String, String?>>()
     val skipped = LinkedHashSet<String>()
 
     fun toBody(): StoreBody {

@@ -1,5 +1,6 @@
 package com.vynatix.holdfast.testing.matcher
 
+import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.snapshot
@@ -110,8 +111,10 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
 /**
  * Snapshot equality: takes [com.vynatix.holdfast.snapshot]s of both this handle's
  * store and [other], requires they cover the same state names — every state
- * each store declares, read or not (the backing states of `derived` are not
- * state names) — and asserts each named state has the same current `value`.
+ * each store declares, read or not, and every keyed state family (the
+ * backing states of `derived` are not state names) — and asserts each named
+ * state has the same current `value`, and each keyed state family the same
+ * live keys with the same `value` per key.
  *
  * Why `value` (post-`transformer.get`) instead of the raw snapshot entries:
  * raw entries are an internal-only field on [com.vynatix.holdfast.StoreSnapshot]
@@ -123,7 +126,12 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
  * rather than ciphertext, which is what tests almost always want.
  *
  * Throws [AssertionError] on a state-name set mismatch or on any value
- * mismatch; a `StateTag.Secret` state's mismatch line shows neither value.
+ * mismatch; a `StateTag.Secret` state's mismatch line shows neither value. A
+ * keyed state family's mismatch line never shows a key (a key can be data): a
+ * key-set mismatch gives the two entry counts, and a value mismatch the two
+ * values without the key — neither value for a Secret family. A name that is
+ * neither a state nor a family of both stores fails rather than passing
+ * unchecked.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
     val mySnap = store.snapshot()
@@ -140,19 +148,58 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
         throw AssertionError("Snapshot state-name mismatch — ${parts.joinToString("; ")}")
     }
 
-    val mismatches =
-        mySnap.stateNames.sorted().mapNotNull { name ->
-            val state = store.getState(name)
-            val mine = state?.value
-            val theirs = other.getState(name)?.value
-            when {
-                mine == theirs -> null
-                state != null && PrivilegedHooks.isSecret(state) -> secretMismatch(name)
-                else -> "$name: this=$mine other=$theirs"
-            }
-        }
+    val mismatches = mySnap.stateNames.sorted().mapNotNull { name -> snapshotMismatch(store, other, name) }
     if (mismatches.isNotEmpty()) {
         throw AssertionError("Snapshot mismatch:\n${mismatches.joinToString("\n")}")
+    }
+}
+
+/** [shouldMatchSnapshotOf]'s line for [name], a state or keyed state family of both stores, or `null` when equal. */
+@OptIn(ExperimentalStoreApi::class)
+private fun snapshotMismatch(
+    mine: Store<*>,
+    other: Store<*>,
+    name: String,
+): String? {
+    val state = mine.getState(name)
+    if (state != null || other.getState(name) != null) {
+        val myValue = state?.value
+        val theirValue = other.getState(name)?.value
+        return when {
+            myValue == theirValue -> null
+            state != null && PrivilegedHooks.isSecret(state) -> secretMismatch(name)
+            else -> "$name: this=$myValue other=$theirValue"
+        }
+    }
+    val myFamily = PrivilegedHooks.keyedFamily(mine, name)
+    val theirFamily = PrivilegedHooks.keyedFamily(other, name)
+    return if (myFamily != null && theirFamily != null) {
+        familyMismatch(name, LinkedHashMap(myFamily.entries), LinkedHashMap(theirFamily.entries))
+    } else {
+        "$name: cannot be compared (neither a state nor a keyed state family of both stores)"
+    }
+}
+
+/**
+ * The mismatch line for keyed state family [name], whose live entries are
+ * [mine] and [theirs], or `null` when they hold the same keys with equal
+ * values. Never names a key; a Secret family's line shows no value either.
+ */
+private fun familyMismatch(
+    name: String,
+    mine: Map<Any?, State<*>>,
+    theirs: Map<Any?, State<*>>,
+): String? {
+    val differing = mine.entries.firstOrNull { (key, entry) -> entry.value != theirs[key]?.value }
+    return when {
+        mine.keys != theirs.keys ->
+            "$name: keyed entries differ (this has ${mine.size} entries, other has ${theirs.size}; keys withheld)"
+        differing == null -> null
+        PrivilegedHooks.isSecret(differing.value) -> secretMismatch(name)
+        else -> {
+            val theirValue = theirs[differing.key]?.value
+            "$name: an entry's value differs (key withheld): this=${differing.value.value} other=$theirValue"
+        }
     }
 }
 

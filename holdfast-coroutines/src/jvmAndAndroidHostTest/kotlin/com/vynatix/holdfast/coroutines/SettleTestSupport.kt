@@ -38,7 +38,19 @@ internal fun settlesWithin(
     thrown.get()?.let { throw it }
 }
 
-/** Resume on a fresh thread: under `Dispatchers.Unconfined`, the coroutine then carries on there. */
+/**
+ * Resume on a fresh thread: under `Dispatchers.Unconfined`, the coroutine then
+ * carries on there. A resume that lands before the coroutine has suspended
+ * hands `suspendCancellableCoroutine` its result synchronously, so the
+ * coroutine carries on where it was: hop again until it has moved.
+ */
 internal suspend fun resumeOnAnotherThread() {
-    suspendCancellableCoroutine<Unit> { continuation -> thread(isDaemon = true) { continuation.resume(Unit) } }
+    val from = Thread.currentThread()
+    repeat(MAX_HOP_ATTEMPTS) {
+        suspendCancellableCoroutine<Unit> { continuation -> thread(isDaemon = true) { continuation.resume(Unit) } }
+        if (Thread.currentThread() !== from) return
+    }
+    fail("the coroutine never resumed on another thread in $MAX_HOP_ATTEMPTS hops; is it under Dispatchers.Unconfined?")
 }
+
+private const val MAX_HOP_ATTEMPTS = 100

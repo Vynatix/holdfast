@@ -49,14 +49,19 @@ package com.vynatix.holdfast
 // synced value never survives the restore. The pass reads the store's other
 // declared states at the values the action staged: a Remote initializer sees
 // the restored values, as it would in a fresh store holding them. A declared
-// state the restore itself brings to life ([RestorePlanner.cameToLife]: not
-// live when the restore began, not restored, never written since) was
-// materialized from pre-restore values — by the plan, or by a first read in
-// the pass — so the pass recomputes it from the restored values too, as a
-// fresh store's first read would.
+// state or keyed entry the restore itself brings to life
+// ([RestorePlanner.cameToLife]: not live when the restore began, not
+// restored, never written since) was materialized from pre-restore values —
+// by the plan, or by a first read (or `get`) in the pass — so the pass
+// recomputes it from the restored values too, as a fresh store's first read
+// would.
 
-/** One raw value a restore stages into [decl]'s state. [backing]: a derived backing state (same-instance undo). */
-private class PlannedWrite(
+/**
+ * One raw value a restore stages into [decl]'s state. [backing]: a derived
+ * backing state (same-instance undo). [decl] may be a keyed entry's
+ * (KeyedRestorePlanner.kt).
+ */
+internal class PlannedWrite(
     val decl: StateDeclaration<*>,
     val raw: Any,
     val backing: Boolean = false,
@@ -105,9 +110,10 @@ private class Restore<V : Store<V>, R>(
             // the plan: a declared one is materialized again (its initializer
             // then runs here, under the action's locks); a dropped derived
             // backing is skipped; a dropped internal state lost its
-            // declaration with it, so it fails the restore.
+            // declaration with it, so it fails the restore. A keyed entry
+            // evicted since is created again the same way.
             val state =
-                write.decl.materialized ?: when {
+                liveEntryState(write.decl) ?: write.decl.materialized ?: when {
                     write.backing -> continue
                     write.decl.kind == StateKind.Declared -> materialize(write.decl)
                     else -> error("${store.displayName} state '${write.decl.name}' was removed while restore() ran")
@@ -127,35 +133,59 @@ private class Restore<V : Store<V>, R>(
  * report. A [sterile] plan drops the entries of Remote states and derived
  * backings, and materializes the Remote states the action will reset.
  */
-private class RestorePlanner(
+internal class RestorePlanner(
     private val store: Store<*>,
     private val content: SnapshotContent,
     private val sterile: Boolean,
 ) {
     val writes = ArrayList<PlannedWrite>()
     private val written = HashSet<StateDeclaration<*>>()
+
+    /**
+     * The keyed entries this plan writes, by family and key: an entry evicted
+     * after the plan is created again for its key by the action, which
+     * stages the planned value into it — a new declaration, still written.
+     */
+    private val writtenEntries = HashSet<Pair<KeyedFamily<*, *>, Any>>()
     private val restored = LinkedHashSet<String>()
     private val issues = ArrayList<RestoreIssue>()
 
-    /** For a [sterile] plan: the declarations whose state was live when the restore began (see [cameToLife]). */
+    /**
+     * For a [sterile] plan: the declarations whose state was live when the
+     * restore began — declared states and keyed entries (see [cameToLife]).
+     */
     private val liveBefore: Set<StateDeclaration<*>> =
-        if (sterile) store.declarations().filterTo(HashSet()) { it.materialized != null } else emptySet()
+        if (sterile) {
+            val states = store.declarations().filterTo(HashSet()) { it.materialized != null }
+            store.registry.keyed.familiesInOrder().flatMapTo(states) { family ->
+                family.committedEntries().map { (_, entry) -> checkNotNull(entry.declaration) }
+            }
+        } else {
+            emptySet()
+        }
 
     /**
-     * Whether a sterile restore's reset recomputes [decl], a declared state it
-     * neither restores nor resets as Remote: one this restore brought to
-     * life. Its state was not live when the restore began and is live now —
-     * materialized by the plan (a target, or a state a Remote initializer
-     * read), or by a first read inside the reset — and no write has committed
-     * to it since, so it holds a first-read value computed from pre-restore
+     * Whether a sterile restore's reset recomputes [decl], a declared state
+     * or keyed entry it neither restores nor resets as Remote: one this
+     * restore brought to life. Its state was not live when the restore began
+     * and is live now (not evicted) — materialized by the plan (a target, an
+     * entry the snapshot holds, or a state a Remote initializer read), or by a
+     * first read (or `get`) inside the reset — and no write has committed to
+     * it since, so it holds a first-read value computed from pre-restore
      * values, which the reset replaces with the value a first read computes
      * after the restore. A state live before the restore keeps its value, as
      * a plain restore leaves it, and so does one a concurrent action has
      * written since it came to life. Asked inside the restore's action.
      */
     fun cameToLife(decl: StateDeclaration<*>): Boolean {
-        val state = decl.materialized.takeIf { decl.kind == StateKind.Declared && decl !in liveBefore }
-        return state != null && decl !in written && state.writesBegun.value == 0L
+        val state = decl.materialized.takeIf { decl.kind.isWritable && decl !in liveBefore } ?: return false
+        return !state.retired && !plansWriteTo(decl) && state.writesBegun.value == 0L
+    }
+
+    /** Whether this plan writes [decl]'s state — for a keyed entry, its family's entry of that key. */
+    private fun plansWriteTo(decl: StateDeclaration<*>): Boolean {
+        val entry = decl.keyed ?: return decl in written
+        return entry.family to entry.key in writtenEntries
     }
 
     /**
@@ -164,6 +194,9 @@ private class RestorePlanner(
      * so a generic store's type arguments are not compared.
      */
     private val trusted = (content as? CapturedContent)?.originClass?.isInstance(store) == true
+
+    /** The keyed state families' part of the plan (KeyedRestorePlanner.kt), adding to this plan's writes and report. */
+    private val families = KeyedRestorePlanner(store, sterile, trusted, writes, writtenEntries, restored, issues)
 
     /**
      * Check the schema version, then materialize every target and decide every
@@ -178,14 +211,13 @@ private class RestorePlanner(
             is CapturedContent -> {
                 schema.checkCaptured(content.schema)
                 content.rawValues.forEach { (name, raw) -> planCaptured(name, raw) }
+                content.families.forEach { (name, family) -> families.planCaptured(name, family) }
                 if (!sterile && content.originKey == store.lockOrderKey) planBackings(content)
             }
             is DecodedContent -> {
                 val body = schema.upcast(content.body)
                 body.states.forEach { (name, text) -> planDecoded(name, text) }
-                body.families.keys.forEach { name ->
-                    if (target(name) != null) issues += RestoreIssue.Undecodable(name, FAMILY_REASON)
-                }
+                body.families.forEach { (name, entries) -> families.planDecoded(name, entries) }
             }
         }
         // The Remote states the action resets, never-read ones included: their
@@ -203,11 +235,11 @@ private class RestorePlanner(
     /** What the restore did, once it has staged [writes] (and, [sterile], reset the Remote states). */
     fun report(): RestoreReport {
         val skipped = issues.mapTo(HashSet()) { it.stateName }
-        val declared = store.declarations().filter { it.kind != StateKind.DerivedBacking }
-        val sterilized = if (sterile) declared.filter { it.isRemote }.mapTo(LinkedHashSet()) { it.name } else emptySet()
+        val declared = store.reportedNames()
+        val sterilized = if (sterile) declared.filter { it.second }.mapTo(LinkedHashSet()) { it.first } else emptySet()
         val kept =
             declared
-                .map { it.name }
+                .map { it.first }
                 .filterTo(LinkedHashSet()) { it !in restored && it !in skipped && it !in sterilized }
         return RestoreReport(restored.toSet(), kept, issues.toList(), sterilized)
     }
@@ -255,7 +287,7 @@ private class RestorePlanner(
     private fun target(name: String): StateDeclaration<*>? {
         val decl = store.registry.declaration(name)?.takeIf { it.kind != StateKind.DerivedBacking }
         when {
-            decl == null -> issues += RestoreIssue.UnknownState(name)
+            decl == null -> issues += store.undeclaredStateIssue(name)
             sterile && decl.isRemote -> return null
             else -> materialize(decl)
         }
@@ -272,13 +304,11 @@ private class RestorePlanner(
     }
 }
 
-private const val FAMILY_REASON = "the snapshot holds a keyed state family under this name, not a single value"
-
 /** A value class without a simple name (an anonymous object), as [RestoreIssue.TypeMismatch] names it. */
 private const val ANONYMOUS = "<anonymous>"
 
 /** The type witness (see the top of this file): a [RestoreIssue.TypeMismatch], or `null` when [raw] may fit. */
-private fun typeMismatch(
+internal fun typeMismatch(
     name: String,
     raw: Any,
     current: Any,

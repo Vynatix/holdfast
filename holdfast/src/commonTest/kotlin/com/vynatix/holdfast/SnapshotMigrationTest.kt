@@ -64,6 +64,38 @@ private class ReaderV3 :
     }
 }
 
+/** Schema 1 of a notes store: its keyed family is called `notes`, and an empty note is "". */
+private class NotesV1 : Store<NotesV1>() {
+    val notes by keyedState<String, String>(codec = StringCodec, keyCodec = StringCodec) { "" }
+}
+
+/** Schema 2: the family is renamed `docs`, and an empty note is spelled "(empty)". */
+private class NotesV2 :
+    Store<NotesV2>(),
+    SchemaVersioned {
+    val title by state(codec = StringCodec) { "" }
+    val docs by keyedState<String, String>(codec = StringCodec, keyCodec = StringCodec) { "(empty)" }
+
+    val seen = mutableListOf<Any?>()
+
+    override val schemaVersion: Int get() = 2
+
+    override fun migrate(
+        from: Int,
+        view: EncodedSnapshotView,
+    ) {
+        if (from >= 2) return
+        seen.add(view.families.names)
+        seen.add(view.families.rename("notes", "docs"))
+        seen.add(view.families.rename("never", "docs"))
+        val entries = checkNotNull(view.families["docs"])
+        view.families.put("docs", entries.mapValues { (_, text) -> if (text == "") "(empty)" else text })
+        seen.add(view.families["docs"])
+        seen.add(view.families.remove("gone"))
+        seen.add("docs" in view.families)
+    }
+}
+
 /** `fontSize` renamed `textSize` without a schema version: no migrate runs. */
 private class ReaderRenamed : Store<ReaderRenamed>() {
     val theme by state(codec = StringCodec) { "light" }
@@ -340,7 +372,7 @@ class SnapshotMigrationTest {
     }
 
     @Test fun migrateSeesAnEmptyFamiliesSection() {
-        // Keyed state families (R7) fill it later; for now a snapshot holds none...
+        // A snapshot of a store that declares no keyed state family holds none...
         val seen = mutableListOf<Set<String>>()
         val store =
             ReaderWith { _, view ->
@@ -364,6 +396,38 @@ class SnapshotMigrationTest {
         assertIs<IllegalArgumentException>(failure.cause, "a misuse of the view is attached")
         assertContains(failure.cause?.message.orEmpty(), "keyed state family under that name")
         assertEquals("light", claiming.theme.value)
+    }
+
+    @Test fun migrateRenamesAndEditsAKeyedStateFamily() {
+        val v1 = NotesV1()
+        v1 action {
+            notes["a"] mutate "hello"
+            notes["b"] mutate ""
+        }
+        val v2 = NotesV2()
+
+        v2.restore(StoreSnapshot.decode(v1.snapshot().encode()), RestorePolicy.Strict).getOrThrow()
+
+        assertEquals(
+            listOf<Any?>(setOf("notes"), true, false, mapOf("a" to "hello", "b" to "(empty)"), false, true),
+            v2.seen,
+        )
+        assertEquals(mapOf("a" to "hello", "b" to "(empty)"), v2.docs.entries.mapValues { it.value.value })
+    }
+
+    @Test fun aFamilyEditUnderAStatesNameIsAMisuseOfTheView() {
+        val text = """{"format":"holdfast.store","v":1,"schema":1,"states":{"theme":"dark"},"skipped":[]}"""
+        for (edit in listOf<(EncodedSnapshotView) -> Unit>(
+            { it.families.put("theme", mapOf("k" to "v")) },
+            { it.families.rename("gone", "theme") },
+        )) {
+            val store = ReaderWith { _, view -> edit(view) }
+
+            val failure = store.restore(StoreSnapshot.decode(text), RestorePolicy.BestEffort).migrationFailure
+
+            assertIs<IllegalArgumentException>(failure.cause, "a misuse of the view is attached")
+            assertContains(failure.cause?.message.orEmpty(), "holds a state's entry under that name")
+        }
     }
 
     @Test fun theViewEditsEncodedText() {

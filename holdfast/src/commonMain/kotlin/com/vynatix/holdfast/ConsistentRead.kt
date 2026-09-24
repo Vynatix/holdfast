@@ -40,12 +40,18 @@ internal fun closeWriteBracket(states: Iterable<MutableState<*>>) {
 /**
  * The raw committed values of [states], in order, as of one instant at which
  * no write bracket was open on any of them — never part of one commit and part
- * of the one before. Lock-free; retries while a write is in flight.
+ * of the one before. Lock-free; retries while a write is in flight. [read]
+ * reads one state inside the validated window: its raw value, or — for a
+ * capture — [RetiredEntry] for a keyed entry an eviction has retired, which a
+ * commit sets inside its bracket like a value.
  */
-internal fun readConsistent(states: List<MutableState<*>>): List<Any> {
+internal fun readConsistent(
+    states: List<MutableState<*>>,
+    read: (MutableState<*>) -> Any = { it.rawCurrentValue },
+): List<Any> {
     val begun = LongArray(states.size)
     while (true) {
-        tryReadCut(states, begun)?.let { return it }
+        tryReadCut(states, begun, read)?.let { return it }
         threadYield()
     }
 }
@@ -54,12 +60,13 @@ internal fun readConsistent(states: List<MutableState<*>>): List<Any> {
 private fun tryReadCut(
     states: List<MutableState<*>>,
     begun: LongArray,
+    read: (MutableState<*>) -> Any,
 ): List<Any>? {
     for (i in states.indices) {
         begun[i] = states[i].writesBegun.value
         if (begun[i] != states[i].writesEnded.value) return null
     }
-    val values = states.map { it.rawCurrentValue }
+    val values = states.map(read)
     val noWriteBegan = states.indices.all { states[it].writesBegun.value == begun[it] }
     return if (noWriteBegan) values else null
 }
@@ -77,6 +84,22 @@ private fun tryReadCut(
  * A participant joined as a savepoint of an enclosing transaction applies with
  * that transaction instead (see the note at the top of this file).
  *
+ * Keyed entries are listed as the plan finds them live; one an eviction
+ * retires before the cut is left out, in the same cut (KeyedCommit.kt).
+ * Creating an entry is no commit and has no bracket, so a listing can miss
+ * an entry that comes to life after it — which only tears the capture when a
+ * commit (or an inbound bridge write) made after that creation lands in the
+ * cut. So the capture is listed and cut again when, between listing and cut,
+ * BOTH an entry of a captured family came to life (or a family was declared)
+ * AND a commit or an inbound bridge write of a captured store applied.
+ * That can repeat while both keep happening, faster than one listing plus
+ * cut; after [HOLD_BACK_AFTER] attempts the capture holds entry creation
+ * back on the captured stores around its listing and cut
+ * ([CreationHoldBack]; that part runs no user code and waits only for write
+ * brackets), so the next attempt completes. A capture never
+ * blocks a writer; a thread creating an entry waits only for such a held-back
+ * listing and cut.
+ *
  * @throws IllegalStateException if a store is disposed, or as [snapshot] (a
  *   throwing initializer).
  */
@@ -84,11 +107,51 @@ internal fun captureConsistent(
     stores: List<Store<*>>,
     scope: SnapshotScope = SnapshotScope.All,
 ): List<StoreSnapshot> {
-    val plans = stores.map { it.planCapture(scope) }
-    val values = readConsistent(plans.flatMap { it.states })
-    var from = 0
-    return plans.map { plan ->
-        val until = from + plan.states.size
-        plan.build(values.subList(from, until)).also { from = until }
+    var attempts = 0
+    while (true) {
+        val schemas = stores.map { it.prepareCapture(scope) }
+        val holdBack = ++attempts > HOLD_BACK_AFTER
+        cutOnce(stores, scope, schemas, holdBack)?.let { return it }
+        threadYield()
     }
 }
+
+/**
+ * One listing and cut of [captureConsistent] — holding entry creation back on
+ * [stores] throughout when [holdBack] — or `null` when it can have missed an
+ * entry and must run again.
+ */
+private fun cutOnce(
+    stores: List<Store<*>>,
+    scope: SnapshotScope,
+    schemas: List<Int>,
+    holdBack: Boolean,
+): List<StoreSnapshot>? {
+    var held = 0
+    try {
+        if (holdBack) {
+            for (store in stores) {
+                store.creationHoldBack.hold()
+                held++
+            }
+        }
+        val plans = stores.mapIndexed { i, store -> store.listCapture(scope, schemas[i]) }
+        val values = readConsistent(plans.flatMap { it.states }, ::capturedRaw)
+        // A commit (or an inbound bridge write) of a captured store that the
+        // cut includes, made after an unlisted entry came to life,
+        // happens-before the cut's reads, so both counts it implies are
+        // visible here.
+        val committed = plans.any { it.membership.committedSince() }
+        if (!holdBack && committed && plans.any { it.membership.grewSince() }) return null
+        var from = 0
+        return plans.map { plan ->
+            val until = from + plan.states.size
+            plan.build(values.subList(from, until)).also { from = until }
+        }
+    } finally {
+        for (i in 0 until held) stores[i].creationHoldBack.release()
+    }
+}
+
+/** How many listings and cuts a capture tries before it holds entry creation back. */
+private const val HOLD_BACK_AFTER = 4

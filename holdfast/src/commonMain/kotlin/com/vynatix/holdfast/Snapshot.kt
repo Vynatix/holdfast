@@ -19,6 +19,11 @@ import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
  * for keeps its own. A snapshot of another schema version than the
  * destination's is migrated first, or refused (see [SchemaVersioned]).
  *
+ * A keyed state family ([keyedState]) is captured with every entry live at
+ * the capture — its raw values by key — under the family's name, which
+ * [stateNames] lists ([keysOf] lists its keys); a restore creates the entries
+ * it holds and never evicts one.
+ *
  * The backing states of `derived` (and `:holdfast-coroutines`'
  * `suspendDerived`) are captured too, so an undo restores them with their
  * sources, but they are not in [stateNames] or [size], never encoded, and take
@@ -45,12 +50,13 @@ import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
  * [render] and [toString] of a captured snapshot never show it, in any scope
  * (a decoded snapshot knows no tags; see [render]). [encode] leaves
  * [StateTag.Remote] states out unless asked, and
- * `snapshot(SnapshotScope.UserAuthored)` captures only the
- * [StateTag.UserAuthored] states.
+ * `snapshot(SnapshotScope.UserAuthored)` captures only the states and keyed
+ * state families tagged [StateTag.UserAuthored].
  *
  * **Equality.** Snapshots compare by value: two captured snapshots are equal
  * when they are at the same [schemaVersion] and hold the same state names
- * with `==` raw values (whichever store instances took them; which states
+ * with `==` raw values, and the same keyed state families with the same keys
+ * and `==` raw values (whichever store instances took them; which states
  * have a codec, and which codec, plays no part, and neither does the
  * [SnapshotScope] that captured them), and two decoded ones when
  * they hold the same encoded text. A
@@ -71,7 +77,8 @@ class StoreSnapshot internal constructor(
      * Names of the states in this snapshot, except the backing states of
      * `derived`/`suspendDerived`: those are captured too but not listed (see
      * the class KDoc). A captured snapshot lists the states its
-     * [SnapshotScope] captures. A decoded snapshot lists every state its
+     * [SnapshotScope] captures, a keyed state family among them under its
+     * name. A decoded snapshot lists every state (and family) its
      * encoded text holds or lists as skipped, [unencodableStateNames]
      * included (the states its capture's scope held, less the
      * [StateTag.Remote] ones unless it was encoded with `includeRemote`).
@@ -96,7 +103,8 @@ class StoreSnapshot internal constructor(
 
     /**
      * The [stateNames] that [encode] cannot write because their state has no
-     * [StateCodec]; the encoded text lists them as skipped (a
+     * [StateCodec] (or, a keyed state family, no `codec` or no `keyCodec`);
+     * the encoded text lists them as skipped (a
      * [StateTag.Remote] one only when encoded with `includeRemote`). A
      * decoded snapshot holds no value for them, and a restore of it leaves
      * those states as they are. Derived backing states are never listed.
@@ -118,6 +126,12 @@ class StoreSnapshot internal constructor(
      *
      * `{"format":"holdfast.store","v":1,"schema":1,"states":{"count":"3"},"skipped":["draft"]}`
      *
+     * A keyed state family is written as an object under its name, one
+     * member per entry — the key as its `keyCodec` encodes it, the value as
+     * its `codec` does — sorted by encoded key:
+     * `"docs":{"a":"hello","b":"world"}`. Tags apply to every entry, and
+     * never to the keys, which are always written.
+     *
      * Tags decide what else is written (a captured snapshot's; decoded text
      * carries no tags, so a decoded snapshot writes back the text it holds):
      *
@@ -137,7 +151,7 @@ class StoreSnapshot internal constructor(
      *
      * @throws IllegalStateException if a codec throws; the message names the
      *   state and the exception's class, but not the exception, which may quote
-     *   the value.
+     *   the value. Also when two keys of a family encode to the same text.
      */
     @ExperimentalStoreApi
     fun encode(includeRemote: Boolean = false): String = encodeStoreDocument(content.toBody(includeRemote))
@@ -168,11 +182,14 @@ class StoreSnapshot internal constructor(
      * @throws IllegalArgumentException for a state of another store instance
      *   (captured snapshots), or one no store declared (a `computed { }`).
      * @throws IllegalStateException when a decoded snapshot holds text for a
-     *   state that has no codec.
+     *   state that has no codec; for an entry of a keyed state family, also
+     *   when the family has no `keyCodec` (a decoded snapshot addresses
+     *   entries by encoded key) or its `keyCodec` throws encoding the key.
      * @throws SnapshotFormatException when the state's codec cannot decode
      *   the text, or when a decoded snapshot holds a keyed state family, not
-     *   a single value, under the state's name (the message names the state,
-     *   never the text).
+     *   a single value, under the state's name — or a single value under a
+     *   keyed entry's family's name (the message names the state or family,
+     *   never the text or a key).
      */
     @ExperimentalStoreApi
     fun <T : Any> entry(state: State<T>): SnapshotEntry<T> = content.entryFor(state)
@@ -194,11 +211,42 @@ class StoreSnapshot internal constructor(
     operator fun <T : Any> get(state: State<T>): T? = (entry(state) as? SnapshotEntry.Present<T>)?.value
 
     /**
+     * The keys this snapshot holds entries of [family] for (a keyed state
+     * family, [keyedState]): for a captured snapshot, the keys of the
+     * family's entries live at its cut, in the order they were created; for
+     * a decoded one, the keys its text holds — a Secret family's too — decoded
+     * by the family's `keyCodec`, in the text's (sorted) order. Empty when the
+     * snapshot holds no entry of the family, or does not hold the family (a
+     * [SnapshotScope.UserAuthored] capture of another family, say). Read one
+     * entry with `snapshot[family[key]]`. Like [entry], a captured snapshot
+     * answers only the families of the store instance that took it, and
+     * either kind keeps answering after its store is disposed.
+     *
+     * Experimental (issue #20, R7).
+     *
+     * @throws IllegalArgumentException for a family of another store instance
+     *   (captured snapshots).
+     * @throws IllegalStateException when a decoded snapshot holds keys for a
+     *   family that has no `keyCodec`.
+     * @throws SnapshotFormatException when the family's `keyCodec` cannot
+     *   decode a key, or a decoded snapshot holds a single value, not a
+     *   family, under the family's name (the message names the family,
+     *   never a key).
+     */
+    @ExperimentalStoreApi
+    fun <K : Any> keysOf(family: KeyedState<K, *>): Set<K> = content.keysOf(family)
+
+    /**
      * This snapshot as text for a person, one line per state sorted by name:
      * a captured state's raw stored value (`toString()`; an encrypted state's
      * ciphertext), a decoded state's encoded text, and the states it holds no
-     * value for. In a captured snapshot, a [StateTag.Secret] state's value is
-     * never shown, whatever the [SnapshotScope]: its line reads `<redacted>`.
+     * value for. A keyed state family shows its entry count, then one line
+     * per entry sorted by key: the key (a captured key's `toString()`, a
+     * decoded key's encoded text) and its value, `<redacted>` for a Secret
+     * family's value. The key is shown even for a Secret family, so do not
+     * log a render whose keys are sensitive. In a captured snapshot, a
+     * [StateTag.Secret] state's value is never shown, whatever the
+     * [SnapshotScope]: its line reads `<redacted>`.
      * A decoded snapshot knows no tags: it shows the text it holds, so a
      * `null` that [encode] wrote reads `<redacted>`, but text from elsewhere
      * (written before the state was tagged Secret, or by another writer) is
@@ -251,6 +299,8 @@ class StoreSnapshot internal constructor(
  * A declared state that has never been read is materialized first: its
  * initializer runs now, exactly as its first read would run it — so an
  * untouched store's snapshot already holds every state, at its initial value.
+ * Every live entry of every keyed state family ([keyedState]) is captured
+ * too, in the same cut; no entry is created for this.
  * `snapshot()` takes no store lock for this, but called from inside an action
  * it runs the initializer under that action's locks. An initializer run this
  * way sees committed values only (see [Store.state]). A throwing initializer
@@ -258,7 +308,11 @@ class StoreSnapshot internal constructor(
  *
  * The values are one consistent cut: a commit applying while the snapshot is
  * taken is either wholly in it or not in it at all. A snapshot taken inside an
- * action captures committed values, not that action's pending writes.
+ * action captures committed values, not that action's pending writes. It never
+ * blocks a writer: it retries while a commit is applying, and lists the keyed
+ * entries again when entries keep coming to life while commits keep applying;
+ * after a few such retries it holds the creation of new entries back for the
+ * moment it takes to list them and read its cut, so it always completes.
  *
  * The returned snapshot is detached from the store — mutations after `snapshot()`
  * do not affect previously-captured snapshots.
@@ -275,10 +329,12 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot = captureSnapshot(SnapshotScope.A
  *
  * - [SnapshotScope.All] is the one-argument [snapshot]: every declared state;
  *   a Secret state's typed reads return [Redacted].
- * - [SnapshotScope.UserAuthored] captures exactly the declared states tagged
- *   [StateTag.UserAuthored] — what a persisted overlay writes — and runs only
+ * - [SnapshotScope.UserAuthored] captures exactly the declared states — and
+ *   the keyed state families, with every live entry — tagged
+ *   [StateTag.UserAuthored] (what a persisted overlay writes), and runs only
  *   their never-read initializers. It holds no `derived` state. Restored, it
- *   leaves every other state as it is.
+ *   leaves every other state as it is. Entries coming to life in a family it
+ *   does not capture never make it list again.
  * - [SnapshotScope.Raw] captures what [SnapshotScope.All] does, and its typed
  *   reads return a Secret state's plaintext — in memory only: its [encode]d
  *   text, [StoreSnapshot.render] and `toString` withhold Secret values as in
@@ -319,7 +375,11 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  * dropped that way fails the restore.)
  * Derived backing states in the snapshot are restored only when this is the
  * store instance that took it (undo); into any other store they are skipped,
- * and so is one that `removeState`/`clearStates` has dropped since.
+ * and so is one that `removeState`/`clearStates` has dropped since. A keyed
+ * state family's entries restore into the store's family of that name: an
+ * entry whose key is not live is created (its initializer runs) before the
+ * action opens, and stays live if the restore then fails; a live entry the
+ * snapshot does not hold keeps its value — a restore never evicts.
  *
  * Returns [TransactionResult.Error] (nothing changed) if a target's
  * initializer fails, or if an entry this store declares cannot be restored:
@@ -355,7 +415,15 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * ([RestoreIssue.Undecodable]); or when the type witness rejects its value
  * ([RestoreIssue.TypeMismatch]). Under [policy] a skip either stands, and is
  * reported, or fails the whole restore with a [RestoreRejectedException]
- * that names each such state, never its value — nothing changes then.
+ * that names each such state, never its value — nothing changes then. A
+ * keyed state family's entries ([keyedState]) are checked one by one, and
+ * each skipped entry is an issue naming the family, never the key:
+ * [RestoreIssue.Undecodable] also when the family has no `keyCodec`, when its
+ * `keyCodec` cannot decode a key, or when the snapshot holds a single value
+ * under a family's name (or a family under a state's name). The entries the
+ * snapshot holds that are not live are created before the action opens (and
+ * stay live, at their initial values, if the restore then fails); a restore
+ * never evicts one.
  *
  * The type witness: a state's declared type is erased at runtime, so a
  * captured value is checked against the class of the value the state holds.
@@ -409,7 +477,12 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * it. `derived` states are not written back, even into the store that took
  * the snapshot: they recompute from the restored sources once the restore
  * commits. The report lists the reset Remote states in
- * [RestoreReport.sterilized]. As after [reset], `removeState`/`clearStates`
+ * [RestoreReport.sterilized]. A [StateTag.Remote] keyed state family is
+ * sterilized the same way: the snapshot's entries of it are dropped, and its
+ * live entries (only those: none is created) are reset from its initializer
+ * given each key, as [reset] resets them — an entry the restore's
+ * transaction has staged for eviction is left to that eviction; the family's
+ * name is in [RestoreReport.sterilized]. As after [reset], `removeState`/`clearStates`
  * refuse a state the reset re-ran until the restore's transaction (or the
  * action or frame it joined) ends. A throwing initializer, or an initializer
  * cycle, rolls the whole restore back: nothing changes.

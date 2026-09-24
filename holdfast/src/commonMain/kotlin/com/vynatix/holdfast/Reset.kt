@@ -58,6 +58,18 @@ package com.vynatix.holdfast
  *   (or the action or frame it joined) commits or rolls back. `derived`
  *   states are not reset: they recompute from their sources once the reset
  *   has committed.
+ * - **Keyed state families.** Every live entry of a keyed state family
+ *   ([keyedState]) is reset the same way, from the family's initializer
+ *   given the entry's key — after the declared states, family by family,
+ *   each family's entries in creation order, unless an initializer reads an
+ *   entry first (it reads the entry's reset value). An entry an initializer
+ *   creates during the reset (`docs[key]` of a key with no live entry) comes
+ *   to life from committed values, as any entry does, and is then reset
+ *   too — its initializer runs twice — so it holds what a fresh store's
+ *   would. A reset never evicts an entry, and leaves alone an entry its own
+ *   transaction has staged for eviction (an initializer reads it at its
+ *   committed value); to also drop the entries, `evictAll()` in the same
+ *   action.
  * - **One transaction.** Middleware sees one transaction (id `Reset`). Called
  *   inside another action on this store, the reset is a savepoint: it overrides
  *   that action's pending writes to this store's declared states, and commits
@@ -147,10 +159,11 @@ internal fun Store<*>.stageResetOfDeclaredStates(txn: Transaction) {
  * declared states at the values [txn] holds for them — the restore's writes,
  * which it stages first, or an enclosing action's — as a fresh store's
  * initializer would read the restored values; and other stores' states and
- * `derived` states at their committed values. A state that comes to life
- * during the pass itself (first read by an initializer the pass runs) is
- * recomputed on the spot when [cameToLife] picks it. Store attachments are
- * not told: the store was restored, not reset.
+ * `derived` states at their committed values. A state (or keyed entry) that
+ * comes to life during the pass itself (first read, or created, by an
+ * initializer the pass runs) is recomputed from those values when
+ * [cameToLife] picks it. Store attachments are not told: the store was
+ * restored, not reset.
  *
  * Throws as [stageResetOfDeclaredStates].
  */
@@ -185,15 +198,18 @@ private fun Store<*>.stageResetPass(
 }
 
 /**
- * One reset of [store], staging into [txn]: the declared states [select]
- * picks whose reset is not staged yet ([pending]), the ones whose initializer
- * is [running] right now, and the reset value of every state [resolved] so
- * far. A state [select] leaves out is not reset: an initializer reading it
- * reads its committed value — unless [readsStagedWrites] (a sterile restore),
- * where a declared state of [store] is read at the value [txn] holds for it
- * (the restore's write, else an enclosing action's pending write, else the
- * committed value), and one [select] picks only once it is read — it came
- * to life during the pass — is resolved on the spot.
+ * One reset of [store], staging into [txn]: the declared states and keyed
+ * entries [select] picks whose reset is not staged yet ([pending]), the ones
+ * whose initializer is [running] right now, and the reset value of every
+ * state [resolved] so far. A state [select] leaves out is not reset: an
+ * initializer reading it reads its committed value — unless
+ * [readsStagedWrites] (a sterile restore), where a declared state or entry
+ * of [store] is read at the value [txn] holds for it (the restore's write,
+ * else an enclosing action's pending write, else the committed value), and
+ * one [select] picks only once it is read — it came to life during the
+ * pass — is resolved on the spot. A keyed entry that comes to life during
+ * the pass ([noteGot], [valueFor]) is reset too, when [select] picks it; an
+ * entry [txn]'s chain evicts never is.
  *
  * A state is resolved by running its initializer in the [NoWriteRegion] —
  * marked as this pass's ([NoWriteRegion.runForReset]) — then staging the
@@ -204,9 +220,9 @@ private fun Store<*>.stageResetPass(
  * state declared after it (a forward reference), and how the whole pass runs
  * in the order a fresh store's first reads would.
  *
- * Confined to the thread running the reset: [valueFor] touches the sets only
- * once it has checked that its caller is an initializer this very pass is
- * running, which no other thread can be.
+ * Confined to the thread running the reset: [valueFor] and [noteGot] touch
+ * the sets only once they have checked that their caller is an initializer
+ * this very pass is running, which no other thread can be.
  */
 internal class ResetPass(
     private val store: Store<*>,
@@ -218,7 +234,11 @@ internal class ResetPass(
     private val running = HashSet<StateDeclaration<*>>()
     private val resolved = HashMap<StateDeclaration<*>, Any>()
 
-    /** Resolve every [StateKind.Declared] state of [store] that [select] picks, in declaration order. */
+    /**
+     * Resolve every [StateKind.Declared] state of [store] that [select] picks,
+     * in declaration order, then the live keyed entries — and the entries
+     * that come to life during the pass ([noteGot]), after them.
+     */
     fun stageAll() {
         // Derived backings and internal states have no initializer of their
         // own to reset from (D6): a derived recomputes once its sources' reset
@@ -229,14 +249,41 @@ internal class ResetPass(
     }
 
     /**
-     * Extension point for keyed state families (issue #20, R7; plan PR 12):
-     * add the declaration of every live entry that [select] picks to
-     * [pending], so each entry is reset by this same pass — from its family's
+     * Keyed state families (issue #20, R7): add the declaration of every
+     * entry that is live in [txn]'s view — not evicted, nor staged for
+     * eviction in [txn]'s chain — and that [select] picks to [pending],
+     * family by family in declaration order, entry by entry in creation
+     * order, so each entry is reset by this same pass — from its family's
      * retained initializer, reading reset values like any declared state —
-     * and none is evicted. (A sterile restore picks the Remote families' entries.)
+     * and none is evicted. (A sterile restore picks the Remote families'
+     * entries, and those the restore brought to life.)
      */
     private fun addLiveKeyedEntries() {
-        // No keyed state families exist yet.
+        for (family in store.registry.keyed.familiesInOrder()) {
+            for ((_, state) in family.committedEntries()) {
+                val decl = checkNotNull(state.declaration)
+                if (!txn.evictsInChain(state) && select(decl)) pending += decl
+            }
+        }
+    }
+
+    /**
+     * A `get` of a keyed state family of [store] returned [state]. When the
+     * get comes from an initializer this pass is running, and the entry is
+     * not decided, running or pending yet — it came to life during the pass,
+     * from committed values, or after [stageAll] listed the live entries —
+     * it joins [pending], after the states pending now, if [select] picks it
+     * and [txn]'s chain does not evict it: so the pass resets it from the
+     * reset values even when nothing reads its value, and the store ends up
+     * holding what a fresh store's first reads would give. Deferred, not
+     * resolved on the spot: its initializer runs once its value is read in
+     * the pass ([valueFor]), or at the end, as a live entry's does.
+     */
+    fun noteGot(state: MutableState<*>) {
+        if ((NoWriteRegion.current() as? InitializingFrame)?.reset !== this) return
+        val decl = checkNotNull(state.declaration)
+        if (decl in pending || decl in running || decl in resolved) return
+        if (!state.retired && select(decl) && !txn.evictsInChain(state)) pending += decl
     }
 
     /**
@@ -257,16 +304,20 @@ internal class ResetPass(
 
     /**
      * [state]'s reset value when this read comes from an initializer this pass
-     * is running and [state] is one of the states it resets. When the pass
-     * [readsStagedWrites] and [state] is another declared state of [store],
-     * the raw value [txn] holds for it: what the sterile restore staged into
-     * it, else an enclosing action's pending write (reading it is safe: this
-     * pass stages into the same transaction chain, so what it computes from
-     * those writes rolls back with them); holding none, a state [select]
-     * picks now — one that came to life after [stageAll] chose its states,
-     * such as by this very read — is resolved like a pending one. `null`
-     * otherwise, and the read goes on as usual (inside an initializer:
-     * committed values).
+     * is running and [state] is one of the states it resets — a keyed entry
+     * that came to life after [stageAll] listed the live ones included, when
+     * [select] picks it: it is resolved like a pending one. When the pass
+     * [readsStagedWrites] and [state] is another declared state (or entry)
+     * of [store], the raw value [txn] holds for it: what the sterile restore
+     * staged into it, else an enclosing action's pending write (reading it is
+     * safe: this pass stages into the same transaction chain, so what it
+     * computes from those writes rolls back with them); holding none, a state
+     * [select] picks now — one that came to life after [stageAll] chose its
+     * states, such as by this very read — is resolved like a pending one. An
+     * entry [txn]'s chain evicts is read at its committed value and never
+     * resolved, so the pass never stages into it (a staged write would cancel
+     * the eviction). `null` otherwise, and the read goes on as usual (inside
+     * an initializer: committed values).
      *
      * @throws IllegalStateException when [state]'s own initializer is running
      *   in this pass: an initializer cycle.
@@ -282,13 +333,35 @@ internal class ResetPass(
             known != null -> known
             decl in running -> throw IllegalStateException(sameThreadCycleMessage(decl))
             decl in pending -> resolve(decl)
-            // Sterile restore: a declared state of this store that the pass
-            // does not reset is read at the value the restore's transaction
-            // holds for it (its restored value), as a fresh store's
-            // initializer would read it once restored. One the restore
-            // brought to life only now, first read from pre-restore values,
-            // is recomputed through the pass instead.
-            readsStagedWrites && decl.kind == StateKind.Declared && state.owningStore === store ->
+            state.owningStore === store -> unlistedValueFor(state, decl)
+            else -> null
+        }
+    }
+
+    /**
+     * [valueFor] for [state], a state of [store] declared by [decl] that the
+     * pass has neither resolved nor listed (yet): an entry the chain evicts,
+     * one that came to life after [stageAll] listed the live ones, or — for
+     * a sterile restore — a state the pass does not reset.
+     */
+    private fun <T : Any> unlistedValueFor(
+        state: MutableState<T>,
+        decl: StateDeclaration<T>,
+    ): T? {
+        val keyed = decl.kind == StateKind.Keyed
+        return when {
+            // Left to its eviction: read at its committed value, never staged.
+            keyed && txn.evictsInChain(state) -> null
+            // Came to life after stageAll listed the live entries (an evicted
+            // stale handle stays as it is).
+            keyed && !state.retired && select(decl) -> resolve(decl)
+            // Sterile restore: a declared state (or entry) of this store that
+            // the pass does not reset is read at the value the restore's
+            // transaction holds for it (its restored value), as a fresh
+            // store's initializer would read it once restored. One the
+            // restore brought to life only now, first read from pre-restore
+            // values, is recomputed through the pass instead.
+            readsStagedWrites && decl.kind.isWritable ->
                 txn.findPendingValue(state) ?: if (select(decl)) resolve(decl) else null
             else -> null
         }
