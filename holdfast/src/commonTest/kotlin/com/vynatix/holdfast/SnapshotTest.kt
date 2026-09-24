@@ -64,9 +64,10 @@ private object Identity : Transformer<String> {
 /**
  * Every stable spelling of `state(…)`. This file has no `ExperimentalStoreApi`
  * opt-in, so it compiles only while each call resolves to the stable
- * three-parameter `state` rather than the experimental overload that adds a
- * `codec` parameter (Kotlin picks the candidate that leaves fewer parameters
- * to their defaults): the source-compatibility guard for that overload.
+ * three-parameter `state` rather than the experimental overload that adds
+ * `codec` and `tags` parameters (Kotlin picks the candidate that leaves fewer
+ * parameters to their defaults): the source-compatibility guard for that
+ * overload.
  */
 private class StableOverloadStore : Store<StableOverloadStore>() {
     val bare by state { 0 }

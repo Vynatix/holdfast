@@ -4,6 +4,7 @@ import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.snapshot
 import com.vynatix.holdfast.testing.StoreHandle
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import kotlin.reflect.KProperty1
 
 /**
@@ -52,7 +53,10 @@ class StateMatcher<V : Store<V>> internal constructor(
  * checked.
  *
  * Throws [AssertionError] listing each mismatch as
- * `"<state-name>: expected=<X> actual=<Y>"` joined by newlines.
+ * `"<state-name>: expected=<X> actual=<Y>"` joined by newlines. A
+ * `StateTag.Secret` state is compared like any other, but its mismatch line
+ * shows neither value: `"<state-name>: does not match (a Secret state: values
+ * withheld)"`.
  *
  * Use [shouldMatchExactly] when every declared state must be asserted.
  */
@@ -119,7 +123,7 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
  * rather than ciphertext, which is what tests almost always want.
  *
  * Throws [AssertionError] on a state-name set mismatch or on any value
- * mismatch.
+ * mismatch; a `StateTag.Secret` state's mismatch line shows neither value.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
     val mySnap = store.snapshot()
@@ -138,9 +142,14 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
 
     val mismatches =
         mySnap.stateNames.sorted().mapNotNull { name ->
-            val mine = store.getState(name)?.value
+            val state = store.getState(name)
+            val mine = state?.value
             val theirs = other.getState(name)?.value
-            if (mine == theirs) null else "$name: this=$mine other=$theirs"
+            when {
+                mine == theirs -> null
+                state != null && PrivilegedHooks.isSecret(state) -> secretMismatch(name)
+                else -> "$name: this=$mine other=$theirs"
+            }
         }
     if (mismatches.isNotEmpty()) {
         throw AssertionError("Snapshot mismatch:\n${mismatches.joinToString("\n")}")
@@ -149,11 +158,20 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchSnapshotOf(other: V) {
 
 /**
  * Walk [sm]'s captured assertions in insertion order, returning a list of
- * `"<state-name>: expected=<X> actual=<Y>"` strings — one per mismatch. An
- * empty list means every assertion passed.
+ * `"<state-name>: expected=<X> actual=<Y>"` strings — one per mismatch, a
+ * Secret state's without its values. An empty list means every assertion
+ * passed.
  */
 private fun <V : Store<V>> collectMismatches(sm: StateMatcher<V>): List<String> =
     sm.expected.mapNotNull { (prop, expectedValue) ->
-        val actualValue = prop.get(sm.store).value
-        if (actualValue == expectedValue) null else "${prop.name}: expected=$expectedValue actual=$actualValue"
+        val state = prop.get(sm.store)
+        val actualValue = state.value
+        when {
+            actualValue == expectedValue -> null
+            PrivilegedHooks.isSecret(state) -> secretMismatch(prop.name)
+            else -> "${prop.name}: expected=$expectedValue actual=$actualValue"
+        }
     }
+
+/** A mismatch line for Secret state [name]: neither value, since either may be the secret. */
+private fun secretMismatch(name: String): String = "$name: does not match (a Secret state: values withheld)"

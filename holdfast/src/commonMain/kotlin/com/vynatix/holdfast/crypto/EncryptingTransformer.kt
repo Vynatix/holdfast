@@ -6,10 +6,23 @@ import com.vynatix.holdfast.Transformer
  * [Transformer] that encrypts on write and decrypts on read. The stored
  * `currentValue` is ciphertext; readers see plaintext (post `transformer.get`).
  *
- * "In-memory encryption" means the plaintext exists only transiently during a
- * read — the buffer-then-commit transaction model writes ciphertext via
- * `set`, and `MutableState.currentValue` therefore stores ciphertext. Audit
- * middleware that snapshots `pendingWrites` sees ciphertext too.
+ * What is encrypted is the STORED value: `mutate` stages ciphertext (`set`),
+ * `MutableState.currentValue` holds it, and so do what is built from the raw
+ * value — `snapshot()` captures, `StoreSnapshot.encode()` text, bridge
+ * publishes (a `KvBridge` persists ciphertext). Everything that reads the
+ * state gets plaintext: `value`, observers and `effect`, `derived` states,
+ * `snapshot[state]`, and a middleware or test that reads `value` — the
+ * plaintext is no more transient than any other value a reader holds.
+ * Encryption is therefore not redaction: to keep a value out of encoded
+ * snapshots, `render()`/`toString()`, `:holdfast-testing` timelines and
+ * middleware output, tag the state `StateTag.Secret`
+ * (`state(transformer = EncryptingTransformer(cipher), tags = setOf(StateTag.Secret)) { "" }`);
+ * a Secret state is encoded as `null`, not as its ciphertext.
+ *
+ * An initializer's result is stored as it is, without `set`, like every
+ * initial value, so it is read through `get` as if it were ciphertext: start
+ * from a value your cipher decrypts to itself (the empty string, for
+ * [XorCipher]) or from ciphertext.
  *
  * Asymmetric-transformer rollback is handled correctly by the library: pending
  * writes record post-`set` ciphertext; rollback restores raw ciphertext;

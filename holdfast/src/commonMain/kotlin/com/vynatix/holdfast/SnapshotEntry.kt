@@ -15,7 +15,10 @@ sealed interface SnapshotEntry<out T : Any> {
     /**
      * The snapshot holds a value for the state: [value] is what the state's
      * `value` would read for it — the `Transformer.get` view of the stored
-     * raw value, so an `EncryptingTransformer` state reads plaintext.
+     * raw value, so an `EncryptingTransformer` state reads plaintext. A
+     * [StateTag.Secret] state's value is `Present` only in a snapshot
+     * captured with [SnapshotScope.Raw]; [toString] then shows it, so do not
+     * log a Raw capture's entries.
      */
     data class Present<out T : Any>(
         val value: T,
@@ -30,9 +33,12 @@ sealed interface SnapshotEntry<out T : Any> {
 }
 
 /**
- * The snapshot holds a value for the state but withholds it: an encoded
- * snapshot's `null` for that state. The same marker stands in for a withheld
- * value wherever one is shown.
+ * The snapshot holds a value for the state but withholds it: the value of a
+ * [StateTag.Secret] state, read from any snapshot but one captured with
+ * [SnapshotScope.Raw], or an encoded snapshot's `null` for the state (which
+ * is how [StoreSnapshot.encode] writes a Secret state). The same marker
+ * stands in for a withheld value wherever one is shown — in the
+ * `:holdfast-testing` timelines, for example.
  *
  * Experimental (issue #20).
  */
@@ -64,6 +70,7 @@ private fun <T : Any> readableState(state: State<T>): MutableState<T> {
 /**
  * A captured snapshot answers the states of the store instance that took it
  * (or, made by hand, any state by name); a derived's state reads its backing.
+ * A Secret state's value is withheld unless the capture's scope reads secrets.
  */
 private fun <T : Any> CapturedContent.capturedEntry(
     state: MutableState<T>,
@@ -73,13 +80,18 @@ private fun <T : Any> CapturedContent.capturedEntry(
     val values = if (decl.kind == StateKind.DerivedBacking) derivedBackingValues else rawValues
 
     @Suppress("UNCHECKED_CAST")
-    val raw = values[decl.name] as T? ?: return SnapshotEntry.Absent
-    return SnapshotEntry.Present(state.afterGet(raw))
+    val raw = values[decl.name] as T?
+    return when {
+        raw == null -> SnapshotEntry.Absent
+        StateTag.Secret in decl.tags && !tags.scope.readsSecrets -> Redacted
+        else -> SnapshotEntry.Present(state.afterGet(raw))
+    }
 }
 
 /**
  * A decoded snapshot answers any store's states by name, decoding the text
- * with the reading state's codec. Derived states are never encoded.
+ * with the reading state's codec. Derived states are never encoded. A Secret
+ * state's text is never decoded: a decoded snapshot is no Raw capture.
  */
 private fun <T : Any> DecodedContent.decodedEntry(
     state: MutableState<T>,
@@ -91,7 +103,11 @@ private fun <T : Any> DecodedContent.decodedEntry(
         name in body.families -> throw familyMismatch(decl)
         else -> {
             val text = body.states[name]
-            if (text == null) Redacted else SnapshotEntry.Present(state.afterGet(decodeText(decl, codecOf(decl), text)))
+            if (text == null || StateTag.Secret in decl.tags) {
+                Redacted
+            } else {
+                SnapshotEntry.Present(state.afterGet(decodeText(decl, codecOf(decl), text)))
+            }
         }
     }
 }

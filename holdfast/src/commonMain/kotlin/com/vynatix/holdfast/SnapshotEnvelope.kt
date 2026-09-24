@@ -8,7 +8,8 @@ package com.vynatix.holdfast
 // a value withheld from the encoding (the redaction marker), and an object for
 // a keyed state family — reserved: read and kept, never written yet.
 // `skipped` names the states the store declares but could not encode (they
-// have no codec). The writer is canonical: fields in this order, states and
+// have no codec). Remote states are omitted from both unless the snapshot is
+// encoded with `includeRemote`. The writer is canonical: fields in this order, states and
 // skipped names sorted, no whitespace, fixed escaping (SnapshotJsonWriter.kt),
 // so equal bodies encode to equal text. The reader accepts any member order
 // and whitespace, and skips fields it does not know.

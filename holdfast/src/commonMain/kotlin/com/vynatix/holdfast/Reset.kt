@@ -130,22 +130,66 @@ private class Reset<V : Store<V>>(
  * stays in [txn], and the caller rolls it back.
  */
 internal fun Store<*>.stageResetOfDeclaredStates(txn: Transaction) {
+    stageResetPass(txn, "reset $displayName", readsStagedWrites = false) { true }.notifyAttachments()
+}
+
+/**
+ * Stage the reset of every [StateTag.Remote] state of this store into [txn],
+ * exactly as [stageResetOfDeclaredStates] stages a declared state's reset,
+ * and of every other declared state the restore brought to life
+ * ([cameToLife]): the second half of a sterile [restore] (issue #20, R3).
+ * An initializer this pass re-runs reads the other Remote states, and the
+ * states [cameToLife] picks, at their reset values; this store's other
+ * declared states at the values [txn] holds for them — the restore's writes,
+ * which it stages first, or an enclosing action's — as a fresh store's
+ * initializer would read the restored values; and other stores' states and
+ * `derived` states at their committed values. A state that comes to life
+ * during the pass itself (first read by an initializer the pass runs) is
+ * recomputed on the spot when [cameToLife] picks it. Store attachments are
+ * not told: the store was restored, not reset.
+ *
+ * Throws as [stageResetOfDeclaredStates].
+ */
+internal fun Store<*>.stageResetOfRemoteStates(
+    txn: Transaction,
+    cameToLife: (StateDeclaration<*>) -> Boolean,
+) {
+    stageResetPass(txn, "restore $displayName", readsStagedWrites = true) { it.isRemote || cameToLife(it) }
+}
+
+/**
+ * Run one [ResetPass] over the declared states [select] picks, staging into
+ * [txn]; [attempt] names the operation if [txn] is closed to writes, and
+ * [readsStagedWrites] is the pass's (see [ResetPass]).
+ */
+private fun Store<*>.stageResetPass(
+    txn: Transaction,
+    attempt: String,
+    readsStagedWrites: Boolean,
+    select: (StateDeclaration<*>) -> Boolean,
+): ResetPass {
     check(activeTransaction === txn) { "a reset stages into its store's active transaction" }
-    check(!txn.closedToWrites) { appliedTransactionMessage("reset $displayName", displayName, txn) }
-    val pass = ResetPass(this, txn)
+    check(!txn.closedToWrites) { appliedTransactionMessage(attempt, displayName, txn) }
+    val pass = ResetPass(this, txn, readsStagedWrites, select)
     txn.pendingReset = pass
     try {
         pass.stageAll()
     } finally {
         txn.pendingReset = null
     }
-    pass.notifyAttachments()
+    return pass
 }
 
 /**
- * One reset of [store], staging into [txn]: the declared states whose reset
- * is not staged yet ([pending]), the ones whose initializer is [running] right
- * now, and the reset value of every state [resolved] so far.
+ * One reset of [store], staging into [txn]: the declared states [select]
+ * picks whose reset is not staged yet ([pending]), the ones whose initializer
+ * is [running] right now, and the reset value of every state [resolved] so
+ * far. A state [select] leaves out is not reset: an initializer reading it
+ * reads its committed value — unless [readsStagedWrites] (a sterile restore),
+ * where a declared state of [store] is read at the value [txn] holds for it
+ * (the restore's write, else an enclosing action's pending write, else the
+ * committed value), and one [select] picks only once it is read — it came
+ * to life during the pass — is resolved on the spot.
  *
  * A state is resolved by running its initializer in the [NoWriteRegion] —
  * marked as this pass's ([NoWriteRegion.runForReset]) — then staging the
@@ -163,26 +207,29 @@ internal fun Store<*>.stageResetOfDeclaredStates(txn: Transaction) {
 internal class ResetPass(
     private val store: Store<*>,
     private val txn: Transaction,
+    private val readsStagedWrites: Boolean,
+    private val select: (StateDeclaration<*>) -> Boolean,
 ) {
     private val pending = LinkedHashSet<StateDeclaration<*>>()
     private val running = HashSet<StateDeclaration<*>>()
     private val resolved = HashMap<StateDeclaration<*>, Any>()
 
-    /** Resolve every [StateKind.Declared] state of [store], in declaration order. */
+    /** Resolve every [StateKind.Declared] state of [store] that [select] picks, in declaration order. */
     fun stageAll() {
         // Derived backings and internal states have no initializer of their
         // own to reset from (D6): a derived recomputes once its sources' reset
         // commits.
-        store.declarations().filterTo(pending) { it.kind == StateKind.Declared }
+        store.declarations().filterTo(pending) { it.kind == StateKind.Declared && select(it) }
         addLiveKeyedEntries()
         while (pending.isNotEmpty()) resolve(pending.first())
     }
 
     /**
      * Extension point for keyed state families (issue #20, R7; plan PR 12):
-     * add the declaration of every live entry to [pending], so each entry is
-     * reset by this same pass — from its family's retained initializer, reading
-     * reset values like any declared state — and none is evicted.
+     * add the declaration of every live entry that [select] picks to
+     * [pending], so each entry is reset by this same pass — from its family's
+     * retained initializer, reading reset values like any declared state —
+     * and none is evicted. (A sterile restore picks the Remote families' entries.)
      */
     private fun addLiveKeyedEntries() {
         // No keyed state families exist yet.
@@ -200,12 +247,21 @@ internal class ResetPass(
 
     /**
      * [state]'s reset value when this read comes from an initializer this pass
-     * is running and [state] is one of the states it resets; `null` otherwise,
-     * and the read goes on as usual (inside an initializer: committed values).
+     * is running and [state] is one of the states it resets. When the pass
+     * [readsStagedWrites] and [state] is another declared state of [store],
+     * the raw value [txn] holds for it: what the sterile restore staged into
+     * it, else an enclosing action's pending write (reading it is safe: this
+     * pass stages into the same transaction chain, so what it computes from
+     * those writes rolls back with them); holding none, a state [select]
+     * picks now — one that came to life after [stageAll] chose its states,
+     * such as by this very read — is resolved like a pending one. `null`
+     * otherwise, and the read goes on as usual (inside an initializer:
+     * committed values).
      *
      * @throws IllegalStateException when [state]'s own initializer is running
      *   in this pass: an initializer cycle.
      */
+    @OptIn(StoreInternalApi::class)
     fun <T : Any> valueFor(state: MutableState<T>): T? {
         val runningHere = (NoWriteRegion.current() as? InitializingFrame)?.reset === this
         val decl = state.declaration?.takeIf { runningHere } ?: return null
@@ -216,6 +272,14 @@ internal class ResetPass(
             known != null -> known
             decl in running -> throw IllegalStateException(sameThreadCycleMessage(decl))
             decl in pending -> resolve(decl)
+            // Sterile restore: a declared state of this store that the pass
+            // does not reset is read at the value the restore's transaction
+            // holds for it (its restored value), as a fresh store's
+            // initializer would read it once restored. One the restore
+            // brought to life only now, first read from pre-restore values,
+            // is recomputed through the pass instead.
+            readsStagedWrites && decl.kind == StateKind.Declared && state.owningStore === store ->
+                txn.findPendingValue(state) ?: if (select(decl)) resolve(decl) else null
             else -> null
         }
     }

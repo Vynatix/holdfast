@@ -41,6 +41,19 @@ package com.vynatix.holdfast
 // initializer then runs under the action's locks), a dropped derived backing
 // is skipped, and a dropped internal state — which loses its declaration too
 // — fails the restore.
+//
+// A STERILE restore (issue #20, R3) plans as if the snapshot held no entry for
+// a Remote state and no derived backing, materializes every Remote state the
+// store declares, and then — in the action, after staging the planned writes —
+// resets the Remote states through the reset pass (Reset.kt), so a stale
+// synced value never survives the restore. The pass reads the store's other
+// declared states at the values the action staged: a Remote initializer sees
+// the restored values, as it would in a fresh store holding them. A declared
+// state the restore itself brings to life ([RestorePlanner.cameToLife]: not
+// live when the restore began, not restored, never written since) was
+// materialized from pre-restore values — by the plan, or by a first read in
+// the pass — so the pass recomputes it from the restored values too, as a
+// fresh store's first read would.
 
 /** One raw value a restore stages into [decl]'s state. [backing]: a derived backing state (same-instance undo). */
 private class PlannedWrite(
@@ -50,8 +63,9 @@ private class PlannedWrite(
 )
 
 /**
- * Restore [snapshot] into this store under [policy], as one action whose value
- * is [result] of the restore's report: plan, then stage.
+ * Restore [snapshot] into this store under [policy] — [sterile]ly, resetting
+ * its Remote states instead of restoring them — as one action whose value is
+ * [result] of the restore's report: plan, then stage.
  *
  * @throws IllegalStateException like [Store.action]: when the store is
  *   disposed, or inside a state initializer or a schema migration.
@@ -59,15 +73,17 @@ private class PlannedWrite(
 internal fun <V : Store<V>, R> V.runRestore(
     snapshot: StoreSnapshot,
     policy: RestorePolicy,
+    sterile: Boolean = false,
     result: (RestoreReport) -> R,
 ): TransactionResult<R> {
     checkNotDisposed()
     NoWriteRegion.refuse { "restore $displayName" }
-    val planner = RestorePlanner(this, snapshot.content)
+    val planner = RestorePlanner(this, snapshot.content, sterile)
     // A failing target initializer is carried into the action, which reports
     // it like one inside the restore, whatever the policy.
     val failure = runCatching { planner.plan() }.exceptionOrNull() ?: planner.rejection(policy)
-    return action(Restore(planner.writes, failure) { result(planner.report()) })
+    val sterileReset = if (sterile) planner::cameToLife else null
+    return action(Restore(planner.writes, failure, sterileReset) { result(planner.report()) })
 }
 
 /**
@@ -77,6 +93,8 @@ internal fun <V : Store<V>, R> V.runRestore(
 private class Restore<V : Store<V>, R>(
     private val writes: List<PlannedWrite>,
     private val failure: Throwable?,
+    /** For a sterile restore, which non-Remote declared states it brought to life (see [RestorePlanner.cameToLife]). */
+    private val sterileReset: ((StateDeclaration<*>) -> Boolean)?,
     private val result: () -> R,
 ) : (V) -> R {
     override fun invoke(store: V): R {
@@ -96,18 +114,49 @@ private class Restore<V : Store<V>, R>(
                 }
             txn.stagePendingRaw(state, write.raw)
         }
+        // After the planned writes, which never touch a Remote state here: the
+        // reset compares each Remote state with the value the transaction
+        // holds for it, and its initializers read the restored values.
+        sterileReset?.let { store.stageResetOfRemoteStates(txn, it) }
         return result()
     }
 }
 
-/** Plans one restore of [content] into [store]: what to stage, and what to report. */
+/**
+ * Plans one restore of [content] into [store]: what to stage, and what to
+ * report. A [sterile] plan drops the entries of Remote states and derived
+ * backings, and materializes the Remote states the action will reset.
+ */
 private class RestorePlanner(
     private val store: Store<*>,
     private val content: SnapshotContent,
+    private val sterile: Boolean,
 ) {
     val writes = ArrayList<PlannedWrite>()
+    private val written = HashSet<StateDeclaration<*>>()
     private val restored = LinkedHashSet<String>()
     private val issues = ArrayList<RestoreIssue>()
+
+    /** For a [sterile] plan: the declarations whose state was live when the restore began (see [cameToLife]). */
+    private val liveBefore: Set<StateDeclaration<*>> =
+        if (sterile) store.declarations().filterTo(HashSet()) { it.materialized != null } else emptySet()
+
+    /**
+     * Whether a sterile restore's reset recomputes [decl], a declared state it
+     * neither restores nor resets as Remote: one this restore brought to
+     * life. Its state was not live when the restore began and is live now —
+     * materialized by the plan (a target, or a state a Remote initializer
+     * read), or by a first read inside the reset — and no write has committed
+     * to it since, so it holds a first-read value computed from pre-restore
+     * values, which the reset replaces with the value a first read computes
+     * after the restore. A state live before the restore keeps its value, as
+     * a plain restore leaves it, and so does one a concurrent action has
+     * written since it came to life. Asked inside the restore's action.
+     */
+    fun cameToLife(decl: StateDeclaration<*>): Boolean {
+        val state = decl.materialized.takeIf { decl.kind == StateKind.Declared && decl !in liveBefore }
+        return state != null && decl !in written && state.writesBegun.value == 0L
+    }
 
     /**
      * A captured snapshot an instance of the target's class (or a superclass)
@@ -118,9 +167,10 @@ private class RestorePlanner(
 
     /**
      * Check the schema version, then materialize every target and decide every
-     * entry. Throws a [SnapshotMigrationException] for a snapshot the store's
-     * schema refuses (or its `migrate` fails on), before any other user code
-     * runs, and what a target's initializer throws.
+     * entry (and, when [sterile], materialize the Remote states). Throws a
+     * [SnapshotMigrationException] for a snapshot the store's schema refuses
+     * (or its `migrate` fails on), before any other user code runs, and what
+     * a target's initializer throws.
      */
     fun plan() {
         val schema = StoreSchema(store)
@@ -128,7 +178,7 @@ private class RestorePlanner(
             is CapturedContent -> {
                 schema.checkCaptured(content.schema)
                 content.rawValues.forEach { (name, raw) -> planCaptured(name, raw) }
-                if (content.originKey == store.lockOrderKey) planBackings(content)
+                if (!sterile && content.originKey == store.lockOrderKey) planBackings(content)
             }
             is DecodedContent -> {
                 val body = schema.upcast(content.body)
@@ -138,6 +188,9 @@ private class RestorePlanner(
                 }
             }
         }
+        // The Remote states the action resets, never-read ones included: their
+        // initializers run now, outside the action's locks, as reset() runs them.
+        if (sterile) store.materializeDeclaredStates { it.isRemote }
     }
 
     /** The failure [policy] makes of the issues found, or `null` if it tolerates them all. */
@@ -147,15 +200,16 @@ private class RestorePlanner(
             .takeIf { it.isNotEmpty() }
             ?.let { RestoreRejectedException(store.displayName, policy, it) }
 
-    /** What the restore did, once it has staged [writes]. */
+    /** What the restore did, once it has staged [writes] (and, [sterile], reset the Remote states). */
     fun report(): RestoreReport {
         val skipped = issues.mapTo(HashSet()) { it.stateName }
+        val declared = store.declarations().filter { it.kind != StateKind.DerivedBacking }
+        val sterilized = if (sterile) declared.filter { it.isRemote }.mapTo(LinkedHashSet()) { it.name } else emptySet()
         val kept =
-            store
-                .declarations()
-                .filter { it.kind != StateKind.DerivedBacking && it.name !in restored && it.name !in skipped }
-                .mapTo(LinkedHashSet()) { it.name }
-        return RestoreReport(restored.toSet(), kept, issues.toList())
+            declared
+                .map { it.name }
+                .filterTo(LinkedHashSet()) { it !in restored && it !in skipped && it !in sterilized }
+        return RestoreReport(restored.toSet(), kept, issues.toList(), sterilized)
     }
 
     private fun planCaptured(
@@ -193,13 +247,18 @@ private class RestorePlanner(
     }
 
     /**
-     * The declared state [name] names, materialized; or `null`, reported as
-     * unknown, when this store declares no such state (a derived backing's
-     * name included: those are private to their store).
+     * The declared state [name] names, materialized; or `null`: reported as
+     * unknown when this store declares no such state (a derived backing's
+     * name included: those are private to their store), and dropped silently
+     * when a [sterile] restore resets the state instead.
      */
     private fun target(name: String): StateDeclaration<*>? {
         val decl = store.registry.declaration(name)?.takeIf { it.kind != StateKind.DerivedBacking }
-        if (decl == null) issues += RestoreIssue.UnknownState(name) else materialize(decl)
+        when {
+            decl == null -> issues += RestoreIssue.UnknownState(name)
+            sterile && decl.isRemote -> return null
+            else -> materialize(decl)
+        }
         return decl
     }
 
@@ -208,6 +267,7 @@ private class RestorePlanner(
         raw: Any,
     ) {
         writes += PlannedWrite(decl, raw)
+        written += decl
         restored += decl.name
     }
 }

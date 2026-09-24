@@ -59,6 +59,10 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *    So a derived — on its sources' store or another — can briefly lag its
  *    sources after the committing call returns, then converges. Read the
  *    sources, or use [computed], when you need the caller's own write.
+ *  - A derived with a [StateTag.Secret] state among its [sources] is Secret
+ *    too ([State.tags]): its value is withheld wherever a Secret value is. A
+ *    Secret state read in [compute] without being listed as a source does
+ *    not taint it.
  *  - A throwing [compute] (or a middleware rejecting the recompute) rolls that
  *    recompute back and is reported through this store's
  *    [Store.uncaughtObserverHandler] (logged loudly while no handler is set);

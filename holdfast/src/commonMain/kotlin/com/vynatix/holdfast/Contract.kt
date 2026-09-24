@@ -37,7 +37,10 @@ fun interface Initializer<T : Any> : () -> T
  * `value` reflects pending writes (read-your-own-writes) — except inside a
  * state initializer, which reads committed values only, or, when the
  * experimental `reset()` re-runs it, its own store's declared states at their
- * reset values and everything else at committed values (see [Store.state]).
+ * reset values and everything else at committed values (one a sterile
+ * `restore()` re-runs reads the store's declared states that restore does not
+ * re-run as its transaction holds them — restored, else an enclosing action's
+ * pending writes; see [Store.state]).
  */
 interface State<T : Any> {
     val value: T

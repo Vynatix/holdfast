@@ -191,6 +191,7 @@ public final class com/vynatix/holdfast/MutableState : com/vynatix/holdfast/Stat
 	public final fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 	public final fun publishToBridge (Ljava/lang/Object;)V
 	public final fun setBridge (Lcom/vynatix/holdfast/Bridge;)V
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/vynatix/holdfast/MutableStateKt {
@@ -297,6 +298,7 @@ public final class com/vynatix/holdfast/RestoreReport {
 	public final fun getIssues ()Ljava/util/List;
 	public final fun getKept ()Ljava/util/Set;
 	public final fun getRestored ()Ljava/util/Set;
+	public final fun getSterilized ()Ljava/util/Set;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -332,13 +334,31 @@ public final class com/vynatix/holdfast/SnapshotFormatException : java/lang/Ille
 
 public final class com/vynatix/holdfast/SnapshotKt {
 	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;)Lcom/vynatix/holdfast/TransactionResult;
-	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;)Lcom/vynatix/holdfast/TransactionResult;
+	public static final fun restore (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 	public static final fun snapshot (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/StoreSnapshot;
+	public static final fun snapshot (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/StoreSnapshot;
 }
 
 public final class com/vynatix/holdfast/SnapshotMigrationException : java/lang/IllegalStateException {
 	public final fun getSnapshotVersion ()I
 	public final fun getStoreVersion ()I
+}
+
+public abstract class com/vynatix/holdfast/SnapshotScope {
+	public final fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$All : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$All;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$Raw : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$Raw;
+}
+
+public final class com/vynatix/holdfast/SnapshotScope$UserAuthored : com/vynatix/holdfast/SnapshotScope {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SnapshotScope$UserAuthored;
 }
 
 public abstract interface class com/vynatix/holdfast/State {
@@ -357,6 +377,28 @@ public abstract interface class com/vynatix/holdfast/StateDelegate {
 
 public final class com/vynatix/holdfast/StateDelegate$DefaultImpls {
 	public static fun provideDelegate (Lcom/vynatix/holdfast/StateDelegate;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
+}
+
+public abstract class com/vynatix/holdfast/StateTag {
+	public final fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/StateTag$Remote : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$Remote;
+}
+
+public final class com/vynatix/holdfast/StateTag$Secret : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$Secret;
+}
+
+public final class com/vynatix/holdfast/StateTag$UserAuthored : com/vynatix/holdfast/StateTag {
+	public static final field INSTANCE Lcom/vynatix/holdfast/StateTag$UserAuthored;
+}
+
+public final class com/vynatix/holdfast/StateTagsKt {
+	public static final fun displayValue (Lcom/vynatix/holdfast/State;Ljava/lang/Object;)Ljava/lang/Object;
+	public static final fun getTags (Lcom/vynatix/holdfast/State;)Ljava/util/Set;
+	public static final fun taggedStates (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StateTag;)Ljava/util/List;
 }
 
 public abstract class com/vynatix/holdfast/Store {
@@ -404,9 +446,9 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
 	public final fun snapshotMiddleware ()Ljava/util/List;
 	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
-	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
+	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
 	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
-	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Lcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
+	public static synthetic fun state$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/StateCodec;Ljava/util/Set;Lcom/vynatix/holdfast/Initializer;ILjava/lang/Object;)Lcom/vynatix/holdfast/StateDelegate;
 	public final fun update (Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)V
 }
 

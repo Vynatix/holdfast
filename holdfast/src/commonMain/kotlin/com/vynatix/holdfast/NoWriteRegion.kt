@@ -59,10 +59,13 @@ internal class MigratingFrame(
  * [MutableState.value] skips the pending writes of an action on this thread
  * while a region is open. The one exception is an initializer that `reset()`
  * re-runs ([runForReset]): it reads its store's declared states at their
- * reset values (see [ResetPass]). A store write from inside it is refused:
- * `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`, `restore`, and
- * `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all throw inside
- * it, naming the state being initialized or the store migrating.
+ * reset values (see [ResetPass]); re-run by a sterile `restore()`, it reads
+ * the states that restore re-runs at their reset values and its store's
+ * other declared states as the restore's transaction holds them (restored,
+ * else an enclosing action's pending writes). A store write from inside it
+ * is refused: `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`,
+ * `restore`, and `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all
+ * throw inside it, naming the state being initialized or the store migrating.
  */
 internal object NoWriteRegion {
     /** The innermost region open on this thread, or `null`. */
@@ -135,10 +138,11 @@ internal fun initializerWriteMessage(
 ): String =
     "Cannot $attempt: the initializer of ${initializing.qualifiedName} is running on this thread. A state " +
         "initializer runs lazily — at the state's first read, when snapshot() or restore() needs the state, or " +
-        "when reset() re-runs it — so a write from it would land at an unpredictable moment, inside whatever " +
-        "action, commit or snapshot first needed the state. Initializers may read other states, but not write " +
-        "them, open an action or an atomic(...) frame, reset a store, or emit events. Fix: compute the initial " +
-        "value from what the initializer can read, and make the write in an action once the store exists."
+        "when reset() or a sterile restore() re-runs it — so a write from it would land at an unpredictable " +
+        "moment, inside whatever action, commit or snapshot first needed the state. Initializers may read other " +
+        "states, but not write them, open an action or an atomic(...) frame, reset a store, or emit events. " +
+        "Fix: compute the initial value from what the initializer can read, and make the write in an action " +
+        "once the store exists."
 
 internal fun migrateWriteMessage(
     attempt: String,

@@ -78,11 +78,11 @@ for the full consistency contract.
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), `reset()` to initial values (experimental), derived state, cross-store `atomic` frames, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), state tags — `Secret` values redacted from encoded snapshots, renders and logs, `UserAuthored` snapshot scopes, `Remote` states reset by a sterile restore (experimental) — `reset()` to initial values (experimental), derived state, cross-store `atomic` frames, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
-| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers. |
-| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
+| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers; `Secret` state values never reach a timeline or a failure message. |
+| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory (with experimental codec and tags overloads that keep a `Secret` value out of validation errors), `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
 ## Platform support

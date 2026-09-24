@@ -47,9 +47,17 @@ class DisposedEntrypointTest {
                 p.state { 0 }.provideDelegate(null, DisposedProbe::n)
             },
             Entrypoint("state declaration with a codec (experimental overload)") { p, _ -> p.state(codec = IntCodec) { 0 } },
+            Entrypoint("state declaration with tags (experimental overload)") { p, _ ->
+                p.state(tags = setOf(StateTag.Secret)) { 0 }
+            },
             Entrypoint("snapshot") { p, _ -> p.snapshot() },
+            Entrypoint("snapshot with a scope") { p, _ -> p.snapshot(SnapshotScope.UserAuthored) },
+            Entrypoint("taggedStates") { p, _ -> p.taggedStates(StateTag.Remote) },
             Entrypoint("restore") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1))) },
             Entrypoint("restore with a policy") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1)), RestorePolicy.BestEffort) },
+            Entrypoint("sterile restore") { p, _ ->
+                p.restore(StoreSnapshot(mapOf("n" to 1)), RestorePolicy.BestEffort, sterile = true)
+            },
             Entrypoint("reset") { p, _ -> p.reset() },
             Entrypoint("registerDerivedBackingState") { p, _ -> p.registerDerivedBackingState("__probe", 0, emptyList()) },
             Entrypoint("properties") { p, _ -> p.properties },
@@ -67,6 +75,8 @@ class DisposedEntrypointTest {
             Entrypoint("clock") { p, _ -> p.clock },
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
+            // A State extension, not a Store entrypoint: it reads the state's declaration.
+            Entrypoint("State.tags") { _, s -> s.tags },
             Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->
                 p.internalRefuseInitializerWrite("probe")
             },

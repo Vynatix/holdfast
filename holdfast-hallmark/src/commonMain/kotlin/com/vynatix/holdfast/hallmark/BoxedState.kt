@@ -2,7 +2,10 @@ package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.Validator
+import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.StateDelegate
+import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 
 /**
@@ -38,3 +41,35 @@ fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxed(
     validator: Validator<P, O>,
     initial: () -> P,
 ): StateDelegate<O> = state(transformer = ValidatingTransformer(validator)) { validator of initial() }
+
+/**
+ * [boxed], declared through `Store.state`'s experimental overload: with a
+ * [codec] that encodes the boxed value when a snapshot leaves memory (wrap a
+ * primitive codec in [BoxedCodec]), and [tags] the store enforces
+ * (`StateTag.Secret`, `StateTag.UserAuthored`, `StateTag.Remote`; see
+ * `Store.state`).
+ *
+ * For a `StateTag.Secret` state, validation never quotes the rejected value:
+ * a [com.vynatix.hallmark.HallmarkException] thrown by the initializer or by
+ * a write keeps each violation's code, path and rule, but its message reads
+ * "`<code>` rejected the value (withheld: a Secret state)" and it carries no
+ * arguments, where hallmark's rules may quote the value ("got 42"). A
+ * validator you call yourself (`validator of x`) is outside the store and
+ * keeps hallmark's messages.
+ *
+ * Calls that pass neither [codec] nor [tags] resolve to the stable [boxed].
+ *
+ * Experimental (issue #20, R1 and R3).
+ */
+@ExperimentalStoreApi
+fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxed(
+    validator: Validator<P, O>,
+    codec: StateCodec<O>? = null,
+    tags: Set<StateTag> = emptySet(),
+    initial: () -> P,
+): StateDelegate<O> {
+    val secret = StateTag.Secret in tags
+    return state(ValidatingTransformer(validator, withheld = secret), codec = codec, tags = tags) {
+        validator.ofWithheldIf(secret, initial())
+    }
+}

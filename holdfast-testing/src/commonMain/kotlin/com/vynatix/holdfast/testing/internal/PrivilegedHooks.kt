@@ -4,10 +4,13 @@ package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.State
+import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.displayValue
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.tags
 import kotlin.time.Clock
 
 /**
@@ -16,11 +19,18 @@ import kotlin.time.Clock
  * for these helpers rather than opt in directly — that way new dependencies on
  * store internals are visible at PR time.
  *
- * Three clusters of hooks live here:
+ * Four clusters of hooks live here:
  *  - **Recorder reads** — [snapshotCommittedStateValues] and [modifiedStates]
  *    let the timeline recorder observe committed values from inside a
  *    middleware hook without re-entering the read-your-own-writes overlay.
  *    Strict subset of what `:holdfast-coroutines.SuspendAction` uses.
+ *  - **Secret redaction** — [isSecret] and [recordedValue] decide what the
+ *    harness may record or print of a state's value: every value it records
+ *    (timeline events, bridge publish histories) goes through
+ *    [recordedValue], and every matcher that would print or compare a value
+ *    checks [isSecret] first and withholds it (a failure message without the
+ *    values, or a refused value matcher), so a `StateTag.Secret` value never
+ *    reaches a timeline or an assertion message.
  *  - **Clock binding** — [boundClock] and [restoreBoundClock] let a handle
  *    remember a store's raw clock binding at track time and put it back at
  *    teardown.
@@ -54,15 +64,18 @@ internal object PrivilegedHooks {
      * Single-call semantics: this captures the committed view at one instant
      * and returns. The caller MUST keep the hold-lock invariant intact — never
      * call this from outside a middleware hook.
+     *
+     * Each value is already [recordedValue]: a Secret state maps to
+     * [com.vynatix.holdfast.Redacted].
      */
-    fun snapshotCommittedStateValues(store: Store<*>): Map<State<*>, Any> {
+    fun snapshotCommittedStateValues(store: Store<*>): Map<State<*>, Any?> {
         val active = store.activeTransaction
         return if (active == null) {
             // No active transaction → state.value already returns the committed
             // view. Cheap path; avoids the toggle.
             buildMap {
                 for ((_, state) in store.properties) {
-                    put(state, state.value)
+                    put(state, recordedValue(state, state.value))
                 }
             }
         } else {
@@ -70,7 +83,7 @@ internal object PrivilegedHooks {
             try {
                 buildMap {
                     for ((_, state) in store.properties) {
-                        put(state, state.value)
+                        put(state, recordedValue(state, state.value))
                     }
                 }
             } finally {
@@ -78,6 +91,19 @@ internal object PrivilegedHooks {
             }
         }
     }
+
+    /** Whether [state] is tagged `StateTag.Secret` (a `derived` of one included). */
+    @OptIn(ExperimentalStoreApi::class)
+    fun isSecret(state: State<*>): Boolean = StateTag.Secret in state.tags
+
+    /**
+     * What the harness may record or print of [value], a value of [state]:
+     * [com.vynatix.holdfast.Redacted] for a Secret state, [value] otherwise.
+     */
+    fun recordedValue(
+        state: State<*>,
+        value: Any?,
+    ): Any? = state.displayValue(value)
 
     /**
      * Owner-thread-only read of the transaction's modified-state set. Wraps

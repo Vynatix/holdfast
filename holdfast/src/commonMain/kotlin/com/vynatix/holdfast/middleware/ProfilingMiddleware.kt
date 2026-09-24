@@ -25,7 +25,8 @@ import kotlin.time.TimeSource
  * for plain sync actions.
  *
  * [modifiedStates] holds the property names of the states this transaction
- * staged writes for. For a savepoint sample, only the savepoint's own writes;
+ * staged writes for — names only, never values, so a sample may be logged even
+ * when a `StateTag.Secret` state was written. For a savepoint sample, only the savepoint's own writes;
  * a committed savepoint's writes merge into the parent and so surface again in
  * the parent's sample. Empty when name attribution is unavailable (see
  * [ProfilingMiddleware] docs).

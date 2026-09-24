@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalStoreApi::class)
+
 package com.vynatix.holdfast
 
 /**
@@ -87,7 +89,9 @@ internal class StateRegistry(
      * value: a [StateKind.DerivedBacking] or [StateKind.Internal] state. An
      * [StateKind.Internal] name already registered as one returns that state
      * (create-or-fetch, the `registerInternalState` contract); any other
-     * existing declaration of [name] fails fast.
+     * existing declaration of [name] fails fast. A derived backing state
+     * carries the Secret taint of its [sources] ([derivedTags]); an internal
+     * state carries no tags.
      */
     @Suppress("LongParameterList") // One declaration's fields, forwarded as-is.
     fun <T : Any> registerEager(
@@ -119,6 +123,7 @@ internal class StateRegistry(
                     property = null,
                     local = false,
                     sources = sources,
+                    tags = if (kind == StateKind.DerivedBacking) derivedTags(sources) else emptySet(),
                 )
             val state = MutableState(initial, transformer, store, distinct)
             state.declaration = decl

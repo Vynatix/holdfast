@@ -5,11 +5,11 @@ package com.vynatix.holdfast
 import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
 
 /**
- * The state of a [Store] at one moment: every declared state's raw value, as
- * [Store.snapshot] captured it, or — for a snapshot [decode]d from text — the
- * encoded text of each state its store could encode. Stored values are RAW —
- * post-`Transformer.set` — so that [Store.restore] can round-trip without
- * re-running the transformer.
+ * The state of a [Store] at one moment: the raw value of every state its
+ * [SnapshotScope] captures (every declared state for [Store.snapshot]), or —
+ * for a snapshot [decode]d from text — the encoded text of each state its
+ * store could encode. Stored values are RAW — post-`Transformer.set` — so
+ * that [Store.restore] can round-trip without re-running the transformer.
  *
  * Snapshots are NOT typed against any particular store instance. Restoring a
  * snapshot from one store into a different store is permitted: each state the
@@ -37,10 +37,22 @@ import com.vynatix.holdfast.RestorePolicy.IgnoreUnknown
  * accepts — into a new store instance, in another process. A state without a
  * codec is not written; its name is listed in [unencodableStateNames].
  *
+ * **Tags** (experimental). A captured snapshot holds the raw value of every
+ * state its scope captures, a [StateTag.Secret] state's included, so a
+ * [restore] puts it back. But a Secret value is withheld wherever it would be
+ * read out or written: [entry] returns [Redacted] (and [get] `null`) for it
+ * unless the snapshot was captured with [SnapshotScope.Raw], and [encode],
+ * [render] and [toString] of a captured snapshot never show it, in any scope
+ * (a decoded snapshot knows no tags; see [render]). [encode] leaves
+ * [StateTag.Remote] states out unless asked, and
+ * `snapshot(SnapshotScope.UserAuthored)` captures only the
+ * [StateTag.UserAuthored] states.
+ *
  * **Equality.** Snapshots compare by value: two captured snapshots are equal
  * when they are at the same [schemaVersion] and hold the same state names
  * with `==` raw values (whichever store instances took them; which states
- * have a codec, and which codec, plays no part), and two decoded ones when
+ * have a codec, and which codec, plays no part, and neither does the
+ * [SnapshotScope] that captured them), and two decoded ones when
  * they hold the same encoded text. A
  * captured snapshot never equals a decoded one; compare their [encode]d text
  * instead. [toString] lists state names only, never values.
@@ -58,8 +70,11 @@ class StoreSnapshot internal constructor(
     /**
      * Names of the states in this snapshot, except the backing states of
      * `derived`/`suspendDerived`: those are captured too but not listed (see
-     * the class KDoc). A decoded snapshot lists every state its store
-     * declared, [unencodableStateNames] included.
+     * the class KDoc). A captured snapshot lists the states its
+     * [SnapshotScope] captures. A decoded snapshot lists every state its
+     * encoded text holds or lists as skipped, [unencodableStateNames]
+     * included (the states its capture's scope held, less the
+     * [StateTag.Remote] ones unless it was encoded with `includeRemote`).
      */
     val stateNames: Set<String> get() = content.names
 
@@ -81,9 +96,10 @@ class StoreSnapshot internal constructor(
 
     /**
      * The [stateNames] that [encode] cannot write because their state has no
-     * [StateCodec]; the encoded text lists them as skipped. A decoded
-     * snapshot holds no value for them, and a restore of it leaves those
-     * states as they are. Derived backing states are never listed.
+     * [StateCodec]; the encoded text lists them as skipped (a
+     * [StateTag.Remote] one only when encoded with `includeRemote`). A
+     * decoded snapshot holds no value for them, and a restore of it leaves
+     * those states as they are. Derived backing states are never listed.
      *
      * Experimental (issue #20, R1).
      */
@@ -102,25 +118,39 @@ class StoreSnapshot internal constructor(
      *
      * `{"format":"holdfast.store","v":1,"schema":1,"states":{"count":"3"},"skipped":["draft"]}`
      *
-     * [includeRemote] is reserved for state tags, and changes nothing until
-     * they exist. `decode(s.encode())` holds the same text as `s` for every
-     * encodable state: round trips are exact on what [encode] writes.
+     * Tags decide what else is written (a captured snapshot's; decoded text
+     * carries no tags, so a decoded snapshot writes back the text it holds):
      *
-     * Experimental (issue #20, R1).
+     * - A [StateTag.Secret] state is written as `null`, the withheld marker,
+     *   in every [SnapshotScope] ([SnapshotScope.Raw] included); its codec
+     *   never sees the value. A decoded snapshot reads it as [Redacted], and a
+     *   restore of that text leaves the state's value as it is.
+     * - A [StateTag.Remote] state is left out — neither written nor listed as
+     *   skipped — unless [includeRemote] is `true`, so stale synced data does
+     *   not persist; a restore of the text leaves it as it is.
+     *
+     * `decode(s.encode())` holds the same text as `s` for every state `encode`
+     * writes: round trips are exact on that encodable projection (the Secret
+     * values and, by default, the Remote states are not in it).
+     *
+     * Experimental (issue #20, R1 and R3).
      *
      * @throws IllegalStateException if a codec throws; the message names the
      *   state and the exception's class, but not the exception, which may quote
      *   the value.
      */
     @ExperimentalStoreApi
-    @Suppress("UNUSED_PARAMETER", "UnusedParameter") // Reserved for state tags (issue #20, R3); inert until then.
-    fun encode(includeRemote: Boolean = false): String = encodeStoreDocument(content.toBody())
+    fun encode(includeRemote: Boolean = false): String = encodeStoreDocument(content.toBody(includeRemote))
 
     /**
      * What this snapshot holds for [state], read by the state instance: its
      * value ([SnapshotEntry.Present], the `Transformer.get` view, as
      * `state.value` would read it), [SnapshotEntry.Absent] when it holds none,
-     * or [Redacted] when a decoded snapshot's text withholds it.
+     * or [Redacted] when it withholds it: a decoded snapshot's `null` text,
+     * and the value of a [StateTag.Secret] state (see [State.tags]; a
+     * `derived` of one included), which only a snapshot captured with
+     * [SnapshotScope.Raw] returns. A Secret state's entry is [Redacted] even
+     * where the snapshot's text holds a value for it, without decoding it.
      *
      * A captured snapshot answers the states of the store instance that took
      * it — a derived's state included — and throws for a state of any other
@@ -149,9 +179,10 @@ class StoreSnapshot internal constructor(
 
     /**
      * The value this snapshot holds for [state], or `null` when it holds none
-     * (or withholds it): [entry]'s [SnapshotEntry.Present] value. Typed by the
-     * state: `snapshot[store.count]` is an `Int?`. Like [entry], it reads a
-     * decoded snapshot's text as written, without migrating it.
+     * (or withholds it: a Secret state's value, outside a
+     * [SnapshotScope.Raw] capture): [entry]'s [SnapshotEntry.Present] value.
+     * Typed by the state: `snapshot[store.count]` is an `Int?`. Like [entry],
+     * it reads a decoded snapshot's text as written, without migrating it.
      *
      * Experimental (issue #20, R1).
      *
@@ -166,8 +197,13 @@ class StoreSnapshot internal constructor(
      * This snapshot as text for a person, one line per state sorted by name:
      * a captured state's raw stored value (`toString()`; an encrypted state's
      * ciphertext), a decoded state's encoded text, and the states it holds no
-     * value for. For logs and debugging; the layout may change. Use [encode]
-     * for text that must be read back.
+     * value for. In a captured snapshot, a [StateTag.Secret] state's value is
+     * never shown, whatever the [SnapshotScope]: its line reads `<redacted>`.
+     * A decoded snapshot knows no tags: it shows the text it holds, so a
+     * `null` that [encode] wrote reads `<redacted>`, but text from elsewhere
+     * (written before the state was tagged Secret, or by another writer) is
+     * shown as it is, and [encode] writes it back. For logs and debugging;
+     * the layout may change. Use [encode] for text that must be read back.
      *
      * Experimental (issue #20).
      */
@@ -206,7 +242,11 @@ class StoreSnapshot internal constructor(
 /**
  * Capture the current raw value of every declared state on this store, at
  * the store's schema version ([StoreSnapshot.schemaVersion]: its
- * [SchemaVersioned.schemaVersion], or 1).
+ * [SchemaVersioned.schemaVersion], or 1). This is the experimental
+ * `snapshot(SnapshotScope.All)`: a [StateTag.Secret] state's raw value is
+ * captured (so [restore] puts it back), but typed reads withhold it
+ * ([StoreSnapshot.entry] returns [Redacted], [StoreSnapshot.get] `null`; see
+ * [StoreSnapshot]).
  *
  * A declared state that has never been read is materialized first: its
  * initializer runs now, exactly as its first read would run it — so an
@@ -227,22 +267,32 @@ class StoreSnapshot internal constructor(
  *   cycle is found (see [Store.state]), or the store declares a schema version
  *   below 1; an exception thrown by an initializer propagates as is.
  */
-fun <V : Store<V>> V.snapshot(): StoreSnapshot {
-    checkNotDisposed()
-    val schema = StoreSchema(this).version
-    materializeDeclaredStates()
-    val captured = registry.materializedInOrder()
-    val values = readConsistent(captured.map { it.second })
-    val declared = LinkedHashMap<String, Any>()
-    val backings = LinkedHashMap<String, Any>()
-    val codecs = HashMap<String, StateCodec<*>>()
-    captured.forEachIndexed { i, (decl, _) ->
-        val into = if (decl.kind == StateKind.DerivedBacking) backings else declared
-        into[decl.name] = values[i]
-        decl.codec?.let { codecs[decl.name] = it }
-    }
-    return StoreSnapshot(CapturedContent(declared, backings, lockOrderKey, this::class, codecs, schema))
-}
+fun <V : Store<V>> V.snapshot(): StoreSnapshot = captureSnapshot(SnapshotScope.All)
+
+/**
+ * [snapshot] in [scope]: which states the capture holds, and whether a
+ * [StateTag.Secret] state's value can be read back from it.
+ *
+ * - [SnapshotScope.All] is the one-argument [snapshot]: every declared state;
+ *   a Secret state's typed reads return [Redacted].
+ * - [SnapshotScope.UserAuthored] captures exactly the declared states tagged
+ *   [StateTag.UserAuthored] — what a persisted overlay writes — and runs only
+ *   their never-read initializers. It holds no `derived` state. Restored, it
+ *   leaves every other state as it is.
+ * - [SnapshotScope.Raw] captures what [SnapshotScope.All] does, and its typed
+ *   reads return a Secret state's plaintext — in memory only: its [encode]d
+ *   text, [StoreSnapshot.render] and `toString` withhold Secret values as in
+ *   any scope.
+ *
+ * Everything else — materialization, the consistent cut, the schema version,
+ * detachment from later mutations — is as [snapshot] describes.
+ *
+ * Experimental (issue #20, R3).
+ *
+ * @throws IllegalStateException as [snapshot].
+ */
+@ExperimentalStoreApi
+fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnapshot(scope)
 
 /**
  * Restore [snapshot] into this store, atomically, under
@@ -296,7 +346,8 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * the one-argument [restore] (same transaction, same order of work), with the
  * [RestorePolicy] chosen here and a [RestoreReport] as the success value —
  * the states restored, the declared states the snapshot holds no value for
- * (kept as they are), and every skipped entry as a [RestoreIssue].
+ * (kept as they are), and every skipped entry as a [RestoreIssue] — and,
+ * with [sterile], its Remote states reset rather than restored (below).
  *
  * An entry is skipped when this store does not declare its name
  * ([RestoreIssue.UnknownState]); when it is decoded text for a state without
@@ -333,7 +384,37 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * a [SnapshotMigrationException] naming the store and both versions, and
  * nothing changes.
  *
- * Experimental (issue #20, R1; schema versions R2).
+ * **Sterile restore.** With [sterile] `true`, synced data never survives
+ * the restore: the snapshot's entries for [StateTag.Remote] states are
+ * dropped (neither restored nor reported as issues), and every Remote state
+ * this store declares is reset to its initial value instead, in the same
+ * transaction — its initializer runs again, as [reset] runs it, and its
+ * result is staged raw only where it differs from the state's value, so its
+ * observers fire only if it changes. A never-read Remote state is
+ * materialized first, before the action opens. A Remote initializer reads
+ * the other Remote states at their reset values, this store's other declared
+ * states at the values the restore leaves them (restored, recomputed as
+ * below, else as the transaction holds them: an enclosing action's pending
+ * write, else the committed value), and other stores' states and `derived`
+ * states at committed values — so a Remote state computed from restored
+ * states is what a fresh store holding the restored values computes. So is
+ * a declared state the restore itself brings to life: one neither restored
+ * nor Remote that nothing had read before the restore, which the restore
+ * first materializes from pre-restore values (a target whose entry it skips
+ * or that holds no value, or a state a Remote initializer reads, directly or
+ * through other states). The same reset re-runs its initializer, reading as
+ * a Remote initializer does, so it holds what a first read after the restore
+ * computes — unless a write has committed to it since it came to life. A
+ * state live before the restore keeps its value, as a plain restore leaves
+ * it. `derived` states are not written back, even into the store that took
+ * the snapshot: they recompute from the restored sources once the restore
+ * commits. The report lists the reset Remote states in
+ * [RestoreReport.sterilized]. As after [reset], `removeState`/`clearStates`
+ * refuse a state the reset re-ran until the restore's transaction (or the
+ * action or frame it joined) ends. A throwing initializer, or an initializer
+ * cycle, rolls the whole restore back: nothing changes.
+ *
+ * Experimental (issue #20, R1; schema versions R2; sterile R3).
  *
  * @throws IllegalStateException like [Store.action]: if the store is
  *   disposed, or when called from inside a state initializer or a
@@ -343,4 +424,5 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
 fun <V : Store<V>> V.restore(
     snapshot: StoreSnapshot,
     policy: RestorePolicy,
-): TransactionResult<RestoreReport> = runRestore(snapshot, policy) { it }
+    sterile: Boolean = false,
+): TransactionResult<RestoreReport> = runRestore(snapshot, policy, sterile) { it }

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalStoreApi::class)
+
 package com.vynatix.holdfast
 
 import kotlinx.atomicfu.locks.SynchronousMutex
@@ -65,6 +67,12 @@ internal class StateDeclaration<T : Any>(
     val local: Boolean,
     /** The sources of a [StateKind.DerivedBacking] state; empty otherwise. */
     val sources: List<State<*>> = emptyList(),
+    /**
+     * The state's [StateTag]s ([State.tags]): as declared, already validated
+     * ([validateTags]); for a [StateKind.DerivedBacking] state, the taint of
+     * its [sources] ([derivedTags]); empty for an internal state.
+     */
+    val tags: Set<StateTag> = emptySet(),
 ) {
     /** The live state, or `null` until materialized (and again after `removeState`/`clearStates`/`dispose`). */
     @kotlin.concurrent.Volatile
@@ -98,11 +106,13 @@ internal const val NO_LATCH_OWNER = Long.MIN_VALUE
  * of a caller invoking `getValue` by hand (a wrapper delegate that does not
  * forward [provideDelegate]); such a state is declared only once it is read.
  */
+@Suppress("LongParameterList") // One declaration's fields, carried until provideDelegate names the state.
 internal class DeclaringStateDelegate<T : Any>(
     private val store: Store<*>,
     private val transformer: Transformer<T>?,
     private val distinct: Boolean,
     private val codec: StateCodec<T>?,
+    private val tags: Set<StateTag>,
     private val initializer: Initializer<T>,
     private val declaration: StateDeclaration<T>? = null,
 ) : StateDelegate<T> {
@@ -115,7 +125,8 @@ internal class DeclaringStateDelegate<T : Any>(
         property: KProperty<*>,
     ): StateDelegate<T> {
         store.checkNotDisposed()
-        return DeclaringStateDelegate(store, transformer, distinct, codec, initializer, declare(thisRef, property))
+        val bound = declare(thisRef, property)
+        return DeclaringStateDelegate(store, transformer, distinct, codec, tags, initializer, bound)
     }
 
     override fun getValue(
@@ -135,11 +146,19 @@ internal class DeclaringStateDelegate<T : Any>(
         property: KProperty<*>,
     ): StateDeclaration<T> = declare(thisRef, property).also { declaredOnRead = it }
 
+    /**
+     * Declare the state on [store] under [property]'s name. Its tags are
+     * checked first, so a refused combination fails where the state is
+     * declared, naming it.
+     *
+     * @throws IllegalArgumentException for a refused tag combination.
+     */
     private fun declare(
         thisRef: Any?,
         property: KProperty<*>,
-    ): StateDeclaration<T> =
-        store.registry.declare(
+    ): StateDeclaration<T> {
+        validateTags("${store.displayName}.${property.name}", tags)
+        return store.registry.declare(
             StateDeclaration(
                 store = store,
                 name = property.name,
@@ -150,8 +169,25 @@ internal class DeclaringStateDelegate<T : Any>(
                 codec = codec,
                 property = property,
                 local = thisRef == null,
+                tags = tags,
             ),
         )
+    }
+}
+
+/**
+ * The delegate of `Store.state`'s experimental overload: checks that the store
+ * is not disposed, and copies [tags].
+ */
+internal fun <T : Any> Store<*>.checkedDeclaringDelegate(
+    transformer: Transformer<T>?,
+    distinct: Boolean,
+    codec: StateCodec<T>?,
+    tags: Set<StateTag>,
+    initialize: Initializer<T>,
+): StateDelegate<T> {
+    checkNotDisposed()
+    return DeclaringStateDelegate(this, transformer, distinct, codec, tags.toSet(), initialize)
 }
 
 /** Where a declaration came from, for failure messages. */

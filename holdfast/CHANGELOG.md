@@ -358,6 +358,12 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   differed in which states had been read no longer mismatch on state names.
   The backing states of `derived` are not compared.
 
+- **`MutableState.toString()` names the state** — `MutableState(CounterStore.count)`
+  (`MutableState(a state of CounterStore)` for one constructed by hand)
+  instead of the default identity string. It never shows the value, so a
+  modified-states set in a log line cannot leak a `Secret` value (it never
+  showed values before either).
+
 - **`Store.state`'s delegate reads take no lock once the state exists.** A read
   used to look the state up by name under `propertiesLock` every time. And
   `removeState`/`clearStates` shut a removed state's observers and bridge down
@@ -467,10 +473,11 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   its shape.
 
 - **Snapshots that leave memory** (`@ExperimentalStoreApi`, issue #20 R1):
-  - `Store.state(transformer, distinct, codec, initialize)` — an overload of
-    `state` that gives the state a `StateCodec`. A call that passes no `codec`
-    (`state { … }`, `state(transformer = t) { … }`) still resolves to the
-    stable overload and needs no opt-in. It throws on a disposed store.
+  - `Store.state(transformer, distinct, codec, tags, initialize)` — an
+    overload of `state` that gives the state a `StateCodec` (and state tags;
+    see "State tags" below). A call that passes neither (`state { … }`,
+    `state(transformer = t) { … }`) still resolves to the stable overload and
+    needs no opt-in. It throws on a disposed store.
   - `StoreSnapshot.encode(includeRemote = false)` and
     `StoreSnapshot.decode(text)` — canonical text in the v1 store format,
     `{"format":"holdfast.store","v":1,"schema":N,"states":{…},"skipped":[…]}`:
@@ -481,20 +488,21 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     containers nested deeper than 64 levels without deep recursion, and throws
     `SnapshotFormatException`, whose message names the problem, an offset
     and possibly a state name but never quotes a state's value, and which has
-    no cause. `includeRemote` is
-    reserved for state tags and changes nothing yet. `schemaVersion` is the
+    no cause. `includeRemote` decides whether `Remote` states are written
+    (see "State tags" below). `schemaVersion` is the
     schema version of the store captured (see "Schema versions" below).
   - `StoreSnapshot.entry(state)` / `snapshot[state]` — typed reads through a
     `State`: `SnapshotEntry.Present(value)` (the `Transformer.get` view, so an
     encrypted state reads plaintext), `SnapshotEntry.Absent`, or `Redacted` (a
-    value withheld from the text). A captured snapshot answers the states of
+    value withheld from the text, or a `Secret` state's value). A captured snapshot answers the states of
     the store instance that took it and throws `IllegalArgumentException` for
     another instance's; a decoded one answers any store's state by name,
     through that state's codec. Both work after the store is disposed.
     `render()` shows the stored values for debugging.
-  - `restore(snapshot, policy): TransactionResult<RestoreReport>` with
+  - `restore(snapshot, policy, sterile = false): TransactionResult<RestoreReport>`
+    (`sterile`: see "State tags" below) with
     `RestorePolicy` (`Strict`, `IgnoreUnknown`, `BestEffort`),
-    `RestoreReport` (`restored`, `kept`, `issues`), `RestoreIssue`
+    `RestoreReport` (`restored`, `kept`, `issues`, and `sterilized`), `RestoreIssue`
     (`UnknownState`, `NoCodec`, `Undecodable`, `TypeMismatch`) and
     `RestoreRejectedException`. The restore decides everything before its
     action opens — materializing never-read targets and running codecs, at top
@@ -548,6 +556,72 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     value; a library exception raised inside it (a refused write, a misuse of
     the view) is.
   - GUIDE §16.3 documents all of it, with a compiled three-schema example.
+
+- **State tags, snapshot scopes and redaction** (`@ExperimentalStoreApi`,
+  issue #20 R3):
+  - `StateTag` — `Secret`, `UserAuthored` and `Remote`: a closed set that is
+    not exhaustive (an abstract class with an internal constructor, so a
+    later tag breaks no `when` with an `else`). Declared with
+    `state(tags = setOf(…)) { … }` (the set is copied); `Secret` with
+    `UserAuthored`, and `UserAuthored` with `Remote`, fail the declaration
+    with an `IllegalArgumentException` naming the state. `State.tags` reads
+    a state's tags (and keeps answering after dispose); `Store.taggedStates(tag)`
+    lists a store's states carrying one, in declaration order, materializing
+    never-read ones first. A `derived`/`suspendDerived` state is `Secret`
+    when any of its sources is, and never `UserAuthored` or `Remote`.
+  - `Secret` values are withheld, never scrambled: reads (`value`,
+    observers, `effect`, `derived`) stay plaintext, and a captured snapshot
+    keeps the raw value, so `restore(snapshot)` puts it back. `encode()`
+    writes it as `null` in every scope (its codec never sees it); a
+    captured snapshot's `render()` shows `<redacted>`; `entry(state)`
+    returns `Redacted` (and `snapshot[state]` `null`) unless the snapshot
+    was captured with `SnapshotScope.Raw`, and a decoded snapshot never
+    decodes a `Secret` state's text. `:holdfast-testing` records `Redacted` in timeline events
+    (`EmissionEvent`, `BridgePublished`, `BridgeObserved`) and bridge
+    views, refuses value matchers on a `Secret` state with a teaching error
+    (`emitted(prop, value)` throws `IllegalArgumentException`; the bridge
+    value matchers `IllegalStateException`), and keeps `Secret` values out
+    of `shouldMatch`/`shouldMatchExactly`/`shouldMatchSnapshotOf` failure
+    messages. The built-in middleware never showed a state value; tests now
+    pin that for blocking actions, `atomic`, `suspendAction` and
+    `suspendAtomic`.
+  - `SnapshotScope` — `All` (what `snapshot()` captures), `UserAuthored`
+    (exactly the `UserAuthored` states, running only their never-read
+    initializers, no `derived` state), `Raw` (typed reads return `Secret`
+    plaintext, in memory only). `snapshot(scope)` captures in a scope; the
+    scope plays no part in equality.
+  - `encode(includeRemote = false)` now leaves `Remote` states out (neither
+    written nor listed as skipped) unless `includeRemote` is `true`; decoded
+    text carries no tags and is written back as it was read.
+  - Sterile restore: `restore(snapshot, policy, sterile = true)` drops the
+    snapshot's `Remote` entries and resets every `Remote` state to its
+    initial value in the restore's one transaction, through the reset pass
+    (initializers re-run, output staged raw and only where it differs; a
+    never-read `Remote` state is materialized before the action opens); its
+    `Remote` entries are never decoded or type-checked. A `Remote`
+    initializer reads the other `Remote` states at their reset values and
+    the store's other declared states at the values the restore leaves them
+    (restored, else an enclosing action's pending write, else committed), as
+    a fresh store holding them would. A declared state the restore itself
+    brings to life (never read before, materialized by the restore from
+    pre-restore values, not restored, not written since) is recomputed by the
+    same pass from the restored values; a state live before the restore
+    keeps its value. `derived` states are not written back by a sterile
+    restore; they recompute from the restored sources.
+    `RestoreReport.sterilized` lists the reset states, and
+    `removeState`/`clearStates` refuse a state the pass re-ran until the
+    restore's transaction ends. A throwing initializer rolls the whole
+    restore back.
+  - `State<*>.displayValue(value)` (`@StoreInternalApi`) — what
+    `:holdfast-testing` records a state's value as in timeline events and
+    bridge histories (`Redacted` for a `Secret` state). Companion modules
+    only.
+  - GUIDE §16.4 documents all of it, and answers the issue's first open
+    question: redaction is a tag honoured where values are read out of a
+    snapshot, rendered, encoded and recorded, not a `RedactingTransformer`
+    (reads must stay plaintext, and the transformer slot belongs to
+    `EncryptingTransformer`). `EncryptingTransformer`'s KDoc no longer calls
+    the plaintext transient, and says encryption is not redaction.
 
 - **`Store.AsyncSerializer.tryBlockingAcquire()`** (`@StoreInternalApi`) — a
   non-blocking acquire for the store's non-blocking paths (the `derived`

@@ -220,14 +220,25 @@ class StoreHandle<V : Store<V>> internal constructor(
      * [com.vynatix.holdfast.bridge.KvBridge]) only the wrapper-tracked publishes
      * are visible — but only if the bridge was wrapped at install time.
      *
+     * For a `StateTag.Secret` state the view withholds every published value
+     * (each entry of `published` is [com.vynatix.holdfast.Redacted]), and the
+     * bridge value matchers refuse it; see [BridgeView].
+     *
      * @throws IllegalStateException if the state has no bridge attached.
      */
     fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
         val state = prop.get(store)
         val wrapper = bridgeWrappers[state]
-        if (wrapper != null) {
-            return BridgeView(BridgeView.WrappedSource(wrapper))
-        }
+        val view = wrapper?.let { BridgeView(BridgeView.WrappedSource(it)) } ?: attachedBridgeView(prop, state)
+        // A Secret state's published values are withheld here, as in the timeline.
+        return if (PrivilegedHooks.isSecret(state)) view.withheldFor(prop.name) else view
+    }
+
+    /** [bridge]'s view of a state no install-time wrapper covers. */
+    private fun attachedBridgeView(
+        prop: KProperty1<V, State<*>>,
+        state: State<*>,
+    ): BridgeView<*> {
         // Fallback: no install-time wrapper, but the state may have a bridge
         // attached after track(v). Probe the MutableState.bridge directly and
         // try to construct a view from a known test-bridge type.

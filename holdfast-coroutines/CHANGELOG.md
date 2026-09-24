@@ -8,6 +8,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`suspendDerived` inherits the `Secret` tag of its sources** (issue #20,
+  R3, through `:holdfast`'s `registerDerivedBackingState`): a suspending
+  derived with a `StateTag.Secret` state among its sources is `Secret`
+  itself, so its value is withheld from encoded snapshots, renders and test
+  timelines like its source's. `SecretRedactionSuspendTest` pins that no built-in
+  middleware writes a `Secret` value under `suspendAction` or
+  `suspendAtomic`.
+
 - **`suspendAtomic` graduated to a first-class cross-store frame**, matching
   the core `atomic` contract (see `:holdfast`'s changelog and GUIDE §15):
   `policy: FramePolicy = FramePolicy.Strict` parameter, enrollment

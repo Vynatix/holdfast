@@ -118,7 +118,11 @@ class MutableState<T : Any>(
      * its reset value when it is one of the declared states that reset is
      * resetting, running this state's own initializer first if its reset is
      * still pending (see [ResetPass]). That runs user code, so it happens before
-     * [stateLock] is taken.
+     * [stateLock] is taken. An initializer a sterile `restore()` re-runs — a
+     * Remote state's, or one the restore brought to life — reads the states
+     * that restore re-runs that way, and this store's other declared states at
+     * the values the restore's transaction holds for them (restored, else an
+     * enclosing action's pending writes).
      */
     override val value: T
         get() {
@@ -230,10 +234,16 @@ class MutableState<T : Any>(
     }
 
     /**
-     * Human-readable identity of the store that owns this state, for failure
-     * messages. Falls back to `"Store"` on targets without class simple names.
+     * Names the state — `MutableState(CounterStore.count)` — and never shows
+     * its value, so a state that reaches a log line or a failure message (a
+     * [Transaction.modifiedStates] set, say) cannot leak a
+     * [StateTag.Secret] value. A state constructed by hand, outside any
+     * store's declarations, names its store only.
      */
-    internal fun describeOwner(): String = owningStore::class.simpleName ?: "Store"
+    override fun toString(): String {
+        val name = declaration?.qualifiedName ?: "a state of ${owningStore.displayName}"
+        return "MutableState($name)"
+    }
 
     /**
      * Bridge-driven update: writes `currentValue` and notifies observers, but does
@@ -373,6 +383,13 @@ class MutableState<T : Any>(
         }
     }
 }
+
+/**
+ * Human-readable identity of the store that owns this state, for failure
+ * messages. Falls back to `"Store"` on targets without class simple names.
+ * (An extension, so the class stays within its function budget.)
+ */
+internal fun MutableState<*>.describeOwner(): String = owningStore.displayName
 
 /**
  * Test-only window onto the live observer count for a [State]. Convenience

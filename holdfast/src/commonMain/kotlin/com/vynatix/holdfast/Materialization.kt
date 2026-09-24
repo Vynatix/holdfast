@@ -23,10 +23,10 @@ import kotlinx.atomicfu.locks.SynchronousMutex
 /**
  * The live state of [decl], created from its initializer on first need. At
  * most one thread materializes it at a time; the others wait for it. (The
- * experimental `reset()` re-runs the initializer without this latch, so that
- * re-run can overlap a materialization on another thread.) A throwing
- * initializer propagates to its caller and publishes nothing, so the next
- * read runs it again.
+ * experimental `reset()`, and a sterile `restore()`, re-run the initializer
+ * without this latch, so that re-run can overlap a materialization on another
+ * thread.) A throwing initializer propagates to its caller and publishes
+ * nothing, so the next read runs it again.
  *
  * @throws IllegalStateException when the store is disposed, or when the
  *   initializer would (transitively) need this very state: an initializer
@@ -37,13 +37,13 @@ internal fun <T : Any> materialize(decl: StateDeclaration<T>): MutableState<T> =
 
 /**
  * Materialize every [StateKind.Declared] state of this store that is not live
- * yet, in declaration order, taking no store lock (a caller inside an action
- * still holds its `transactionLock`).
+ * yet — or only those [select] picks — in declaration order, taking no store
+ * lock (a caller inside an action still holds its `transactionLock`).
  */
-internal fun Store<*>.materializeDeclaredStates() {
+internal fun Store<*>.materializeDeclaredStates(select: (StateDeclaration<*>) -> Boolean = { true }) {
     checkNotDisposed()
     for (decl in registry.declarationsInOrder()) {
-        if (decl.kind == StateKind.Declared && decl.materialized == null) materialize(decl)
+        if (decl.kind == StateKind.Declared && decl.materialized == null && select(decl)) materialize(decl)
     }
 }
 

@@ -7,7 +7,8 @@ package com.vynatix.holdfast
  * How a [restore] treats snapshot entries it cannot restore — each one a
  * [RestoreIssue]. Whatever the policy, a restore either stages every entry it
  * restores in one transaction or changes nothing, and a state the snapshot
- * has no entry for keeps its value (its observers do not fire).
+ * has no entry for keeps its value (its observers do not fire; a sterile
+ * restore resets its [StateTag.Remote] states instead).
  *
  * Experimental (issue #20, R1).
  */
@@ -99,21 +100,40 @@ class RestoreReport internal constructor(
     /**
      * The states this store declares that kept their value because the
      * snapshot holds none for them: no entry at all, a state its store could
-     * not encode ([StoreSnapshot.unencodableStateNames]), or a withheld one.
+     * not encode ([StoreSnapshot.unencodableStateNames]), or a withheld one
+     * (a Secret state's, in encoded text). A sterile restore's Remote states
+     * are in [sterilized] instead, and a state listed here that a sterile
+     * restore brought to life holds the value it computed from the restored
+     * values (see [restore]).
      */
     val kept: Set<String>,
     /** The entries the restore skipped, which its [RestorePolicy] tolerated. */
     val issues: List<RestoreIssue>,
+    /**
+     * The [StateTag.Remote] states a sterile restore (`sterile = true`) reset
+     * to their initial values, whatever the snapshot held for them — each
+     * one, whether or not its value changed. Empty for any other restore.
+     *
+     * Experimental (issue #20, R3).
+     */
+    val sterilized: Set<String> = emptySet(),
 ) {
     override fun equals(other: Any?): Boolean =
-        other is RestoreReport && restored == other.restored && kept == other.kept && issues == other.issues
+        other is RestoreReport &&
+            restored == other.restored &&
+            kept == other.kept &&
+            issues == other.issues &&
+            sterilized == other.sterilized
 
     override fun hashCode(): Int {
         val names = restored.hashCode() * HASH_MULTIPLIER + kept.hashCode()
-        return names * HASH_MULTIPLIER + issues.hashCode()
+        return (names * HASH_MULTIPLIER + issues.hashCode()) * HASH_MULTIPLIER + sterilized.hashCode()
     }
 
-    override fun toString(): String = "RestoreReport(restored=$restored, kept=$kept, issues=$issues)"
+    override fun toString(): String {
+        val names = "restored=$restored, kept=$kept, sterilized=$sterilized"
+        return "RestoreReport($names, issues=$issues)"
+    }
 }
 
 /**

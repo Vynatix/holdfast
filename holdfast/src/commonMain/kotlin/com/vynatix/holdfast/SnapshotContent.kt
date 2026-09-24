@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalStoreApi::class)
+
 package com.vynatix.holdfast
 
 import kotlin.reflect.KClass
@@ -19,8 +21,34 @@ internal sealed class SnapshotContent {
     /** The states the snapshot's store declares but could not encode. */
     abstract val unencodable: Set<String>
 
-    /** This content as a v1 store body: the encodable projection. */
-    abstract fun toBody(): StoreBody
+    /**
+     * This content as a v1 store body: the encodable projection. Remote
+     * states are left out unless [includeRemote], and Secret states are
+     * written as `null` (captured content only: decoded text carries no tags).
+     */
+    abstract fun toBody(includeRemote: Boolean = false): StoreBody
+}
+
+/** The store instance, and its class, that took a captured snapshot. */
+internal class CaptureOrigin(
+    /** [Store.lockOrderKey] of the store captured. */
+    val key: Long,
+    /** The class of the store captured. */
+    val storeClass: KClass<*>,
+)
+
+/** A capture's [SnapshotScope], and which of its states carry the tags a snapshot enforces. */
+internal class CaptureTags(
+    val scope: SnapshotScope,
+    /** The captured states tagged [StateTag.Secret]: never encoded, rendered or (outside [SnapshotScope.Raw]) read. */
+    val secret: Set<String>,
+    /** The captured states tagged [StateTag.Remote]: encoded only with `includeRemote`. */
+    val remote: Set<String>,
+) {
+    companion object {
+        /** A snapshot made by hand: scope [SnapshotScope.All], no tagged state. */
+        val None = CaptureTags(SnapshotScope.All, emptySet(), emptySet())
+    }
 }
 
 /** What [Store.snapshot] captures. */
@@ -29,23 +57,34 @@ internal class CapturedContent(
     val rawValues: Map<String, Any>,
     /** Raw values of derived backing states; restored only into the store with [originKey]. */
     val derivedBackingValues: Map<String, Any> = emptyMap(),
-    /** [Store.lockOrderKey] of the store captured, or `null` for a snapshot made by hand. */
-    val originKey: Long? = null,
-    /** The class of the store captured, or `null` for a snapshot made by hand. */
-    val originClass: KClass<*>? = null,
+    /** The store instance that took the snapshot, or `null` for a snapshot made by hand. */
+    val origin: CaptureOrigin? = null,
     /** The codec of each state in [rawValues] that has one. */
     val codecs: Map<String, StateCodec<*>> = emptyMap(),
     /** The schema version of the store captured ([SchemaVersioned]); 1 for a snapshot made by hand. */
     override val schema: Int = DEFAULT_SCHEMA_VERSION,
+    /** The capture's scope and tagged states. */
+    val tags: CaptureTags = CaptureTags.None,
 ) : SnapshotContent() {
+    /** [Store.lockOrderKey] of the store captured, or `null` for a snapshot made by hand. */
+    val originKey: Long? get() = origin?.key
+
+    /** The class of the store captured, or `null` for a snapshot made by hand. */
+    val originClass: KClass<*>? get() = origin?.storeClass
+
     override val names: Set<String> get() = rawValues.keys
 
     override val unencodable: Set<String> get() = rawValues.keys - codecs.keys
 
-    override fun toBody(): StoreBody {
+    override fun toBody(includeRemote: Boolean): StoreBody {
+        val written = { name: String -> includeRemote || name !in tags.remote }
         val texts = LinkedHashMap<String, String?>()
-        for ((name, codec) in codecs) texts[name] = encodeValue(name, codec, rawValues.getValue(name))
-        return StoreBody(schema, texts, emptyMap(), unencodable)
+        for ((name, codec) in codecs) {
+            if (!written(name)) continue
+            // A Secret value never reaches its codec: `null` is the withheld marker.
+            texts[name] = if (name in tags.secret) null else encodeValue(name, codec, rawValues.getValue(name))
+        }
+        return StoreBody(schema, texts, emptyMap(), unencodable.filterTo(LinkedHashSet(), written))
     }
 }
 
@@ -59,8 +98,12 @@ internal class DecodedContent(
 
     override val unencodable: Set<String> get() = body.skipped
 
-    /** Families a newer writer wrote are kept for reading but never written back (see SnapshotEnvelope.kt). */
-    override fun toBody(): StoreBody = body.copy(families = emptyMap())
+    /**
+     * Families a newer writer wrote are kept for reading but never written
+     * back (see SnapshotEnvelope.kt). The text carries no tags, so it is
+     * written back as it was read, whatever [includeRemote] says.
+     */
+    override fun toBody(includeRemote: Boolean): StoreBody = body.copy(families = emptyMap())
 }
 
 /**
@@ -84,24 +127,33 @@ private fun encodeValue(
 
 /**
  * The snapshot as text for a person: one line per state, sorted by name — a
- * captured state's raw value, a decoded state's text as a JSON string — plus
- * the states it has no value for. See [StoreSnapshot.render].
+ * captured state's raw value (a Secret state's withheld), a decoded state's
+ * text as a JSON string — plus the states it has no value for. See
+ * [StoreSnapshot.render].
  */
 internal fun SnapshotContent.render(): String =
     buildString {
-        append("StoreSnapshot (schema ").append(schema).append(if (this@render is DecodedContent) ", decoded)" else ")")
+        append("StoreSnapshot (schema ").append(schema).append(renderKind())
         for (name in names.sorted()) {
             append("\n  ").append(name)
             when (this@render) {
-                is CapturedContent -> append(" = ").append(rawValues.getValue(name))
+                is CapturedContent -> append(" = ").append(renderedValue(name in tags.secret, rawValues.getValue(name)))
                 is DecodedContent -> append(renderDecoded(name))
             }
         }
+    }
+
+/** How [render]'s header names the snapshot's kind: decoded, or a capture's scope other than [SnapshotScope.All]. */
+private fun SnapshotContent.renderKind(): String =
+    when {
+        this is DecodedContent -> ", decoded)"
+        this is CapturedContent && tags.scope !== SnapshotScope.All -> ", scope ${tags.scope})"
+        else -> ")"
     }
 
 private fun DecodedContent.renderDecoded(name: String): String =
     when {
         name in body.families -> " = <keyed state family>"
         name in body.skipped -> " (not encoded)"
-        else -> body.states.getValue(name)?.let { " = " + buildString { appendJsonString(it) } } ?: " = <redacted>"
+        else -> body.states.getValue(name)?.let { " = " + buildString { appendJsonString(it) } } ?: " = $REDACTED_TEXT"
     }

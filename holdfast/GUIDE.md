@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction
 
 ---
 
@@ -189,21 +189,26 @@ state from it again, and the experimental `reset()` (§16.1) runs it again to
 put the state back to its initial value.
 
 `init` runs once per materialization, on the thread that first needs the
-state. (`reset()` also re-runs it inside its own transaction; see §16.1 for
-how that run differs.) The store takes no lock to run it — only the state's
-own latch (§10.2) — and another thread needing the state meanwhile waits for
-it. It does run under whatever locks its caller already holds: first needed
-inside an action, an `atomic(...)` frame, an observer during commit fanout,
-or a `snapshot()`/`restore()` called inside an action, it runs under that
-action's locks, and when `reset()` re-runs it, it always runs under the reset
-action's locks. So keep initializers cheap and never make one wait for another
-thread's store work. It may read other states (materializing them in turn),
+state. (`reset()` also re-runs it inside its own transaction, and a sterile
+`restore()` re-runs a `Remote` state's; see §16.1/§16.4 for how those runs
+differ.) The store takes no lock to run it — only the state's own latch
+(§10.2) — and another thread needing the state meanwhile waits for it. It
+does run under whatever locks its caller already holds: first needed inside
+an action, an `atomic(...)` frame, an observer during commit fanout, or a
+`snapshot()`/`restore()` called inside an action, it runs under that action's
+locks, and when `reset()` or a sterile `restore()` re-runs it, it always runs
+under that action's locks. So keep initializers cheap and never make one wait
+for another thread's store work. It may read other states (materializing them in turn),
 and it sees their committed values only — never the pending writes of an
 action on its thread, not even the one that needed the state: the initial
 value is committed at once and survives that action's rollback (§9.7). An
 initializer that `reset()` re-runs is the exception: it reads its store's
 declared states at their reset values, and its result is staged into the
-reset's transaction and rolls back with it (§16.1). It may not write:
+reset's transaction and rolls back with it (§16.1). So is one that a sterile
+`restore()` re-runs: it reads the other `Remote` states at their reset values
+and its store's other declared states at the values the restore's transaction
+holds for them (restored, or an enclosing action's pending writes), and its
+result rolls back with that transaction (§16.4). It may not write:
 `mutate`/`update`, `action`, `atomic`, `reset()` and `emit` inside an
 initializer throw `IllegalStateException`, and so does an initializer that
 needs its own state, directly or through other initializers (a cycle). A
@@ -291,8 +296,11 @@ write. Reads on the same thread (`count.value`) see the pending write
 (read-your-own-writes) — except inside a state initializer or a schema
 migration (`SchemaVersioned.migrate`, run by a `restore` called in the
 action), which read committed values only, or, in an initializer `reset()`
-re-runs, its store's reset values (§4.1/§16.1/§16.3). Reads on other
-threads still see the committed value, never the pending one.
+re-runs, its store's reset values; in an initializer a sterile `restore()`
+re-runs, the `Remote` states' reset values and its store's other declared
+states at the values the restore's transaction holds for them (restored, or
+an enclosing action's pending writes) (§4.1/§16.1/§16.3/§16.4). Reads on
+other threads still see the committed value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
@@ -532,9 +540,12 @@ Three things to internalize:
 2. **Read-your-own-writes is owner-thread-only.** The thread executing the
    action sees its own pending writes (except inside a state initializer or
    a schema migration, which read committed values only, or, in an
-   initializer `reset()` re-runs, its store's reset values —
-   §4.1/§16.1/§16.3). Other threads see committed values only — they cannot
-   witness "in-flight" mutations.
+   initializer `reset()` re-runs, its store's reset values; in an
+   initializer a sterile `restore()` re-runs, the `Remote` states' reset
+   values and its store's other declared states at the values the restore's
+   transaction holds for them, restored or an enclosing action's pending
+   writes — §4.1/§16.1/§16.3/§16.4). Other threads see committed values
+   only — they cannot witness "in-flight" mutations.
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
@@ -929,7 +940,9 @@ thread. An initializer that runs inside the action, because the action is the
 first to need its state, and a `migrate` that a `restore` called in the action
 runs, both read committed values, not the action's pending writes. (An
 initializer that `reset()` re-runs reads its store's reset values instead,
-§16.1.)
+§16.1. One that a sterile `restore()` re-runs reads its store's other declared
+states as the restore's transaction holds them: restored, or this action's
+pending writes, §16.4.)
 
 ### 9.8 Savepoint semantics
 
@@ -1181,7 +1194,7 @@ never T1's pending writes.
 | Member | Signature | Description |
 |---|---|---|
 | `state` | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `initialize` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
-| `state` (with a codec) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with; a call that passes no `codec` resolves to the stable overload and needs no opt-in; throws on a disposed store (§16.2) |
+| `state` (with a codec or tags) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, tags: Set<StateTag> = emptySet(), initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with (§16.2) and `StateTag`s the library enforces — `Secret`, `UserAuthored`, `Remote` (§16.4); a call that passes neither resolves to the stable overload and needs no opt-in; throws on a disposed store, and a refused tag combination fails the declaration with `IllegalArgumentException` |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
@@ -1191,15 +1204,17 @@ never T1's pending writes.
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
-| `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`), and again at every `reset()` (§16.1). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
+| `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`), and again at every `reset()` (§16.1), and a `Remote` state's at every sterile `restore()` (§16.4). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
 | `bindClock` | `fun bindClock(clock: Clock?)` *(experimental)* | Binds a clock (level 2), e.g. a fixed test clock; `null` unbinds. Throws on a disposed store. `storeTest` restores each tracked store's binding to its value at first `track` (`store.action {}` doesn't auto-track), so bind after tracking |
 | `reset` | `fun <V : Store<V>> V.reset(): TransactionResult<Unit>` *(experimental, extension)* | Puts every declared state back to its initializer's value in one transaction: initializers re-run (reading each other's reset values), results staged raw, only changed states staged and fired; a throwing initializer rolls it all back (§16.1) |
-| `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3) |
+| `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3). `sterile = true` drops the snapshot's `Remote` entries and resets every `Remote` state to its initial value in the same transaction (§16.4) |
+| `snapshot` (with a scope) | `fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot` *(experimental, extension)* | `All` is `snapshot()`; `UserAuthored` captures only the `UserAuthored` states; `Raw` lets typed reads return a `Secret` state's plaintext, in memory only (§16.4) |
+| `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`), and the store's states carrying a tag in declaration order, never-read ones materialized first; `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
-| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read (or `snapshot()`/`restore()`/`reset()`) recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations). Both throw `IllegalStateException` for a state with a pending write in the active transaction or one enclosing it, or held by an open `reset()` (§16.1) |
+| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read (or `snapshot()`/`restore()`/`reset()`) recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations). Both throw `IllegalStateException` for a state with a pending write in the active transaction or one enclosing it, or held by an open `reset()` (§16.1) or sterile `restore()` (§16.4) |
 
 ### Extensions on `State<T>` (member-extensions of `Store<Self>`)
 
@@ -1230,9 +1245,10 @@ manages them.
 
 | Member | Signature | Description |
 |---|---|---|
-| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer or a schema migration (`SchemaVersioned.migrate`), which read committed values only, or, in an initializer re-run by `reset()`, its store's reset values — §4.1/§9.7/§16.1/§16.3) |
+| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer or a schema migration (`SchemaVersioned.migrate`), which read committed values only, or, in an initializer re-run by `reset()`, its store's reset values; in an initializer re-run by a sterile `restore()`, the `Remote` states' reset values and its store's other declared states at the values the restore's transaction holds for them, restored or an enclosing action's pending writes — §4.1/§9.7/§16.1/§16.3/§16.4) |
 | `observe` | `fun observe(observer: (T) -> Unit): Disposable` | Subscribe with initial fire |
 | `bridge` | `var bridge: Bridge<T>?` | Get/set the bridge; setting installs an observer on it |
+| `toString` | `override fun toString(): String` | Names the state (`MutableState(CounterStore.count)`), never its value (§16.4) |
 
 `MutableState` is the concrete state class. You will rarely instantiate
 it directly — `state { … }` does it for you.
@@ -1303,7 +1319,7 @@ capability is independently usable; pick the ones you need.
 
 ```kotlin
 class StoreSnapshot internal constructor(…) {
-    val stateNames: Set<String>   // every declared state; not the backing states of derived
+    val stateNames: Set<String>   // the states its scope captured (every declared state for snapshot()); not the backing states of derived
     val size: Int
     // equals/hashCode compare values; toString lists state names only.
     // Experimental (§16.2): schemaVersion, unencodableStateNames, encode, entry, get,
@@ -1311,8 +1327,9 @@ class StoreSnapshot internal constructor(…) {
 }
 
 fun <V : Store<V>> V.snapshot(): StoreSnapshot
+fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot   // experimental, §16.4
 fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>   // RestorePolicy.IgnoreUnknown
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>   // experimental, §16.2
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>   // experimental, §16.2/§16.4
 ```
 
 `snapshot` captures the raw stored value of every declared state (see §4.1
@@ -1353,7 +1370,9 @@ another restore policy, turn a snapshot into text and back, or read one
 state's value from it, see the experimental §16.2.
 
 To go back to the initial values rather than to a captured snapshot, use the
-experimental `reset()` (§16.1).
+experimental `reset()` (§16.1). To keep a state's value out of encoded text,
+renders and logs, or to capture only what the user wrote, see the
+experimental state tags (§16.4).
 
 ### 14.2 `Store.computed { }` / `Store.derived(sources) { }`
 
@@ -1442,6 +1461,13 @@ encrypt-on-write, decrypt-on-read. Stored `currentValue` is ciphertext;
 `KvBridge`-persisted bytes are ciphertext; reads through `state.value`
 are plaintext. Asymmetric-rollback safe (the library records raw
 ciphertext and writes raw on restore — never re-runs `transformer.set`).
+Encryption is not redaction: observers, `effect`, `derived` states and
+typed snapshot reads see plaintext, and an encoded snapshot holds the
+ciphertext. To keep the value out of encoded snapshots, renders, test
+timelines and middleware output, also tag the state `StateTag.Secret`
+(experimental, §16.4). An initializer's result is stored without `set`,
+like every initial value, so start from a value the cipher decrypts to
+itself (the empty string, for `XorCipher`) or from ciphertext.
 
 `XorCipher` is **NOT production-grade** — it's a KMP-pure stand-in.
 Production users implement `Cipher` over `javax.crypto` (JVM) or
@@ -1656,7 +1682,7 @@ canonical fix for the **primitive obsession** code smell.
 |---|---|
 | `com.vynatix:hallmark` *(separate [Hallmark repo](https://github.com/vynatix/hallmark))* | Core lib. No Holdfast dep. `Boxed` / `Rule` / `Validator` / composite DSL / 14 prebuilt rules / multi-error `HallmarkResult`. |
 | `com.vynatix:hallmark-coroutines` *(separate Hallmark repo)* | Suspend extension. `SuspendRule`, `SuspendValidator`, `suspendValidator { }` DSL. |
-| `com.vynatix:holdfast-hallmark` *(this repo)* | Holdfast adapter. `ValidatingTransformer`, `Store.boxed { }` factory, `BoxedCodec`. |
+| `com.vynatix:holdfast-hallmark` *(this repo)* | Holdfast adapter. `ValidatingTransformer`, `Store.boxed { }` / `boxedHandle { }` factories (plus experimental `codec`/`tags` overloads, §16.4), `BoxedCodec`. |
 
 #### Core surface (`com.vynatix.hallmark`)
 
@@ -1819,7 +1845,7 @@ adopter-side.
 
 #### Holdfast integration (`:holdfast-hallmark`)
 
-Two state factories:
+State factories:
 
 ```kotlin
 class UserStore : Store<UserStore>() {
@@ -1850,8 +1876,26 @@ holdfast {
   is a `BoxedHandle<P, O>` bundling state + validator. Enables the
   `assign` infix (powered by Kotlin context parameters) for one-line
   civilize-and-mutate at the call site.
+- **`boxed(validator, codec = …, tags = …) { initial }` /
+  `boxedHandle(validator, codec = …, tags = …) { initial }`**
+  *(experimental, `@ExperimentalStoreApi`)* — the same factories, declared
+  through the experimental `state(transformer, distinct, codec, tags,
+  initialize)` overload. `codec` is the snapshot codec `snapshot().encode()`
+  writes the boxed value with; wrap a primitive codec, e.g.
+  `BoxedCodec(LongCodec, PinValidator)` (§16.2). `tags` are the state's
+  `StateTag`s (§16.4). A call that passes neither resolves to the stable
+  factory and needs no opt-in. For a `StateTag.Secret` state, a rejection by
+  the initializer, a write, `civilize` or `assign` throws a
+  `HallmarkException` whose violations keep their code, path and rule; each
+  message reads "`<code>` rejected the value (withheld: a Secret state)" and
+  the violations carry no arguments.
 - **`ValidatingTransformer`** — re-validates on every write, so
-  constructor bypass (`data class copy`) is rejected.
+  constructor bypass (`data class copy`) is rejected. A transformer you
+  construct yourself does not know its state's tags — that includes the
+  `Transformer.then` pipeline below — so hallmark's messages, which may quote
+  the rejected value, reach the exception even on a Secret-tagged state.
+  Declare a Secret boxed state with the `tags` overloads above, not with
+  `state(transformer = ValidatingTransformer(v), tags = setOf(StateTag.Secret))`.
 - **`BoxedCodec`** — round-trips `Boxed<P>` through any `Codec<P>`.
 
 #### Suspend validation (`hallmark-coroutines`)
@@ -1893,7 +1937,9 @@ suspend fun adoptUsername(name: String): TransactionResult<Unit> =
 
 Runs the suspend validator (which may do I/O), then mutates the Store state
 inside a `suspendAction { }`. Atomic: validation failure rolls back the
-entire transaction.
+entire transaction. For a `StateTag.Secret` state (declared with the `tags`
+overload above), the `HallmarkException` withholds the rejected value the
+same way; any other state keeps hallmark's messages.
 
 #### Transformer composition — `Transformer.then`
 
@@ -2207,12 +2253,13 @@ interface StateCodec<T : Any> {                 // stable; every bridge.Codec is
     fun decode(string: String): T
 }
 
-// Store member: the stable state(...) plus a codec.
+// Store member: the stable state(...) plus a codec (and tags, §16.4).
 @ExperimentalStoreApi
 fun <T : Any> state(
     transformer: Transformer<T>? = null,
     distinct: Boolean = false,
     codec: StateCodec<T>? = null,
+    tags: Set<StateTag> = emptySet(),
     initialize: Initializer<T>,
 ): StateDelegate<T>
 
@@ -2235,8 +2282,8 @@ sealed interface SnapshotEntry<out T : Any> {
 data object Redacted : SnapshotEntry<Nothing>
 
 enum class RestorePolicy { Strict, IgnoreUnknown, BestEffort }
-fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy): TransactionResult<RestoreReport>
-class RestoreReport { val restored: Set<String>; val kept: Set<String>; val issues: List<RestoreIssue> }
+fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>
+class RestoreReport { val restored: Set<String>; val kept: Set<String>; val issues: List<RestoreIssue>; val sterilized: Set<String> }
 sealed class RestoreIssue { UnknownState, NoCodec, Undecodable, TypeMismatch }  // stateName + reason
 class RestoreRejectedException : IllegalStateException { val policy; val issues }
 class SnapshotFormatException : IllegalArgumentException
@@ -2275,9 +2322,9 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   after `Transformer.set`: an `EncryptingTransformer` state is encoded as its
   ciphertext, and restoring that ciphertext does not encrypt it again.
 - **Declaring.** `state(codec = …) { … }` is an experimental overload of
-  `state`. A call that passes no codec, such as `state { … }` or
-  `state(transformer = t) { … }`, still resolves to the stable overload and
-  needs no opt-in.
+  `state`, which also takes `tags` (§16.4). A call that passes neither a
+  codec nor tags, such as `state { … }` or `state(transformer = t) { … }`,
+  still resolves to the stable overload and needs no opt-in.
 - **Encoding.** `encode()` writes version 1 of the store format:
   `{"format":"holdfast.store","v":1,"schema":1,"states":{…},"skipped":[…]}`.
   `states` maps each state with a codec to its codec text. `skipped` names the
@@ -2291,7 +2338,8 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   from their sources. `schema` is the store's schema version, which
   `schemaVersion` reads back: 1 unless the store implements
   `SchemaVersioned` (§16.3).
-  `includeRemote` is reserved for state tags and changes nothing yet.
+  A `Secret` state is written as `null`, and a `Remote` one is left out
+  unless you pass `includeRemote = true` (§16.4).
 - **Decoding.** `decode` throws `SnapshotFormatException` for text it cannot
   read. The message names the problem, a character offset and possibly a
   state name, but never quotes a state's value, and the exception has no
@@ -2341,8 +2389,9 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
 - **Typed reads.** `snapshot[state]` returns the value the snapshot holds for
   `state`, typed by the state. It returns the `Transformer.get` view, so an
   encrypted state reads as plaintext. `entry(state)` distinguishes
-  `Present(value)` from `Absent` and `Redacted` (a value withheld from the
-  text). A captured snapshot answers the states of the store instance that
+  `Present(value)` from `Absent` and `Redacted` (a value withheld: `null`
+  in the text, or a `Secret` state's value outside a `SnapshotScope.Raw`
+  capture, §16.4). A captured snapshot answers the states of the store instance that
   took it, and throws `IllegalArgumentException` for another instance's
   state. A decoded snapshot answers any store's state by name, decoding the
   text with that state's codec. It reads the text as written, without a
@@ -2358,7 +2407,8 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   equals a decoded one: compare their `encode()` output instead. That output
   survives the round trip exactly:
   `StoreSnapshot.decode(s.encode()).encode() == s.encode()`. `toString()`
-  lists state names only. `render()` shows the stored values, for debugging.
+  lists state names only. `render()` shows the stored values, for debugging,
+  except a `Secret` state's (§16.4).
 - **Values stay out of failures.** No exception these APIs throw carries a
   state's value in its message or cause chain. A codec exception is reported
   by its class name only, because its message may quote the text it failed on.
@@ -2509,6 +2559,179 @@ fun boot(saved: String): ReaderSettings {
   `migrate` that misses the rename, the old name is a
   `RestoreIssue.UnknownState`. `IgnoreUnknown` skips and reports it, and the
   renamed state keeps its value. `Strict` fails the restore.
+
+### 16.4 State tags, snapshot scopes and redaction
+
+```kotlin
+@ExperimentalStoreApi
+abstract class StateTag {                       // closed, not exhaustive: match with an `else`
+    object Secret : StateTag                    // never leaves memory or reaches a log
+    object UserAuthored : StateTag              // what the user wrote; snapshot(UserAuthored) captures it
+    object Remote : StateTag                    // synced data; left out of encode(), reset by a sterile restore
+}
+
+@ExperimentalStoreApi
+abstract class SnapshotScope { object All; object UserAuthored; object Raw }
+
+// Store member: the stable state(...) plus a codec (§16.2) and tags.
+@ExperimentalStoreApi
+fun <T : Any> state(
+    transformer: Transformer<T>? = null,
+    distinct: Boolean = false,
+    codec: StateCodec<T>? = null,
+    tags: Set<StateTag> = emptySet(),
+    initialize: Initializer<T>,
+): StateDelegate<T>
+
+@ExperimentalStoreApi val State<*>.tags: Set<StateTag>
+@ExperimentalStoreApi fun Store<*>.taggedStates(tag: StateTag): List<State<*>>
+@ExperimentalStoreApi fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot
+@ExperimentalStoreApi fun <V : Store<V>> V.restore(
+    snapshot: StoreSnapshot,
+    policy: RestorePolicy,
+    sterile: Boolean = false,
+): TransactionResult<RestoreReport>
+class RestoreReport { val sterilized: Set<String> }   // added to §16.2's
+```
+
+A tag is policy the library enforces for one state, wherever that state's
+value could leave memory, reach a log, or be written by the wrong party. It
+is declared with the state and never changes.
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+class MailStore : Store<MailStore>() {
+    val token by state(codec = StringCodec, tags = setOf(StateTag.Secret)) { "" }
+    val pinned by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "" }
+    val unread by state(codec = IntCodec, tags = setOf(StateTag.Remote)) { 0 }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+fun saveAndReboot(mail: MailStore): MailStore {
+    // Say mail holds token = "t0k3n", pinned = "m1", unread = 42.
+    println(mail.snapshot()[mail.token])                            // "null": withheld outside SnapshotScope.Raw
+    println(mail.snapshot(SnapshotScope.Raw)[mail.token])           // "t0k3n", in memory only
+    println(mail.snapshot(SnapshotScope.UserAuthored).stateNames)   // "[pinned]"
+    val saved = mail.snapshot().encode()
+    // {"format":"holdfast.store","v":1,"schema":1,"states":{"pinned":"m1","token":null},"skipped":[]}
+    val rebooted = MailStore()
+    rebooted.restore(StoreSnapshot.decode(saved), RestorePolicy.Strict, sterile = true).getOrThrow()
+    return rebooted   // pinned = "m1", token = "" (never written out), unread = 0 (reset)
+}
+```
+
+- **Declaring.** Pass `tags` to the experimental `state` overload; the set is
+  copied. Two combinations are refused where the state is declared, with an
+  `IllegalArgumentException` naming it: `Secret` with `UserAuthored` (an
+  overlay of what the user wrote leaves memory; a secret must not), and
+  `UserAuthored` with `Remote` (sync may overwrite a Remote state and must
+  never overwrite what the user wrote: declare one state of each and combine
+  them in a derived state). `state.tags` reads a state's tags, and
+  `store.taggedStates(tag)` lists the store's states that carry one, in
+  declaration order, materializing never-read ones first. These two are the
+  one lookup every tag-driven feature uses. A `derived` (or `suspendDerived`)
+  state with a Secret state among its `sources` is Secret too; a derived is
+  never `UserAuthored` or `Remote`, and a `computed { }` state has no tags.
+  The taint follows the listed sources only: a Secret state read inside
+  `compute` without being passed as a source leaves the derived untagged,
+  and its value is shown and encoded like any other, so list every Secret
+  state a derived reads as a source (which also makes it recompute when that
+  state changes).
+- **Secret: withheld, not scrambled.** Reads stay plaintext: `value`,
+  observers, `effect` and `derived` see the value as always. The value is
+  withheld wherever it would be written out or shown:
+  - `encode()` writes it as `null`, in every scope, and its codec never sees
+    it (a Secret state without a codec is listed as skipped, like any other).
+    A decoded snapshot reads it as `Redacted`, and restoring that text leaves
+    the state's value as it is.
+  - A snapshot's typed reads (`snapshot[state]`, `entry(state)`) return
+    `Redacted` (`get` returns `null`) unless the snapshot was captured with
+    `SnapshotScope.Raw`. A decoded snapshot is never a Raw capture: it reads a
+    Secret state as `Redacted` even when its text holds a value.
+  - `render()` of a captured snapshot shows `<redacted>` and `toString()`
+    shows names only, in every scope. A decoded snapshot knows no tags: it
+    renders (and re-encodes) the text it holds, which is `null` for text
+    `encode()` wrote. `MutableState.toString()` names the state
+    (`MutableState(MailStore.token)`) and never shows a value.
+  - `:holdfast-testing` records `Redacted` in timeline events and bridge
+    histories, refuses value matchers on a Secret state with a teaching error
+    (`emitted(prop)` and counts still work), and keeps Secret values out of
+    `shouldMatch`/`shouldMatchSnapshotOf` failure messages.
+  - The built-in middleware (`LoggingMiddleware`, `TimingMiddleware`,
+    `ProfilingMiddleware`, `ValidationMiddleware`) writes ids, state names,
+    durations and exception messages, never a state's value. The library's
+    own exception messages name states and never quote values; an exception
+    your code throws is logged with the message you gave it.
+  - `:holdfast-hallmark`'s `boxed(validator, codec, tags)` and
+    `boxedHandle(validator, codec, tags)`, and `:holdfast-hallmark-coroutines`'
+    `suspendValidateAndMutate`, withhold a rejected value from the
+    `HallmarkException` for a Secret state (§14.11), and `shouldBeBoxedAs`
+    shows neither value in its failure message for one. A
+    `ValidatingTransformer` you construct yourself cannot know its state's
+    tags and keeps hallmark's messages, which may quote the value.
+
+  A captured snapshot still holds the raw value in memory, so
+  `val s = snapshot(); …; restore(s)` puts a secret back: undo stays
+  lossless.
+- **Encryption is not redaction.** An `EncryptingTransformer` protects the
+  stored value; it does not keep it out of anything. A non-Secret encrypted
+  state is encoded as its ciphertext and read back as plaintext. Tag the state
+  Secret as well to keep its value, cipher or plain, out of the text and the
+  logs.
+- **Scopes.** `snapshot()` is `snapshot(SnapshotScope.All)`: every declared
+  state, Secret ones read as `Redacted`. `SnapshotScope.UserAuthored`
+  captures exactly the `UserAuthored` states, runs only their never-read
+  initializers and holds no `derived` state; restored, it leaves every other
+  state as it is. `SnapshotScope.Raw` captures what `All` does and reads a
+  Secret state's plaintext through `snapshot[state]`, in memory only: its
+  encoded text, `render()` and `toString()` withhold Secret values as in any
+  scope. The scope plays no part in equality.
+- **Remote.** `encode()` leaves Remote states out, neither written nor listed
+  as skipped, unless called with `includeRemote = true`, so stale synced data
+  does not persist; a restore of that text leaves them as they are. Encoded
+  text carries no tags, so a decoded snapshot writes back the text it holds,
+  whatever `includeRemote` says.
+- **Round trips.** `StoreSnapshot.decode(s.encode())` equals `s` on what
+  `encode()` writes: the Secret values and, by default, the Remote states are
+  not part of that projection.
+- **Sterile restore.** `restore(snapshot, policy, sterile = true)` drops the
+  snapshot's entries for Remote states (they are not issues, and they are
+  never decoded or type-checked) and resets every Remote state the store
+  declares to its initial value, in the restore's one transaction: each
+  Remote initializer runs again, as `reset()` runs it (§16.1), and its result
+  is staged raw only where it differs, so an unchanged state's observers do
+  not fire. A never-read Remote state is materialized before the action
+  opens. A Remote initializer reads the other Remote states at their reset
+  values, this store's other declared states at the values the restore
+  leaves them (restored, recomputed as below, else as the transaction holds
+  them: an enclosing action's pending write, else the committed value), and
+  other stores' states and `derived` states at committed values: a Remote
+  state computed from restored states comes out as a fresh store holding the
+  restored values computes it. So does a declared state the restore itself
+  brings to life — one neither restored nor Remote that nothing had read
+  before the restore, which the restore first materializes from pre-restore
+  values (a target whose entry it skips or that holds no value, or a state a
+  Remote initializer reads, directly or through other states): the same
+  reset re-runs its initializer, reading as a Remote initializer does, so it
+  holds what a first read after the restore computes, unless a write has
+  committed to it since it came to life. A state that was live before the
+  restore keeps its value, as a plain restore leaves it. With `prefs`
+  (`UserAuthored`), `locale by state { prefs.value }` and `feed` (`Remote`,
+  reading `locale`), a sterile restore of a `prefs` overlay into a fresh
+  store sets `locale` and `feed` from the restored `prefs`, even though
+  materializing `feed` first read `locale` from the default. `derived` states
+  are not written back, even into the store that took the snapshot: they
+  recompute from the restored sources, so none keeps a value computed from
+  dropped data. `RestoreReport.sterilized` lists the reset Remote states. As
+  after `reset()`, `removeState`/`clearStates` refuse a state the reset
+  re-ran until the restore's transaction (or the action or frame it joined)
+  ends. A throwing initializer, or a cycle, rolls the whole restore back.
+- **Why a tag and not a `RedactingTransformer`.** Issue #20 asked whether
+  redaction belongs in a transformer. It does not: a transformer changes what
+  every read returns, and reads must stay plaintext for the app to work, while
+  the transformer slot is what `EncryptingTransformer` needs. A tag is
+  honoured where values are read out of a snapshot, rendered, encoded and
+  recorded, and nowhere else.
 
 ---
 

@@ -75,7 +75,8 @@ class FrameMiddlewareSession internal constructor(
  *    for it. First needed inside an action (or by a [snapshot] or [restore] called
  *    in one), it runs under that action's locks. Initializers may read committed values of states, but not write
  *    (see [state]). The initializer is retained: the experimental [reset] runs it
- *    again, inside its own action.
+ *    again, inside its own action, and so does a sterile [restore] for a Remote
+ *    state (see [state]).
  *
  * Typical subclass:
  * ```
@@ -173,11 +174,13 @@ abstract class Store<Self : Store<Self>> {
      *
      * State initializers run lazily, when the state is first needed — its first
      * read, or a [snapshot]/[restore] that captures or writes it — and [reset]
-     * runs every declared state's initializer again, so an initializer that
-     * reads `clock` sees the resolution in force at that moment: bind before
-     * anything first reads, snapshots or resets such a state (for a singleton
-     * store, before anything touches it). A materialized state keeps its value
-     * until a [reset]; rebinding the clock never re-runs an initializer.
+     * runs every declared state's initializer again (a sterile [restore], every
+     * Remote state's), so an initializer that reads `clock` sees the resolution
+     * in force at that moment: bind before anything first reads, snapshots,
+     * resets or sterile-restores such a state (for a singleton store, before
+     * anything touches it). A materialized state keeps its value until a
+     * [reset] or a sterile [restore]; rebinding the clock never re-runs an
+     * initializer.
      *
      * The library's own timestamps ([Transaction.endTime], `TimingMiddleware`,
      * `ProfilingMiddleware`) do not read this clock — it is an input for store code
@@ -1001,7 +1004,13 @@ abstract class Store<Self : Store<Self>> {
      * reset, it reads the other declared states of this store at their reset
      * values, and everything else at committed values; it runs without the
      * latch, inside the reset's action and under its locks, and its result is
-     * staged into that action, so it rolls back with it.
+     * staged into that action, so it rolls back with it. A sterile [restore]
+     * re-runs a [StateTag.Remote] state's initializer the same way — and that
+     * of a declared state the restore itself brought to life, so it holds
+     * what a first read after the restore computes — except that it reads
+     * this store's declared states it does not re-run as the restore's
+     * transaction holds them (restored, else an enclosing action's pending
+     * writes).
      *
      * Each name is declared once per store: a second property with the same
      * name (for example a subclass redeclaring a base class's state) fails
@@ -1012,44 +1021,58 @@ abstract class Store<Self : Store<Self>> {
      * is always the receiver of `state(…)`, never the object the property
      * belongs to.
      *
-     * A state declared here has no codec: a snapshot can hold it in memory,
-     * but `snapshot().encode()` lists it as unencodable. Declare it with the
-     * `codec` overload to give it a text encoding.
+     * A state declared here has no codec and no tags: a snapshot can hold it
+     * in memory, but `snapshot().encode()` lists it as unencodable. Declare it
+     * with the experimental overload to give it a text encoding or
+     * [StateTag]s.
      */
+    @OptIn(ExperimentalStoreApi::class) // Passes "no tags" to the declaration; the stable signature has none.
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
         initialize: Initializer<T>,
-    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, initialize)
+    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, emptySet(), initialize)
 
     /**
-     * Declare a state property that can leave memory: exactly the stable
-     * [state] above, plus a [codec] that [StoreSnapshot.encode] writes the
-     * state's raw value with and [StoreSnapshot.decode]/[restore] read it
-     * back with (`val count by state(codec = IntCodec) { 0 }`). Any
-     * `bridge.Codec` is a [StateCodec]. A state declared without one (here or
-     * through the stable overload) is captured in memory like any other, but
-     * `encode()` lists it in [StoreSnapshot.unencodableStateNames] instead of
-     * writing it.
+     * Declare a state property that can leave memory, and that carries policy:
+     * exactly the stable [state] above, plus
      *
-     * Calls that pass no [codec] (`state { … }`, `state(transformer = t) { … }`)
-     * resolve to the stable overload, which needs no opt-in: Kotlin prefers the
-     * candidate that leaves fewer parameters to their defaults.
+     *  - a [codec] that [StoreSnapshot.encode] writes the state's raw value
+     *    with and [StoreSnapshot.decode]/[restore] read it back with
+     *    (`val count by state(codec = IntCodec) { 0 }`). Any `bridge.Codec` is
+     *    a [StateCodec]. A state declared without one (here or through the
+     *    stable overload) is captured in memory like any other, but `encode()`
+     *    lists it in [StoreSnapshot.unencodableStateNames] instead of writing
+     *    it.
+     *  - [tags] the library enforces for the state
+     *    (`state(tags = setOf(StateTag.Secret)) { "" }`): [StateTag.Secret]
+     *    keeps its value out of encodings, renders, `toString`s, test
+     *    timelines and middleware output; [StateTag.UserAuthored] puts it in
+     *    `snapshot(SnapshotScope.UserAuthored)`; [StateTag.Remote] keeps it out
+     *    of `encode()` by default and lets a sterile [restore] reset it. The
+     *    set is copied. Read them back with [State.tags].
      *
-     * Experimental (issue #20, R1): later releases add parameters here.
+     * Calls that pass neither [codec] nor [tags] (`state { … }`,
+     * `state(transformer = t) { … }`) resolve to the stable overload, which
+     * needs no opt-in: Kotlin prefers the candidate that leaves fewer
+     * parameters to their defaults.
+     *
+     * Experimental (issue #20, R1 and R3): later releases add parameters here.
      *
      * @throws IllegalStateException if the store is disposed.
+     * @throws IllegalArgumentException when the property is declared, if
+     *   [tags] combine [StateTag.Secret] with [StateTag.UserAuthored] or
+     *   [StateTag.UserAuthored] with [StateTag.Remote]; the message names the
+     *   state.
      */
     @ExperimentalStoreApi
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
         codec: StateCodec<T>? = null,
+        tags: Set<StateTag> = emptySet(),
         initialize: Initializer<T>,
-    ): StateDelegate<T> {
-        checkNotDisposed()
-        return DeclaringStateDelegate(this, transformer, distinct, codec, initialize)
-    }
+    ): StateDelegate<T> = checkedDeclaringDelegate(transformer, distinct, codec, tags, initialize)
 
     /**
      * Create-or-fetch a state under an arbitrary name. Kept for companion
@@ -1081,7 +1104,9 @@ abstract class Store<Self : Store<Self>> {
      * one of [StoreSnapshot.stateNames]: [restore] writes it back only into
      * this same store instance (undo), and skips it anywhere else — another
      * instance's derived states have backing states of their own. It stays
-     * visible through [properties] and [getState] under [name].
+     * visible through [properties] and [getState] under [name]. It carries
+     * [StateTag.Secret] when any of [sources] does ([State.tags]), and no
+     * other tag.
      *
      * @throws IllegalStateException if the store is disposed.
      */
@@ -1326,7 +1351,9 @@ abstract class Store<Self : Store<Self>> {
      *
      * Throws [IllegalStateException] if the state has pending writes in the
      * active transaction or one enclosing it (caller must commit or roll back
-     * first), or while an open experimental [reset] holds it: once a reset has
+     * first), or while an open experimental [reset], or a sterile [restore]
+     * (which resets the [StateTag.Remote] states, and recomputes the states it
+     * brings to life), holds it: once a reset has
      * decided a state's value — staged it, or left it because it already held
      * its reset value — it holds the state until its transaction (or the
      * action or frame it joined) commits or rolls back.
@@ -1356,7 +1383,7 @@ abstract class Store<Self : Store<Self>> {
      *
      * Throws [IllegalStateException] if any state has pending writes in the
      * active transaction or one enclosing it, or while an open experimental
-     * [reset] holds one (see [removeState]).
+     * [reset] or sterile [restore] holds one (see [removeState]).
      */
     fun clearStates() {
         checkNotDisposed()
@@ -1390,8 +1417,8 @@ abstract class Store<Self : Store<Self>> {
         val root = active.root
         if (!root.closedToWrites && state in root.resetHeld) {
             error(
-                "Cannot remove state '$name' while a reset() in the active transaction holds it; " +
-                    "commit or rollback first",
+                "Cannot remove state '$name' while a reset() or sterile restore() in the active transaction " +
+                    "holds it; commit or rollback first",
             )
         }
     }
