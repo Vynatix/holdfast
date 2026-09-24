@@ -32,6 +32,7 @@ final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.hol
 
 final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/BoxedHandleDelegate { // com.vynatix.holdfast.hallmark/BoxedHandleDelegate|null[0]
     final fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast.hallmark/BoxedHandle<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandleDelegate.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+    final fun provideDelegate(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast.hallmark/BoxedHandleDelegate<#A, #B> // com.vynatix.holdfast.hallmark/BoxedHandleDelegate.provideDelegate|provideDelegate(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
 }
 
 final class <#A: kotlin/Any, #B: com.vynatix.hallmark/Boxed<#A>> com.vynatix.holdfast.hallmark/ValidatingTransformer : com.vynatix.holdfast/Transformer<#B> { // com.vynatix.holdfast.hallmark/ValidatingTransformer|null[0]

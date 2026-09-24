@@ -40,11 +40,19 @@ data class BoxedHandle<P : Any, O : Boxed<P>>(val state: State<O>, val validator
 /**
  * Property delegate that returns a [BoxedHandle] (state + validator) on every
  * read.
+ *
+ * [provideDelegate] forwards to the wrapped state delegate, so the state is
+ * declared on its store when the property is (see
+ * [com.vynatix.holdfast.StateDelegate.provideDelegate]) — a never-read handle's
+ * state is still captured by `snapshot()`.
  */
 class BoxedHandleDelegate<P : Any, O : Boxed<P>> internal constructor(
     private val backing: StateDelegate<O>,
     private val validator: Validator<P, O>,
 ) {
+    operator fun provideDelegate(thisRef: Any?, property: KProperty<*>): BoxedHandleDelegate<P, O> =
+        BoxedHandleDelegate(backing.provideDelegate(thisRef, property), validator)
+
     operator fun getValue(thisRef: Any?, property: KProperty<*>): BoxedHandle<P, O> =
         BoxedHandle(backing.getValue(thisRef, property), validator)
 }

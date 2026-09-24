@@ -29,6 +29,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 12. [Common Pitfalls](#12-common-pitfalls)
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
+15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 
 ---
 
@@ -88,7 +89,7 @@ class CounterStore : Store<CounterStore>() {
 
 ```
 Store<Self>                         abstract base; holds states + middleware + active txn
- ├── state(transformer?, init)      registers a MutableState by property name
+ ├── state(transformer?, init)      declares a state by property name (materialized on first need)
  ├── action { … }                   transactional batch
  ├── invoke { … }                   plain context block (just runs the lambda)
  └── extension members on State<T>:
@@ -116,10 +117,17 @@ holdfast/src/commonMain/kotlin/com/vynatix/holdfast/
   Transaction.kt    pendingWrites, commit/rollback, status state machine
   Middleware.kt     three-hook interceptor with metadata bag
   Contract.kt       State, Bridge, Transformer, Initializer, StateDelegate, Disposable
+  StateDeclaration.kt / StateRegistry.kt
+                    declared vs materialized states; the delegate state(…) returns
+  Materialization.kt / NoWriteRegion.kt
+                    initializer latches, cycle detection, initializers may not write
+  ConsistentRead.kt write brackets; the consistent cut snapshot() takes
   StoreLock.kt      reentrant mutex over kotlinx.atomicfu SynchronizedObject
   UUID.kt           v4 UUID generator (used for unnamed transactions)
   platform/
     Threading.kt    expect currentThreadId, threadYield
+    StoreThreadLocals.kt
+                    expect running-initializer slot (NoWriteRegion)
 ```
 
 ---
@@ -168,9 +176,43 @@ That is the complete day-one usage. Everything after this is depth.
 
 ### 4.1 `state(transformer?, init)` — Declare
 
-Registers a `MutableState` keyed by the property name. The first read creates
-it; subsequent reads of the same property return the same `State` (delegate
-identity is preserved across reads).
+Declares a state keyed by the property name. Declaring happens while the
+store is constructed and runs nothing: the store knows every declared state
+from then on. The `MutableState` itself is created from `init` — the state is
+*materialized* — the first time it is needed: on the first read of the
+property, or when `snapshot()`/`restore()` (§14.1) needs it. Subsequent reads
+of the same property return the same `State` (delegate identity is preserved
+across reads).
+
+`init` runs once, on the thread that first needs the state. The store takes
+no lock to run it — only the state's own latch (§10.2) — and another thread
+needing the state meanwhile waits for it. It does run under whatever locks
+its caller already holds: first needed inside an action, an `atomic(...)`
+frame, an observer during commit fanout, `restore()`, or a `snapshot()` taken
+inside an action, it runs under that action's locks, so keep initializers
+cheap and never make one wait for another thread's store work. It may read
+other states (materializing them in turn), and it sees their committed values
+only — never the pending writes of an action on its thread, not even the one
+that needed the state: the initial value is committed at once and survives
+that action's rollback (§9.7). It may not write:
+`mutate`/`update`, `action`, `atomic` and `emit` inside an initializer throw
+`IllegalStateException`, and so does an initializer that needs its own state,
+directly or through other initializers (a cycle). A throwing initializer
+leaves the state unmaterialized, and the next read runs it again. Each name is
+declared once per store — a second property with the same name, such as a
+subclass redeclaring a base class's state, fails when the store is
+constructed — unless the same declaration runs again (a local delegated
+property in a function called twice, or a member property of a helper class
+instantiated twice over the store), which binds to the existing state; the
+first declaration's initializer and transformer win.
+
+A custom delegate that wraps `state(…)` (as `:holdfast-hallmark`'s
+`boxedHandle` does) must also forward
+`operator fun provideDelegate(thisRef: Any?, property: KProperty<*>)` to the
+wrapped delegate and serve reads from the delegate that call returns. A
+wrapper that forwards only `getValue` declares its state on its first read,
+so a `snapshot()` taken earlier silently leaves the state out, and restoring
+that name into a fresh store fails.
 
 ```kotlin
 class Profile : Store<Profile>() {
@@ -200,8 +242,12 @@ when (result) {
 }
 ```
 
-**Returns** `TransactionResult` (sealed: `Success | Error`). It never throws —
-exceptions are captured into `Error`.
+**Returns** `TransactionResult` (sealed: `Success | Error`). A failure inside
+the body, a middleware hook or the commit is captured into `Error`, not
+thrown. `action` itself throws `IllegalStateException` when called on a
+disposed store or from inside a state initializer (§4.1), and inside an
+`atomic(...)` frame it can throw the frame's contract exceptions or escalate
+an inner error (§15.1–15.2).
 
 **Nested actions** form a savepoint chain. The inner `action` becomes a
 child transaction whose `parent` is the outer's. Inner commit merges the
@@ -232,7 +278,8 @@ holdfast action {
 
 **Inside an active transaction owned by the current thread**: buffers the
 write. Reads on the same thread (`count.value`) see the pending write
-(read-your-own-writes). Reads on other threads still see the committed
+(read-your-own-writes) — except inside a state initializer, which reads
+committed values only (§4.1). Reads on other threads still see the committed
 value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
@@ -471,8 +518,9 @@ Three things to internalize:
    leak. No rolled-back leak. Same-value commits re-fire by default; states
    declared `state(distinct = true) { … }` dedup them.
 2. **Read-your-own-writes is owner-thread-only.** The thread executing the
-   action sees its own pending writes. Other threads see committed values
-   only — they cannot witness "in-flight" mutations.
+   action sees its own pending writes (except inside a state initializer,
+   which reads committed values only — §4.1). Other threads see committed
+   values only — they cannot witness "in-flight" mutations.
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
@@ -860,7 +908,10 @@ holdfast action {
 
 This is the only place reads see uncommitted values, and only on the
 thread executing the action. From any other thread, `count.value` returns
-the last committed value until this action commits.
+the last committed value until this action commits. A state initializer
+(§4.1) is the one exception on the action's own thread: one that runs inside
+the action — because the action is the first to need its state — reads
+committed values, not the action's pending writes.
 
 ### 9.8 Savepoint semantics
 
@@ -940,7 +991,8 @@ cd.dispose()
 |---|---|---|---|
 | `holdfast action { … }` | `transactionLock` | yes | The only entry point; nested actions reuse the same lock |
 | `holdfast.middlewares(...)` | `middlewareLock` | yes | Reading the chain is also under this lock |
-| `holdfast.state(…)` (delegate first read) | `propertiesLock` | yes | After first read, no lock for delegate |
+| `holdfast.state(…)` (declaration, at construction) | `propertiesLock` | yes | Registers the name; runs no user code |
+| First read of a state (materialization) | per-state initializer latch | no — re-entering it is an initializer cycle, which throws | The initializer runs outside `propertiesLock`, holding its own latch plus whatever the reading thread already holds (the `transactionLock` when first needed inside an action or `atomic(...)` frame (every participant's `transactionLock`), an observer during commit fanout, `restore()`, or a `snapshot()` taken inside an action, and `middlewareLock` too from an action body); `propertiesLock` is taken briefly to publish. After that, no lock for the delegate |
 | `MutableState.value` read | `stateLock` (per state) | yes | Plus optional pending-write peek if owner thread |
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
@@ -951,13 +1003,20 @@ The library acquires locks in this consistent global order; respect it
 when extending:
 
 ```
-transactionLock  →  middlewareLock  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
+transactionLock  →  middlewareLock  →  initializer latch  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
 ```
 
 Of these, only adjacent acquisitions actually nest in practice; the
 critical AB-BA candidate fixed in earlier work was `stateLock ↔
 observersLock`, which `applyCommitted` now resolves by snapshotting under
 `stateLock`, releasing, then notifying under `observersLock`.
+
+An initializer latch (§4.1) is held while a state's initializer runs, and an
+action body that reads a never-read state waits for it under the action's
+locks. That is why an initializer may only read: the store refuses every
+write, action and frame from inside one, so it never needs a lock to its
+left. Initializers waiting for each other's latches in a cycle — on one
+thread or across threads — are detected and throw instead of deadlocking.
 
 ### 10.3 Thread confinement of a transaction
 
@@ -1083,6 +1142,10 @@ never T1's pending writes.
 | `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it; the write could never commit | Write in the action itself, derive the value (`computed`/`derived`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4 |
 | `IllegalStateException: Cannot write S.x: a suspendAction or suspendAtomic holds S …` | A bare `mutate`/`update` from another thread while a `suspendAction`/`suspendAtomic` on S is committing | Write through `S action { … }`, which waits for the store — see §8.2 |
 | `Holdfast: a post-commit side effect of S failed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | An effect, bridge publish or `derived` recompute threw after its commit; with no `uncaughtObserverHandler` set, the failure is logged | Fix the thrower, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
+| `IllegalStateException: Cannot write S.x: the initializer of S.y is running on this thread …` (or `open an action on S`, `open an atomic(...) frame`, `emit an event on S`) | A state initializer writes, or opens an action or frame; initializers run whenever the state is first needed — including inside `snapshot()` | Compute the initial value from what the initializer can read; make the write in an action once the store exists — see §4.1 |
+| `IllegalStateException: State initializer cycle: S.x → S.y → S.x` (or `… cycle across threads …`) | Initializers that need each other's states | Give one state of the cycle an initial value that does not read the others; compute the rest from it |
+| `IllegalStateException: S already declares a state named 'x' …` when constructing a store | Two properties with one name on one store — typically a subclass redeclaring a base class's state | Give one of them another name |
+| A custom delegate's state is missing from `snapshot()` (and `restore()` into a fresh store returns `Error: snapshot contains state 'x' not registered on this store`) | The delegate wraps `state(…)` but forwards only `getValue`, so the state is declared on first read instead of at construction | Forward `provideDelegate(thisRef, property)` to the wrapped delegate — see §4.1 |
 | `IllegalStateException: store disposed` | Calling any state API after `dispose()` | `dispose()` is terminal — create a new store instance, or don't dispose a store still in use |
 | `IllegalStateException: emit(event) called outside of an action / suspendAction` | `EventfulStore.emit` outside a transaction | Emit only inside `action { }` / `suspendAction { }` so rollback can discard staged events |
 | Bridge keeps publishing forever in a loop | Bridge's `publish` calls into a system that re-publishes back and the bridge does not dedupe | Have the bridge dedupe (compare to last-published) before notifying observers |
@@ -1097,7 +1160,7 @@ never T1's pending writes.
 
 | Member | Signature | Description |
 |---|---|---|
-| `state` | `fun <T> state(transformer: Transformer<T>? = null, distinct: Boolean = false, init: Initializer<T>): StateDelegate<T>` | Declares a state property; `distinct=true` opts into same-value commit dedup |
+| `state` | `fun <T> state(transformer: Transformer<T>? = null, distinct: Boolean = false, init: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `init` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
@@ -1107,12 +1170,12 @@ never T1's pending writes.
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
-| `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, at a state's first read. Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
+| `clock` | `open val clock: Clock` *(experimental — `@ExperimentalStoreApi`)* | The `kotlin.time.Clock` store code reads time through; resolution order: subclass getter override → `bindClock` binding → `Clock.System`. Initializers read it lazily, when a state is first needed (its first read, or `snapshot()`/`restore()`). Library timestamps (`Transaction.endTime`, timing middleware) don't use it |
 | `bindClock` | `fun bindClock(clock: Clock?)` *(experimental)* | Binds a clock (level 2), e.g. a fixed test clock; `null` unbinds. Throws on a disposed store. `storeTest` restores each tracked store's binding to its value at first `track` (`store.action {}` doesn't auto-track), so bind after tracking |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
-| `properties` | `val properties: Map<String, State<*>>` | Snapshot of registered states |
-| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the property map; `removeState`/`clearStates` dispose observers + bridge silently |
+| `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
+| `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations) |
 
 ### Extensions on `State<T>` (member-extensions of `Store<Self>`)
 
@@ -1143,7 +1206,7 @@ manages them.
 
 | Member | Signature | Description |
 |---|---|---|
-| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread |
+| `value` | `override val value: T` | Post-`get` view; read-your-own-writes for owner thread (except inside a state initializer, which reads committed values only — §4.1/§9.7) |
 | `observe` | `fun observe(observer: (T) -> Unit): Disposable` | Subscribe with initial fire |
 | `bridge` | `var bridge: Bridge<T>?` | Get/set the bridge; setting installs an observer on it |
 
@@ -1215,8 +1278,8 @@ capability is independently usable; pick the ones you need.
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
 ```kotlin
-class StoreSnapshot internal constructor(internal val rawValues: Map<String, Any>) {
-    val stateNames: Set<String>
+class StoreSnapshot internal constructor(…) {
+    val stateNames: Set<String>   // every declared state; not the backing states of derived
     val size: Int
 }
 
@@ -1224,10 +1287,23 @@ fun <V : Store<V>> V.snapshot(): StoreSnapshot
 fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit>
 ```
 
-`snapshot` captures the raw stored value of every state that has been
-delegate-initialized at least once. `restore` writes them back inside a
-single top-level `action`, bypassing `transformer.set` so asymmetric
-transformers (encryption, JSON codecs) round-trip losslessly.
+`snapshot` captures the raw stored value of every declared state (see §4.1
+for delegates that wrap `state(…)`) — a state nobody has read yet is
+materialized first (its initializer runs), so even an untouched store's
+snapshot is complete. The values form one consistent cut: a commit applying
+on another thread meanwhile is either wholly in the snapshot or not in it,
+and the snapshot never makes that writer wait. Taken inside an action, a
+snapshot holds committed values, not that action's pending writes —
+including for a state it materializes there, whose initializer reads
+committed values only (§4.1). The backing states of
+`derived`/`suspendDerived` are captured too, but are not in `stateNames`:
+`restore` writes them back only into the store instance that took the
+snapshot, and skips one that `removeState`/`clearStates` has dropped since.
+`restore` writes the values back inside one `action` (called inside another
+action, it is a savepoint: its writes commit, or roll back, with the
+enclosing action), bypassing `transformer.set` so asymmetric transformers
+(encryption, JSON codecs) round-trip losslessly; a declared target that is
+not materialized yet is materialized first.
 
 ```kotlin
 val snap = holdfast.snapshot()

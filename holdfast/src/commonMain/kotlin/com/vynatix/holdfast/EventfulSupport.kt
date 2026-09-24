@@ -114,6 +114,9 @@ class EventfulSupport<E : Any>(
      * that store's commit is notifying it. The event would never be drained;
      * thrown out of an observer, it reaches the store's
      * [Store.uncaughtObserverHandler].
+     *
+     * Also throws [IllegalStateException] from inside a state initializer, in
+     * an action or not (see [Store.state]).
      */
     override fun emit(event: E) {
         val store =
@@ -121,6 +124,8 @@ class EventfulSupport<E : Any>(
                 "EventfulSupport.emit called before bindStore. The hosting Store must " +
                     "call support.bindStore(this) in its init block.",
             )
+        // Before the transaction check: an initializer emits outside any action too.
+        NoWriteRegion.refuse { "emit an event on ${store.displayName}" }
         val txn =
             store.activeTransaction ?: error(
                 "emit(event) called outside of an action / suspendAction. " +

@@ -8,6 +8,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`BoxedHandleDelegate.provideDelegate(thisRef, property)`**: `boxedHandle`
+  forwards the new `StateDelegate.provideDelegate` of `:holdfast` (issue #20,
+  R5), so a `val email by boxedHandle(…) { … }` state is declared when its
+  store is constructed and a never-read handle's state is captured by
+  `snapshot()`. `boxed(…)` returns the `state(…)` delegate itself and needs no
+  change. As with any declared state, a never-read `boxed`/`boxedHandle` state
+  whose initial value fails validation now makes `snapshot()` throw
+  `HallmarkException`.
+
 - `shouldBeBoxedAs` test matcher moved here from `:holdfast-testing` (package
   `com.vynatix.holdfast.hallmark`, previously
   `com.vynatix.holdfast.testing.matcher`), so `:holdfast-testing` no longer

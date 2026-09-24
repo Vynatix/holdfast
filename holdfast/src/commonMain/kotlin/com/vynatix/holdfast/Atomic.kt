@@ -66,7 +66,9 @@ import kotlin.uuid.Uuid
  * commit is notifying it — behaves like a nested `action` there: it returns
  * [TransactionResult.Error] carrying an [IllegalStateException], before any
  * lock is taken or any body or middleware runs, because its savepoint could
- * never commit.
+ * never commit. From inside a state initializer, `atomic` throws
+ * [IllegalStateException] before taking anything: initializers may read
+ * states but not write (see [Store.state]).
  *
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
@@ -96,6 +98,7 @@ fun <R> atomic(
     require(stores.isNotEmpty()) { "atomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
+    NoWriteRegion.refuse { "open an atomic(...) frame on ${sorted.joinToString { it.displayName }}" }
     val enclosing = FrameMarkers.current()
     // O(1)-per-store nested-frame safety: interop flavor + lock-order checks,
     // BEFORE any lock is acquired.

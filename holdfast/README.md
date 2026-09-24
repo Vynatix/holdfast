@@ -125,7 +125,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 - **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, `ProfilingMiddleware`, or your own.
 - **Transformers** — normalize on write / project on read, including the asymmetric case where `set` and `get` produce different shapes.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
-- **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
+- **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt). States are declared when the store is constructed, so a snapshot holds every declared state — a never-read one at its initial value — as one consistent cut that no concurrent commit is half-way through.
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
 - **`atomic(vararg stores, policy) { }`** — cross-store transaction frames: all enrolled stores commit or roll back together (basic usage in [Cross-store transactions](#cross-store-transactions) above). Per-store middleware fires for the frame with a shared `Transaction.frameId`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.

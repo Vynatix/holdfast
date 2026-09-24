@@ -9,6 +9,7 @@ import com.vynatix.hallmark.rules.MinLengthRule
 import com.vynatix.hallmark.rules.NonBlankRule
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.snapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -27,6 +28,10 @@ private object HandleEmailValidator : BoxedValidator<String, HandleEmail>() {
 
 private class HandleVault : Store<HandleVault>() {
     val email by boxedHandle(HandleEmailValidator) { "init@example.com" }
+}
+
+private class BoxedOnlyStore : Store<BoxedOnlyStore>() {
+    val token by boxed(HandleEmailValidator) { "token@example.com" }
 }
 
 class BoxedHandleTest {
@@ -86,5 +91,21 @@ class BoxedHandleTest {
         assertIs<TransactionResult.Error>(r)
         assertTrue(r.exception is HallmarkException)
         assertEquals("init@example.com", v.email.state.value.value)
+    }
+
+    @Test
+    fun anUntouchedHandleIsDeclaredAndCapturedBySnapshot() {
+        // The handle forwards provideDelegate, so its state is declared when the
+        // store is constructed rather than on the handle's first read.
+        val v = HandleVault()
+        val snap = v.snapshot()
+        assertEquals(setOf("email"), snap.stateNames)
+        assertEquals(setOf("email"), v.properties.keys, "snapshot() materialized the never-read state")
+    }
+
+    @Test
+    fun anUntouchedBoxedStateIsDeclaredAndCapturedBySnapshot() {
+        val snap = BoxedOnlyStore().snapshot()
+        assertEquals(setOf("token"), snap.stateNames)
     }
 }

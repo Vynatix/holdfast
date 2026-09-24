@@ -44,6 +44,7 @@ abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/Publisher { // com.
 
 abstract fun interface <#A: kotlin/Any> com.vynatix.holdfast/StateDelegate { // com.vynatix.holdfast/StateDelegate|null[0]
     abstract fun getValue(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast/State<#A> // com.vynatix.holdfast/StateDelegate.getValue|getValue(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
+    open fun provideDelegate(kotlin/Any?, kotlin.reflect/KProperty<*>): com.vynatix.holdfast/StateDelegate<#A> // com.vynatix.holdfast/StateDelegate.provideDelegate|provideDelegate(kotlin.Any?;kotlin.reflect.KProperty<*>){}[0]
 }
 
 abstract fun interface com.vynatix.holdfast/Disposable { // com.vynatix.holdfast/Disposable|null[0]
@@ -176,6 +177,7 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).mutate(#A1) // com.vynatix.holdfast/Store.mutate|mutate@com.vynatix.holdfast.State<0:0>(0:0){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).observeFrom(com.vynatix.holdfast/Observable<#A1>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/Store.observeFrom|observeFrom@com.vynatix.holdfast.State<0:0>(com.vynatix.holdfast.Observable<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).update(kotlin/Function1<#A1, #A1>) // com.vynatix.holdfast/Store.update|update@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> registerDerivedBackingState(kotlin/String, #A1, kotlin.collections/List<com.vynatix.holdfast/State<*>>, kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Store.registerDerivedBackingState|registerDerivedBackingState(kotlin.String;0:0;kotlin.collections.List<com.vynatix.holdfast.State<*>>;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> registerInternalState(kotlin/String, #A1, com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ...): com.vynatix.holdfast/MutableState<#A1> // com.vynatix.holdfast/Store.registerInternalState|registerInternalState(kotlin.String;0:0;com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any> state(com.vynatix.holdfast/Transformer<#A1>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/Initializer<#A1>): com.vynatix.holdfast/StateDelegate<#A1> // com.vynatix.holdfast/Store.state|state(com.vynatix.holdfast.Transformer<0:0>?;kotlin.Boolean;com.vynatix.holdfast.Initializer<0:0>){0§<kotlin.Any>}[0]
     final fun <#A1: kotlin/Any?> action(kotlin/Function1<#A, #A1>): com.vynatix.holdfast/TransactionResult<#A1> // com.vynatix.holdfast/Store.action|action(kotlin.Function1<1:0,0:0>){0§<kotlin.Any?>}[0]
@@ -542,6 +544,7 @@ final object com.vynatix.holdfast/FrameObservers { // com.vynatix.holdfast/Frame
 final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCount|@com.vynatix.holdfast.State<0:0>{0§<kotlin.Any>}observerCount[0]
     final fun <#A1: kotlin/Any> (com.vynatix.holdfast/State<#A1>).<get-observerCount>(): kotlin/Int // com.vynatix.holdfast/observerCount.<get-observerCount>|<get-observerCount>@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
 
+final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalRefuseInitializerWrite(kotlin/String) // com.vynatix.holdfast/internalRefuseInitializerWrite|internalRefuseInitializerWrite@com.vynatix.holdfast.Store<*>(kotlin.String){}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/computed(kotlin/Function1<#A, #B>): com.vynatix.holdfast/State<#B> // com.vynatix.holdfast/computed|computed@0:0(kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot){0§<com.vynatix.holdfast.Store<0:0>>}[0]

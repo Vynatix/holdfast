@@ -81,7 +81,7 @@ fun <V : Store<V>, T : Any> V.derived(
     val self = this
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"
-    val backingState: MutableState<T> = self.registerInternalState(name, initial)
+    val backingState: MutableState<T> = self.registerDerivedBackingState(name, initial, sources.toList())
     // ONE task per derived: its stable identity is what lets postCommit's
     // identity dedup coalesce several sources firing in one commit into a
     // single recompute.

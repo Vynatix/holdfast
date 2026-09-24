@@ -79,7 +79,7 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     // recomputes are async-launched on `store.scope`.
     val initial: T = runBlockingForInitialSeed { self.compute() }
     val name = "__suspendDerived_${suspendDerivedCounter.incrementAndGet()}"
-    val backingState: MutableState<T> = self.registerInternalState(name, initial)
+    val backingState: MutableState<T> = self.registerDerivedBackingState(name, initial, sources.toList())
 
     // Holder for the most recent launched job, so dispose() can cancel it.
     // We cancel on dispose to avoid leaking work past the consumer's lifetime;

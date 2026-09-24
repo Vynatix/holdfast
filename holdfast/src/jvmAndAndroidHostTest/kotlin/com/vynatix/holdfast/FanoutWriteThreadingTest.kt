@@ -82,17 +82,19 @@ class FanoutWriteThreadingTest {
     /**
      * The refusal message must not wait for `propertiesLock`: a write refused
      * inside `Bridge.publish` runs under that state's bridge lock, while
-     * `clearStates`/`removeState` take `propertiesLock` and then bridge locks.
-     * Here the other thread takes `propertiesLock` and blocks on the bridge
+     * `clearStates`/`removeState` used to take `propertiesLock` and then bridge
+     * locks. Here the other thread removes states and blocks on the bridge
      * lock the publish holds; a refusal that waited for `propertiesLock` to
      * name the state would deadlock both threads (and every later action).
+     * (The refusal now names the state from its declaration, taking no lock,
+     * and removal shuts states down after releasing `propertiesLock`.)
      */
     private fun assertBridgeWriteBackSurvivesConcurrentRemoval(remove: (ThreadedFanoutStore) -> Unit) {
         val s = ThreadedFanoutStore()
         val failures = CopyOnWriteArrayList<Throwable>()
         s.uncaughtObserverHandler = { failures += it }
-        // Captured up front: a delegate read inside the publish would itself
-        // take propertiesLock, which is not what this test is about.
+        // Captured up front: a delegate read inside the publish is not what
+        // this test is about.
         val echoRef = s.echo
         val inPublish = CountDownLatch(1)
         s {
@@ -102,8 +104,9 @@ class FanoutWriteThreadingTest {
 
                     override fun publish(value: Int): Boolean {
                         inPublish.countDown()
-                        // Let the other thread take propertiesLock and block on
-                        // this state's bridge lock, held around this call.
+                        // Let the other thread remove states and block shutting
+                        // this state's bridge down, on the bridge lock held
+                        // around this call.
                         Thread.sleep(150)
                         s { echoRef mutate value }
                         return true

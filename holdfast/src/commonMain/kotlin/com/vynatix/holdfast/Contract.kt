@@ -34,7 +34,8 @@ fun interface Initializer<T : Any> : () -> T
 /**
  * Read-only contract for a piece of store state. Read `value` to see the
  * post-`transformer.get` view; on the owner thread of an active transaction,
- * `value` reflects pending writes (read-your-own-writes).
+ * `value` reflects pending writes (read-your-own-writes) — except inside a
+ * state initializer, which reads committed values only (see [Store.state]).
  */
 interface State<T : Any> {
     val value: T
@@ -49,6 +50,23 @@ fun interface StateDelegate<T : Any> {
         thisRef: Any?,
         property: KProperty<*>,
     ): State<T>
+
+    /**
+     * Called once when a property is delegated to this object
+     * (`val x by state { … }`), before its first read: for a member property
+     * while the object is being constructed, for a local delegated property
+     * where it is declared. The returned delegate serves every read of the
+     * property.
+     *
+     * The delegate [Store.state] returns overrides this to declare the state on
+     * its store under `property.name` — without running the initializer — so a
+     * never-read state is still known to the store (for example to
+     * [snapshot]). The default returns `this` unchanged.
+     */
+    operator fun provideDelegate(
+        thisRef: Any?,
+        property: KProperty<*>,
+    ): StateDelegate<T> = this
 }
 
 /**

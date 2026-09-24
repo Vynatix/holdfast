@@ -71,13 +71,14 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatch(builder: StateMatcher<V>.() 
  * registered but not asserted produce an [AssertionError] listing them
  * alphabetically.
  *
- * KMP note: a Store registers a state lazily, on the first delegate read of
- * its property. `shouldMatchExactly` checks `store.properties.keys`, so a
+ * KMP note: a Store declares every state when it is constructed, but
+ * materializes one only when it is first needed — on the first delegate read
+ * of its property, or by `snapshot()`/`restore()`. `shouldMatchExactly` checks
+ * `store.properties.keys`, which lists materialized states only, so a
  * declared-but-never-touched state is invisible to the matcher. In practice
  * this is benign — tests reach this matcher only after exercising the store
  * (which touches every state of interest), and listing a never-touched state
- * in [builder] would fail to type-check anyway because `prop.get(store)` would
- * register it.
+ * in [builder] materializes it anyway, because `prop.get(store)` reads it.
  */
 infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher<V>.() -> Unit) {
     val sm = StateMatcher(store).apply(builder)
@@ -102,8 +103,9 @@ infix fun <V : Store<V>> StoreHandle<V>.shouldMatchExactly(builder: StateMatcher
 
 /**
  * Snapshot equality: takes [com.vynatix.holdfast.snapshot]s of both this handle's
- * store and [other], requires they cover the same state names, and asserts
- * each named state has the same current `value`.
+ * store and [other], requires they cover the same state names — every state
+ * each store declares, read or not (the backing states of `derived` are not
+ * state names) — and asserts each named state has the same current `value`.
  *
  * Why `value` (post-`transformer.get`) instead of the raw snapshot entries:
  * raw entries are an internal-only field on [com.vynatix.holdfast.StoreSnapshot]

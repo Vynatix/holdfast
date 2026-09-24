@@ -70,6 +70,11 @@ class FrameMiddlewareSession internal constructor(
  *    into this store gets an exception from [mutate] (or `update`/`emit`), or an
  *    Error result from a nested [action], instead of losing the write silently.
  *    Post-commit failures go to [uncaughtObserverHandler], or are logged.
+ *  - A state's initializer runs once, when the state is first needed, without the
+ *    store taking any lock to run it; other threads needing that state meanwhile wait
+ *    for it. First needed inside an action (or by [restore]), it runs under that
+ *    action's locks. Initializers may read committed values of states, but not write
+ *    (see [state]).
  *
  * Typical subclass:
  * ```
@@ -165,11 +170,12 @@ abstract class Store<Self : Store<Self>> {
      *     store instance, if any. Rebindable; `bindClock(null)` unbinds.
      *  3. **System** — [Clock.System].
      *
-     * State initializers run lazily, on the first read of their delegate, so an
+     * State initializers run lazily, when the state is first needed — its first
+     * read, or a [snapshot]/[restore] that captures or writes it — so an
      * initializer that reads `clock` sees the resolution in force at that moment:
-     * bind before anything first reads such a state (for a singleton store, before
-     * anything touches it). A materialized state keeps its value; rebinding the
-     * clock never re-runs an initializer.
+     * bind before anything first reads or snapshots such a state (for a singleton
+     * store, before anything touches it). A materialized state keeps its value;
+     * rebinding the clock never re-runs an initializer.
      *
      * The library's own timestamps ([Transaction.endTime], `TimingMiddleware`,
      * `ProfilingMiddleware`) do not read this clock — it is an input for store code
@@ -235,7 +241,8 @@ abstract class Store<Self : Store<Self>> {
      * After `dispose()`:
      *  - Every state-mutation API throws `IllegalStateException("store disposed")`.
      *  - Every state-registry read API throws.
-     *  - All registered observers are dropped; all bridges are detached.
+     *  - All registered observers are dropped; all bridges are detached; every state
+     *    declaration is dropped with its initializer.
      *  - The [Store.scope] / bound scope is **NOT** cancelled — caller owns its lifecycle.
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
@@ -256,15 +263,11 @@ abstract class Store<Self : Store<Self>> {
             _activeTransaction = null
         }
         postCommitQueue.clear()
-        // Snapshot the property map under its lock, then call shutdownSilently outside
-        // any store-side lock — `shutdownSilently` takes the per-state observer + bridge
-        // locks, and we don't want to invert ordering.
-        val toShutdown =
-            propertiesLock.withLock {
-                val snap = _properties.values.toList()
-                _properties.clear()
-                snap
-            }
+        // Drop every state and declaration under the registry's lock, then call
+        // shutdownSilently outside any store-side lock — `shutdownSilently` takes
+        // the per-state observer + bridge locks, and we don't want to invert
+        // ordering.
+        val toShutdown = registry.releaseAll()
         toShutdown.forEach { runCatching { it.shutdownSilently() } }
         // Drop middleware so a stray reference to a disposed store can't keep
         // captured state alive.
@@ -283,13 +286,27 @@ abstract class Store<Self : Store<Self>> {
      */
     protected open fun onDispose() {}
 
-    private fun checkNotDisposed() {
+    internal fun checkNotDisposed() {
         if (disposedFlag.value) error("store disposed")
     }
 
     private val transactionLock = StoreLock()
-    private val propertiesLock = StoreLock()
     private val middlewareLock = StoreLock()
+
+    /**
+     * Every state of this store: its declarations, in declaration order, and
+     * the materialized states by name. Its lock is the store's
+     * `propertiesLock`.
+     */
+    internal val registry = StateRegistry(this)
+
+    /**
+     * The wait-for graph this store's initializer latches belong to. Always
+     * [InitializerGraph.Process] outside tests, which swap it (before the first
+     * read) to model a thread identity such as wasmJs's shared id `0`.
+     */
+    @kotlin.concurrent.Volatile
+    internal var initializerGraph: InitializerGraph = InitializerGraph.Process
 
     @kotlin.concurrent.Volatile
     private var _activeTransaction: Transaction? = null
@@ -303,19 +320,22 @@ abstract class Store<Self : Store<Self>> {
     val activeTransaction: Transaction?
         get() = _activeTransaction
 
-    private val _properties = mutableMapOf<String, MutableState<*>>()
-
     /**
-     * Snapshot view of every state currently registered with this store, keyed by
-     * property name. The map is a copy — modifying it does not affect the store.
-     * The contained `State<*>` references are LIVE — reading `.value` reflects the
-     * current state. Callers MUST NOT cast these back to `MutableState` to bypass
-     * the transactional API; doing so leads to undefined behavior.
+     * Snapshot view of every state currently materialized on this store, keyed
+     * by property name. A declared state appears once it has been created —
+     * by its first read, or by [snapshot] or [restore] — and a state removed
+     * with [removeState] disappears until it is created again. The backing
+     * states of [derived] (and `:holdfast-coroutines`' `suspendDerived`)
+     * appear too, under their synthesized names. The map is a copy — modifying
+     * it does not affect the store. The contained `State<*>` references are
+     * LIVE — reading `.value` reflects the current state. Callers MUST NOT cast
+     * these back to `MutableState` to bypass the transactional API; doing so
+     * leads to undefined behavior.
      */
     val properties: Map<String, State<*>>
         get() {
             checkNotDisposed()
-            return propertiesLock.withLock { _properties.toMap() }
+            return registry.lock.withLock { registry.states.toMap() }
         }
 
     private val middlewareList = mutableListOf<Middleware<Self>>()
@@ -695,10 +715,14 @@ abstract class Store<Self : Store<Self>> {
      * an [IllegalStateException], without running [body] or any middleware: a
      * savepoint of that transaction could never commit. Another thread's action
      * is not nested, and simply runs once the commit has finished.
+     *
+     * @throws IllegalStateException when called from inside a state
+     *   initializer (see [state]): initializers may read states but not write.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
         checkNotDisposed()
+        NoWriteRegion.refuse { "open an action on $displayName" }
         // Frame policing (body-only: the marker is cleared before commit fanout,
         // so observer-triggered actions never land here). Ordered BEFORE the
         // serializer acquire — a blocking acquire on a suspendAtomic
@@ -929,45 +953,68 @@ abstract class Store<Self : Store<Self>> {
     operator fun <R> invoke(block: Self.() -> R): R = block(self)
 
     /**
-     * Declare a state property. The first read of the delegate creates a
-     * [MutableState] from [initialize]; subsequent reads return the same instance.
+     * Declare a state property. Delegating a property to it
+     * (`val count by state { 0 }`) DECLARES the state under the property's
+     * name while the store is being constructed, without running
+     * [initialize]. The state is MATERIALIZED — a [MutableState] created from
+     * [initialize] — the first time it is needed: on the first read of the
+     * property, or when [snapshot] or [restore] captures or writes it.
+     * Subsequent reads return the same instance.
      *
      *  - Pass a [transformer] to normalize on write or project on read.
      *  - Pass [distinct] = true to skip observer fanout and bridge publish when a
      *    commit re-applies the same value (StateFlow-style dedup). Default is
      *    false — every commit fires observers, matching the library's original
      *    contract.
+     *
+     * [initialize] runs at most once per materialization, on the thread that
+     * first needs the state. The store takes no lock to run it (in particular
+     * not its registry lock, `propertiesLock`); it holds only the state's own
+     * latch, and other threads needing the state meanwhile wait for it. It
+     * does run under whatever locks its caller already holds: first needed
+     * inside an action, an `atomic(...)` frame, an observer during commit
+     * fanout, [restore], or a [snapshot] taken inside an action, it runs under
+     * that action's `transactionLock` (and, from the action body, its
+     * `middlewareLock`), so a slow initializer there holds up every other
+     * action on that store, and an initializer must not block on another
+     * thread's store work.
+     *
+     * [initialize] may read other states (which materializes them in turn),
+     * and sees their committed values only — never the pending writes of an
+     * action on its thread, even the action that happened to need the state:
+     * the initial value is committed at once and survives that action's
+     * rollback, so it must not be computed from writes that may roll back.
+     * A store write from inside it — `mutate`/`update`, `action`, `atomic`,
+     * `emit` — throws [IllegalStateException], and so does an initializer
+     * that (directly or through other initializers, on this thread or across
+     * threads) needs its own state. An initializer that throws propagates to
+     * the read that ran it, and runs again on the next read.
+     *
+     * Each name is declared once per store: a second property with the same
+     * name (for example a subclass redeclaring a base class's state) fails
+     * fast with [IllegalStateException] when it is declared. The same
+     * declaration evaluated again — a local delegated property in a function
+     * called twice, or a member property of a helper class instantiated twice
+     * over this store — binds to the existing state instead. The owning store
+     * is always the receiver of `state(…)`, never the object the property
+     * belongs to.
      */
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
         initialize: Initializer<T>,
-    ): StateDelegate<T> {
-        val owningStore: Store<*> = this
-        return StateDelegate { _, property ->
-            checkNotDisposed()
-            propertiesLock.withLock {
-                val existing = _properties[property.name]
-                if (existing != null) {
-                    @Suppress("UNCHECKED_CAST")
-                    existing as MutableState<T>
-                } else {
-                    MutableState(initialize(), transformer, owningStore, distinct).also { state ->
-                        _properties[property.name] = state
-                    }
-                }
-            }
-        }
-    }
+    ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, initialize)
 
     /**
-     * Create-or-fetch a state under an arbitrary name. Used by [derived] to
-     * register synthetic backing states whose names ("__derived_N") never
-     * collide with user-declared property names (since Kotlin identifiers
-     * can't start with `__`). Also reachable by companion modules
-     * (`:holdfast-coroutines.suspendDerived`) for the suspending-derived backing
-     * state; marked `@StoreInternalApi` because the synthesized name scheme
-     * is an implementation detail.
+     * Create-or-fetch a state under an arbitrary name. Kept for companion
+     * code that registers synthetic states; [derived] and
+     * `:holdfast-coroutines.suspendDerived` use [registerDerivedBackingState].
+     * Callers choose names unlikely to collide with a property name (such as
+     * `"__internal_N"`) — Kotlin identifiers CAN start with `__`, so a
+     * collision with a declared state is possible, and fails fast. A state
+     * registered here is captured by [snapshot] like a declared one. Marked
+     * `@StoreInternalApi` because the synthesized name scheme is an
+     * implementation detail.
      */
     @StoreInternalApi
     fun <T : Any> registerInternalState(
@@ -975,18 +1022,41 @@ abstract class Store<Self : Store<Self>> {
         initial: T,
         transformer: Transformer<T>? = null,
         distinct: Boolean = false,
-    ): MutableState<T> =
-        propertiesLock.withLock {
-            val existing = _properties[name]
-            if (existing != null) {
-                @Suppress("UNCHECKED_CAST")
-                existing as MutableState<T>
-            } else {
-                MutableState(initial, transformer, this, distinct).also {
-                    _properties[name] = it
-                }
-            }
-        }
+    ): MutableState<T> = registry.registerEager(name, initial, transformer, distinct, StateKind.Internal, emptyList())
+
+    /**
+     * Register the backing state of a [derived] (or `:holdfast-coroutines`'
+     * `suspendDerived`) under [name], seeded with [initial] and computed from
+     * [sources]. [name] is synthesized by the caller to be unlikely to collide
+     * with a property name (`"__derived_N"`); an existing declaration of it
+     * fails fast.
+     *
+     * A backing state is live at once. [snapshot] captures it, but it is not
+     * one of [StoreSnapshot.stateNames]: [restore] writes it back only into
+     * this same store instance (undo), and skips it anywhere else — another
+     * instance's derived states have backing states of their own. It stays
+     * visible through [properties] and [getState] under [name].
+     *
+     * @throws IllegalStateException if the store is disposed.
+     */
+    @StoreInternalApi
+    fun <T : Any> registerDerivedBackingState(
+        name: String,
+        initial: T,
+        sources: List<State<*>>,
+        distinct: Boolean = false,
+    ): MutableState<T> {
+        checkNotDisposed()
+        return registry.registerEager(name, initial, null, distinct, StateKind.DerivedBacking, sources)
+    }
+
+    /**
+     * Every state declared on this store, in declaration order, whether or not
+     * it has been materialized. Resolved at call time: code that captures the
+     * store during construction (a base-class `init` block) must call this
+     * after construction to see the subclass's declarations.
+     */
+    internal fun declarations(): List<StateDeclaration<*>> = registry.declarationsInOrder()
 
     /**
      * Attach (or detach, when null) a [Bridge] for two-way external sync.
@@ -1053,11 +1123,12 @@ abstract class Store<Self : Store<Self>> {
      *   `suspendAtomic` holds this store and its transaction has already
      *   applied but is still committing (bridge publishes, event emits), and
      *   this thread is not part of that commit: write from other threads
-     *   through [action], which waits for the store.
+     *   through [action], which waits for the store. Also thrown from inside
+     *   a state initializer (see [state]): initializers may read states but
+     *   not write.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
-        checkNotDisposed()
-        val state = this.getMutableState()
+        val state = writableState()
         val txn = _activeTransaction
         if (txn != null && stagesInto(txn)) {
             stageWrite(txn, state, that)
@@ -1147,21 +1218,28 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * `Store.property` for failure messages, or a generic phrase when the name
-     * is not at hand. Best effort, and never blocks: this runs on the refusal
-     * path, possibly inside a `Bridge.publish` that holds the state's bridge
-     * lock, while `removeState`/`clearStates` take [propertiesLock] and then
-     * bridge locks. Waiting for [propertiesLock] here would invert that order.
+     * `Store.property` for failure messages, or a generic phrase for a state
+     * with no declaration (a `MutableState` constructed by hand). Reads the
+     * state's declaration back-link, so it takes no lock: this runs on the
+     * refusal path, possibly inside a `Bridge.publish` that holds the state's
+     * bridge lock, where waiting for any store-side lock could invert an
+     * order another thread holds.
      */
     private fun describeState(state: MutableState<*>): String {
-        if (!propertiesLock.tryAcquire()) return "a state of $displayName"
-        val name =
-            try {
-                _properties.entries.firstOrNull { it.value === state }?.key
-            } finally {
-                propertiesLock.release()
-            }
+        val name = state.declaration?.name
         return if (name != null) "$displayName.$name" else "a state of $displayName"
+    }
+
+    /**
+     * The [MutableState] behind this state, for a write: checks that the
+     * store is not disposed, that the state is this store's, and that no state
+     * initializer is running on this thread.
+     */
+    private fun <T : Any> State<T>.writableState(): MutableState<T> {
+        checkNotDisposed()
+        val state = getMutableState()
+        NoWriteRegion.refuse { "write ${describeState(state)}" }
+        return state
     }
 
     /**
@@ -1177,54 +1255,69 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Look up a state by its property name. Returns null if not registered yet
-     * (states are registered lazily on first delegate read). Caller MUST NOT cast
-     * the returned [State] back to [MutableState].
+     * Look up a materialized state by its property name. Returns null if it
+     * has not been materialized yet: a declared state is created by its first
+     * read, or by [snapshot] or [restore], not by this lookup. Caller MUST NOT
+     * cast the returned [State] back to [MutableState].
      */
     fun getState(name: String): State<*>? {
         checkNotDisposed()
-        return propertiesLock.withLock { _properties[name] }
+        return registry.lock.withLock { registry.states[name] }
     }
 
-    /** Whether a state with [name] has been registered. */
+    /** Whether a state with [name] is materialized (see [getState]). */
     fun hasState(name: String): Boolean {
         checkNotDisposed()
-        return propertiesLock.withLock { _properties.containsKey(name) }
+        return registry.lock.withLock { registry.states.containsKey(name) }
     }
 
     /**
      * Drop the named state from the registry and silently dispose its observers
-     * and bridge. A subsequent delegate read recreates the state from its initializer.
+     * and bridge. Its declaration stays: a subsequent delegate read — or
+     * [snapshot]/[restore] — recreates the state from its initializer. (A
+     * derived backing or internally registered state has no initializer to
+     * recreate it from, and goes with its declaration.)
      *
      * Throws [IllegalStateException] if the state has pending writes in an active
      * transaction (caller must commit or roll back first).
      */
     fun removeState(name: String) {
         checkNotDisposed()
-        propertiesLock.withLock {
-            val state = _properties[name] ?: return@withLock
-            checkNoPendingWrites(state, name)
-            state.shutdownSilently()
-            _properties.remove(name)
-        }
+        val removed =
+            registry.lock.withLock {
+                val state = registry.states[name] ?: return
+                checkNoPendingWrites(state, name)
+                registry.dematerialize(name)
+                state
+            }
+        // Outside the registry's lock, as in dispose(): shutting down disposes
+        // the bridge's inbound subscription, which is user code — and user code
+        // may read a state another thread is materializing, which needs this
+        // lock to publish it.
+        removed.shutdownSilently()
     }
 
     /**
-     * Drop every registered state and silently dispose all observers and bridges.
-     * Subsequent delegate reads recreate fresh states.
+     * Drop every materialized state and silently dispose all observers and
+     * bridges. Declarations stay: subsequent delegate reads — or
+     * [snapshot]/[restore] — recreate fresh states from their initializers.
+     * (Derived backing and internally registered states have no initializer
+     * and go with their declarations.)
      *
      * Throws [IllegalStateException] if any state has pending writes in an active
      * transaction.
      */
     fun clearStates() {
         checkNotDisposed()
-        propertiesLock.withLock {
-            _properties.values.forEach { state ->
-                checkNoPendingWrites(state, state.toString())
+        val removed =
+            registry.lock.withLock {
+                registry.states.forEach { (name, state) -> checkNoPendingWrites(state, name) }
+                val live = registry.states.toMap()
+                live.keys.forEach { registry.dematerialize(it) }
+                live.values
             }
-            _properties.values.forEach { it.shutdownSilently() }
-            _properties.clear()
-        }
+        // Outside the registry's lock; see removeState.
+        removed.forEach { it.shutdownSilently() }
     }
 
     private fun checkNoPendingWrites(

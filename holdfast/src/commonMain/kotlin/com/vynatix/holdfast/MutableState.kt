@@ -3,6 +3,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import kotlinx.atomicfu.atomic
 
 /**
  * The concrete implementation of [State] used by [Store]. Carries:
@@ -62,6 +63,27 @@ class MutableState<T : Any>(
     @kotlin.concurrent.Volatile
     private var currentValue: T = initialValue
 
+    /**
+     * The declaration this state was materialized from: its store-side name
+     * and kind. `null` only for a `MutableState` constructed by hand, outside
+     * any store registry. Set before the state is published.
+     */
+    @kotlin.concurrent.Volatile
+    internal var declaration: StateDeclaration<T>? = null
+
+    /**
+     * Write brackets around every assignment of [currentValue] (see
+     * ConsistentRead.kt): [writesBegun] is bumped before a write starts and
+     * [writesEnded] after it finishes, so the two differ exactly while a
+     * write is in progress. A commit opens the bracket on every state it
+     * applies before assigning any of them, which is what lets a reader take
+     * a cut of several states that no commit is half-way through.
+     */
+    internal val writesBegun = atomic(0L)
+
+    /** See [writesBegun]. */
+    internal val writesEnded = atomic(0L)
+
     @kotlin.concurrent.Volatile
     private var currentBridge: Bridge<T>? = null
 
@@ -83,6 +105,12 @@ class MutableState<T : Any>(
      *
      * Off-owner-thread reads only see the committed value, never another thread's
      * uncommitted pending writes.
+     *
+     * A read from inside a state initializer sees the committed value too, even on
+     * the owning thread: an initializer runs whenever its state is first needed —
+     * possibly inside an action, an `atomic(...)` frame or a `snapshot()` taken in
+     * one — and the value it returns is committed at once and survives a rollback,
+     * so it must not be computed from writes that may yet roll back.
      */
     override val value: T
         get() =
@@ -90,7 +118,9 @@ class MutableState<T : Any>(
                 val txn = owningStore.activeTransaction
                 if (txn != null && txn.ownerThreadId == currentThreadId()) {
                     val pending = txn.findPendingValue(this)
-                    if (pending != null) return@withLock afterGet(pending)
+                    // The thread-local is read only when there is a pending
+                    // value to hide, so an ordinary read pays nothing for it.
+                    if (pending != null && NoWriteRegion.current() == null) return@withLock afterGet(pending)
                 }
                 afterGet(currentValue)
             }
@@ -108,16 +138,25 @@ class MutableState<T : Any>(
      * Used by [Store.snapshot] to capture the on-disk-equivalent representation
      * (ciphertext, post-`transformer.set` form, etc.) so [Store.restore] can
      * round-trip without re-running `transformer.set`.
+     *
+     * A plain volatile read that never waits for a writer: a snapshot reads it
+     * through `readConsistent`, which validates it against the write brackets.
      */
     internal val rawCurrentValue: T
-        get() = stateLock.withLock { currentValue }
+        get() = currentValue
 
     /**
      * Commit pass 1 — **assignment only**. Writes `currentValue` and returns
-     * whether the value changed; runs NO user code, so it cannot throw and
-     * therefore cannot tear a commit part-way through its pending writes.
-     * [Transaction.commitDispatching] applies every pending write with this
-     * before any fanout begins.
+     * whether the value changed. Runs no user code except `equals` on a
+     * [distinct] state. [Transaction.commitDispatching] applies every pending
+     * write with this before any fanout begins.
+     *
+     * Core-only: it must be called inside the commit's write bracket, which
+     * `Transaction.applyPendingWrites` opens on every pending state before the
+     * first assignment and closes in a `finally` after the last (see
+     * ConsistentRead.kt). An unbracketed call lets a concurrent `snapshot()`
+     * see half of a commit. The bracket helpers are `internal`, so companion
+     * modules must not call this.
      *
      * If [distinct] is true and the new processed value is `==` to
      * `currentValue`, nothing is written and this returns `false` — the caller
@@ -185,8 +224,13 @@ class MutableState<T : Any>(
      */
     internal fun applyFromBridge(rawValue: T) {
         val processed = beforeSet(rawValue)
-        stateLock.withLock {
-            currentValue = processed
+        writesBegun.incrementAndGet()
+        try {
+            stateLock.withLock {
+                currentValue = processed
+            }
+        } finally {
+            writesEnded.incrementAndGet()
         }
         notifyObservers(afterGet(processed))
     }

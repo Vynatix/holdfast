@@ -11,6 +11,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.UnenrolledStoreException
+import com.vynatix.holdfast.internalRefuseInitializerWrite
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -61,6 +62,8 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+    // A state initializer may read states but not write them (Store.state).
+    internalRefuseInitializerWrite("run suspendAction")
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic
     // frame runs as a SAVEPOINT of its frame root — no mutex re-acquisition

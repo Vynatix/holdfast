@@ -41,6 +41,13 @@ class DisposedEntrypointTest {
             Entrypoint("bridge") { p, s -> p { s bridge null } },
             Entrypoint("observeFrom") { p, s -> p { s observeFrom Observable { error("subscribed after dispose") } } },
             Entrypoint("state delegate read") { p, _ -> p.n },
+            // Only the operator runs: a later read would throw from getValue's own check.
+            Entrypoint("state declaration (provideDelegate)") { p, _ ->
+                p.state { 0 }.provideDelegate(null, DisposedProbe::n)
+            },
+            Entrypoint("snapshot") { p, _ -> p.snapshot() },
+            Entrypoint("restore") { p, _ -> p.restore(StoreSnapshot(mapOf("n" to 1))) },
+            Entrypoint("registerDerivedBackingState") { p, _ -> p.registerDerivedBackingState("__probe", 0, emptyList()) },
             Entrypoint("properties") { p, _ -> p.properties },
             Entrypoint("getState") { p, _ -> p.getState("n") },
             Entrypoint("hasState") { p, _ -> p.hasState("n") },
@@ -56,6 +63,9 @@ class DisposedEntrypointTest {
             Entrypoint("clock") { p, _ -> p.clock },
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
+            Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->
+                p.internalRefuseInitializerWrite("probe")
+            },
             Entrypoint("dispose (idempotent)") { p, _ -> p.dispose() },
             Entrypoint("internalReportUncaughtFailure (handler)") { p, _ ->
                 var reported: Throwable? = null

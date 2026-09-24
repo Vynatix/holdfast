@@ -111,6 +111,29 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   transaction was open could be stranded. All three exits now drain after
   releasing, like a production `action`.
 
+- **Two stores whose state initializers read each other no longer deadlock
+  (issue #20, R5).** An initializer ran under its store's `propertiesLock`, so
+  store A's initializer reading a never-read state of store B, while B's
+  initializer read one of A's on another thread, deadlocked AB-BA on the two
+  locks. Initializers no longer run under `propertiesLock`; each runs behind
+  a per-state latch: the first thread to need a state runs its initializer
+  once, and any other thread needing it meanwhile waits for that one (parked,
+  not spinning).
+
+- **`snapshot()` never captures a half-applied commit (issue #20, D7).** It
+  read each state's value one after the other, so a commit applying on another
+  thread meanwhile could land in the snapshot for some states and not others.
+  A commit now brackets its apply pass on every state it writes, and
+  `snapshot()` takes a lock-free cut that no bracket overlaps, retrying while
+  one is open; a writer never waits for a snapshot.
+
+- **A snapshot of a store with a `derived` state restores into another
+  instance.** The derived's backing state was captured under its synthesized
+  name (`__derived_N`), which no other instance declares, so restoring the
+  snapshot anywhere but its own store failed as an unknown state. Backing
+  states are now restored only into the store that captured them, and skipped
+  elsewhere (see the `BREAKING` entry below).
+
 ### Changed
 
 - **BREAKING (commit fanout order).** Observers for every state in a
@@ -225,7 +248,113 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   your own logging, or `{ }` to silence them. See
   [MIGRATING.md](../MIGRATING.md#behavior-change-post-commit-failures-are-logged-by-default-040).
 
+- **BREAKING (behavior): states are declared when the store is constructed,
+  and `snapshot()` captures never-read ones (issue #20, R5).** `val x by state
+  { … }` used to register nothing until `x` was first read, so a snapshot of a
+  fresh (or partly used) store silently missed every state nobody had read yet,
+  and restoring into such a store failed on them. Delegating the property now
+  DECLARES the state on its store (through the new
+  `StateDelegate.provideDelegate`) without running the initializer; the state
+  is MATERIALIZED from its initializer on its first read, or when `snapshot()`
+  or `restore()` needs it. So:
+  - `snapshot()` runs the initializer of every declared state that was never
+    read, and its snapshot holds every declared state — at its initial value
+    if untouched. A throwing initializer makes `snapshot()` throw.
+  - `restore()` materializes a declared target itself; touching the states of
+    a fresh store before restoring into it is no longer needed.
+  - `removeState`/`clearStates` keep the declaration: the next read, or
+    snapshot, creates the state again from its initializer.
+  - `properties`, `getState` and `hasState` still report materialized states
+    only.
+
+  The store takes no lock to run an initializer (a first need inside an
+  action still runs it under that action's locks); it runs once per
+  materialization, on the thread that first needs the state. See
+  [MIGRATING.md](../MIGRATING.md#behavior-change-states-are-declared-eagerly-040).
+
+- **BREAKING (behavior): a state initializer may not write, and an
+  initializer cycle throws.** An initializer runs at an unpredictable moment —
+  a first read inside some action, a commit's fanout, or now a `snapshot()` —
+  so a write from it landed there. Inside an initializer, `mutate`/`update`,
+  `action`, `atomic` and `emit` (and `:holdfast-coroutines`' `suspendAction`
+  and `suspendAtomic`) now throw an `IllegalStateException` naming the state
+  being initialized; reading other states is fine. An initializer that needs
+  its own state — directly, or through other initializers, on one thread or
+  across threads — used to overflow the stack, or deadlock when two stores'
+  initializers needed each other on two threads; it now throws an
+  `IllegalStateException` naming the chain (`CycleStore.x → CycleStore.y →
+  CycleStore.x`). Both leave the state unmaterialized, so the next read runs
+  its initializer again.
+
+- **BREAKING (behavior): a state initializer reads committed values only.**
+  An initializer that ran inside an action — because that action was the
+  first to need its state — read the action's uncommitted writes, and seeded
+  the state from them. The seed was committed at once, visible to every
+  thread, and survived the action's rollback, so a rolled-back write could
+  leak into committed state for good; now that `snapshot()` and `restore()`
+  materialize never-read states, a snapshot taken inside an action could also
+  pair one state's committed value with another's value computed from a
+  pending write. Inside an initializer, a read of any state now returns its
+  committed value, even on the thread whose action has pending writes to it.
+  So `store action { a mutate 5; b.value }`, where `b`'s initializer reads
+  `a` and `b` was never read, seeds `b` from the committed `a` — as a fresh
+  store would — rather than from `5`. Reads outside initializers keep
+  read-your-own-writes.
+
+- **BREAKING (behavior): declaring a state name twice fails fast.** Two
+  properties with one name on one store — typically a subclass redeclaring a
+  state of its base class (`override val x by state { … }`) — silently shared
+  one state, created by whichever initializer ran first. The second
+  declaration now throws an `IllegalStateException` when the store is
+  constructed. The same declaration evaluated again still binds to the
+  existing state: a member property of a helper class instantiated twice over
+  one store, or a local delegated property (`val x by store.state { … }` in a
+  function) run twice.
+
+- **BREAKING (behavior): the backing states of `derived` leave
+  `StoreSnapshot.stateNames`.** They were captured as ordinary states under
+  their synthesized names. They are still captured — an undo on the same store
+  restores them in the restore's own commit — but they are no longer in
+  `stateNames` or `size`, and `restore` writes them back only into the store
+  instance that took the snapshot. An undo whose backing state
+  `removeState`/`clearStates` has dropped since skips it, where it used to
+  fail as an unknown state. `properties` and `getState` still list them
+  under their synthesized names. `derived` on a disposed store now throws
+  instead of registering its backing state there.
+
+- **`:holdfast-testing`: `shouldMatchSnapshotOf` compares every declared
+  state**, read or not, since snapshots now cover them; two stores that only
+  differed in which states had been read no longer mismatch on state names.
+  The backing states of `derived` are not compared.
+
+- **`Store.state`'s delegate reads take no lock once the state exists.** A read
+  used to look the state up by name under `propertiesLock` every time. And
+  `removeState`/`clearStates` shut a removed state's observers and bridge down
+  after releasing that lock, as `dispose()` always did.
+
 ### Added
+
+- **`StateDelegate.provideDelegate(thisRef, property)`** — a default member
+  (returning the delegate itself) that the delegate `Store.state` returns
+  overrides to declare the state on its store when the property is delegated.
+  Additive: `StateDelegate` stays a `fun interface`, and `state(…)` keeps its
+  signature and return type. A wrapping delegate should forward it (as
+  `:holdfast-hallmark`'s `boxedHandle` does) so its state is declared
+  eagerly; one that only forwards `getValue` declares on first read.
+
+- **`Store.registerDerivedBackingState(name, initial, sources, distinct)`**
+  (`@StoreInternalApi`) — registers the backing state of a `derived`/
+  `suspendDerived`, which `snapshot()` captures but hides from `stateNames`
+  and `restore()` writes back only into the same instance. Throws on a
+  disposed store. `registerInternalState` stays for compatibility; its KDoc no
+  longer claims Kotlin identifiers cannot start with `__` (they can: the
+  synthesized names are chosen to be unlikely, and a collision now fails
+  fast). Companion modules only.
+
+- **`Store.internalRefuseInitializerWrite(attempt)`** (`@StoreInternalApi`) —
+  throws when a state initializer is running on the calling thread;
+  `:holdfast-coroutines` polices `suspendAction`/`suspendAtomic` with it.
+  Companion modules only.
 
 - **`Store.internalReportUncaughtFailure(error)`** (`@StoreInternalApi`) — the
   one reporting path for post-commit failures: `uncaughtObserverHandler` when
@@ -248,7 +377,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   resolves like `scope`: a subclass getter override, then the clock bound with
   `bindClock`, then `Clock.System`. `bindClock(null)` unbinds; `bindClock` throws
   on a disposed store, while reading `clock` never throws. State initializers
-  read it lazily, at the state's first read, so bind before that read. The
+  read it lazily, when the state is first needed (its first read, or
+  `snapshot()`/`restore()`), so bind before that. The
   library's own timestamps (`Transaction.endTime`, `TimingMiddleware`,
   `ProfilingMiddleware`) keep using the system clocks. `Store.internalBoundClock`
   (`@StoreInternalApi`) exposes the raw binding for the test harness.

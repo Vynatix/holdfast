@@ -12,6 +12,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.internalRefuseInitializerWrite
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.verifyFrameNesting
 import kotlinx.coroutines.CancellationException
@@ -102,6 +103,8 @@ suspend fun <R> suspendAtomic(
     require(stores.isNotEmpty()) { "suspendAtomic requires at least one store" }
     // De-duplicate by identity and sort by global lock order key.
     val sorted = stores.toSet().sortedBy { it.lockOrderKey }
+    // A state initializer may read states but not write them (Store.state).
+    sorted.first().internalRefuseInitializerWrite("open a suspendAtomic(...) frame")
 
     // Nested-frame safety (interop flavor + lock order), BEFORE any lock is
     // acquired. The enclosing marker is coherent on this thread because the

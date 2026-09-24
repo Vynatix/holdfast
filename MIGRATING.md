@@ -154,6 +154,42 @@ observers still run.
   `store.uncaughtObserverHandler = { e -> logger.warn("post-commit failure", e) }`.
 - To restore the old silence deliberately: `store.uncaughtObserverHandler = { }`.
 
+## Behavior change: states are declared eagerly (0.4.0)
+
+`val x by state { … }` now declares `x` on its store while the store is being
+constructed; the initializer still runs lazily, when the state is first
+needed. What changes (issue #20, R5):
+
+- **`snapshot()` holds every declared state.** It runs the initializer of any
+  state nobody has read yet, so a snapshot of a fresh store is complete — and
+  an initializer with side effects, or one that throws, now runs (or throws)
+  inside `snapshot()`. Code that touched states before snapshotting, or before
+  `restore`-ing into a fresh store, can drop the touches. The backing states
+  of `derived`/`suspendDerived` are no longer in `stateNames`/`size`.
+- **Initializers may read, not write.** A `mutate`/`update`, `action`,
+  `atomic`, `emit`, `suspendAction` or `suspendAtomic` inside an initializer
+  throws `IllegalStateException`. Compute the initial value from what the
+  initializer can read, and make the write in an action after construction.
+- **Initializers read committed values only.** An initializer that runs
+  inside an action (because the action is the first to need its state) no
+  longer sees that action's pending writes: `action { a mutate 5; b.value }`
+  seeds a never-read `b` from the committed `a`, not from `5`. If `b` should
+  follow `a`, compute it with `computed { }`/`derived(...)` instead of seeding
+  a state from it.
+- **Initializer cycles throw** an `IllegalStateException` naming the chain,
+  where they used to overflow the stack or deadlock. Give one state of the
+  cycle an initial value that does not read the others.
+- **One declaration per name.** A subclass that redeclares a state of its base
+  class (`override val x by state { … }`) — or any second property with the
+  same name on one store — now fails when the store is constructed, instead of
+  silently sharing one state. Rename one of them. A local delegated property
+  evaluated again, or a helper object's property declared again over the same
+  store, still binds to the existing state.
+- **Custom delegates wrapping `state(…)`** should forward
+  `provideDelegate(thisRef, property)` to the wrapped delegate (as
+  `:holdfast-hallmark`'s `boxedHandle` does); otherwise their state is
+  declared only on its first read, and a snapshot taken before that misses it.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

@@ -420,7 +420,8 @@ class Transaction internal constructor(
                         parentTxn.pendingEvents.addAll(pendingEvents)
                     }
                 } else {
-                    // Top-level commit, pass 1 (assignment only, cannot throw).
+                    // Top-level commit, pass 1 (assignment only; a distinct state's
+                    // equals may throw, and the write bracket is closed in a finally).
                     applyPendingWrites(committed, eventsToDrain)
                 }
                 buffersClosed = true
@@ -563,24 +564,39 @@ private const val NOT_FANNING_OUT = Long.MIN_VALUE
  * events into [eventsToDrain]; then mark the transaction [Transaction.applied]
  * with the calling thread as its fanout thread. The caller holds `pendingLock`.
  *
- * Assignment only — no user code runs here, so this pass cannot throw and
- * cannot leave the transaction half-applied. Fanout (observers, bridges)
- * happens afterwards, once every state in the transaction already holds its
- * committed value, so an observer reading a sibling state sees the committed
+ * Assignment only. The only user code that runs here is `equals` on a
+ * `distinct` state; if that throws, earlier states in the pass are already
+ * assigned, and the write bracket is still closed in the `finally`. Fanout
+ * (observers, bridges) happens afterwards, once every state in the
+ * transaction already holds its committed value, so an observer reading a
+ * sibling state sees the committed
  * value directly rather than through `findPendingValue`. The events are drained
  * after `pendingLock` is released: `tryEmit` may invoke ready collectors
  * synchronously, and no internal lock is ever held across user code.
+ *
+ * The assignments sit inside one write bracket (ConsistentRead.kt): every
+ * state's bracket opens before the first assignment and closes after the
+ * last, so a concurrent `snapshot()` sees all of this commit or none of it.
  */
 @OptIn(StoreInternalApi::class)
 private fun Transaction.applyPendingWrites(
     committed: MutableList<Pair<MutableState<*>, Any>>,
     eventsToDrain: MutableList<Pair<MutableSharedFlow<*>, Any>>,
 ) {
-    pendingWrites.forEach { (state, value) ->
-        @Suppress("UNCHECKED_CAST")
-        if ((state as MutableState<Any>).applyCommittedValue(value)) {
-            committed += state to value
+    // A stable copy: opening and closing must cover exactly the same states.
+    val states = pendingWrites.keys.toList()
+    openWriteBracket(states)
+    try {
+        pendingWrites.forEach { (state, value) ->
+            @Suppress("UNCHECKED_CAST")
+            if ((state as MutableState<Any>).applyCommittedValue(value)) {
+                committed += state to value
+            }
         }
+    } finally {
+        // Closed even if a `distinct` state's `equals` throws, so no reader
+        // waits forever on a bracket this commit left open.
+        closeWriteBracket(states)
     }
     eventsToDrain.addAll(pendingEvents)
     applied = true

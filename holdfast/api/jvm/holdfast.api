@@ -181,6 +181,10 @@ public final class com/vynatix/holdfast/MutableStateKt {
 	public static final fun getObserverCount (Lcom/vynatix/holdfast/State;)I
 }
 
+public final class com/vynatix/holdfast/NoWriteRegionKt {
+	public static final fun internalRefuseInitializerWrite (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)V
+}
+
 public abstract interface class com/vynatix/holdfast/Observable {
 	public abstract fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 }
@@ -200,6 +204,11 @@ public abstract interface class com/vynatix/holdfast/State {
 
 public abstract interface class com/vynatix/holdfast/StateDelegate {
 	public abstract fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/State;
+	public fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
+}
+
+public final class com/vynatix/holdfast/StateDelegate$DefaultImpls {
+	public static fun provideDelegate (Lcom/vynatix/holdfast/StateDelegate;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/StateDelegate;
 }
 
 public abstract class com/vynatix/holdfast/Store {
@@ -236,6 +245,8 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun observeFrom (Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/Observable;)Lcom/vynatix/holdfast/Disposable;
 	protected fun onDispose ()V
 	public final fun postCommit (Lkotlin/jvm/functions/Function0;)V
+	public final fun registerDerivedBackingState (Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;Z)Lcom/vynatix/holdfast/MutableState;
+	public static synthetic fun registerDerivedBackingState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
 	public final fun registerInternalState (Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;Z)Lcom/vynatix/holdfast/MutableState;
 	public static synthetic fun registerInternalState$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Lcom/vynatix/holdfast/Transformer;ZILjava/lang/Object;)Lcom/vynatix/holdfast/MutableState;
 	public final fun removeState (Ljava/lang/String;)V

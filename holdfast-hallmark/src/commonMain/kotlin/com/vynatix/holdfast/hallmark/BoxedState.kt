@@ -21,8 +21,11 @@ import com.vynatix.holdfast.Store
  * ```
  *
  * If [initial] returns a primitive that itself fails validation,
- * [com.vynatix.hallmark.HallmarkException] is thrown lazily on first
- * read of the state.
+ * [com.vynatix.hallmark.HallmarkException] is thrown when the state is first
+ * materialized, not when the store is constructed: on its first read, or
+ * when `snapshot()` (which then throws) or `restore()` (which then returns
+ * [com.vynatix.holdfast.TransactionResult.Error]) needs a state that was
+ * never read (see [com.vynatix.holdfast.Store.state]).
  *
  * Note: an `assign` infix that writes a raw primitive directly
  * (`email assign "..."`) was deferred to a future release — it would require

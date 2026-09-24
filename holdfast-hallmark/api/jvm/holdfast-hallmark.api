@@ -22,6 +22,7 @@ public final class com/vynatix/holdfast/hallmark/BoxedHandle {
 
 public final class com/vynatix/holdfast/hallmark/BoxedHandleDelegate {
 	public final fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/hallmark/BoxedHandle;
+	public final fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/hallmark/BoxedHandleDelegate;
 }
 
 public final class com/vynatix/holdfast/hallmark/BoxedHandleKt {

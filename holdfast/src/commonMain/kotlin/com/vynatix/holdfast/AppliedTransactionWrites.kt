@@ -173,6 +173,8 @@ internal fun refusedUnderAppliedTransaction(
  * `emit` for [store]: stage [event] on [channel] in this transaction, refusing
  * one that is closed to writes with a message naming [store]
  * ([Transaction.stagePendingEvent] refuses it too, but cannot name the store).
+ * The callers refuse an emit from inside a state initializer before they look
+ * for a transaction.
  */
 @OptIn(StoreInternalApi::class)
 internal fun Transaction.stageEmittedEvent(

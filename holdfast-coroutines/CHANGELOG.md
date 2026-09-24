@@ -112,6 +112,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when no `uncaughtObserverHandler` is set**, like every other post-commit
   failure, instead of being dropped silently. The commit still succeeds.
 
+- **BREAKING (behavior): `suspendAction` and `suspendAtomic` refuse to run
+  inside a state initializer** (issue #20, R5; see `:holdfast`'s changelog).
+  State initializers may read states but not write them; like the blocking
+  `action` and `atomic`, a suspending entrypoint reached from one — through
+  `runBlocking` — throws an `IllegalStateException` naming the state being
+  initialized.
+
+- **BREAKING (behavior): a `suspendDerived`'s backing state leaves
+  `StoreSnapshot.stateNames`.** It is registered with the new
+  `Store.registerDerivedBackingState`, like `derived`'s: `snapshot()` still
+  captures it and an undo on the same store restores it in the restore's own
+  commit, but it is no longer a state name, and restoring the snapshot into
+  another store instance skips it instead of failing on an unknown
+  `__suspendDerived_N` state. `suspendDerived` on a disposed store now throws.
+
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.
 
