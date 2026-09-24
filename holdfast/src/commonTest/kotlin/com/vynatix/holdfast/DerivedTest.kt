@@ -2,7 +2,9 @@ package com.vynatix.holdfast
 
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -47,6 +49,34 @@ class DerivedTest {
 
     @AfterTest fun cleanup() {
         disposables.forEach { it.dispose() }
+    }
+
+    /**
+     * A `computed` source is refused with a teaching IllegalArgumentException
+     * before anything runs, registers or subscribes: no compute, no backing
+     * state (in `properties` or a snapshot), no observer on the other sources.
+     */
+    @OptIn(StoreInternalApi::class)
+    @Test
+    fun aComputedSourceIsRefusedBeforeAnythingRunsOrSubscribes() {
+        val v = DerivedVault()
+        val snapshot = v.snapshot()
+        val keys = v.properties.keys.toSet()
+        val observers = v.items.observerCount
+        var computes = 0
+        val e =
+            assertFailsWith<IllegalArgumentException> {
+                v.derived(v.items, v.computed { tax.value }) {
+                    computes++
+                    0
+                }
+            }
+        assertContains(e.message.orEmpty(), "computed { }")
+        assertEquals(keys, v.properties.keys, "no backing state was registered")
+        assertEquals(snapshot, v.snapshot())
+        assertEquals(observers, v.items.observerCount, "no source was subscribed")
+        v action { items mutate listOf(1) }
+        assertEquals(0, computes, "the compute never ran, and nothing recomputes it")
     }
 
     @Test fun derivedRecomputesOnSourceCommit() {

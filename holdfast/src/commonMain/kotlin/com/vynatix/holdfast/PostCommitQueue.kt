@@ -37,10 +37,6 @@ internal class PostCommitQueue {
         lock.withLock { tasks.removeAll { it === task } }
     }
 
-    fun clear() {
-        lock.withLock { tasks.clear() }
-    }
-
     /**
      * Run every queued task, including tasks queued by the tasks it runs, on
      * the calling thread and outside the queue lock. A throwing task is

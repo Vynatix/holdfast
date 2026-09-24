@@ -216,12 +216,15 @@ internal class Recorder<V : Store<V>>(
         // middleware holds the store's transactionLock, so the brief
         // internalSetActiveTransaction(null) toggle inside the helper is safe
         // from concurrent observation.
-        val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store)
+        // modifiedStates is owner-thread-only. A state the store does not list
+        // (a derivedState's backing) is read with the registered ones.
+        val modified = PrivilegedHooks.modifiedStates(txn)
+        val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store, modified)
 
-        // Iterate modifiedStates (owner-thread-only). For each, read the
-        // post-set value via the public State.value getter — read-your-own-writes
-        // is in effect, so this returns the about-to-be-committed pending value.
-        for (state in PrivilegedHooks.modifiedStates(txn)) {
+        // For each modified state, read the post-set value via the public
+        // State.value getter — read-your-own-writes is in effect, so this
+        // returns the about-to-be-committed pending value.
+        for (state in modified) {
             val newValue = PrivilegedHooks.recordedValue(state, state.value)
             val oldValue = committedSnapshot[state]
             push(EmissionEvent(state = state, oldValue = oldValue, newValue = newValue, timestamp = now))

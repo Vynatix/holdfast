@@ -252,6 +252,13 @@ abstract class Store<Self : Store<Self>> {
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
      *  - The bound clock is kept, and reading [clock] still works; [bindClock] throws.
+     *  - If this store's last commit changed a source of a `derivedState`/`merged`
+     *    hosted on another, live store, and that recompute has not run yet — only
+     *    when `dispose()` is called from inside that commit's fanout (one of its
+     *    observers) or races the commit from another thread — it runs before
+     *    `dispose()` returns, on the calling thread: that derived state's
+     *    compute, its host's middleware and its host's observers then run inside
+     *    `dispose()`. A recompute hosted on this store does nothing.
      *
      * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
@@ -267,7 +274,13 @@ abstract class Store<Self : Store<Self>> {
         transactionLock.withLock {
             _activeTransaction = null
         }
-        postCommitQueue.clear()
+        // Drain, not clear, outside the lock: this store's queue can hold the
+        // recomputes of derived states hosted on OTHER, live stores (a
+        // DerivedState queues its recompute on the store whose commit changed
+        // a source), which must still see this store's last commit. A task
+        // hosted here refuses itself (tryTopLevelAction answers Disposed), and
+        // one hosted elsewhere never blocks: a busy host is handed the task.
+        drainPostCommitTasks()
         // Drop every state and declaration under the registry's lock, then call
         // shutdownSilently outside any store-side lock — `shutdownSilently` takes
         // the per-state observer + bridge locks, and we don't want to invert
@@ -563,11 +576,12 @@ abstract class Store<Self : Store<Self>> {
      * `:holdfast-testing`'s open-transaction commit, rollback and body-throw
      * cleanup. The queue write happens before the busy retry, and that
      * holder's drain after it releases, so the drain sees the task. [dispose]
-     * holds the lock only to empty the active-transaction slot, then clears
-     * the queue instead of draining it — fine, because a disposed store
-     * refuses every later attempt with [TopLevelAttempt.Disposed]. A new
-     * holder added to any of these must drain the same way (see
-     * [internalDrainPostCommitTasks]).
+     * holds the lock only to empty the active-transaction slot, then drains
+     * the queue too: it can hold the recomputes of derived states hosted on
+     * other, live stores, queued there by this store's last commit, while a
+     * task hosted on this store meets [TopLevelAttempt.Disposed] and does
+     * nothing. A new holder added to any of these must drain the same way
+     * (see [internalDrainPostCommitTasks]).
      */
     internal fun tryTopLevelAction(
         id: String,
@@ -722,8 +736,9 @@ abstract class Store<Self : Store<Self>> {
      * is not nested, and simply runs once the commit has finished.
      *
      * @throws IllegalStateException when called from inside a state
-     *   initializer (see [state]) or a schema migration
-     *   (`SchemaVersioned.migrate`): both may read states but not write.
+     *   initializer (see [state]), a schema migration
+     *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
+     *   recompute: all three may read states but not write.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
@@ -1134,6 +1149,9 @@ abstract class Store<Self : Store<Self>> {
      * On attach, the bridge's `observe` is invoked immediately — implementations
      * typically replay any persisted value here for load-on-attach.
      * On detach, the previous bridge's inbound observer is disposed.
+     *
+     * @throws IllegalStateException for a [DerivedState] ([derivedState],
+     *   [merged]), which is read-only.
      */
     infix fun <T : Any> State<T>.bridge(bridge: Bridge<T>?) {
         checkNotDisposed()
@@ -1146,6 +1164,9 @@ abstract class Store<Self : Store<Self>> {
      * admin override channel) and the state should not echo back via `publish`.
      *
      * Returns a [Disposable] that detaches the inbound subscription.
+     *
+     * @throws IllegalStateException for a [DerivedState] ([derivedState],
+     *   [merged]), which is read-only.
      */
     infix fun <T : Any> State<T>.observeFrom(observable: Observable<T>): Disposable {
         checkNotDisposed()
@@ -1195,8 +1216,10 @@ abstract class Store<Self : Store<Self>> {
      *   applied but is still committing (bridge publishes, event emits), and
      *   this thread is not part of that commit: write from other threads
      *   through [action], which waits for the store. Also thrown from inside
-     *   a state initializer (see [state]) or a schema migration
-     *   (`SchemaVersioned.migrate`): both may read states but not write.
+     *   a state initializer (see [state]), a schema migration
+     *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
+     *   recompute: all three may read states but not write. And for a
+     *   [DerivedState] ([derivedState], [merged]), which is read-only.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         val state = writableState()
@@ -1316,9 +1339,12 @@ abstract class Store<Self : Store<Self>> {
     /**
      * O(1) ownership check via [MutableState.owningStore]. Throws if [State] was
      * created by a different store — without this, a foreign-store state would
-     * silently pass the type cast and corrupt either store's state.
+     * silently pass the type cast and corrupt either store's state — and for a
+     * read-only `DerivedState` (or its backing state), which only its recompute
+     * writes.
      */
     private fun <T : Any> State<T>.getMutableState(): MutableState<T> {
+        refuseDerivedStateWrite(this)
         @Suppress("UNCHECKED_CAST")
         val ms = (this as? MutableState<T>) ?: error("State must be created by this Store instance")
         if (ms.owningStore !== this@Store) error("State must be created by this Store instance")

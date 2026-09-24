@@ -30,10 +30,12 @@ package com.vynatix.holdfast
  * thread, the launched body runs inside this commit and is refused the same way; the
  * launch alone would drop that Error. See GUIDE §4.4.
  *
- * Resolution detail: the cast to [MutableState] stays inside this function — it never
- * leaks into the published signature. Calling `effect` on a foreign `State` (not produced
- * by `store.state { … }`) throws — every observable state in this library is a
- * [MutableState] under the hood.
+ * Resolution detail: the resolution to a [MutableState] stays inside this function — it
+ * never leaks into the published signature. A [DerivedState] ([derivedState], [merged])
+ * observes like a declared state: the handler sees each value its recompute commits.
+ * Calling `effect` on a `State` no store produced — a [computed] one, or a foreign
+ * implementation — throws: every observable state in this library is a [MutableState]
+ * under the hood.
  *
  * ```
  * val v = MyStore()
@@ -44,8 +46,9 @@ package com.vynatix.holdfast
  */
 @OptIn(StoreInternalApi::class)
 infix fun <T : Any> State<T>.effect(handler: T.() -> Unit): Disposable {
-    @Suppress("UNCHECKED_CAST")
-    val mutable = (this as? MutableState<T>) ?: error("effect is only defined for State produced by store.state { ... }")
+    val mutable =
+        observableBacking()
+            ?: error("effect is only defined for a State a store produced (state { }, derived, derivedState, merged)")
     if (mutable.owningStore.isDisposed) error("store disposed")
     return mutable.observe(handler::invoke)
 }

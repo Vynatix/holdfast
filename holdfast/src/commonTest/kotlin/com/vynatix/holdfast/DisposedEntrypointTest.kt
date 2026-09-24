@@ -60,6 +60,12 @@ class DisposedEntrypointTest {
             },
             Entrypoint("reset") { p, _ -> p.reset() },
             Entrypoint("registerDerivedBackingState") { p, _ -> p.registerDerivedBackingState("__probe", 0, emptyList()) },
+            // The source is on a live store, so only derivedState's own check
+            // on its (disposed) host can throw.
+            Entrypoint("derivedState") { p, _ -> p.derivedState(DisposedProbe().n) { 0 } },
+            // The store's own check runs before merged's input checks, so the
+            // same state twice (refused on a live store) still reaches it.
+            Entrypoint("merged") { p, s -> p.merged(s, s) { a, b -> a + b } },
             Entrypoint("properties") { p, _ -> p.properties },
             Entrypoint("getState") { p, _ -> p.getState("n") },
             Entrypoint("hasState") { p, _ -> p.hasState("n") },

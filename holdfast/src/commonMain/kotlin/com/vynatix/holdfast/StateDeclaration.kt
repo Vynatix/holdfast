@@ -29,6 +29,13 @@ internal enum class StateKind {
 
     /** A state created eagerly by [Store.registerInternalState] under a synthesized name. */
     Internal,
+
+    /**
+     * The backing state of a `DerivedState` (`derivedState`/`merged`). Never
+     * registered: no registry, snapshot, restore or reset sees it. Read-only —
+     * only its recompute writes it; every store write entrypoint refuses it.
+     */
+    ReadOnlyDerived,
 }
 
 /**
@@ -37,7 +44,10 @@ internal enum class StateKind {
  * for the store's lifetime ([Store.removeState] and [Store.clearStates] drop
  * only the materialized instance of a [StateKind.Declared] state, so a later
  * read creates it again from [initializer]); [Store.dispose] clears the
- * registry.
+ * registry. The exception is a [StateKind.ReadOnlyDerived] declaration, which
+ * only names and tags a `DerivedState`'s backing state: `createDerivedState`
+ * sets it on a MutableState it builds by hand, it is never in the registry,
+ * and its [materialized] stays `null`.
  *
  * [latch] and [latchOwner] belong to the store's [InitializerGraph]: the
  * latch is held by the one thread running [initializer], and [latchOwner]
@@ -65,12 +75,13 @@ internal class StateDeclaration<T : Any>(
     val property: KProperty<*>?,
     /** Whether [property] was declared without a receiver: a local (or top-level) delegated property. */
     val local: Boolean,
-    /** The sources of a [StateKind.DerivedBacking] state; empty otherwise. */
+    /** The sources of a [StateKind.DerivedBacking] or [StateKind.ReadOnlyDerived] state; empty otherwise. */
     val sources: List<State<*>> = emptyList(),
     /**
      * The state's [StateTag]s ([State.tags]): as declared, already validated
-     * ([validateTags]); for a [StateKind.DerivedBacking] state, the taint of
-     * its [sources] ([derivedTags]); empty for an internal state.
+     * ([validateTags]); for a [StateKind.DerivedBacking] or
+     * [StateKind.ReadOnlyDerived] state, the taint of its [sources]
+     * ([derivedTags]); empty for an internal state.
      */
     val tags: Set<StateTag> = emptySet(),
 ) {
@@ -204,4 +215,5 @@ internal fun StateKind.describe(): String =
         StateKind.Declared -> "declared state"
         StateKind.DerivedBacking -> "derived backing state"
         StateKind.Internal -> "internal state"
+        StateKind.ReadOnlyDerived -> "derived state (derivedState or merged)"
     }

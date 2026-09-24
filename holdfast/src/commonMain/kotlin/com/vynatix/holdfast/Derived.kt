@@ -77,23 +77,33 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  * // …later:
  * disposable.dispose()
  * ```
+ *
+ * A source may be any state a store produced, including a [derivedState] or
+ * [merged] one; the experimental [derivedState] is the read-only,
+ * snapshot-free counterpart of this function.
+ *
+ * @throws IllegalArgumentException for a [computed] source (or any State no
+ *   store produced): it has no commits to follow.
  */
 fun <V : Store<V>, T : Any> V.derived(
     vararg sources: State<*>,
     compute: V.() -> T,
 ): Pair<State<T>, Disposable> {
     val self = this
+    // Resolve every source before anything runs or registers, so a refused
+    // source (a computed one) leaves no backing state and no subscription.
+    val observed = sources.map { it.observableSourceFor("derived") }
     val initial = self.compute()
     val name = "__derived_${derivedCounter.incrementAndGet()}"
     val backingState: MutableState<T> = self.registerDerivedBackingState(name, initial, sources.toList())
     // ONE task per derived: its stable identity is what lets postCommit's
     // identity dedup coalesce several sources firing in one commit into a
     // single recompute.
-    val recompute = DerivedRecompute(self, name, backingState, compute)
+    val recompute = DerivedRecompute(self, name, compute) { value -> backingState mutate value }
 
     val initialFireFlags = BooleanArray(sources.size)
     val subs =
-        sources.mapIndexed { idx, src ->
+        observed.mapIndexed { idx, src ->
             @Suppress("UNCHECKED_CAST")
             (src as MutableState<Any>).observe {
                 // Skip the initial-fire callback so we don't double-recompute.
@@ -120,9 +130,19 @@ fun <V : Store<V>, T : Any> V.derived(
 }
 
 /**
- * The recompute task of one [derived] state. It is submitted to the host's
- * post-commit queue by identity, so it must stay a single instance for the
- * derived's lifetime.
+ * The recompute task of one [derived] state (or [DerivedState]): runs
+ * [compute] and hands the result to [commit], which stages it into the
+ * derived's backing state, in a top-level action on [host]. It is submitted to
+ * post-commit queues by identity, so it must stay a single instance for the
+ * derived's lifetime. [queuedOn] lists the stores other than [host] whose
+ * queues a source commit may have put it on (a [DerivedState] queues it on
+ * its source's store); it withdraws itself from all of them, and while this
+ * thread runs a blocking action or frame on one of them it defers to that
+ * holder, so it runs once, after it ends. With [committedReads] (a
+ * [DerivedState]'s), [compute] runs in a [ComputingFrame]: it reads committed
+ * values only, so it never commits a value built from another transaction's
+ * pending writes — a blocking one it does not defer to, or a `suspendAction`
+ * parked on this thread — and a write from it throws.
  *
  * It commits through [Store.tryTopLevelAction] and never blocks or spins: a
  * busy host gets the task handed to its post-commit queue, and the host's
@@ -135,20 +155,50 @@ fun <V : Store<V>, T : Any> V.derived(
  * source store; and a host whose serializer was held by a coroutine that
  * needed this very thread spun forever.
  */
-private class DerivedRecompute<V : Store<V>, T : Any>(
+internal class DerivedRecompute<V : Store<V>, T : Any>(
     private val host: V,
     private val id: String,
-    private val backing: MutableState<T>,
     private val compute: V.() -> T,
+    private val queuedOn: List<Store<*>> = emptyList(),
+    private val committedReads: Boolean = false,
+    private val commit: V.(T) -> Unit,
 ) : () -> Unit {
     private val disposed = atomic(false)
 
     fun dispose() {
         disposed.value = true
+        withdrawEverywhere()
+    }
+
+    private fun withdrawEverywhere() {
         host.withdrawPostCommit(this)
+        queuedOn.forEach { it.withdrawPostCommit(this) }
     }
 
     override fun invoke() {
+        if (disposed.value) return
+        // This thread runs a blocking action or frame on a source's store (the
+        // recompute runs from another source store's drain, inside it): that
+        // action's commit, if it changes a source, queues this recompute
+        // again, and a frame's other participants are still to commit. Defer
+        // to that holder, which drains after it ends — on commit and on
+        // rollback alike (the hand-off invariant in Store.tryTopLevelAction) —
+        // so the recompute runs once, never from a torn pair. The compute
+        // reads committed values (committedReads), so this is about running
+        // once, not about what it reads. A suspending holder is never
+        // deferred to: its recorded owner thread is only where it started, and
+        // one parked on this thread (Android's main thread, runBlocking, any
+        // thread on wasmJs) could hold the recompute back for as long as its
+        // body suspends. internalOwnsActiveTransaction is false while one
+        // holds the store. postCommit, not a bare hand-off, for its
+        // lost-wakeup guard. The host needs no such check: a transaction
+        // there makes the attempt below busy, which hands off the same way.
+        // Legacy `derived` has no [queuedOn].
+        val held = queuedOn.firstOrNull { it.internalOwnsActiveTransaction() }
+        if (held != null) {
+            held.postCommit(this)
+            return
+        }
         val first = attempt()
         if (first is TopLevelAttempt.Busy || first is TopLevelAttempt.BusyNoTxn) {
             // Hand off, then retry once: the retry closes the window in which
@@ -176,9 +226,15 @@ private class DerivedRecompute<V : Store<V>, T : Any>(
                 // by this one. Before the middleware chain, so a middleware
                 // rejecting this recompute cannot leave the copy queued for the
                 // drain to run (and report) a second time.
-                onAcquired = { host.withdrawPostCommit(this) },
+                onAcquired = { withdrawEverywhere() },
             ) {
-                backing mutate compute()
+                val value =
+                    if (committedReads) {
+                        NoWriteRegion.runCompute("${host.displayName}.$id") { compute() }
+                    } else {
+                        compute()
+                    }
+                commit(value)
             }
         val result = (attempt as? TopLevelAttempt.Ran)?.result
         if (result is TransactionResult.Error && !host.isDisposed) {

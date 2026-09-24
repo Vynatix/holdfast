@@ -59,10 +59,14 @@ internal fun <T : Any> SnapshotContent.entryFor(state: State<T>): SnapshotEntry<
 private fun <T : Any> readableState(state: State<T>): MutableState<T> {
     @Suppress("UNCHECKED_CAST")
     val readable = state as? MutableState<T>
-    require(readable != null && readable.declaration != null) {
+    // A DerivedState's backing (handed out by a timeline's EmissionEvent,
+    // say) has a declaration too, but no store registers it.
+    val decl = readable?.declaration
+    require(readable != null && decl != null && decl.kind != StateKind.ReadOnlyDerived) {
         "Cannot read this State from a snapshot: a snapshot holds the states a store declares " +
             "(`val x by state { … }`) and the states of derived(...), and this State is neither — a computed { } " +
-            "state, for example, is recomputed on every read and has no value of its own to capture."
+            "state, for example, is recomputed on every read and has no value of its own to capture, and a " +
+            "derivedState(...) or merged(...) state is recomputed from its sources: read those instead."
     }
     return readable
 }

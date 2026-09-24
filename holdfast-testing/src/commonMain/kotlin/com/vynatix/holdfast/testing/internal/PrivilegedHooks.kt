@@ -9,6 +9,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
+import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
 import kotlin.time.Clock
@@ -66,31 +67,40 @@ internal object PrivilegedHooks {
      * call this from outside a middleware hook.
      *
      * Each value is already [recordedValue]: a Secret state maps to
-     * [com.vynatix.holdfast.Redacted].
+     * [com.vynatix.holdfast.Redacted]. [alsoRead] adds states the store does
+     * not list in `properties` (a `derivedState`'s backing, say) that the
+     * caller needs the committed values of too.
      */
-    fun snapshotCommittedStateValues(store: Store<*>): Map<State<*>, Any?> {
+    fun snapshotCommittedStateValues(
+        store: Store<*>,
+        alsoRead: Collection<State<*>> = emptyList(),
+    ): Map<State<*>, Any?> {
+        // Registered states, plus [alsoRead]: the states a transaction writes
+        // that the store does not list, such as a derivedState's backing.
+        val states = store.properties.values + alsoRead
         val active = store.activeTransaction
         return if (active == null) {
             // No active transaction → state.value already returns the committed
             // view. Cheap path; avoids the toggle.
-            buildMap {
-                for ((_, state) in store.properties) {
-                    put(state, recordedValue(state, state.value))
-                }
-            }
+            states.associateWith { recordedValue(it, it.value) }
         } else {
             store.internalSetActiveTransaction(null)
             try {
-                buildMap {
-                    for ((_, state) in store.properties) {
-                        put(state, recordedValue(state, state.value))
-                    }
-                }
+                states.associateWith { recordedValue(it, it.value) }
             } finally {
                 store.internalSetActiveTransaction(active)
             }
         }
     }
+
+    /**
+     * The state the recorder's events name for [state]: the backing state of
+     * a `derivedState`/`merged` state (the state its recompute commits, and
+     * so the one [com.vynatix.holdfast.Transaction.modifiedStates] and the
+     * timeline hold), [state] itself otherwise. Every lookup of a tracked
+     * property in the timeline resolves through this.
+     */
+    fun recordedState(state: State<*>): State<*> = state.observableBacking() ?: state
 
     /** Whether [state] is tagged `StateTag.Secret` (a `derived` of one included). */
     @OptIn(ExperimentalStoreApi::class)

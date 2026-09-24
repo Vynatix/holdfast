@@ -3,13 +3,14 @@ package com.vynatix.holdfast
 import com.vynatix.holdfast.platform.currentInitializerLocal
 import com.vynatix.holdfast.platform.setInitializerLocal
 
-// The no-write region state initializers and schema migrations run in, and
-// the teaching messages built from this thread's stack of running
-// initializers (issue #20, D3 and D12).
+// The no-write region state initializers, schema migrations and derived
+// states' recomputes run in, and the teaching messages built from this
+// thread's stack of running initializers (issue #20, D3, D12 and R6).
 
 /**
  * One no-write region open on this thread, linked to the region it opened
- * inside ([parent]), if any: an initializer, or a store's `migrate`.
+ * inside ([parent]), if any: an initializer, a store's `migrate`, or a
+ * derived state's recompute.
  */
 internal sealed class NoWriteFrame(
     val parent: NoWriteFrame?,
@@ -53,8 +54,27 @@ internal class MigratingFrame(
 }
 
 /**
- * The thread-local region in which state initializers, and schema migrations
- * ([SchemaVersioned.migrate]), run. Code inside it may read states — which
+ * The compute of the derived state [derived] (`derivedState`/`merged`, by its
+ * qualified name), running on this thread for a recompute. The recompute
+ * commits what the compute returns at once, so the compute reads committed
+ * values only — never the pending writes of a transaction this thread holds
+ * elsewhere, which may yet roll back, including those of a `suspendAction`
+ * parked on this thread — and may not write.
+ */
+internal class ComputingFrame(
+    val derived: String,
+    parent: NoWriteFrame?,
+) : NoWriteFrame(parent) {
+    override fun refusal(attempt: String): IllegalStateException {
+        val message = computeWriteMessage(attempt, derived)
+        return IllegalStateException(message)
+    }
+}
+
+/**
+ * The thread-local region in which state initializers, schema migrations
+ * ([SchemaVersioned.migrate]) and the compute of a derived state's recompute
+ * ([ComputingFrame]) run. Code inside it may read states — which
  * materializes them in turn — and sees committed values only:
  * [MutableState.value] skips the pending writes of an action on this thread
  * while a region is open. The one exception is an initializer that `reset()`
@@ -65,7 +85,8 @@ internal class MigratingFrame(
  * else an enclosing action's pending writes). A store write from inside it
  * is refused: `mutate`/`update`, `action`, `atomic`, `emit`, `reset()`,
  * `restore`, and `:holdfast-coroutines`' `suspendAction`/`suspendAtomic` all
- * throw inside it, naming the state being initialized or the store migrating.
+ * throw inside it, naming the state being initialized, the store migrating or
+ * the derived state recomputing.
  */
 internal object NoWriteRegion {
     /** The innermost region open on this thread, or `null`. */
@@ -89,6 +110,12 @@ internal object NoWriteRegion {
         frame: MigratingFrame,
         block: () -> R,
     ): R = enter(frame, block)
+
+    /** Run [block] as the compute of the derived state [derived]'s recompute. */
+    fun <R> runCompute(
+        derived: String,
+        block: () -> R,
+    ): R = enter(ComputingFrame(derived, current()), block)
 
     private fun <R> enter(
         frame: NoWriteFrame,
@@ -121,8 +148,9 @@ internal object NoWriteRegion {
 
 /**
  * Refuse a store write from inside a state initializer (or a schema
- * migration): throws when one is running on this thread, naming [attempt]
- * and the state being initialized (or the store migrating). For
+ * migration, or a derived state's recompute): throws when one is running on
+ * this thread, naming [attempt] and the state being initialized (or the store
+ * migrating, or the derived state recomputing). For
  * `:holdfast-coroutines`' suspending entrypoints, which police what the
  * blocking ones police. It only reads a thread-local, so it works on a
  * disposed store too; the caller does its own disposed check.
@@ -155,6 +183,16 @@ internal fun migrateWriteMessage(
         "open an action or an atomic(...) frame, restore or reset a store, or emit events. Fix: make every " +
         "change to the snapshot through the EncodedSnapshotView migrate is given, and make any other write in " +
         "an action once the restore has returned."
+
+internal fun computeWriteMessage(
+    attempt: String,
+    derived: String,
+): String =
+    "Cannot $attempt: the compute of $derived is running on this thread, recomputing it after a commit that " +
+        "changed one of its sources. A derived state's compute may read states, but not write them, open an " +
+        "action or an atomic(...) frame, restore or reset a store, or emit events: its value is what its " +
+        "sources explain, and it commits in a transaction of its own right after the compute returns. Fix: " +
+        "make the write in the action that changes the sources, or compute that value as a derived state too."
 
 internal fun sameThreadCycleMessage(decl: StateDeclaration<*>): String {
     val stack = NoWriteRegion.stack()

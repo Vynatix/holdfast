@@ -369,7 +369,93 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `removeState`/`clearStates` shut a removed state's observers and bridge down
   after releasing that lock, as `dispose()` always did.
 
+- **BREAKING (behavior, misuse only): a `derived()` source that no store
+  produced fails with `IllegalArgumentException`.** A `computed { }` state
+  (or any foreign `State`) passed as a source of `derived` (or
+  `:holdfast-coroutines`' `suspendDerived`) used to fail with a bare
+  `ClassCastException`; it now fails with an `IllegalArgumentException` that
+  says why (a `computed` state has no commits to follow) and what to list
+  instead — before the initial compute runs, so a refused call registers no
+  backing state and subscribes to no source. A `derivedState`/`merged` state
+  is accepted as a source.
+
 ### Added
+
+- **Derived states and `merged`** (`@ExperimentalStoreApi`, issue #20 R6):
+  - `DerivedState<T>` — a sealed, read-only `State<T>` that is its own
+    `Disposable`, returned by the two builders below. Declare one with `by`
+    (its `getValue` operator returns the `DerivedState` itself) or `=`.
+    `mutate`, `update`, `bridge` and `observeFrom` on it (or on its backing
+    state) throw `IllegalStateException`. `dispose()` stops recomputation and
+    releases the source subscriptions; the value stays readable. A disposed
+    host stops recomputing, and the next commit of a source on another store
+    drops that subscription.
+  - `derivedState(vararg sources) { … }` — computed from `sources` (states of
+    any store, `derived` and derived states included; a `computed` one or an
+    empty list is an `IllegalArgumentException`) and recomputed ONCE per
+    commit that changes a source, however many sources it changes and on
+    whichever store: the recompute is queued on the committing store's
+    post-commit queue, runs once that commit has released its store (never
+    inside its fanout), and commits through the never-blocking top-level
+    attempt `derived` uses, handing off to a busy host. Sources on two stores
+    written in one `atomic` frame recompute once, after the frame unwinds.
+    The value commits in a transaction of its own on the host (middleware
+    sees it), into an unregistered `distinct` backing state, so observers
+    fire only when it changes. A throwing compute is reported through
+    `uncaughtObserverHandler` and keeps the previous value. A recompute never
+    commits writes that may still roll back: its compute reads committed
+    values only, never the pending writes of an action on its thread, and may
+    not write (a write, `action`, `atomic`, `reset()`, `restore` or `emit` from
+    it throws, reported like any failing recompute). A source commit nested in
+    a blocking action (or a frame inside one) on another source's store
+    recomputes once that action ends. A `suspendAction`/`suspendAtomic`
+    holding a source's store never holds a recompute back, even one parked on
+    the recomputing thread (Android's main thread, `runBlocking`, wasmJs): it
+    recomputes at once from committed values, and again after that action
+    commits. A source value that arrives outside a commit (`bridge`,
+    `observeFrom`) recomputes at once on an idle host. The derived state
+    subscribes to its sources before its initial compute, so a source commit
+    landing during that compute is recomputed rather than lost; created
+    inside an action on its store or a source's store, it sees that action's
+    pending writes and recomputes from committed values once the action ends,
+    rollback included.
+  - `merged(local, remote) { l, r -> … }` — a derived state over two
+    different states the store declares: the user's side and sync's.
+    Another store's state, a `derived`, derived, `computed` or internal
+    state, or the same state twice is an `IllegalArgumentException` naming
+    it; the inputs' tags are the caller's to choose (`UserAuthored` for
+    `local` and `Remote` for `remote` is the advice, not a check). An
+    adoption that writes `remote` leaves `local` and its observers alone and
+    recomputes the merge once.
+  - Tags: a derived state carries `StateTag.Secret` when a source does
+    (transitively), never `UserAuthored` or `Remote`. It is not store state:
+    `snapshot()`, `encode()`, `restore`, `reset()`, `properties` and
+    `taggedStates` never see it (a typed snapshot read of it is refused), and
+    it recomputes after `reset()`/`restore` write its sources.
+  - Known gaps until frames settle derivations (R9, 0.6.0): a recompute that
+    races another thread's `atomic` frame over sources on two stores can
+    commit a torn pair, which that frame's own recompute then corrects; and
+    the initial compute, when it reads a state it does not list as a source
+    on a thread holding an action on that state's store, reads the action's
+    uncommitted writes — if that action rolls back, the value stays as
+    computed until the next commit that changes a source.
+  - `Store.dispose()` drains its post-commit queue instead of clearing it. A
+    store disposed from inside its own commit's fanout, or racing that commit
+    from another thread, still runs the recompute that commit queued for a
+    derived state hosted on another, live store, on the calling thread. A
+    recompute hosted on the disposed store does nothing.
+  - Observation paths resolve a derived state to its backing through the
+    new `@StoreInternalApi` `State<T>.observableBacking()` (a `MutableState`
+    itself, a derived state's backing, `null` for a `computed` one):
+    `effect`, `observerCount`, `State.tags`, `derived` sources,
+    `:holdfast-coroutines`' flows and `suspendDerived` sources, and
+    `:holdfast-testing`'s timeline lookups (`emissions`, `bridgeEvents`,
+    `bridge` and the `emitted` matchers resolve a derived-state property to
+    the backing state its recompute's `EmissionEvent` names, recorded with
+    its committed old value); `:holdfast-compose`'s `collectAsState` works
+    through `effect`. The legacy `derived` `Pair` API is unchanged until the
+    0.7.0 triage.
+  - GUIDE §16.5 documents all of it, with a compiled example.
 
 - **`StateDelegate.provideDelegate(thisRef, property)`** — a default member
   (returning the delegate itself) that the delegate `Store.state` returns

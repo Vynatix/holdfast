@@ -100,6 +100,12 @@ data class TransactionErrored(
  * For a `StateTag.Secret` state (a `derived` of one included) both values are
  * [com.vynatix.holdfast.Redacted]: a secret never reaches a timeline, so the
  * event can be printed. Its presence still says the state changed.
+ *
+ * A `derivedState`/`merged` state's value is committed by its recompute, in a
+ * transaction of its own on its store, and [state] is then its backing state
+ * (a `MutableState`), not the `DerivedState` itself: look its events up
+ * through the handle (`handle.emissions(MyStore::merged)`,
+ * `emitted(MyStore::merged)`), which resolves the property to that backing.
  */
 data class EmissionEvent(
     val state: State<*>,

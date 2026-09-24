@@ -1,8 +1,9 @@
 package com.vynatix.holdfast.platform
 
 /**
- * Thread-local slot naming the state initializers (and schema migrations)
- * running on the current thread (see `com.vynatix.holdfast.NoWriteRegion`):
+ * Thread-local slot naming the state initializers (and schema migrations,
+ * and derived states' recompute computes) running on the current thread (see
+ * `com.vynatix.holdfast.NoWriteRegion`):
  * the innermost one, which links to the one it started inside. Typed as
  * `Any?` so the platform actuals stay dependency-free; the single
  * reader/writer casts.

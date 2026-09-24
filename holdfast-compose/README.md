@@ -14,6 +14,14 @@ fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.
 fun rememberDisposable(make: () -> Disposable): Disposable
 ```
 
+`collectAsState` accepts any observable state: a declared state
+(`val x by state { … }`), a `derived` state, or core's experimental
+`derivedState`/`merged` states. A commit that recomputes a merged value
+recomposes its readers once, and one that leaves the value as it was does
+not recompose them. A `computed { }` state has no commits to observe, so
+`collectAsState` throws on it: read its `.value` in composition, or use
+`derived`/`derivedState` over its sources.
+
 ## Examples
 
 ### Bind store state to a Composable

@@ -15,6 +15,20 @@ public final class com/vynatix/holdfast/DerivedKt {
 	public static final fun derived (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lkotlin/Pair;
 }
 
+public abstract interface class com/vynatix/holdfast/DerivedState : com/vynatix/holdfast/Disposable, com/vynatix/holdfast/State {
+	public fun getValue (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/DerivedState;
+}
+
+public final class com/vynatix/holdfast/DerivedState$DefaultImpls {
+	public static fun getValue (Lcom/vynatix/holdfast/DerivedState;Ljava/lang/Object;Lkotlin/reflect/KProperty;)Lcom/vynatix/holdfast/DerivedState;
+}
+
+public final class com/vynatix/holdfast/DerivedStateKt {
+	public static final fun derivedState (Lcom/vynatix/holdfast/Store;[Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/DerivedState;
+	public static final fun merged (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;Lcom/vynatix/holdfast/State;Lkotlin/jvm/functions/Function2;)Lcom/vynatix/holdfast/DerivedState;
+	public static final fun observableBacking (Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/MutableState;
+}
+
 public abstract interface class com/vynatix/holdfast/Disposable {
 	public abstract fun dispose ()V
 }

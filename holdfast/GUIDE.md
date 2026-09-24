@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`
 
 ---
 
@@ -1210,8 +1210,10 @@ never T1's pending writes.
 | `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3). `sterile = true` drops the snapshot's `Remote` entries and resets every `Remote` state to its initial value in the same transaction (§16.4) |
 | `snapshot` (with a scope) | `fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot` *(experimental, extension)* | `All` is `snapshot()`; `UserAuthored` captures only the `UserAuthored` states; `Raw` lets typed reads return a `Secret` state's plaintext, in memory only (§16.4) |
 | `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`), and the store's states carrying a tag in declaration order, never-read ones materialized first; `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
+| `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` recomputed once per commit that changes a source (sources on any store; not a `computed` one), after that commit releases its store, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
+| `merged` | `fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(local: State<L>, remote: State<R>, merge: (L, R) -> T): DerivedState<T>` *(experimental, extension)* | A `DerivedState` over two different states this store declares — the user's side (`local`, tag it `UserAuthored`) and sync's (`remote`, tag it `Remote`) — so an adoption writing `remote` never touches `local` and recomputes the merge once; carries neither tag; the input tags are not checked. Another store's, a derived, `computed` or internal input, or the same state twice, is an `IllegalArgumentException` (§16.5) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
-| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")` |
+| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute that this store's last commit queued for a live store runs inside it, on the calling thread (§16.5) |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read (or `snapshot()`/`restore()`/`reset()`) recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations). Both throw `IllegalStateException` for a state with a pending write in the active transaction or one enclosing it, or held by an open `reset()` (§16.1) or sterile `restore()` (§16.4) |
@@ -1412,6 +1414,11 @@ recompute back and is reported through `uncaughtObserverHandler`
 (logged while no handler is set); the next source commit
 recomputes normally. Disposing the `Disposable` stops recomputation,
 including a recompute that is already queued.
+
+The experimental `derivedState(sources) { … }` and `merged(local, remote)`
+(§16.5) return a read-only `DerivedState` instead of a `Pair`: it is its
+own `Disposable`, cannot be written, stays out of snapshots, and recomputes
+once per source commit for sources on another store too.
 
 ### 14.3 `atomic(vararg stores) { body }`
 
@@ -2174,8 +2181,8 @@ newly constructed store's state holds once read. In tests,
 so does `store.snapshot() == NewStore().snapshot()`: snapshots compare by
 value (§16.2).
 
-The one exception is an initializer that reads a `derived` state computed
-from states this reset changes. A `derived` recomputes only after the reset
+The one exception is an initializer that reads a `derived` state (or a
+`derivedState`/`merged` one, §16.5) computed from states this reset changes. A `derived` recomputes only after the reset
 commits, so the initializer reads its pre-reset value, and its state can
 differ from a new store's. In an initializer, read the derived's sources
 directly or use `computed { }`, which sees the reset values.
@@ -2732,6 +2739,143 @@ fun saveAndReboot(mail: MailStore): MailStore {
   the transformer slot is what `EncryptingTransformer` needs. A tag is
   honoured where values are read out of a snapshot, rendered, encoded and
   recorded, and nowhere else.
+
+### 16.5 Derived states and `merged`
+
+```kotlin
+@ExperimentalStoreApi
+sealed interface DerivedState<T : Any> : State<T>, Disposable {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): DerivedState<T>   // `by` yields itself
+}
+
+@ExperimentalStoreApi
+fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>
+
+@ExperimentalStoreApi
+fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(
+    local: State<L>,
+    remote: State<R>,
+    merge: (L, R) -> T,
+): DerivedState<T>
+```
+
+A derived state is a read-only state the library keeps computed from other
+states. `merged(local, remote)` is the one a synced store needs: the user
+writes `local`, sync writes `remote`, and the screen reads the merge, so
+adopting a fetch can never overwrite what the user wrote — not by
+convention, but because the adoption only ever writes `remote`.
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+class NotesStore : Store<NotesStore>() {
+    val pinned by state(tags = setOf(StateTag.UserAuthored)) { emptySet<String>() }
+    val fetched by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val shown by merged(pinned, fetched) { pins, all -> all.sortedByDescending { it in pins } }
+    val count by derivedState(shown) { shown.value.size }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+fun pinThenAdopt(notes: NotesStore) {
+    val sub = notes.shown effect { println(this) }   // "[]"
+    notes action { pinned mutate setOf("b") }         // shown is still [], so nothing prints
+    notes action {                                    // an adoption: sync writes fetched only
+        fetched mutate listOf("a")
+        fetched update { it + "b" }
+    }                                                 // "[b, a]": one recompute for the commit
+    println(notes.count.value)                        // "2"
+    sub.dispose()
+}
+```
+
+- **Declaring.** `derivedState(sources) { … }` computes its value from its
+  `sources` — declared states, `derived` states or other derived states, of
+  this store or another, but not a `computed { }` one — and `merged(local,
+  remote) { l, r -> … }` from two states of its store. Both compute the
+  initial value at once, on the calling thread, reading as any read there
+  does: created inside an action (or frame) on its store or a source's store,
+  it sees that action's pending writes, and recomputes from committed values
+  once the action ends — so a rollback leaves it explained by its sources.
+  Declare one with `by`, which yields the `DerivedState` itself (its
+  `getValue` returns it, as `val x by state { … }` yields its `State`), or
+  with `=`. A state `compute`
+  reads without listing it as a source does not trigger a recompute. The
+  legacy `derived(...)` keeps its `Pair` until the 0.7.0 triage (§14.2).
+- **Once per commit.** After a commit that changes one or more sources,
+  the derived state recomputes once — however many sources that commit
+  changed, on its store or on another one. The recompute runs once the
+  commit has fanned out and released its store, never inside it (unless the
+  source's store is disposed from inside that commit: see Disposing), and
+  commits in a transaction of its own on the store the derived state was
+  created on (its host): the host's middleware sees it, and its observers
+  fire in the normal commit order, and only when the value changes (`==`),
+  as for a `distinct` state. It never waits for the host: when another action, frame
+  or `suspendAction` holds the host, the recompute is handed to that holder
+  and runs when it releases. Nor does it commit writes that may still roll
+  back: a recompute's `compute` reads committed values only, never the
+  pending writes of an action on its thread, and may read states but not
+  write them (a write, `action`, `atomic`, `reset()`, `restore` or `emit` from
+  it throws, and is reported like any failing recompute). A source commit
+  nested in a blocking action (or frame) on another source's store
+  recomputes it once that action ends, so it recomputes once. A `suspendAction`
+  or `suspendAtomic` holding a source's store never holds a recompute back,
+  even one parked on the recomputing thread — Android's main thread,
+  `runBlocking`, any thread on wasmJs: the recompute runs at once from
+  committed values, and again after that action commits. A source value
+  that arrives outside a commit — through `bridge` or `observeFrom` —
+  recomputes it at once on an idle host. So after the committing call
+  returns the value can briefly lag its sources. Read the sources, or a
+  `computed { }` state, when you need your own write at once. A throwing
+  `compute` (or a middleware rejecting the recompute) rolls that recompute
+  back, is reported through `uncaughtObserverHandler`, and leaves the value
+  as it was until the next source commit.
+- **`merged`'s inputs.** `local` and `remote` must be two different states
+  its store declares: another store's state, a `derived` or derived state, a
+  `computed { }` one or an internal one is refused with an
+  `IllegalArgumentException` naming it. Tag `local` `UserAuthored` and
+  `remote` `Remote` (§16.4) — each is tagged on its own — or leave them
+  untagged: `merged` does not check the tags, they are yours to choose. The
+  merged state carries neither tag. A derived state with a `Secret` source
+  is `Secret` (its value is withheld like its source's), and never
+  `UserAuthored` or `Remote`.
+- **Read-only.** `mutate`, `update`, `bridge` and `observeFrom` on a derived
+  state throw `IllegalStateException`: its value is what its sources explain.
+  Write a source instead.
+- **Observing.** `effect`, `:holdfast-coroutines`' `asFlow`, `asStateFlow`
+  (whose default scope is the host's), `first` and `awaitValue`,
+  `:holdfast-compose`'s `collectAsState` (a recompute that changes the value
+  recomposes its readers once; one that leaves it as it was, not at all), and `derived`, `derivedState` and `suspendDerived`
+  sources all accept a derived state. In a `:holdfast-testing` timeline its
+  recompute is a transaction of its own, whose `EmissionEvent` names its
+  backing state; `handle.emissions(NotesStore::shown)` and
+  `emitted(NotesStore::shown)` resolve the property to it.
+- **Not store state.** A derived state lives in memory only, computed from
+  its sources: `snapshot()` does not capture it (a typed read of it from a
+  snapshot is refused), `encode()` never writes it, `properties` and
+  `taggedStates` do not list it, and `restore` and `reset()` never write it
+  — they write its sources, and it recomputes after their commit. As for
+  `derived`, an initializer that `reset()` re-runs reads a derived state at
+  its pre-reset value (§16.1).
+- **Across stores, until frames settle.** Sources on two stores written in
+  one `atomic(...)` frame recompute the derived state once, after the frame
+  has unwound, so its observers never see one participant's new value with
+  the other's old one. Two gaps remain until frames settle derivations once
+  per frame from a consistent cut (issue #20, R9, planned for 0.6.0). A
+  recompute that races another thread's frame over its sources can still
+  read a torn pair — one participant committed, the other not yet — and
+  commit it; that frame's own recompute then corrects it. And the initial
+  compute reads a state it does not list as a source the way any read on its
+  thread does: a derived state created on a thread that holds an action on
+  that state's store reads the action's uncommitted writes, and if that
+  action rolls back, the value stays as computed until the next commit that
+  changes a source. List what `compute` reads as sources.
+- **Disposing.** `dispose()` stops recomputation and releases the source
+  subscriptions; a recompute already queued does not commit, and the value
+  stays readable, frozen at its last recompute. Disposing the host store
+  stops recomputation too, and the next commit of a source on another store
+  drops that subscription. Disposing a source's store from one of its own
+  observers, or while another thread commits to it, runs the recompute that
+  commit queued at once, inside `dispose()` and on the calling thread (from
+  inside that commit's fanout, in the first case). Disposing twice is safe.
 
 ---
 

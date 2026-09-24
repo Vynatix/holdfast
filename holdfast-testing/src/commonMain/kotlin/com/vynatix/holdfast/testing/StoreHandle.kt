@@ -181,10 +181,12 @@ class StoreHandle<V : Store<V>> internal constructor(
      * Filter of [timeline] for [EmissionEvent]s targeting [prop]'s state on
      * this store. Resolves [prop] against the live store instance, so
      * `MyStore::count` returns events for the same `State<*>` reference the
-     * recorder pushed at commit time. Order is preserved.
+     * recorder pushed at commit time — for a `derivedState`/`merged`
+     * property, its backing state, which its recomputes commit. Order is
+     * preserved.
      */
     fun emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<EmissionEvent>().filter { it.state === target }
     }
 
@@ -196,7 +198,7 @@ class StoreHandle<V : Store<V>> internal constructor(
      * wrapped).
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<BridgeEvent>().filter { it.state === target }
     }
 
@@ -227,7 +229,7 @@ class StoreHandle<V : Store<V>> internal constructor(
      * @throws IllegalStateException if the state has no bridge attached.
      */
     fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
-        val state = prop.get(store)
+        val state = PrivilegedHooks.recordedState(prop.get(store))
         val wrapper = bridgeWrappers[state]
         val view = wrapper?.let { BridgeView(BridgeView.WrappedSource(it)) } ?: attachedBridgeView(prop, state)
         // A Secret state's published values are withheld here, as in the timeline.

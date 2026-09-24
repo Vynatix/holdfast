@@ -11,7 +11,7 @@ README.md#2: Gradle install snippet (settings.gradle.kts + build.gradle.kts frag
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
 holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#72: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
+holdfast/GUIDE.md#74: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
 
 # --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
 holdfast/GUIDE.md#28: API-reference signature listing (Bridge/Observable/Publisher)
@@ -39,6 +39,7 @@ holdfast/GUIDE.md#63: API-reference signature listing (reset; bodiless top-level
 holdfast/GUIDE.md#65: API-reference signature listing (StateCodec, codec state overload, snapshot encoding and restore policy; bodiless members)
 holdfast/GUIDE.md#68: API-reference signature listing (SchemaVersioned, EncodedSnapshotView, SnapshotMigrationException; bodiless members)
 holdfast/GUIDE.md#70: API-reference signature listing (StateTag, SnapshotScope, the tags overload, State.tags, taggedStates, scoped snapshot, sterile restore; bodiless members)
+holdfast/GUIDE.md#72: API-reference signature listing (DerivedState, derivedState, merged; bodiless members)
 
 # --- holdfast/GUIDE.md §14.11: requires the Hallmark validation modules, excluded from the default build ---
 holdfast/GUIDE.md#49: requires Hallmark modules (off the default build); also an API-reference signature listing

@@ -41,7 +41,10 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 
 `asStateFlow`'s `scope` parameter defaults to the owning store's
 `Store.scope` (per-store override → `bindToScope` binding →
-`Store.defaultScope`); pass a scope explicitly to override. `suspendAction`
+`Store.defaultScope`); pass a scope explicitly to override. The flows,
+`first`/`awaitValue` and `suspendDerived`'s sources accept core's
+experimental `derivedState`/`merged` states like declared ones (their owning
+store is the one they were created on). `suspendAction`
 allows the transaction body to suspend; cancellation of the body rolls the
 transaction back, and the commit fanout runs under `NonCancellable` so it
 completes even if the surrounding scope cancels mid-commit. As with blocking

@@ -8,6 +8,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Core's derived states work with every adapter** (issue #20, R6):
+  `asFlow`, `asStateFlow` (whose default scope is the scope of the store the
+  derived state was created on), `first` and `awaitValue` accept a
+  `derivedState`/`merged` state, and so does `suspendDerived` as a source.
+  `MergedSuspendTest` pins the flows over a merged state, that an adoption
+  committed by `suspendAction` recomputes it once, that a `suspendAction`
+  or `suspendAtomic` commit on a source's store recomputes a derived state on
+  another store once, before the suspending call returns, and that a
+  `suspendAction` parked on the recomputing thread (as under `runBlocking`
+  or on Android's main thread) neither delays a recompute nor leaks its
+  pending writes into it, and that a store disposed from its own commit's
+  fanout launches no `suspendDerived` recompute (core's `dispose()` now
+  drains the queued launch instead of dropping it, and the launch checks
+  the store first). `DerivedStateSourceRoutingTest` (JVM and Android host)
+  pins the same once-after-the-commit recompute for a suspending commit
+  that fans out on another thread than the one that opened it.
+
 - **`suspendDerived` inherits the `Secret` tag of its sources** (issue #20,
   R3, through `:holdfast`'s `registerDerivedBackingState`): a suspending
   derived with a `StateTag.Secret` state among its sources is `Secret`
@@ -134,6 +151,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   commit, but it is no longer a state name, and restoring the snapshot into
   another store instance skips it instead of failing on an unknown
   `__suspendDerived_N` state. `suspendDerived` on a disposed store now throws.
+
+- **BREAKING (behavior, misuse only): a `computed` source of `suspendDerived`
+  fails with `IllegalArgumentException`** (issue #20, R6; see `:holdfast`'s
+  changelog). A `computed { }` state (or any `State` no store produced)
+  passed as a source used to fail with a bare `ClassCastException`; it now
+  fails with an `IllegalArgumentException` that says why (a `computed` state
+  has no commits to follow) and what to list instead: the states it reads.
+  The check runs first, so a refused call neither blocks on the initial
+  compute nor leaves a backing state or a subscription behind.
 
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.

@@ -7,6 +7,7 @@ import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.platform.runBlockingForInitialSeed
+import com.vynatix.holdfast.observableBacking
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -58,6 +59,9 @@ import kotlinx.coroutines.launch
  * time. If [compute] suspends on a long-running operation here, the caller
  * blocks; subsequent recomputes are async-launched.
  *
+ * A source may be any state a store produced, including core's experimental
+ * `derivedState`/`merged` ones.
+ *
  * Example:
  * ```
  * val (fullName, dispose) = store.suspendDerived(firstName, lastName) {
@@ -65,12 +69,26 @@ import kotlinx.coroutines.launch
  *     "${firstName.value} ${lastName.value}"
  * }
  * ```
+ *
+ * @throws IllegalArgumentException for a `computed` source (or any State no
+ *   store produced): it has no commits to follow.
  */
 fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,
 ): Pair<State<T>, Disposable> {
     val self = this
+    // Resolve every source first: a refused one (a computed state) fails
+    // before the initial compute blocks the caller, and leaves no backing
+    // state and no subscription behind.
+    val observed =
+        sources.map { src ->
+            requireNotNull(src.observableBacking()) {
+                "suspendDerived cannot follow this source: a source must be a state a store produced — a " +
+                    "declared state, a derived state or a derivedState/merged — whose commits it recomputes " +
+                    "on. A computed { } state has no commits to follow: list the states it reads instead."
+            }
+        }
 
     // Seed the backing state synchronously. We use runBlocking on the calling
     // thread to evaluate the suspending compute once at registration. This
@@ -91,9 +109,9 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
 
     val initialFireFlags = BooleanArray(sources.size)
     val subs =
-        sources.mapIndexed { idx, src ->
+        observed.mapIndexed { idx, source ->
             @Suppress("UNCHECKED_CAST")
-            (src as MutableState<Any>).observe {
+            (source as MutableState<Any>).observe {
                 // Skip the initial-fire callback so we don't double-recompute.
                 if (!initialFireFlags[idx]) {
                     initialFireFlags[idx] = true
@@ -106,7 +124,11 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
                 // by definition (store.scope.launch), so the actual recompute runs
                 // on the scope's dispatcher.
                 self.postCommit {
-                    if (disposed.value) return@postCommit
+                    // A disposed store drains its queue rather than dropping it
+                    // (other stores' derived states may be queued there): a
+                    // launch now would open a suspendAction on the disposed
+                    // store and run the compute for a write it then refuses.
+                    if (disposed.value || self.isDisposed) return@postCommit
                     val job =
                         self.scope.launch {
                             // Stage the result via suspendAction. AsyncSerializer in

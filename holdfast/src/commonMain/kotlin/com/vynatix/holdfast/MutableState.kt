@@ -64,9 +64,12 @@ class MutableState<T : Any>(
     private var currentValue: T = initialValue
 
     /**
-     * The declaration this state was materialized from: its store-side name
-     * and kind. `null` only for a `MutableState` constructed by hand, outside
-     * any store registry. Set before the state is published.
+     * The declaration that gives this state its store-side name and kind: for
+     * a registered state, the one it was materialized from; for a
+     * `DerivedState`'s backing state, the unregistered
+     * [StateKind.ReadOnlyDerived] declaration `createDerivedState` sets. `null`
+     * only for any other `MutableState` constructed by hand, outside any store
+     * registry. Set before the state is published.
      */
     @kotlin.concurrent.Volatile
     internal var declaration: StateDeclaration<T>? = null
@@ -112,7 +115,8 @@ class MutableState<T : Any>(
      * one — and the value it returns is committed at once and survives a rollback,
      * so it must not be computed from writes that may yet roll back. So does a
      * read from inside a schema migration (`SchemaVersioned.migrate`), which
-     * runs before its restore's action opens.
+     * runs before its restore's action opens, and one from the compute of a
+     * `derivedState`/`merged` recompute, which commits what it computes at once.
      *
      * The exception is an initializer `reset()` re-runs: it reads this state at
      * its reset value when it is one of the declared states that reset is
@@ -394,9 +398,9 @@ internal fun MutableState<*>.describeOwner(): String = owningStore.displayName
 /**
  * Test-only window onto the live observer count for a [State]. Convenience
  * extension so test code can read it from a [State] reference (the public
- * surface) without an explicit cast to [MutableState]. Throws if the [State]
- * was not produced by `store.state { … }` — only [MutableState] instances
- * carry an observer set.
+ * surface) without an explicit cast to [MutableState]; a [DerivedState] reads
+ * its backing state's. Throws for a State no store produced (a [computed]
+ * one) — only [MutableState] instances carry an observer set.
  *
  * Marked `@StoreInternalApi`: companion-module test code (e.g. `:holdfast-coroutines`)
  * uses it to verify that `Flow`/`StateFlow`/`effect` adapters dispose their
@@ -406,6 +410,6 @@ internal fun MutableState<*>.describeOwner(): String = owningStore.displayName
 @StoreInternalApi
 val <T : Any> State<T>.observerCount: Int
     get() {
-        val ms = (this as? MutableState<T>) ?: error("observerCount is only defined for MutableState (store.state { ... })")
+        val ms = observableBacking() ?: error("observerCount is only defined for a State a store produced")
         return ms.observerCount
     }

@@ -131,8 +131,9 @@ class TimelineMatcher<V : Store<V>> internal constructor(
     /**
      * Match any [EmissionEvent] for the [State] referenced by [prop]. Resolves
      * the property reference to a State reference at predicate-construction
-     * time using [vaultRef], so subsequent matching is `===` against the
-     * EmissionEvent's `state` field.
+     * time using [vaultRef] — for a `derivedState`/`merged` property, its
+     * backing state, which its recomputes commit — so subsequent matching is
+     * `===` against the EmissionEvent's `state` field.
      *
      * Throws [IllegalStateException] if [vaultRef] is null (i.e. when invoked
      * via the [List]-receiver combinator without a store context).
@@ -203,7 +204,9 @@ class TimelineMatcher<V : Store<V>> internal constructor(
                         "StoreHandle.$surface { … } instead of List<StoreEvent>.$surface { … }, " +
                         "or build a synthetic-timeline test that doesn't reference state properties.",
                 )
-        return prop.get(v)
+        // A derivedState/merged property resolves to its backing state, the
+        // one its recomputes commit and the recorder's events name.
+        return PrivilegedHooks.recordedState(prop.get(v))
     }
 
     /**
@@ -357,8 +360,9 @@ class MiddlewareErroredPredicate internal constructor(
 
 /**
  * Match [EmissionEvent] events for a specific State. [target] is pre-resolved
- * via `prop.get(store)` at builder-construction time; matching uses `===` so
- * structurally-equal but distinct State instances do not collide.
+ * from the property at builder-construction time (a `derivedState`/`merged`
+ * property to its backing state, which its recomputes commit); matching uses
+ * `===` so structurally-equal but distinct State instances do not collide.
  *
  * If [checkNewValue] is true, the predicate additionally requires
  * `event.newValue == expectedNewValue` (`==`, allowing nullable comparison).

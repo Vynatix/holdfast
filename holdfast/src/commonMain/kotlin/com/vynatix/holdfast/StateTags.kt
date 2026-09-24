@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalStoreApi::class)
+@file:OptIn(ExperimentalStoreApi::class, StoreInternalApi::class)
 
 package com.vynatix.holdfast
 
@@ -12,9 +12,10 @@ package com.vynatix.holdfast
 /**
  * The tags this state carries: the ones its declaration gave it
  * (`state(tags = …) { … }`). A `derived` (or `:holdfast-coroutines`
- * `suspendDerived`) state carries [StateTag.Secret] when any of its sources
- * does — only its listed sources count, not what its `compute` reads — and
- * never [StateTag.UserAuthored] or [StateTag.Remote]. Empty for a state
+ * `suspendDerived`) state, and a [derivedState] or [merged] one, carries
+ * [StateTag.Secret] when any of its sources does — only its listed sources
+ * count, not what its `compute` reads — and never [StateTag.UserAuthored] or
+ * [StateTag.Remote]. Empty for a state
  * declared without tags, for a `computed { }` state (which has no
  * declaration, and cannot be a `derived` source: a derived that reads one in
  * `compute` inherits nothing from it), and for a `MutableState` constructed
@@ -27,14 +28,16 @@ package com.vynatix.holdfast
  */
 @ExperimentalStoreApi
 val State<*>.tags: Set<StateTag>
-    get() = (this as? MutableState<*>)?.declaration?.tags ?: emptySet()
+    get() = observableBacking()?.declaration?.tags ?: emptySet()
 
 /**
  * Every state of this store that carries [tag] (see [State.tags]), in
  * declaration order: the declared states — a never-read one is materialized
  * first, its initializer running as its first read would — and, for
  * [StateTag.Secret], the `derived` states with a Secret source.
- * Internal states registered by companion modules carry no tags.
+ * Internal states registered by companion modules carry no tags. A
+ * [DerivedState] ([derivedState], [merged]) is never listed: the store does
+ * not register it.
  *
  * Experimental (issue #20, R3).
  *

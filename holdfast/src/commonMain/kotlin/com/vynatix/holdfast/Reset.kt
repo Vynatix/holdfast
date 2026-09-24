@@ -18,7 +18,8 @@ package com.vynatix.holdfast
  * declared state holds the raw value a freshly constructed store's state holds
  * once read (the value `snapshot()` captures for it, so the two stores'
  * snapshots compare equal) — except a state whose initializer reads a `derived`
- * state computed from states this reset changes (see "Fresh-store order") —
+ * (or `derivedState`/`merged`) state computed from states this reset changes
+ * (see "Fresh-store order") —
  * and on failure no state's value changes (states it materialized first stay
  * materialized; see below).
  *
@@ -39,9 +40,10 @@ package com.vynatix.holdfast
  *   values a fresh store's first reads would produce. Everything else an
  *   initializer reads — another store's states, this store's `derived` states
  *   — it reads at its committed value, never the pending writes of an
- *   enclosing action or frame (see [Store.state]). A `derived` state
- *   recomputes only once the reset commits, so an initializer reading one
- *   computed from states this reset changes reads its pre-reset value, and
+ *   enclosing action or frame (see [Store.state]). A `derived` (or
+ *   `derivedState`/`merged`) state recomputes only once the reset commits,
+ *   so an initializer reading one computed from states this reset changes
+ *   reads its pre-reset value, and
  *   its state can differ from a fresh store's: read the derived's sources, or
  *   a `computed` state, which sees the reset values. An initializer that
  *   needs its own state, directly or through others, is a cycle and fails
