@@ -37,6 +37,19 @@ interface SuspendingKvStore                          // suspend get / put / remo
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
 fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
 fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
+
+// Hydration (experimental): seed a store once, fetch once, adopt into Remote states.
+fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>   // base { }; refresh { } adopt { }
+fun <V : Store<V>> V.hydratorOrNull(): Hydrator<V>?
+suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
+class Hydrator<V : Store<V>> {
+    val state: State<Hydration>                      // Detached / Seeded / Hydrated / Failed(cause)
+    val current: Hydration
+    suspend fun hydrate(scope: CoroutineScope = …)   // defaults to the store's Store.scope
+    fun invalidate(): TransactionResult<Unit>
+    fun stageInvalidate()
+    suspend fun awaitSettled(): Hydration
+}
 ```
 
 `asStateFlow`'s `scope` parameter defaults to the owning store's
@@ -78,6 +91,24 @@ states recompute after that commit instead.
 saves fire-and-forget (conflated — rapid publishes coalesce);
 `suspendingBridge(...)` returns an await-completion `SuspendingBridge` whose
 `publishAwaited` suspends until the value is persisted.
+
+`hydrator { }` (experimental, issue #20's R8 — see the
+[GUIDE's §16.7](../holdfast/GUIDE.md#167-hydration-holdfast-coroutines))
+gives a store its one hydration lifecycle: `hydrate()` runs `base { }` in one
+transaction that also moves the phase to `Seeded` and marks a refresh in
+flight, launches `refresh { }` on its scope (the store's `Store.scope` by
+default) only once that transaction has committed, and adopts what it
+fetched in one more transaction, where `adopt { }` — a savepoint — may write
+only `StateTag.Remote` states. Calling `hydrate()` again while `Seeded` or
+`Hydrated` does nothing, concurrent calls seed and fetch once, a call on
+`Failed` retries the refresh only, and only `invalidate()` (or
+`stageInvalidate()` inside an action) and the store's `reset()` go back to
+`Detached`. Every decision holds the store only for its transaction, taking it
+politely — never queueing on its mutex — and `hydrate()` throws inside an
+action, frame or suspending entry of any store rather than wait for itself.
+`Hydrator.state` is a read-only `State<Hydration>` of the store: observe it,
+or combine several stores' with `derivedState` for a health flag, with no
+cross-store frame.
 
 ## Examples
 
@@ -152,6 +183,26 @@ outermost frame to keep the frame whole), and an observer may not write into
 any participant. A participant whose fanout
 fails, or whose `publishAwaited` throws a `CancellationException`, does not
 keep the others from fanning out; the frame returns the failure.
+
+### Hydrating a store
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+class FeedStore(api: FeedApi) : Store<FeedStore>() {
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base { items mutate Seeds.feed }                        // seeded in one transaction
+            refresh { api.fetchFeed() } adopt { fetched -> items mutate fetched }
+        }
+}
+
+// On every screen entry: only the first call seeds and fetches.
+@OptIn(ExperimentalStoreApi::class)
+fun onScreenEntered(store: FeedStore, viewModelScope: CoroutineScope) {
+    viewModelScope.launch { store.hydration.hydrate(viewModelScope) }
+}
+```
 
 ## Build
 

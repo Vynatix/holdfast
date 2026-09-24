@@ -82,7 +82,8 @@ internal fun shutDownEvicted(evicted: List<MutableState<*>>) {
 
 /**
  * Refuse a write to [state] that no write may reach: a derived state's
- * ([refuseDerivedStateWrite]), or an evicted keyed entry's stale handle.
+ * ([refuseDerivedStateWrite]), an evicted keyed entry's stale handle, or a
+ * sealed state's ([refuseSealedWrite]).
  *
  * @throws IllegalStateException naming the state (never a key) and the fix.
  */
@@ -90,6 +91,7 @@ internal fun refuseUnwritable(state: State<*>) {
     refuseDerivedStateWrite(state)
     val entry = state as? MutableState<*> ?: return
     check(!entry.retired) { staleEntryMessage(entry) }
+    refuseSealedWrite(entry)
 }
 
 /** The keyed state families of [state]'s store. */

@@ -180,7 +180,8 @@ class StoreSnapshot internal constructor(
      * Experimental (issue #20, R1).
      *
      * @throws IllegalArgumentException for a state of another store instance
-     *   (captured snapshots), or one no store declared (a `computed { }`).
+     *   (captured snapshots), or one no store declared (a `computed { }`, a
+     *   `derivedState`, a `:holdfast-coroutines` hydrator's `state`).
      * @throws IllegalStateException when a decoded snapshot holds text for a
      *   state that has no codec; for an entry of a keyed state family, also
      *   when the family has no `keyCodec` (a decoded snapshot addresses

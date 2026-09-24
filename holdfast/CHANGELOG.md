@@ -494,6 +494,43 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **Sealed states, and hooks for machinery that drives a store**
+  (`@StoreInternalApi`, issue #20, R8; plan PR 13): what `:holdfast-coroutines`'
+  hydrator is built on (see its changelog). Nothing here is user surface, and
+  nothing changes for a store without a hydrator.
+  - `internalSealedState(name, initial, refusal)`: a new `distinct` state of the
+    store that library machinery keeps for itself. It commits, rolls back and
+    fires its observers like a declared state, but `mutate`, `update`,
+    `bridge`, `observeFrom` (and setting `MutableState.bridge`) refuse it with
+    `IllegalStateException` — "Cannot write `Store.name`: " plus its owner's
+    teaching text — and an inbound bridge value for it is dropped. It is never
+    registered: `snapshot()` never captures it (`StoreSnapshot.entry`/`get`
+    refuse it with `IllegalArgumentException`, even when a declared state has
+    its name), `restore` and `reset()` never write it, and `properties`,
+    `taggedStates`, `removeState` and `clearStates` never see it. A new internal
+    `StateKind.Sealed` names it in messages.
+  - `internalStageSealed(state, value)`: its owner stages it into the store's
+    transaction open on this thread (or a `suspendAction`'s), where it commits
+    or rolls back with that transaction; refused outside one, into a
+    transaction closed to writes (an observer of its commit), from a no-write
+    region, and inside an `atomic` frame that does not enroll the store.
+  - `internalTopLevelAction(id, body)`: a top-level transaction, middleware
+    chain included, for a caller that already holds the store's serializer —
+    the hydration gate. It takes `transactionLock`, refuses to open under an
+    active transaction, joins (or opens) the thread's settle scope, and
+    leaves the post-commit drain to its caller: `Store.tryTopLevelAction`'s
+    list of top-level holders that drain after they release now names the
+    gate.
+  - `Transaction.internalForbidStructuralWrites(reason)`: `removeState` and
+    `clearStates` throw `IllegalStateException` with `reason` on that
+    transaction's owner thread while it, or a savepoint of it, is the store's
+    active transaction — they drop states at once, where its rollback cannot
+    reach (a hydrator's `adopt { }`).
+  - `State.internalQualifiedName`: `Store.name` for a message (`Store.docs[*]`
+    for a keyed entry), never a value.
+  `DisposedEntrypointTest` has rows for the three store entrypoints;
+  `SealedStateTest` pins the rest. iOS unverified until a macOS run.
+
 - **Keyed state families** (experimental, issue #20, R7; plan PR 12):
   `val docs by keyedState<K, T>(transformer, distinct, codec, keyCodec, tags) { key -> … }`
   declares, on its store and under the property's name, a family of

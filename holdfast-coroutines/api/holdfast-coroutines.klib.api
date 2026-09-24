@@ -24,6 +24,61 @@ abstract interface com.vynatix.holdfast.coroutines/SuspendingKvStore { // com.vy
     abstract suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.coroutines/SuspendingKvStore.snapshot|snapshot(){}[0]
 }
 
+sealed interface com.vynatix.holdfast.coroutines/Hydration { // com.vynatix.holdfast.coroutines/Hydration|null[0]
+    final class Failed : com.vynatix.holdfast.coroutines/Hydration { // com.vynatix.holdfast.coroutines/Hydration.Failed|null[0]
+        constructor <init>(kotlin/Throwable) // com.vynatix.holdfast.coroutines/Hydration.Failed.<init>|<init>(kotlin.Throwable){}[0]
+
+        final val cause // com.vynatix.holdfast.coroutines/Hydration.Failed.cause|{}cause[0]
+            final fun <get-cause>(): kotlin/Throwable // com.vynatix.holdfast.coroutines/Hydration.Failed.cause.<get-cause>|<get-cause>(){}[0]
+
+        final fun component1(): kotlin/Throwable // com.vynatix.holdfast.coroutines/Hydration.Failed.component1|component1(){}[0]
+        final fun copy(kotlin/Throwable = ...): com.vynatix.holdfast.coroutines/Hydration.Failed // com.vynatix.holdfast.coroutines/Hydration.Failed.copy|copy(kotlin.Throwable){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.coroutines/Hydration.Failed.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast.coroutines/Hydration.Failed.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydration.Failed.toString|toString(){}[0]
+    }
+
+    final object Detached : com.vynatix.holdfast.coroutines/Hydration { // com.vynatix.holdfast.coroutines/Hydration.Detached|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.coroutines/Hydration.Detached.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast.coroutines/Hydration.Detached.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydration.Detached.toString|toString(){}[0]
+    }
+
+    final object Hydrated : com.vynatix.holdfast.coroutines/Hydration { // com.vynatix.holdfast.coroutines/Hydration.Hydrated|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.coroutines/Hydration.Hydrated.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast.coroutines/Hydration.Hydrated.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydration.Hydrated.toString|toString(){}[0]
+    }
+
+    final object Seeded : com.vynatix.holdfast.coroutines/Hydration { // com.vynatix.holdfast.coroutines/Hydration.Seeded|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.coroutines/Hydration.Seeded.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // com.vynatix.holdfast.coroutines/Hydration.Seeded.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydration.Seeded.toString|toString(){}[0]
+    }
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any?> com.vynatix.holdfast.coroutines/HydrationRefresh { // com.vynatix.holdfast.coroutines/HydrationRefresh|null[0]
+    final fun adopt(kotlin/Function2<#A, #B, kotlin/Unit>) // com.vynatix.holdfast.coroutines/HydrationRefresh.adopt|adopt(kotlin.Function2<1:0,1:1,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.coroutines/HydrationSpec { // com.vynatix.holdfast.coroutines/HydrationSpec|null[0]
+    final fun <#A1: kotlin/Any?> refresh(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.holdfast.coroutines/HydrationRefresh<#A, #A1> // com.vynatix.holdfast.coroutines/HydrationSpec.refresh|refresh(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
+    final fun base(kotlin/Function1<#A, kotlin/Unit>) // com.vynatix.holdfast.coroutines/HydrationSpec.base|base(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.coroutines/Hydrator { // com.vynatix.holdfast.coroutines/Hydrator|null[0]
+    final val current // com.vynatix.holdfast.coroutines/Hydrator.current|{}current[0]
+        final fun <get-current>(): com.vynatix.holdfast.coroutines/Hydration // com.vynatix.holdfast.coroutines/Hydrator.current.<get-current>|<get-current>(){}[0]
+    final val state // com.vynatix.holdfast.coroutines/Hydrator.state|{}state[0]
+        final fun <get-state>(): com.vynatix.holdfast/State<com.vynatix.holdfast.coroutines/Hydration> // com.vynatix.holdfast.coroutines/Hydrator.state.<get-state>|<get-state>(){}[0]
+
+    final fun invalidate(): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast.coroutines/Hydrator.invalidate|invalidate(){}[0]
+    final fun stageInvalidate() // com.vynatix.holdfast.coroutines/Hydrator.stageInvalidate|stageInvalidate(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydrator.toString|toString(){}[0]
+    final suspend fun awaitSettled(): com.vynatix.holdfast.coroutines/Hydration // com.vynatix.holdfast.coroutines/Hydrator.awaitSettled|awaitSettled(){}[0]
+    final suspend fun hydrate(kotlinx.coroutines/CoroutineScope = ...) // com.vynatix.holdfast.coroutines/Hydrator.hydrate|hydrate(kotlinx.coroutines.CoroutineScope){}[0]
+}
+
 final class com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore : com.vynatix.holdfast.coroutines/SuspendingKvStore { // com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore|null[0]
     constructor <init>(kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore.<init>|<init>(kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
 
@@ -59,6 +114,8 @@ open class <#A: kotlin/Any> com.vynatix.holdfast.coroutines/SuspendingKvBridge :
 }
 
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast.coroutines/suspendDerived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin.coroutines/SuspendFunction1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast.coroutines/suspendDerived|suspendDerived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.coroutines.SuspendFunction1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast.coroutines/hydrator(kotlin/Function1<com.vynatix.holdfast.coroutines/HydrationSpec<#A>, kotlin/Unit>): com.vynatix.holdfast.coroutines/Hydrator<#A> // com.vynatix.holdfast.coroutines/hydrator|hydrator@0:0(kotlin.Function1<com.vynatix.holdfast.coroutines.HydrationSpec<0:0>,kotlin.Unit>){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast.coroutines/hydratorOrNull(): com.vynatix.holdfast.coroutines/Hydrator<#A>? // com.vynatix.holdfast.coroutines/hydratorOrNull|hydratorOrNull@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast.coroutines/SuspendingKvStore).com.vynatix.holdfast.coroutines/bridge(kotlin/String, com.vynatix.holdfast.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.holdfast.coroutines/SuspendingKvBridge<#A> // com.vynatix.holdfast.coroutines/bridge|bridge@com.vynatix.holdfast.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.holdfast.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast.coroutines/SuspendingKvStore).com.vynatix.holdfast.coroutines/suspendingBridge(kotlin/String, com.vynatix.holdfast.bridge/Codec<#A>, kotlinx.coroutines/CoroutineScope = ...): com.vynatix.holdfast.coroutines/SuspendingKvBridge.Awaiting<#A> // com.vynatix.holdfast.coroutines/suspendingBridge|suspendingBridge@com.vynatix.holdfast.coroutines.SuspendingKvStore(kotlin.String;com.vynatix.holdfast.bridge.Codec<0:0>;kotlinx.coroutines.CoroutineScope){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast.coroutines/asFlow(): kotlinx.coroutines.flow/Flow<#A> // com.vynatix.holdfast.coroutines/asFlow|asFlow@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]
@@ -67,3 +124,4 @@ final suspend fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any?> (#A).com
 final suspend fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast.coroutines/awaitValue(#A): #A // com.vynatix.holdfast.coroutines/awaitValue|awaitValue@com.vynatix.holdfast.State<0:0>(0:0){0§<kotlin.Any>}[0]
 final suspend fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast.coroutines/first(kotlin/Function1<#A, kotlin/Boolean>): #A // com.vynatix.holdfast.coroutines/first|first@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Boolean>){0§<kotlin.Any>}[0]
 final suspend fun <#A: kotlin/Any?> com.vynatix.holdfast.coroutines/suspendAtomic(kotlin/Array<out com.vynatix.holdfast/Store<*>>..., com.vynatix.holdfast/FramePolicy = ..., kotlin.coroutines/SuspendFunction0<#A>): com.vynatix.holdfast/TransactionResult<#A> // com.vynatix.holdfast.coroutines/suspendAtomic|suspendAtomic(kotlin.Array<out|com.vynatix.holdfast.Store<*>>...;com.vynatix.holdfast.FramePolicy;kotlin.coroutines.SuspendFunction0<0:0>){0§<kotlin.Any?>}[0]
+final suspend fun com.vynatix.holdfast.coroutines/hydrateEach(kotlin/Array<out com.vynatix.holdfast.coroutines/Hydrator<*>>...) // com.vynatix.holdfast.coroutines/hydrateEach|hydrateEach(kotlin.Array<out|com.vynatix.holdfast.coroutines.Hydrator<*>>...){}[0]

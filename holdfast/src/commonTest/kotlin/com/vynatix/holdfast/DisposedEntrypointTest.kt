@@ -17,6 +17,9 @@ private class DisposedProbe : Store<DisposedProbe>() {
 
     /** `docs["k"]`, got before the store is disposed. */
     var keyedEntry: State<Int>? = null
+
+    /** A sealed state, made before the store is disposed. */
+    var sealed: MutableState<Int>? = null
 }
 
 private object ProbeAttachment : StoreAttachment
@@ -102,6 +105,9 @@ class DisposedEntrypointTest {
                 p.internalObserveKeyedMembership(object : KeyedMembershipListener {})
             },
             Entrypoint("internalKeyedFamily") { p, _ -> p.internalKeyedFamily("docs") },
+            Entrypoint("internalSealedState") { p, _ -> p.internalSealedState("probe", 0, "the probe's own") },
+            Entrypoint("internalStageSealed") { p, _ -> p.internalStageSealed(checkNotNull(p.sealed), 1) },
+            Entrypoint("internalTopLevelAction") { p, _ -> p.internalTopLevelAction("Probe") { } },
         )
 
     private val exempt =
@@ -119,6 +125,10 @@ class DisposedEntrypointTest {
             Entrypoint("internalKeyedAddress (an entry's)") { p, _ ->
                 check(p.internalKeyedAddress(checkNotNull(p.keyedEntry)) == KeyedAddress("docs", "k"))
             },
+            // Reads the state's declaration only, like State.tags.
+            Entrypoint("internalQualifiedName") { _, s -> check(s.internalQualifiedName == "DisposedProbe.n") },
+            // A sealed state stays readable after dispose, like any state.
+            Entrypoint("a sealed state's value") { p, _ -> check(checkNotNull(p.sealed).value == 0) },
             Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->
                 p.internalRefuseInitializerWrite("probe")
             },
@@ -161,6 +171,7 @@ class DisposedEntrypointTest {
         val probe = DisposedProbe()
         val n = probe.n
         probe.keyedEntry = probe.docs["k"]
+        probe.sealed = probe.internalSealedState("probe", 0, "the probe's own")
         probe.dispose()
         entry.call(probe, n)
     }

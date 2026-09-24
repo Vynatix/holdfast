@@ -1,3 +1,64 @@
+public abstract interface class com/vynatix/holdfast/coroutines/Hydration {
+}
+
+public final class com/vynatix/holdfast/coroutines/Hydration$Detached : com/vynatix/holdfast/coroutines/Hydration {
+	public static final field INSTANCE Lcom/vynatix/holdfast/coroutines/Hydration$Detached;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/Hydration$Failed : com/vynatix/holdfast/coroutines/Hydration {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lcom/vynatix/holdfast/coroutines/Hydration$Failed;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/coroutines/Hydration$Failed;Ljava/lang/Throwable;ILjava/lang/Object;)Lcom/vynatix/holdfast/coroutines/Hydration$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/Hydration$Hydrated : com/vynatix/holdfast/coroutines/Hydration {
+	public static final field INSTANCE Lcom/vynatix/holdfast/coroutines/Hydration$Hydrated;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/Hydration$Seeded : com/vynatix/holdfast/coroutines/Hydration {
+	public static final field INSTANCE Lcom/vynatix/holdfast/coroutines/Hydration$Seeded;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrationRefresh {
+	public final fun adopt (Lkotlin/jvm/functions/Function2;)V
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrationSpec {
+	public final fun base (Lkotlin/jvm/functions/Function1;)V
+	public final fun refresh (Lkotlin/jvm/functions/Function2;)Lcom/vynatix/holdfast/coroutines/HydrationRefresh;
+}
+
+public final class com/vynatix/holdfast/coroutines/Hydrator {
+	public final fun awaitSettled (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getCurrent ()Lcom/vynatix/holdfast/coroutines/Hydration;
+	public final fun getState ()Lcom/vynatix/holdfast/State;
+	public final fun hydrate (Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun hydrate$default (Lcom/vynatix/holdfast/coroutines/Hydrator;Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public final fun invalidate ()Lcom/vynatix/holdfast/TransactionResult;
+	public final fun stageInvalidate ()V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydratorKt {
+	public static final fun hydrateEach ([Lcom/vynatix/holdfast/coroutines/Hydrator;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun hydrator (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/coroutines/Hydrator;
+	public static final fun hydratorOrNull (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/coroutines/Hydrator;
+}
+
 public final class com/vynatix/holdfast/coroutines/InMemorySuspendingKvStore : com/vynatix/holdfast/coroutines/SuspendingKvStore {
 	public fun <init> ()V
 	public fun <init> (Ljava/util/Map;)V

@@ -8,6 +8,67 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Hydration lifecycle** (experimental, issue #20, R8; plan PR 13, decision
+  D19): `val hydration = hydrator { base { … }; refresh { store -> … } adopt
+  { fetched -> … } }` gives a store its one `Hydrator<V>`, attached through
+  core's `StoreAttachment` slot (a second `hydrator { }` on the store throws;
+  `hydratorOrNull()` finds it). New surface — experimental, and per the
+  roadmap's principle 6 it soaks for two minors before it can stabilize.
+  - `hydrate(scope = store.scope)` on `Hydration.Detached` runs `base { }` in
+    ONE transaction (id `HydrationSeed`) that also moves the phase to
+    `Seeded` and marks a refresh in flight (R8's guard guarantee); only once
+    that transaction has committed is `refresh { }` launched on `scope`, with
+    `CoroutineStart.ATOMIC`, so a seed a middleware rolls back launches
+    nothing and a hydration marked in flight always gets its refresh. What
+    it fetched is adopted in one transaction (id `HydrationAdopt`) whose
+    savepoint (id `Adopt`) runs `adopt { }`, then the phase moves to
+    `Hydrated`; a refresh that throws (a cancelled `scope` included) moves it
+    to `Failed(cause)` (id `HydrationFailure`). Middleware sees every one.
+  - Idempotent: `hydrate()` while `Seeded` or `Hydrated` does nothing. Single
+    flight: every decision reads the phase and commits the next while the
+    hydration gate holds the store's serializer — only for that decision's
+    transaction — so concurrent calls seed and fetch once, and fifty calls on
+    a `Failed` hydration retry once: the retry (id `HydrationRetry`) moves
+    back to `Seeded` in the deciding transaction and never re-runs
+    `base { }`. The gate takes the store politely — `tryLock`, then a yield
+    and delays doubling from 1 ms to 32 ms, in coroutine time — and never
+    queues on the store's mutex, so it never spins and never reads the
+    store's clock; it drains the store's post-commit queue once it releases
+    the store, inside one settle scope.
+  - `hydrate()` throws `IllegalStateException` inside an action, an `atomic`
+    frame, a `suspendAction` or a `suspendAtomic` of any store — body or
+    commit, and a child coroutine of the body — where it would wait for
+    itself or commit its seed outside the enclosing transaction.
+  - `adopt { }` may write only `StateTag.Remote` states (and evict entries of
+    `Remote` keyed families): anything else — directly, in a nested action,
+    through `restore` or `reset()` — fails the adoption, naming the states,
+    rolls it back whole and moves the phase to `Failed` in the same
+    transaction; `removeState`/`clearStates` throw inside it.
+  - Back to `Detached` only through `invalidate()` (id
+    `HydrationInvalidate`), `stageInvalidate()` inside an action, and the
+    store's `reset()`, which detaches inside its transaction (plan deviation
+    8). A refresh in flight then is cancelled and its result discarded, even
+    one that ignores cancellation; a sterile `restore` does not detach.
+  - `Hydrator.state` is a read-only, observable `State<Hydration>` of the
+    store (`Detached`, `Seeded`, `Hydrated`, `Failed(cause: Throwable)`),
+    usable as a `derivedState` source — a health flag over several stores'
+    hydrations needs no cross-store frame — that no snapshot, restore or reset
+    captures or writes, and that every store write entrypoint refuses.
+    `current`, `awaitSettled()` (waits until no refresh is in flight), and
+    `hydrateEach(vararg)` until issue #21's `hydrateAll()`. After `dispose()`
+    the entrypoints throw, a refresh in flight is cancelled and never adopted,
+    and `state` keeps its last value.
+  - Deviations from #20's sketch (plan deviation 8): `hydrate { }:
+    State<Hydration>` became `hydrator { }: Hydrator<V>`, `Failed(cause: Any)`
+    became `Failed(cause: Throwable)`, `reset()` detaches too, and
+    `hydrateAll()` waits for #21. The persisted overlay is the next PR.
+  `HydrationLifecycleTest`, `HydrationInvalidateTest`,
+  `HydrationAdoptPolicyTest`, `HydrationHealthFlagTest`, `HydrationClockTest`,
+  `HydrationDisposeTest` and `DisposedEntrypointTest` (common, so iOS runs
+  them too), and `HydrationSingleFlightTest` and the watchdogged
+  `HydrationSerializerContractTest` (JVM and Android host) pin it. iOS
+  unverified until a macOS run.
+
 - **Keyed-state evictions under `suspendAction`/`suspendAtomic`** (issue #20,
   R7; see `:holdfast`'s changelog): `KeyedState.evict`/`evictAll` stage like
   `mutate`, so inside a suspending body they stage into its transaction and

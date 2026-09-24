@@ -179,6 +179,17 @@ class Transaction internal constructor(
     internal val resetHeld: MutableSet<MutableState<*>> = HashSet()
 
     /**
+     * Why `removeState`/`clearStates` are refused on this transaction's owner
+     * thread while it — or a savepoint of it — is its store's active
+     * transaction, or `null` (the default: they are not). Set once, by
+     * library machinery that runs user code inside it whose structural
+     * changes would escape its rollback (`internalForbidStructuralWrites`,
+     * SealedStates.kt: a hydrator's `adopt`).
+     */
+    @kotlin.concurrent.Volatile
+    internal var structuralRefusal: String? = null
+
+    /**
      * The thread running this transaction's commit fanout right now — observer
      * callbacks, bridge publishes and the synchronous event drain — or
      * [NOT_FANNING_OUT]. Set when [fanOutApplied] starts and cleared when it

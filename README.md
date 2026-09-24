@@ -79,7 +79,7 @@ for the full consistency contract.
 | Artifact | Role |
 |---|---|
 | [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), state tags — `Secret` values redacted from encoded snapshots, renders and logs, `UserAuthored` snapshot scopes, `Remote` states reset by a sterile restore (experimental) — `reset()` to initial values (experimental), derived state, read-only `derivedState`/`merged(local, remote)` states that settle once per outermost action or frame, from a consistent cut of their sources (experimental), keyed state families — one state per key, with transactional eviction and snapshot support (experimental) — cross-store `atomic` frames applied whole before any participant fans out, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
-| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
+| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies, and a store hydration lifecycle — `hydrator { base; refresh; adopt }`: seed once, fetch once however many callers ask, adopt into `Remote` states only, back to `Detached` only through `invalidate()` or `reset()` (experimental). |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
 | [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers; `Secret` state values never reach a timeline or a failure message. |
 | [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory (with experimental codec and tags overloads that keep a `Secret` value out of validation errors), `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
@@ -184,6 +184,20 @@ for when each lands.
   coroutine-touched store, blocking actions from two threads on a
   coroutine-touched store, and blocking `atomic()` racing a `suspendAction` —
   are fixed.
+
+- **Hydration (experimental) cannot see every wait for itself.** `hydrate()`
+  throws inside an action, frame, `suspendAction` or `suspendAtomic` — body or
+  commit, and a child coroutine of the body — instead of waiting for the
+  transaction that waits for it. It cannot tell that a coroutine launched on
+  another scope is awaited by such a body (`store.scope.launch { hydration.hydrate() }.join()`
+  inside `store.suspendAction { }`): that one waits for the body forever,
+  politely, without spinning. *Workaround:* never wait for a `hydrate()` from
+  inside a transaction; launch it and return. Two narrower limits:
+  `adopt { }`'s `Remote`-only policy covers the hydrating store — a write to
+  another store from `adopt` commits on its own, outside the adoption's
+  rollback — and the hydration gate never queues on the store's mutex, so
+  under a continuous stream of `suspendAction`s on one store a `hydrate()`
+  waits until the stream has a gap.
 
 - **Writing to a second store from an observer can deadlock.** `action` holds the
   store's transaction lock across the whole commit fanout, so two stores whose

@@ -67,7 +67,9 @@ class MutableState<T : Any>(
      * The declaration that gives this state its store-side name and kind: for
      * a registered state, the one it was materialized from; for a
      * `DerivedState`'s backing state, the unregistered
-     * [StateKind.ReadOnlyDerived] declaration `createDerivedState` sets. `null`
+     * [StateKind.ReadOnlyDerived] declaration `createDerivedState` sets; for
+     * a sealed state, the unregistered [StateKind.Sealed] one
+     * `internalSealedState` sets. `null`
      * only for any other `MutableState` constructed by hand, outside any store
      * registry. Set before the state is published.
      */
@@ -105,6 +107,17 @@ class MutableState<T : Any>(
      */
     @kotlin.concurrent.Volatile
     internal var retired: Boolean = false
+
+    /**
+     * Set when this is a sealed state (`internalSealedState`, SealedStates.kt):
+     * library machinery's own, which every store write entrypoint refuses —
+     * `mutate`, `update`, `bridge`, `observeFrom` — with the seal's teaching
+     * message, and whose inbound bridge values are dropped. Only its owner
+     * stages it (`internalStageSealed`). Set before the state is published,
+     * and never cleared.
+     */
+    @kotlin.concurrent.Volatile
+    internal var writeSeal: WriteSeal? = null
 
     @kotlin.concurrent.Volatile
     private var currentBridge: Bridge<T>? = null
@@ -290,10 +303,11 @@ class MutableState<T : Any>(
      * they are an external sync mechanism.
      *
      * A value arriving for a [retired] keyed entry is dropped: the family no
-     * longer holds the entry, so nothing could read it back through it.
+     * longer holds the entry, so nothing could read it back through it. So is
+     * one for a sealed state ([writeSeal]), which only its owner writes.
      */
     internal fun applyFromBridge(rawValue: T) {
-        if (retired) return
+        if (retired || writeSeal != null) return
         val processed = beforeSet(rawValue)
         // Before the bracket opens, as a commit counts itself (FrameCommit.kt):
         // a capture that listed keyed entries learns that a write its cut may
@@ -400,7 +414,8 @@ class MutableState<T : Any>(
      * Setting to null detaches: the previous bridge's inbound observer is disposed
      * and no further commits are published.
      *
-     * Setting it on an evicted keyed entry (a stale handle) throws
+     * Setting it on an evicted keyed entry (a stale handle), or on a sealed
+     * state (library machinery's own, such as a hydrator's phase), throws
      * [IllegalStateException], as `Store.bridge` does, and attaches nothing.
      */
     var bridge: Bridge<T>?
@@ -454,6 +469,14 @@ class MutableState<T : Any>(
         throw first
     }
 }
+
+/**
+ * Why a sealed state refuses a write ([MutableState.writeSeal]): its owner's
+ * teaching text, which `internalSealedState` (SealedStates.kt) was given.
+ */
+internal class WriteSeal(
+    val refusal: String,
+)
 
 /**
  * Human-readable identity of the store that owns this state, for failure

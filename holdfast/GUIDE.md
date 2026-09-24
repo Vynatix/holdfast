@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration
 
 ---
 
@@ -1219,6 +1219,7 @@ never T1's pending writes.
 | `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` that settles: recomputed once per outermost action or frame that changes a source (sources on any store; not a `computed` one), after it releases every store, from a committed cut of the sources, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
 | `merged` | `fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(local: State<L>, remote: State<R>, merge: (L, R) -> T): DerivedState<T>` *(experimental, extension)* | A `DerivedState` over two different states this store declares — the user's side (`local`, tag it `UserAuthored`) and sync's (`remote`, tag it `Remote`) — so an adoption writing `remote` never touches `local` and recomputes the merge once; carries neither tag; the input tags are not checked. Another store's, a derived, `computed` or internal input, or the same state twice, is an `IllegalArgumentException` (§16.5) |
 | `keyedState` | `fun <K : Any, T : Any> Store<*>.keyedState(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, keyCodec: StateCodec<K>? = null, tags: Set<StateTag> = emptySet(), initialize: (K) -> T): KeyedStateProvider<K, T>` *(experimental, extension)* | Declares a keyed state family with `val docs by keyedState<K, T> { key -> … }`: one state per key, created from the initializer at the key's first `docs[key]` and the same `State` while it lives; `getOrNull`/`contains`/`entries` never create one. `evict(key)`/`evictAll()` are staged like writes (from this store's own commit fanout, deferred until the commit ends) and leave a stale handle whose writes throw; other entries keep their observers and bridges. Snapshots capture every live entry (`keysOf`), `encode()` writes a family with a `codec` and a `keyCodec` as an object under its name, `restore` creates entries and never evicts, `reset()` re-runs live entries' initializers. Families and states share names; throws on a disposed store (§16.6) |
+| `hydrator` | `fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>` *(experimental, `:holdfast-coroutines` extension)* | Gives the store its one hydrator: `base { }` seeds it in one transaction that also marks a refresh in flight, `refresh { } adopt { }` fetches once that has committed and adopts into `Remote` states only (a savepoint; any other write fails the adoption, naming the state). `hydrate()` does nothing while `Seeded` or `Hydrated`, retries only the refresh from `Failed`, and seeds and fetches once under concurrent calls; `invalidate()`/`stageInvalidate()` and `reset()` go back to `Detached`. `state` is a read-only, observable `State<Hydration>` no snapshot sees; `hydrate()` throws inside any action, frame or suspending entry; `hydratorOrNull()`, `hydrateEach(…)`; a second `hydrator { }` throws (§16.7) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute still waiting on this store, for a live store, runs inside it, on the calling thread (§16.5) |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
@@ -1602,6 +1603,15 @@ interface SuspendingKvStore                          // suspend get / put / remo
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
 fun <T : Any> SuspendingKvStore.bridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge<T>
 fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, scope: CoroutineScope = Store.defaultScope): SuspendingKvBridge.Awaiting<T>
+
+// Hydration (experimental, §16.7): seed once, fetch once, adopt into Remote states.
+fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>
+fun <V : Store<V>> V.hydratorOrNull(): Hydrator<V>?
+suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
+class Hydrator<V : Store<V>> {                       // state / current / hydrate / invalidate / stageInvalidate / awaitSettled
+    suspend fun hydrate(scope: CoroutineScope = …)   // defaults to the store's Store.scope
+}
+sealed interface Hydration                           // Detached / Seeded / Hydrated / Failed(cause)
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
@@ -3132,6 +3142,198 @@ What an eviction's commit does:
 | its bridge | detached | untouched |
 | its `observeFrom` subscriptions | disposed | untouched |
 | the next `docs[key]` | creates a new entry, a new `State`, from the initializer | returns the same `State` |
+
+### 16.7 Hydration (`:holdfast-coroutines`)
+
+```kotlin
+// :holdfast-coroutines. A store's hydration: seed it, fetch, adopt — once.
+@ExperimentalStoreApi
+fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>   // one per store
+@ExperimentalStoreApi
+fun <V : Store<V>> V.hydratorOrNull(): Hydrator<V>?
+@ExperimentalStoreApi
+suspend fun hydrateEach(vararg hydrators: Hydrator<*>)       // in order; until #21's hydrateAll()
+
+@ExperimentalStoreApi
+class HydrationSpec<V : Store<V>> {
+    fun base(block: V.() -> Unit)                           // runs in the seed transaction
+    fun <F> refresh(fetch: suspend (V) -> F): HydrationRefresh<V, F>
+}
+
+@ExperimentalStoreApi
+class HydrationRefresh<V : Store<V>, F> {
+    infix fun adopt(block: V.(fetched: F) -> Unit)          // a savepoint that may write Remote states only
+}
+
+@ExperimentalStoreApi
+class Hydrator<V : Store<V>> {
+    val state: State<Hydration>                             // read-only, observable, a derivedState source
+    val current: Hydration
+    suspend fun hydrate(scope: CoroutineScope = …)          // defaults to the store's Store.scope
+    fun invalidate(): TransactionResult<Unit>               // back to Detached
+    fun stageInvalidate()                                   // the same, staged into the caller's action
+    suspend fun awaitSettled(): Hydration                   // once no refresh is in flight
+}
+
+@ExperimentalStoreApi
+sealed interface Hydration {
+    data object Detached : Hydration
+    data object Seeded : Hydration                          // seeded; a refresh is in flight
+    data object Hydrated : Hydration
+    data class Failed(val cause: Throwable) : Hydration
+}
+```
+
+A hydrator turns a screen's "seed the store, then sync it" into one call that
+is safe to make on every entry. `base { }` seeds the store — typically a
+`restore` of bundled seed data (§16.2) — `refresh { }` fetches, and
+`adopt { }` writes what it fetched into the store's `Remote` states (§16.4).
+`hydrate()` seeds once and fetches once, and does nothing while that is in
+flight or done, however many callers ask at once. It lives in
+`:holdfast-coroutines`, and is experimental like the rest of this chapter.
+
+```kotlin
+interface HistoryApi {
+    suspend fun fetchHistory(): List<String>
+}
+
+@OptIn(ExperimentalStoreApi::class)
+class HistoryStore(api: HistoryApi) : Store<HistoryStore>() {
+    val pinned by state(tags = setOf(StateTag.UserAuthored)) { emptySet<String>() }
+    val entries by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base { entries mutate listOf("bundled") }          // in the seed transaction
+            refresh { api.fetchHistory() } adopt { fetched ->   // on hydrate()'s scope, once seeded
+                entries mutate fetched                         // Remote states only
+            }
+        }
+}
+
+@OptIn(ExperimentalStoreApi::class)
+suspend fun openHistory(store: HistoryStore, scope: CoroutineScope) {
+    store.hydration.state effect { println("phase: $this") }   // "phase: Detached"
+    store.hydration.hydrate(scope)                              // "phase: Seeded"
+    store.hydration.hydrate(scope)                              // in flight already: does nothing
+    println(store.entries.value)                                // "[bundled]"
+    println(store.hydration.awaitSettled())                     // "phase: Hydrated", then "Hydrated"
+    println(store.entries.value)                                // "[a, b]"
+}
+```
+
+What `hydrate()` does, by phase:
+
+| Phase | `hydrate()` |
+|---|---|
+| `Detached` | runs `base { }` and moves to `Seeded` in ONE transaction (id `HydrationSeed`), which also marks the refresh in flight; once that transaction has committed — never when it rolled back — launches the refresh on `scope` and returns |
+| `Seeded` | nothing: a refresh is in flight |
+| `Hydrated` | nothing |
+| `Failed` | moves back to `Seeded` in one transaction (id `HydrationRetry`), WITHOUT running `base { }`; once it has committed, launches the refresh again |
+
+What moves the phase, and the transaction middleware sees it in:
+
+| From | When | To | Transaction |
+|---|---|---|---|
+| `Detached` | `hydrate()` | `Seeded` | `HydrationSeed`: `base { }`, then the phase |
+| `Failed` | `hydrate()` | `Seeded` | `HydrationRetry` |
+| `Seeded` | the refresh returned, and `adopt { }` succeeded | `Hydrated` | `HydrationAdopt`, with `adopt { }` as its savepoint `Adopt` |
+| `Seeded` | `adopt { }` threw, or wrote a state that is not `Remote` | `Failed(cause)` | `HydrationAdopt` (its savepoint rolled back whole) |
+| `Seeded` | the refresh threw (a cancelled `scope` included), or a middleware rejected `HydrationAdopt` | `Failed(cause)` | `HydrationFailure` |
+| any | `invalidate()`, `stageInvalidate()`, the store's `reset()` | `Detached` | `HydrationInvalidate` (a savepoint inside an action), the caller's action, `Reset` |
+
+- **One decision at a time.** Every hydration decision — seed, retry, adopt,
+  record a failure — reads the phase and commits the next one while the
+  hydration gate holds the store: its serializer, the lock `suspendAction`,
+  `suspendAtomic` and blocking actions share, held only across that
+  decision's transaction. So no two decisions on one store interleave, and
+  none interleaves with any other transaction on it: two concurrent
+  `hydrate()` calls seed once and fetch once, and fifty on a failed hydration
+  refetch once — the in-flight mark commits in the very transaction that
+  decides to fetch. The gate takes the store politely: when it is busy, it
+  backs off — a yield, then delays doubling from 1 ms to 32 ms, in coroutine
+  time — instead of queueing on the store's mutex, so it never spins, never
+  holds up the store's other callers, and never reads the store's clock. It
+  drains the store's post-commit queue once it releases the store, like every
+  holder of the store, and the derived states a decision changes settle once
+  it has (§16.5).
+- **Where to call `hydrate()`.** From a coroutine, outside every
+  transaction. It throws `IllegalStateException` inside an action, an
+  `atomic` frame, a `suspendAction` or a `suspendAtomic` of any store — body
+  or commit, an observer included, and a child coroutine of the body — since
+  on its own store it would wait for itself forever, and on another its seed
+  would commit outside the enclosing transaction and its rollback. A
+  coroutine launched on some other scope that a body then waits for is not
+  detected, and waits for that body forever. To detach inside an action, call
+  `stageInvalidate()`.
+- **The scope.** `hydrate(scope)` runs the refresh on `scope`, which defaults
+  to the store's `Store.scope` — its override, else its `bindToScope`
+  binding, else `Store.defaultScope`. There is no `context(CoroutineScope)`
+  overload, so inside a coroutine the default is still the store's scope,
+  never the ambient one. The refresh is launched with `CoroutineStart.ATOMIC`
+  once the deciding transaction has committed, so a hydration marked in
+  flight always gets its refresh: a caller cancelled after that transaction
+  committed still launches it, and a scope already cancelled runs it into its
+  cancellation. A cancellation of `scope` while the refresh runs fails the
+  hydration with that `CancellationException`; the next `hydrate()` retries.
+  A caller cancelled while it waits for the store changes nothing.
+- **Adopt writes `Remote` only.** `adopt { }` runs as a savepoint of the adopt
+  transaction and is checked when it returns: every write it staged into the
+  store — directly, in nested actions, through a `restore` or a `reset()` —
+  and every keyed-entry eviction must be of a `StateTag.Remote` state (§16.4)
+  or family (§16.6). Anything else fails the adoption with an
+  `IllegalStateException` naming the states (never a value or a key), rolls
+  it back whole, its `Remote` writes included, and moves the phase to
+  `Failed` in the same adopt transaction. `removeState`/`clearStates` throw
+  inside it: they drop states at once, where no rollback reaches. A write to
+  another store is not part of the adoption; it commits on its own, as from
+  any action. Pair it with `merged(local, remote)` (§16.5), so that what the
+  user writes is never what sync adopts.
+- **Back to `Detached`** only through `invalidate()` (an action of its own,
+  id `HydrationInvalidate`; a savepoint inside an action), `stageInvalidate()`
+  (staged into the caller's action on this thread) and the store's `reset()`
+  (§16.1), which detaches inside its own transaction, since initial values are
+  not hydrated ones — each commits, or rolls back, with its transaction. The
+  store's states keep their values, and the next `hydrate()` runs
+  `base { }` again. A refresh still in flight is cancelled once the detach
+  commits, and whatever it brings is discarded, even when it ignores the
+  cancellation. A sterile `restore` (§16.4) resets the `Remote` states but
+  does not detach: `stageInvalidate()` in the same action to fetch again.
+- **Not store state.** `state` is a state of the store — observe it with
+  `effect`, the coroutines flows or `collectAsState`, and use it as a
+  `derivedState` source — but it is the hydrator's own: `mutate`, `update`,
+  `bridge` and `observeFrom` on it throw, naming the hydrator, and no
+  `snapshot()`, `restore`, `reset()`, `properties` or `taggedStates` sees it
+  (`snapshot[hydration.state]` throws). `current` is its value.
+- **Health flags need no frame.** Each hydration commits on its own store, so
+  a flag over several stores' phases is a `derivedState` of their `state`s,
+  which settles after every change of either (§16.5):
+
+```kotlin
+@OptIn(ExperimentalStoreApi::class)
+fun sessionExpired(app: AppStore, history: HistoryStore, profile: ProfileStore): DerivedState<Boolean> =
+    app.derivedState(history.hydration.state, profile.hydration.state) {
+        listOf(history.hydration.current, profile.hydration.current)
+            .any { (it as? Hydration.Failed)?.cause is SessionExpired }
+    }
+```
+
+- **Time.** `base`, `refresh` and `adopt` read time through the store's
+  `clock` (§13), so a bound fixed clock makes what they stamp deterministic.
+  The hydrator never reads that clock itself.
+- **Dispose.** After `dispose()`, `hydrate()`, `invalidate()`,
+  `stageInvalidate()` and `awaitSettled()` throw `IllegalStateException`; a
+  refresh in flight is cancelled and never adopted (nor is one that finishes
+  anyway); an `awaitSettled()` waiting then throws; and `state` and `current`
+  keep their last value.
+- **One per store.** A second `hydrator { }` on a store throws;
+  `hydratorOrNull()` finds the one it has. `hydrateEach(a, b, …)` hydrates
+  several, in order, each on its store's scope — every seed committed and
+  every refresh launched when it returns — carrying on past a failure and
+  throwing the first once all have run. Issue #21's tree brings
+  `hydrateAll()`.
+- **`awaitSettled()`** waits until no refresh is in flight and returns the
+  phase then — `Hydrated`, `Failed`, or `Detached` (never hydrated, or
+  invalidated meanwhile) — reading committed phases only.
 
 ---
 

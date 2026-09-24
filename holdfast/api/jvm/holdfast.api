@@ -384,6 +384,14 @@ public abstract interface class com/vynatix/holdfast/SchemaVersioned {
 	public abstract fun migrate (ILcom/vynatix/holdfast/EncodedSnapshotView;)V
 }
 
+public final class com/vynatix/holdfast/SealedStatesKt {
+	public static final fun getInternalQualifiedName (Lcom/vynatix/holdfast/State;)Ljava/lang/String;
+	public static final fun internalForbidStructuralWrites (Lcom/vynatix/holdfast/Transaction;Ljava/lang/String;)V
+	public static final fun internalSealedState (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/String;)Lcom/vynatix/holdfast/MutableState;
+	public static final fun internalStageSealed (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/MutableState;Ljava/lang/Object;)V
+	public static final fun internalTopLevelAction (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
 public final class com/vynatix/holdfast/SettleScope {
 	public final fun isOpen ()Z
 	public final fun settle ()V

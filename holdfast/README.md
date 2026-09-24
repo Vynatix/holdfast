@@ -142,6 +142,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 
 - **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same store via an internal coroutine `Mutex`.
 - **`Flow` / `StateFlow` / `first` / `awaitValue`** adapters for state observation in coroutine code.
+- **`hydrator { base { }; refresh { } adopt { } }`** *(experimental)* — a store's hydration lifecycle, `Detached` → `Seeded` → `Hydrated` (or `Failed(cause)`): `hydrate()` seeds in one transaction that also marks the refresh in flight, fetches only once that has committed, and does nothing while in flight or hydrated, however many callers ask; `adopt` may write only `Remote` states; `invalidate()` and `reset()` detach. `Hydrator.state` is observable and a `derivedState` source, so a health flag over several stores needs no frame ([GUIDE §16.7](GUIDE.md#167-hydration-holdfast-coroutines)).
 
 ### `:holdfast-compose` extension
 
@@ -235,7 +236,7 @@ and `com.vynatix.holdfast.crypto`:
 | Artifact | Role |
 |---|---|
 | `com.vynatix:holdfast` | Core. |
-| `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }`. |
+| `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` + `hydrator { … }` (experimental). |
 | `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
 | `com.vynatix:holdfast-testing` | Test scope, handle, timeline, matchers. |
 | `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
