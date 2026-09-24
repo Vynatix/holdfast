@@ -2,7 +2,6 @@
 
 package com.vynatix.holdfast
 
-import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.atomicfu.atomic
 
 // The machinery behind DerivedState (DerivedState.kt): checking its inputs,
@@ -71,18 +70,6 @@ internal fun MutableState<*>.sourceName(host: Store<*>? = null): String {
 }
 
 /**
- * Whether this thread's reads of this store's states return the pending
- * writes of its active transaction ([MutableState.value]'s read-your-own-writes):
- * this thread opened the action or frame that holds the store — including a
- * `suspendAction`/`suspendAtomic` that started here, even while its body is
- * parked. Such writes can still roll back, so a derived state's initial
- * compute, which reads the way any read on its thread does, is followed by a
- * catch-up recompute when this holds (see `createDerivedState`). The
- * recompute itself reads committed values only ([DerivedRecompute]).
- */
-internal fun Store<*>.heldByThisThread(): Boolean = activeTransaction?.ownerThreadId == currentThreadId()
-
-/**
  * Follow [sources] for a derived state of [host]: subscribe to each now, and
  * queue the recompute after each commit that changes one once the returned
  * follower is [armed][SourceFollower.arm]. Subscribing before the initial
@@ -110,16 +97,20 @@ internal fun <V : Store<V>> followSources(
  * callback overtakes it, the commit's is dropped instead and the initial one
  * counts as a change — one extra recompute, never a lost one.
  *
- * **Where a change queues it.** Inside a commit's fanout on the source's
- * store, the recompute is queued on THAT store: its post-commit queue then
- * deduplicates it across every source the commit changed (the host's would
- * run it inline once per source when the host is idle), and the store's
- * holder runs it once the commit has released the store. For a source on the
- * host, the two queues are the same one, as for `derived`. A change outside
- * any commit of the source's store — a `bridge` or `observeFrom` write,
- * which has no commit — queues it on the host instead, as `derived` does, so
- * it runs at once on an idle host rather than waiting for whoever holds the
- * source's store.
+ * **Where a change queues it.** Into the settle scope open on this thread
+ * ([SettleScopes]): every commit runs inside an entry (an action, a frame,
+ * `suspendAction`, `suspendAtomic`, a recompute's own transaction), so a
+ * source commit queues the recompute into its entry's scope, which
+ * deduplicates it across every source, store and nested action of that
+ * entry, and runs it once the outermost entry on the thread has released
+ * everything it took. With no scope open (a scope not carried to this thread,
+ * see `:holdfast-coroutines`' SettleAmbientContext.kt): inside a commit's
+ * fanout on the source's store, the recompute is queued on THAT store, whose
+ * holder runs it once the commit has released the store. A change outside
+ * any commit and any entry — a `bridge` or `observeFrom` write, which has no
+ * commit — queues it on the host instead, as `derived` does, so it runs at
+ * once on an idle host rather than waiting for whoever holds the source's
+ * store.
  *
  * A change that finds the host disposed releases every subscription, so a
  * disposed host does not stay referenced by another store's states.
@@ -151,10 +142,11 @@ internal class SourceFollower<V : Store<V>>(
      * Start queueing [task] on source changes. It is queued once now when a
      * source commit arrived since [start], or when [catchUp] says the initial
      * compute read values that may still change without a commit (see
-     * `createDerivedState`). Queued on the host: an idle host runs it at
-     * once, a busy one hands it to its holder, and the recompute defers
-     * itself to a blocking action or frame this thread runs on a source's
-     * store.
+     * `createDerivedState`): into this thread's settle scope when one is
+     * open, so it runs once the entry holding those values has settled;
+     * otherwise on the host, where an idle host runs it at once, a busy one
+     * hands it to its holder, and the recompute defers itself to a blocking
+     * action or frame this thread runs on a source's store.
      */
     fun arm(
         task: DerivedRecompute<V, *>,
@@ -168,7 +160,7 @@ internal class SourceFollower<V : Store<V>>(
             task.dispose()
             return
         }
-        if (missed || catchUp) host.postCommit(task)
+        if ((missed || catchUp) && SettleScopes.current()?.enqueue(task) != true) host.postCommit(task)
     }
 
     private fun follow(source: MutableState<*>): Disposable {
@@ -202,6 +194,7 @@ internal class SourceFollower<V : Store<V>>(
         source: MutableState<*>,
         task: DerivedRecompute<V, *>,
     ) {
+        if (SettleScopes.current()?.enqueue(task) == true) return
         val sourceStore = source.owningStore
         val inItsCommit = sourceStore.activeTransaction?.fanningOutHere() == true
         (if (inItsCommit) sourceStore else host).postCommit(task)

@@ -86,6 +86,16 @@ public final class com/vynatix/holdfast/FanoutMarkers {
 	public final fun install (Ljava/util/Set;)Ljava/util/Set;
 }
 
+public final class com/vynatix/holdfast/FrameApply {
+	public final fun getApplied ()Ljava/util/List;
+	public final fun getFailure ()Ljava/lang/Throwable;
+}
+
+public final class com/vynatix/holdfast/FrameCommitKt {
+	public static final fun applyFrameCommit (Ljava/util/List;)Lcom/vynatix/holdfast/FrameApply;
+	public static final fun fanOutApplied (Lcom/vynatix/holdfast/Transaction;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)V
+}
+
 public class com/vynatix/holdfast/FrameContractException : java/lang/IllegalStateException {
 	public fun <init> (Ljava/lang/String;)V
 }
@@ -320,6 +330,23 @@ public final class com/vynatix/holdfast/RestoreReport {
 public abstract interface class com/vynatix/holdfast/SchemaVersioned {
 	public abstract fun getSchemaVersion ()I
 	public abstract fun migrate (ILcom/vynatix/holdfast/EncodedSnapshotView;)V
+}
+
+public final class com/vynatix/holdfast/SettleScope {
+	public final fun isOpen ()Z
+	public final fun settle ()V
+}
+
+public final class com/vynatix/holdfast/SettleScopeKt {
+	public static final fun internalDrainPostCommitTasksWhenSettled (Lcom/vynatix/holdfast/Store;)V
+	public static final fun internalSettling (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/holdfast/SettleScopes {
+	public static final field INSTANCE Lcom/vynatix/holdfast/SettleScopes;
+	public final fun current ()Lcom/vynatix/holdfast/SettleScope;
+	public final fun install (Lcom/vynatix/holdfast/SettleScope;)Lcom/vynatix/holdfast/SettleScope;
+	public final fun open ()Lcom/vynatix/holdfast/SettleScope;
 }
 
 public abstract interface class com/vynatix/holdfast/SnapshotEntry {

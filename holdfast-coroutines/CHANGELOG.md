@@ -8,6 +8,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`suspendAction` and `suspendAtomic` are settle entries** (issue #20, R9;
+  see `:holdfast`'s changelog): the `derivedState`/`merged` states whose
+  sources one of them — and everything nested in it: `suspendAction`s,
+  blocking `action`s, frames — changes recompute once, when the outermost
+  entry has released every store, on whatever thread it ends on. Its settle
+  scope travels with the coroutine (`SettleAmbientContext.kt`: a
+  `ThreadContextElement` on JVM/Android, a bracketing interceptor on
+  iOS/wasmJs, as for the frame marker), so a commit that fans out on another
+  thread than the one that opened the entry still queues into it, and a
+  parked entry's scope never leaks into another coroutine sharing its
+  thread. `SuspendSettleCommonTest` (common, so iOS runs it too),
+  `SuspendSettleTest`, `SuspendAtomicHopDerivationTest`,
+  `SettleScopeInterceptedTest` (the iOS/wasmJs carrier, on the JVM) and
+  `SharedThreadIdentityTest` (the wasmJs one-thread model, on the JVM) pin
+  it.
+  On iOS/wasmJs a nested `withContext(dispatcher)` inside the entry replaces
+  the interceptor: a commit in that section does not see the entry's scope —
+  a blocking entry opened there settles on its own, and a nested suspending
+  one joins the entry but its commit falls back to the per-commit routing —
+  so the derived states it changes recompute after that commit, once per
+  commit rather than once per entry.
+
 - **Core's derived states work with every adapter** (issue #20, R6):
   `asFlow`, `asStateFlow` (whose default scope is the scope of the store the
   derived state was created on), `first` and `awaitValue` accept a
@@ -56,6 +78,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A blocking `action`/`atomic` on a later `suspendAtomic` participant, from
+  an earlier one's commit, no longer waits forever** (issue #20, R9). The
+  frame still held that participant's serializer and had not committed it
+  yet, so the call was not recognised as nested and waited for the frame.
+  Every participant now applies before any fans out, so it is refused at once
+  with an `Error`, like one on an earlier participant — closing the last
+  frame gap named below.
+
+- **`suspendAtomic` no longer tears across a thread hop** (issue #20, R9).
+  Participants committed one after the other, so while the first one's
+  `SuspendingBridge.publishAwaited` suspended, every thread saw it applied
+  and the second one not; and after the body resumed on another thread, an
+  observer of the first participant read the second one's old value (only
+  the frame's own thread saw its pending writes). Every participant now
+  applies, inside one write bracket, before any fans out — every participant
+  this frame opens a root for; a store a nested `suspendAtomic` shares with
+  its enclosing frame still applies with that frame (enroll every store in
+  the outermost frame).
+
 - **A blocking `action` or `atomic` from inside a `suspendAction` or
   `suspendAtomic` commit no longer spins forever** when it targets a store
   that commit has applied: from an observer, a sync `Bridge.publish` or a
@@ -73,7 +114,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `withContext(dispatcher)` inside the commit replaces the interceptor, so a
   blocking call from there still waits; and a blocking call on a later
   `suspendAtomic` participant that has not committed yet (from an earlier
-  one's fanout) still waits for the frame.
+  one's fanout) still waits for the frame (closed since: see above).
 
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
@@ -111,6 +152,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   drains every store whose root it opened after releasing all of them.
 
 ### Changed
+
+- **BREAKING (behavior): `suspendAtomic` applies every participant before
+  any fans out** (issue #20, R9; see `:holdfast`'s changelog for `atomic`).
+  Then each participant fans out in lock order — observers, awaited bridge
+  publishes, suspending event drain. An observer's `mutate`/`update`/`emit`
+  into a LATER participant is refused like one into an earlier participant
+  (it used to stage into that participant's open root and commit with the
+  frame), and a participant whose fanout fails — a throwing failure handler,
+  or a `CancellationException` from its `SuspendingBridge.publishAwaited`
+  (one that times out, say) — no longer rolls the later ones back: they have
+  applied, so they fan out and commit, and the frame returns the failure as
+  an `Error` (the cancellation, when there is one, carrying any other
+  failure as suppressed). Only the participants that roll back get
+  `onTransactionError`.
+
+- **BREAKING (behavior): derived states settle once per outermost suspending
+  entry, and a frame's post-commit work runs then.** A `derivedState` over
+  sources written by two `suspendAction`s nested in a third recomputes once,
+  after the outer one, instead of after each; inside the outer one it
+  reflects none of their writes. The `derived`/`suspendDerived` work queued
+  on the stores whose roots a `suspendAtomic` opened runs once the outermost
+  entry has exited, not when the frame does.
+
+- **BREAKING (behavior, edge): an outermost `suspendAction`/`suspendAtomic`
+  checks for cancellation first.** Before it takes anything it checks the
+  caller's job, on every platform: a call from an already-cancelled
+  coroutine now throws its `CancellationException` before taking the store,
+  where it used to take a free store and run — and, with no suspension point
+  in the body, commit — the body. It then runs inside a child of the caller
+  carrying its settle scope (a `withContext` on JVM/Android, an undispatched
+  child on iOS/wasmJs); once the body has returned, the call still returns
+  the committed `TransactionResult` even if the caller was cancelled
+  meanwhile — while its commit awaited a `SuspendingBridge.publishAwaited`,
+  say — as it did before: the caller sees its cancellation at its next
+  suspension point. `SuspendEntryCancellationTest` pins both edges.
 
 - **BREAKING (behavior): writes into a `suspendAction` or `suspendAtomic`
   commit from its own fanout fail loudly** (see `:holdfast`'s changelog, issue

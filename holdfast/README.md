@@ -131,7 +131,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 - **State tags** *(experimental)* — `state(tags = setOf(StateTag.Secret)) { "" }`. A `Secret` value stays readable in memory (and a captured snapshot restores it), but is written as `null` by `encode()`, shown as `<redacted>` by a captured snapshot's `render()`, read as `Redacted` from any snapshot but a `snapshot(SnapshotScope.Raw)` capture, and never reaches a `:holdfast-testing` timeline, a matcher's failure message or the built-in middleware's output; a `derived` with a Secret source is one. `snapshot(SnapshotScope.UserAuthored)` captures exactly the `UserAuthored` states. `Remote` states are left out of `encode()` unless `includeRemote = true`, and `restore(snapshot, policy, sterile = true)` resets them to their initial values instead of restoring them. `state.tags` and `store.taggedStates(tag)` read the tags back ([GUIDE §16.4](GUIDE.md#164-state-tags-snapshot-scopes-and-redaction)).
 - **`Store.reset()`** *(experimental)* — put every declared state back to what its initializer computes, in one transaction. The initializers run again (one that reads another declared state reads that state's reset value, in the order a new store's first reads would run them), their results are staged raw (an encrypted state is not encrypted twice), and only the states whose value changes are staged, so observers and bridges fire once for each and never for the rest. A throwing initializer rolls the whole reset back ([GUIDE §16.1](GUIDE.md#161-reset)).
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
-- **`derivedState(sources) { } / merged(local, remote) { }`** *(experimental)* — a read-only `DerivedState<T>` (declare it with `by`), recomputed once per commit that changes a source — however many sources that commit changes, on this store or another — after that commit has released its store. `merged` names the split between what the user writes (`local`, tagged `UserAuthored`) and what sync adopts (`remote`, tagged `Remote`): an adoption writes `remote` only, so it never clobbers the user's side, and recomputes the merge once. Observable through `effect`, the coroutines flows and Compose's `collectAsState`; writing it throws; snapshots, `reset()` and `restore` leave it to recompute from its sources ([GUIDE §16.5](GUIDE.md#165-derived-states-and-merged)).
+- **`derivedState(sources) { } / merged(local, remote) { }`** *(experimental)* — a read-only `DerivedState<T>` (declare it with `by`), that settles: recomputed once per outermost `action`, `atomic` frame, `suspendAction` or `suspendAtomic` that changes a source — however many sources, stores and nested actions or frame participants it touches — after that entry has released every store, reading its sources from one committed cut (never a torn cross-store pair; inside the entry it reflects none of that entry's writes). `merged` names the split between what the user writes (`local`, tagged `UserAuthored`) and what sync adopts (`remote`, tagged `Remote`): an adoption writes `remote` only, so it never clobbers the user's side, and recomputes the merge once. Observable through `effect`, the coroutines flows and Compose's `collectAsState`; writing it throws; snapshots, `reset()` and `restore` leave it to recompute from its sources ([GUIDE §16.5](GUIDE.md#165-derived-states-and-merged)).
 - **`atomic(vararg stores, policy) { }`** — cross-store transaction frames: all enrolled stores commit or roll back together (basic usage in [Cross-store transactions](#cross-store-transactions) above). Per-store middleware fires for the frame with a shared `Transaction.frameId`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
@@ -203,15 +203,21 @@ and `com.vynatix.holdfast.crypto`:
   source commit for same-store sources, and if that store is busy the
   recompute is handed to its current holder and runs when that holder
   releases — so `value` may briefly lag the committing call. The experimental
-  `derivedState`/`merged` recompute the same way, once per source commit for
-  sources on other stores too, reading committed values only. Until frames
-  settle derivations (issue #20, R9), one whose sources span stores can
-  commit a torn pair when its recompute races another thread's `atomic`
-  frame over them, corrected when that frame's own recompute runs; and its
-  initial compute, when it reads a state it does not list as a source on a
-  thread holding an action on that state's store, reads the action's
-  uncommitted writes, and keeps the value it computed from them if that
-  action rolls back, until the next commit that changes a source.
+  `derivedState`/`merged` settle instead: once per outermost `action`,
+  `atomic` frame, `suspendAction` or `suspendAtomic` that changes their
+  sources — on any stores, in any nesting — after it has released every
+  store, each reading its sources from one committed cut, a chain in order.
+  So one never commits or shows a torn pair across the participants of a
+  frame, even when its recompute races another thread's frame (a frame
+  nested in an action or frame it shares a store with applies that store
+  with the enclosing entry: see the next point).
+- `atomic`/`suspendAtomic` apply every participant, inside one write
+  bracket, before any participant fans out; then each fans out in lock
+  order. A consistent read across the participants sees a frame whole or
+  not at all — an outermost frame, or a nested one sharing no store with its
+  enclosing action or frame (a shared store joins as a savepoint and applies
+  when the enclosing transaction commits) — and an observer of one
+  participant finds the others applied, and may not write into any of them.
 - Commit fanout (observers, bridge publishes, events) runs after the
   transaction has applied, while the store is still held — under its lock
   for a blocking `action`, under its serializer for `suspendAction`. An

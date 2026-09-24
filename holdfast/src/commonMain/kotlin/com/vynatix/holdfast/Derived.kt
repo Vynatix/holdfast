@@ -43,8 +43,9 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *  - Each source commit triggers a derived commit (extra transaction). When
  *    the sources live on this store, one commit recomputes once however many
  *    of them it changed. When they live on another store and this store is
- *    idle, the recompute runs once per changed source (coalescing across
- *    stores is not implemented yet). Chains of derived states fan out
+ *    idle, the recompute runs once per changed source (this function does
+ *    not coalesce across stores; [derivedState] recomputes once per
+ *    outermost entry). Chains of derived states fan out
  *    cost-multiplicatively. Document & batch upstream when this matters.
  *  - The recompute never waits for this store. For sources on this store, it
  *    runs on the committing thread once that commit's fanout has finished and
@@ -56,9 +57,16 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *    store is busy (another action, frame or `suspendAction` holds it, even
  *    one that took it right after the source's commit) the recompute is
  *    handed to that holder and runs on the holder's thread when it releases.
- *    So a derived — on its sources' store or another — can briefly lag its
- *    sources after the committing call returns, then converges. Read the
- *    sources, or use [computed], when you need the caller's own write.
+ *    One exception: when the holder, or the committing call for a source on
+ *    this store, is an `atomic`/`suspendAtomic` frame nested in another
+ *    action or frame on the same thread, and this store is one whose root
+ *    that frame opened, the queued recompute runs once the outermost action
+ *    or frame on that thread has exited and released every store it took
+ *    (its settle), not when the frame itself returns; inside the enclosing
+ *    entry the derived still shows its old value. So a derived — on its
+ *    sources' store or another — can briefly lag its sources after the
+ *    committing call returns, then converges. Read the sources, or use
+ *    [computed], when you need the caller's own write.
  *  - A derived with a [StateTag.Secret] state among its [sources] is Secret
  *    too ([State.tags]): its value is withheld wherever a Secret value is. A
  *    Secret state read in [compute] without being listed as a source does
@@ -133,16 +141,19 @@ fun <V : Store<V>, T : Any> V.derived(
  * The recompute task of one [derived] state (or [DerivedState]): runs
  * [compute] and hands the result to [commit], which stages it into the
  * derived's backing state, in a top-level action on [host]. It is submitted to
- * post-commit queues by identity, so it must stay a single instance for the
- * derived's lifetime. [queuedOn] lists the stores other than [host] whose
- * queues a source commit may have put it on (a [DerivedState] queues it on
- * its source's store); it withdraws itself from all of them, and while this
- * thread runs a blocking action or frame on one of them it defers to that
- * holder, so it runs once, after it ends. With [committedReads] (a
- * [DerivedState]'s), [compute] runs in a [ComputingFrame]: it reads committed
- * values only, so it never commits a value built from another transaction's
- * pending writes — a blocking one it does not defer to, or a `suspendAction`
- * parked on this thread — and a write from it throws.
+ * post-commit queues (and a [DerivedState]'s to settle scopes) by identity, so
+ * it must stay a single instance for the derived's lifetime. [queuedOn] lists
+ * the stores other than [host] whose queues it may have been put on (a
+ * [DerivedState]'s, by a source commit outside any entry, or deferring to a
+ * holder); it withdraws itself from all of them, and while this thread runs a
+ * blocking action or frame on one of them it defers to that holder, so it
+ * runs once, after it ends. With [cutSources] (a [DerivedState]'s, its
+ * sources), [compute] runs in a [ComputingFrame] and reads the sources from
+ * one committed cut ([ComputeReads]): it reads committed values only, so it
+ * never commits a value built from another transaction's pending writes — a
+ * blocking one it does not defer to, or a `suspendAction` parked on this
+ * thread — nor one source after another thread's frame applied and another
+ * before; and a write from it throws.
  *
  * It commits through [Store.tryTopLevelAction] and never blocks or spins: a
  * busy host gets the task handed to its post-commit queue, and the host's
@@ -160,10 +171,36 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
     private val id: String,
     private val compute: V.() -> T,
     private val queuedOn: List<Store<*>> = emptyList(),
-    private val committedReads: Boolean = false,
+    private val cutSources: List<MutableState<*>>? = null,
     private val commit: V.(T) -> Unit,
-) : () -> Unit {
+) : () -> Unit,
+    SettleTask {
     private val disposed = atomic(false)
+
+    /** One more than the deepest derived state among [cutSources]: it settles after every one of them. */
+    override val settleRank: Int = settleRankOver(cutSources.orEmpty())
+
+    override fun settle() = invoke()
+
+    /**
+     * A feedback loop kept one settle running it: leave it in [host]'s
+     * post-commit queue for the host's next holder — an idle host has none
+     * yet, so the value may lag its sources until then — and report that
+     * (hand-off first, so a throwing handler cannot skip it). Value-free.
+     */
+    override fun deferPastSettle(report: Boolean) {
+        host.handOffPostCommit(this)
+        if (report && !host.isDisposed) {
+            host.internalReportUncaughtFailure(
+                IllegalStateException(
+                    "derived state ${host.displayName}.$id recomputed $MAX_SETTLE_RUNS times in one settle — a " +
+                        "feedback loop (an observer of it writing one of its sources?); the next recompute is left " +
+                        "in ${host.displayName}'s post-commit queue for its next holder, so its value may lag its " +
+                        "sources until then",
+                ),
+            )
+        }
+    }
 
     fun dispose() {
         disposed.value = true
@@ -184,16 +221,18 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
         // to that holder, which drains after it ends — on commit and on
         // rollback alike (the hand-off invariant in Store.tryTopLevelAction) —
         // so the recompute runs once, never from a torn pair. The compute
-        // reads committed values (committedReads), so this is about running
-        // once, not about what it reads. A suspending holder is never
-        // deferred to: its recorded owner thread is only where it started, and
-        // one parked on this thread (Android's main thread, runBlocking, any
-        // thread on wasmJs) could hold the recompute back for as long as its
-        // body suspends. internalOwnsActiveTransaction is false while one
-        // holds the store. postCommit, not a bare hand-off, for its
-        // lost-wakeup guard. The host needs no such check: a transaction
-        // there makes the attempt below busy, which hands off the same way.
-        // Legacy `derived` has no [queuedOn].
+        // reads a committed cut (cutSources), so this is about running once,
+        // not about what it reads. A recompute a settle scope runs meets no
+        // such holder: the scope settles once its entry released everything.
+        // A suspending holder is never deferred to: its recorded owner thread
+        // is only where it started, and one parked on this thread (Android's
+        // main thread, runBlocking, any thread on wasmJs) could hold the
+        // recompute back for as long as its body suspends.
+        // internalOwnsActiveTransaction is false while one holds the store.
+        // postCommit, not a bare hand-off, for its lost-wakeup guard. The host
+        // needs no such check: a transaction there makes the attempt below
+        // busy, which hands off the same way. Legacy `derived` has no
+        // [queuedOn].
         val held = queuedOn.firstOrNull { it.internalOwnsActiveTransaction() }
         if (held != null) {
             held.postCommit(this)
@@ -228,9 +267,11 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
                 // drain to run (and report) a second time.
                 onAcquired = { withdrawEverywhere() },
             ) {
+                val sources = cutSources
                 val value =
-                    if (committedReads) {
-                        NoWriteRegion.runCompute("${host.displayName}.$id") { compute() }
+                    if (sources != null) {
+                        val name = "${host.displayName}.$id"
+                        NoWriteRegion.runCompute(name) { ComputeReads.recompute(sources) { compute() } }
                     } else {
                         compute()
                     }

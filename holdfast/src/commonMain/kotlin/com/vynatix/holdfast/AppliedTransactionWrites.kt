@@ -9,11 +9,14 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 //
 // A top-level commit applies its pending writes, then fans out to observers,
 // bridges and event collectors while the transaction is still installed as the
-// store's active one. Anything staged into it from that point on — an observer
-// writing back into the store it observes, emitting, or opening a nested
-// `action`/`atomic` — would never be applied. Every staging path refuses it
-// instead: `mutate`/`update` and `emit` throw, a nested `action` or `atomic`
-// returns `TransactionResult.Error`, each with the message built here.
+// store's active one. An `atomic`/`suspendAtomic` frame applies every
+// participant before any of them fans out (R9), so each participant's root is
+// applied while the others fan out. Anything staged into such a transaction
+// from that point on — an observer writing back into the store it observes or
+// into another participant of the committing frame, emitting, or opening a
+// nested `action`/`atomic` — would never be applied. Every staging path
+// refuses it instead: `mutate`/`update` and `emit` throw, a nested `action` or
+// `atomic` returns `TransactionResult.Error`, each with the message built here.
 //
 // "Nested" means: on the transaction's owner thread (blocking commits), or
 // inside its commit fanout — the synchronous `commitDispatching` window
@@ -42,16 +45,33 @@ internal fun appliedTransactionMessage(
     val owner = storeName?.let { "$it's transaction" } ?: "the transaction"
     txn.rolledBackIn?.let { return rolledBackTransactionMessage(attempt, owner, txn, it) }
     val status = txn.status.takeIf { it != TransactionStatus.Active }?.let { " (status: $it)" } ?: ""
-    return "Cannot $attempt: $owner '${txn.id}' has already applied its writes$status — its commit is " +
-        "fanning out to observers, bridges and event collectors, or has finished — so anything staged into " +
-        "it now would never commit. This usually means an observer (effect/observe) writes back into the " +
-        "store it observes while that store's commit is notifying it. Fix: make the write part of the " +
-        "action itself, before it commits; derive the value instead (computed { } or derived(...)); or run " +
-        "it as a separate action once this one has finished — as `store action { … }` on another thread, " +
-        "which waits for the store, or launched on a dispatcher that does not run it inline, checking the " +
-        "result: store.scope.launch(Dispatchers.Default) { store action { … }.getOrThrow() }. On " +
-        "Dispatchers.Unconfined, or Dispatchers.Main.immediate while already on the main thread, the " +
-        "launched body runs inside this commit and is refused the same way."
+    // A frame participant's root: the frame applied every participant before
+    // any fans out, so this one may be waiting for its turn, not fanning out.
+    val inFrame = txn.root.frameId != null
+    val commit =
+        if (inFrame) {
+            "it is a participant of an atomic/suspendAtomic frame, which applies every participant before any " +
+                "fans out, and the frame's commit is fanning out to observers, bridges and event collectors, " +
+                "or has finished"
+        } else {
+            "its commit is fanning out to observers, bridges and event collectors, or has finished"
+        }
+    val usually =
+        if (inFrame) {
+            "an observer (effect/observe) writes back into the store it observes, or into another participant " +
+                "of the frame, while the frame's commit is notifying it. Fix: make the write part of the frame " +
+                "body (or action) itself, before it commits"
+        } else {
+            "an observer (effect/observe) writes back into the store it observes while that store's commit is " +
+                "notifying it. Fix: make the write part of the action itself, before it commits"
+        }
+    return "Cannot $attempt: $owner '${txn.id}' has already applied its writes$status — $commit — so anything " +
+        "staged into it now would never commit. This usually means $usually; derive the value instead " +
+        "(computed { } or derived(...)); or run it as a separate action once this one has finished — as " +
+        "`store action { … }` on another thread, which waits for the store, or launched on a dispatcher that " +
+        "does not run it inline, checking the result: store.scope.launch(Dispatchers.Default) { store " +
+        "action { … }.getOrThrow() }. On Dispatchers.Unconfined, or Dispatchers.Main.immediate while already " +
+        "on the main thread, the launched body runs inside this commit and is refused the same way."
 }
 
 /**

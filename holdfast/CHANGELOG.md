@@ -141,6 +141,47 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   longer in the store. They now refuse a state with a pending write anywhere
   in the active transaction's savepoint chain.
 
+- **A `derivedState`/`merged` over several stores never commits or shows a
+  torn pair (issue #20, R9).** A recompute racing another thread's `atomic`
+  frame over its sources could read one participant's new value with the
+  other's old one and commit it, until that frame's own recompute corrected
+  it; and an initial compute could do the same. Frames now apply every
+  participant inside one write bracket before any fans out (see the
+  `BREAKING` entry below), and every compute — the initial one too — reads
+  its sources from one committed cut taken just before it runs, which a
+  frame's apply is either wholly inside or wholly outside of: an outermost
+  frame's, or one whose participants all open a root of their own. A
+  participant that a frame nested in an action or another frame shares with
+  that enclosing entry joins as a savepoint, and its writes apply when the
+  enclosing transaction commits; enroll every store in the outermost frame
+  to keep the frame whole.
+  `DerivedConcurrencyTest` pins it under concurrent frames, a busy host and
+  racing creations; `ConsistentCutConcurrencyTest` pins the internal
+  multi-store cut (#21's T4 primitive) under concurrent `atomic` and
+  `suspendAtomic` frames.
+
+- **A derived state created from another action's uncommitted write catches
+  up.** Created on a thread holding an action that had written a state its
+  compute reads without listing it as a source, a `derivedState` kept the
+  value computed from that write when the action rolled back, until the next
+  commit that changed a source. An initial compute that reads any
+  uncommitted value — a pending write of any state, on any store — now
+  queues one recompute, which reads committed values once the outermost
+  action or frame on that thread has ended.
+
+- **A chain of derived states settles in order.** When one commit changed
+  the sources of a derived state and of another derived state it reads, the
+  reading one could recompute first, from the other's previous value, and
+  then again: its observers saw an intermediate value. Derived states now
+  settle lowest rank first (a derived state after every derived state it
+  reads), once each.
+
+- **An observer of an `atomic` participant reads the others' committed
+  values on every thread.** It used to read a later participant's
+  about-to-be-committed value only through the frame's pending writes, on the
+  frame's own thread; another thread — or `suspendAtomic`'s fanout after its
+  body resumed elsewhere — read the old value next to the new one.
+
 ### Changed
 
 - **BREAKING (commit fanout order).** Observers for every state in a
@@ -172,8 +213,9 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   derived see one recompute transaction per source commit. The dedup needs a
   transaction active on the derived's store: for sources on another store,
   while the derived's store is idle, the recompute still runs inline from each
-  changed source's observer — once per changed source — until cross-store
-  settling lands (issue #20).
+  changed source's observer — once per changed source — until the 0.7.0
+  triage; the experimental `derivedState`/`merged` settle once per outermost
+  entry instead (issue #20, R9; see below).
 
 - **BREAKING (behavior): a `derived()` recompute can land after the
   committing `action` returns, on another thread.** The post-commit drain used
@@ -379,7 +421,100 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   backing state and subscribes to no source. A `derivedState`/`merged` state
   is accepted as a source.
 
+- **BREAKING (behavior): an `atomic` frame applies every participant before
+  any fans out (issue #20, R9).** Participants used to commit one after the
+  other in lock order, each fanning out — observers, bridge publishes,
+  events — before the next one applied. Now every participant's writes are
+  assigned inside one write bracket spanning all their states, and only then
+  does each fan out, in lock order; `FrameObserver.onFrameCommitted` still
+  fires last. What changes for observers of a participant:
+  - a write into a LATER participant (`b`, while `a` fans out) is refused
+    like any write into an applied transaction — `mutate`/`update`/`emit`
+    throw an `IllegalStateException` that reaches `uncaughtObserverHandler`,
+    a nested `action`/`atomic` returns `TransactionResult.Error` — where it
+    used to stage into that participant's still-open root and commit with the
+    frame (the same already held for earlier participants). Make the write
+    part of the frame body, or derive the value;
+  - every thread reads every participant's committed value during the
+    fanout (see Fixed);
+  - a participant whose fanout fails (a throwing `uncaughtObserverHandler`)
+    no longer keeps the later ones from committing: they have applied
+    already, so they fan out and commit, and the frame returns the failure
+    as an `Error` (`FrameObserver.onFrameRolledBack` fires, although every
+    participant's values stand). It used to roll them back. An apply that
+    throws (a `distinct` state's `equals`) still commits the participants
+    applied before it and rolls the rest back — now including every
+    participant joined as a savepoint of an enclosing action or frame, whose
+    writes used to be merged into that enclosing transaction first, and so
+    committed with it although the frame reported an error;
+  - `onTransactionError` fires only on the participants that roll back. A
+    participant that committed — or failed in its own apply or fanout — no
+    longer gets it after another participant's apply or fanout failed, as a
+    single `action`'s commit failure reaches no middleware either.
+  See [MIGRATING.md](../MIGRATING.md#behavior-change-frames-apply-whole-derived-states-settle-once-per-entry-060).
+
+- **BREAKING (behavior): `derivedState`/`merged` settle once per outermost
+  entry (issue #20, R9; answers #20's open question 2: coalescing is not a
+  mode).** Every `action`, `atomic`, `suspendAction` and `suspendAtomic`
+  (and so `reset()` and `restore`) is an entry; one nested in another joins
+  the outermost one on its thread. A derived state whose sources an entry —
+  and everything nested in it — changes recomputes once, after the outermost
+  entry has exited and released every store: however many sources, stores,
+  nested actions or frame participants. It used to recompute after each
+  source commit, so a derived state over sources written by two actions
+  nested in a third recomputed twice, and inside the outer action it already
+  reflected the first write. Now, inside an entry, a derived state reflects
+  none of that entry's writes; read the sources, or a `computed { }` state,
+  for them. An initial compute that read no uncommitted value no longer
+  queues a catch-up recompute (see Fixed for one that did). A recompute
+  queued by a store's last commit before that store is disposed from its
+  own observer runs when the entry settles, no longer inside `dispose()`.
+  The legacy `derived` keeps its per-commit recompute (once per changed
+  source for a source on another store while its own store is idle) until
+  the 0.7.0 triage.
+
+- **BREAKING (behavior): an `atomic` frame's post-commit work runs once the
+  outermost entry on its thread has exited.** The `derived` recomputes (and
+  hand-offs) queued on the stores whose roots a frame opened were drained
+  when the frame exited; a frame nested in an action or another frame now
+  leaves them to the settle of the outermost one, which runs after that has
+  released every store. A frame that is itself the outermost entry drains
+  exactly as before.
+
 ### Added
+
+- **Settle scopes and frame commit hooks** (`@StoreInternalApi`, issue #20
+  plan PR 11; `:holdfast-coroutines` and `:holdfast-testing` drive them, and
+  issue #21's `Root` builds on them):
+  - `SettleScope` — the derived-state recomputes and frame post-commit
+    drains one outermost entry queued: `settle()` runs them all (store drains
+    first, then recomputes lowest rank first, work queued meanwhile
+    included) and closes the scope, `isOpen`. A task, or a frame's drain of
+    one store, that one settle already ran 1,000 times — a feedback loop
+    through a derived state's observer, or through frames that legacy
+    `derived` observers open on each other's stores — is not run again: the
+    task is handed to its host's post-commit queue and the store's queue is
+    left to its next holder, so a settle always ends. The cut is reported
+    once per settle through that store's `uncaughtObserverHandler` (logged
+    while none is set): the work left over waits for the store's next
+    holder, so on an idle host a derived state lags its sources until then
+    (`DerivedState` and GUIDE §16.5 document it).
+  - `SettleScopes.current()`/`install(scope)`/`open()` — the thread-local
+    slot, which `:holdfast-coroutines` keeps coherent across dispatch.
+  - `internalSettling { }` — run a block as an entry (the harness's open
+    transactions); `Store.internalDrainPostCommitTasksWhenSettled()` — a
+    frame's owed drain, deferred to the settle.
+  - `applyFrameCommit(transactions)` → `FrameApply(applied, failure)` and
+    `Transaction.fanOutApplied(fanout, drainEvents)` — a frame's apply pass
+    over all its participants in one write bracket, then each participant's
+    fanout. `Transaction.commitDispatching` runs the two for one transaction.
+  - Internal: `captureConsistent(stores, scope)` — snapshots of several
+    stores from one consistent cut (#21's T4 primitive); `snapshot()` is its
+    one-store case.
+  - `:holdfast-testing`: an open transaction's `commit()` and `rollback()`
+    (and a throwing body's cleanup) are entries: the derived states the
+    commit changes a source of settle once, in rank order, after the lock is
+    released.
 
 - **Store attachments** (`@StoreInternalApi`, issue #20 plan PR 10; the slot
   `:holdfast-coroutines`' hydration and issue #21's tree membership build on):
@@ -481,13 +616,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     `snapshot()`, `encode()`, `restore`, `reset()`, `properties` and
     `taggedStates` never see it (a typed snapshot read of it is refused), and
     it recomputes after `reset()`/`restore` write its sources.
-  - Known gaps until frames settle derivations (R9, 0.6.0): a recompute that
-    races another thread's `atomic` frame over sources on two stores can
-    commit a torn pair, which that frame's own recompute then corrects; and
-    the initial compute, when it reads a state it does not list as a source
-    on a thread holding an action on that state's store, reads the action's
-    uncommitted writes — if that action rolls back, the value stays as
-    computed until the next commit that changes a source.
+  - Known gaps until frames settle derivations (R9, 0.6.0) — both closed by
+    the settle entries under Fixed: a recompute that races another thread's
+    `atomic` frame over sources on two stores could commit a torn pair,
+    which that frame's own recompute then corrected; and the initial
+    compute, when it read a state it does not list as a source on a thread
+    holding an action on that state's store, read the action's uncommitted
+    writes — if that action rolled back, the value stayed as computed until
+    the next commit that changed a source.
   - `Store.dispose()` drains its post-commit queue instead of clearing it. A
     store disposed from inside its own commit's fanout, or racing that commit
     from another thread, still runs the recompute that commit queued for a

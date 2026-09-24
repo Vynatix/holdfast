@@ -9,6 +9,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
+import com.vynatix.holdfast.internalSettling
 import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
@@ -208,20 +209,23 @@ internal object PrivilegedHooks {
             store.selfForExternal.body()
         } catch (e: Throwable) {
             // Body threw — leave the store in a clean state for the next test.
-            try {
-                store.runUnderLock {
-                    if (store.activeTransaction === txn) {
-                        store.internalSetActiveTransaction(null)
+            // An entry of its own, like commit/rollbackOpenTransaction.
+            internalSettling {
+                try {
+                    store.runUnderLock {
+                        if (store.activeTransaction === txn) {
+                            store.internalSetActiveTransaction(null)
+                        }
                     }
+                    runCatching { txn.rollback() }
+                } finally {
+                    // This exit releases the active-transaction slot too, so it is a
+                    // hand-off holder like commit/rollbackOpenTransaction: drain the
+                    // post-commit work queued behind the open transaction
+                    // (Store.tryTopLevelAction). The drain swallows task failures, so
+                    // `e` still propagates unchanged.
+                    store.internalDrainPostCommitTasks()
                 }
-                runCatching { txn.rollback() }
-            } finally {
-                // This exit releases the active-transaction slot too, so it is a
-                // hand-off holder like commit/rollbackOpenTransaction: drain the
-                // post-commit work queued behind the open transaction
-                // (Store.tryTopLevelAction). The drain swallows task failures, so
-                // `e` still propagates unchanged.
-                store.internalDrainPostCommitTasks()
             }
             throw e
         }
@@ -243,6 +247,12 @@ internal object PrivilegedHooks {
      * busy handed its work to this transaction, and the store relies on every
      * holder draining after it releases (`Store.tryTopLevelAction`).
      *
+     * The commit is an entry, like a production `action`: the recomputes of
+     * the `derivedState`/`merged` states whose sources it changed are queued
+     * into this thread's settle scope ([internalSettling]) and settle once the
+     * lock is released and the queue drained — once each, reading a committed
+     * cut.
+     *
      * Throws if [Transaction.commit] throws (commit-time `TransactionException`
      * or any state's `applyCommitted` throwing). The caller wraps this in
      * `try/catch` to translate to [com.vynatix.holdfast.TransactionResult.Error].
@@ -251,18 +261,20 @@ internal object PrivilegedHooks {
         store: Store<*>,
         transaction: Transaction,
     ) {
-        try {
-            store.runUnderLock {
-                try {
-                    transaction.commit()
-                } finally {
-                    if (store.activeTransaction === transaction) {
-                        store.internalSetActiveTransaction(null)
+        internalSettling {
+            try {
+                store.runUnderLock {
+                    try {
+                        transaction.commit()
+                    } finally {
+                        if (store.activeTransaction === transaction) {
+                            store.internalSetActiveTransaction(null)
+                        }
                     }
                 }
+            } finally {
+                store.internalDrainPostCommitTasks()
             }
-        } finally {
-            store.internalDrainPostCommitTasks()
         }
     }
 
@@ -285,12 +297,16 @@ internal object PrivilegedHooks {
         store: Store<*>,
         transaction: Transaction,
     ) {
-        store.runUnderLock {
-            runCatching { transaction.rollback() }
-            if (store.activeTransaction === transaction) {
-                store.internalSetActiveTransaction(null)
+        // An entry, like commitOpenTransaction: what the drain runs settles
+        // once the lock is released.
+        internalSettling {
+            store.runUnderLock {
+                runCatching { transaction.rollback() }
+                if (store.activeTransaction === transaction) {
+                    store.internalSetActiveTransaction(null)
+                }
             }
+            store.internalDrainPostCommitTasks()
         }
-        store.internalDrainPostCommitTasks()
     }
 }

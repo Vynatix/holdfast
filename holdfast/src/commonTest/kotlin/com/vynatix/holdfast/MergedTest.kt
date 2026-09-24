@@ -52,7 +52,8 @@ private class TenfoldStore : Store<TenfoldStore>() {
 
 /**
  * `merged(local, remote)` and `derivedState(...)` (issue #20, R6): a
- * read-only [DerivedState] recomputed once per source commit, observable like
+ * read-only [DerivedState] recomputed once per outermost entry that changes a
+ * source (issue #20, R9), observable like
  * a declared state, carrying no tag but a source's Secret taint, and absent
  * from everything that captures or resets the store's own state.
  */
@@ -468,9 +469,10 @@ class MergedTest {
 
     /**
      * A recompute reads committed values only: a state its compute reads
-     * without listing it as a source, held by an action on the recomputing
-     * thread, is read at its committed value, so that action's rollback leaves
-     * nothing to correct.
+     * without listing it as a source, held by an action on the committing
+     * thread, is read at its committed value. The source commit nested in that
+     * action settles once the outer action ends (issue #20, R9): the
+     * recompute then reads the rolled-back state's committed value.
      */
     @Test fun aRecomputeReadsCommittedValuesOfAStateItDoesNotList() {
         val sources = SourcesStore()
@@ -478,17 +480,19 @@ class MergedTest {
         val host = HostStore()
         val sum = host.derivedState(sources.a) { sources.a.value + other.local.value }
         disposables += sum
+        var inside = -1
 
         val rolledBack =
             other action {
                 local mutate 100
                 sources action { a mutate 1 }
-                assertEquals(1, sum.value, "recomputed at once, without other's pending write")
+                inside = sum.value
                 error("abort")
             }
 
         assertIs<TransactionResult.Error>(rolledBack)
-        assertEquals(1, sum.value)
+        assertEquals(0, inside, "not recomputed before the outermost action ended")
+        assertEquals(1, sum.value, "recomputed once it ended, without other's rolled-back write")
     }
 
     /** A recompute's compute may read states but not write them: the write is refused and reported. */

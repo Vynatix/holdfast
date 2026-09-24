@@ -95,6 +95,15 @@ internal class StateDeclaration<T : Any>(
     /** The thread holding [latch], or [NO_LATCH_OWNER]. Guarded by the store's [InitializerGraph]. */
     var latchOwner: Long = NO_LATCH_OWNER
 
+    /**
+     * How deep in a chain of derived states this state sits: 0 for a state
+     * with no [sources], one more than its deepest source for the backing of
+     * a `derived` or `derivedState`. A settle scope recomputes lower ranks
+     * first, so a derived state recomputes after every derived state it reads
+     * ([SettleTask.settleRank]).
+     */
+    val settleRank: Int = settleRankOver(sources)
+
     /** `Store.name`, for failure messages. */
     val qualifiedName: String
         get() = "${store.displayName}.$name"

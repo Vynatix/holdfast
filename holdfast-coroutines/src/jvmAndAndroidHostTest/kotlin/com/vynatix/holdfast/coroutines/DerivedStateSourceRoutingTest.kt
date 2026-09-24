@@ -46,10 +46,14 @@ private suspend fun hopToAnotherThread() {
  * has released its store (issue #20, R6).
  *
  * No thread holds the source's store as a blocking holder there, so the
- * recompute's deferral to such a holder does not apply. Only the routing that
- * queues the recompute on the committing store's post-commit queue (rather
- * than the host's, which would run it inline in the fanout once per changed
- * source) gives this result.
+ * recompute's deferral to such a holder does not apply. The suspending
+ * entry's settle scope, which SettleAmbientContext carries across the hop to
+ * the fanout thread (issue #20, R9), gives this result: the commit queues the
+ * recompute there, once for every changed source, and the entry runs it after
+ * releasing its store. Without that scope on the fanout thread, the routing
+ * that queues the recompute on the committing store's post-commit queue
+ * (rather than the host's, which would run it inline in the fanout once per
+ * changed source) does.
  */
 class DerivedStateSourceRoutingTest {
     private class Probe(

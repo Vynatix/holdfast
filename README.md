@@ -78,7 +78,7 @@ for the full consistency contract.
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), state tags — `Secret` values redacted from encoded snapshots, renders and logs, `UserAuthored` snapshot scopes, `Remote` states reset by a sterile restore (experimental) — `reset()` to initial values (experimental), derived state, read-only `derivedState`/`merged(local, remote)` states recomputed once per source commit (experimental), cross-store `atomic` frames, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), state tags — `Secret` values redacted from encoded snapshots, renders and logs, `UserAuthored` snapshot scopes, `Remote` states reset by a sterile restore (experimental) — `reset()` to initial values (experimental), derived state, read-only `derivedState`/`merged(local, remote)` states that settle once per outermost action or frame, from a consistent cut of their sources (experimental), cross-store `atomic` frames applied whole before any participant fans out, encryption transformer, file-system store, injectable `Store.clock` (experimental). |
 | [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
 | [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
 | [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers; `Secret` state values never reach a timeline or a failure message. |
@@ -170,15 +170,13 @@ for when each lands.
   fail-fast guard is next in 0.2.0. (From inside a `suspendAction`'s or
   `suspendAtomic`'s commit — an observer, a bridge publish, an event collector
   the emit resumes inline, a frame observer — a blocking `action` or `atomic`
-  on a store whose transaction that commit has applied already returns an
-  `Error` instead of spinning. Two gaps remain: on iOS and wasmJs, inside a
-  nested `withContext(dispatcher)` there (say, in a `publishAwaited`); and a
-  blocking call on a later `suspendAtomic` participant that has not committed
-  yet. For the later participant, `mutate` it instead: the write stages into
-  its pending root and commits with the frame. The store that commit has
-  applied refuses every inline write — `mutate` throws there too — so from a
-  nested `withContext(dispatcher)`, make the write part of the action, or
-  launch it once the commit has finished:
+  on a store whose transaction that commit has applied — for a
+  `suspendAtomic`, any participant, since every one applies before any fans
+  out — already returns an `Error` instead of spinning. One gap remains: on
+  iOS and wasmJs, inside a nested `withContext(dispatcher)` there (say, in a
+  `publishAwaited`). A store that commit has applied refuses every inline
+  write — `mutate` throws there too — so make the write part of the action,
+  or launch it once the commit has finished:
   `store.scope.launch { store.suspendAction { … }.getOrThrow() }`.) Other
   combinations that used to hang or fail — `suspendAction` with a `derived()`
   state (including a second

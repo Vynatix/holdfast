@@ -219,6 +219,85 @@ R1). That is what restoring a persisted snapshot after an app update needs.
   names and raw values, not identity. Code that kept snapshots in a set or
   as map keys by identity should wrap them.
 
+## Behavior change: frames apply whole, derived states settle once per entry (0.6.0)
+
+Issue #20, R9. Two changes that work together:
+
+**An `atomic`/`suspendAtomic` frame applies every participant before any of
+them fans out.** Participants used to commit one after the other in lock
+order, each notifying its observers (and publishing, and emitting) before the
+next one applied. Now all of them apply first, inside one write bracket, then
+each fans out in lock order. What that changes for code reacting to a frame:
+
+- **An observer can no longer write into a later participant.** From an
+  observer of `a` in `atomic(a, b) { … }`, `b { x mutate … }` used to stage
+  into `b`'s still-open root and commit with the frame. `b` has applied too
+  by then, so the write is refused exactly like a write back into `a`:
+  `mutate`/`update`/`emit` throw `IllegalStateException` ("… has already
+  applied its writes …", reaching `uncaughtObserverHandler`), a nested
+  `action`/`atomic` returns an `Error`. Move the write into the frame body,
+  where it belongs to the frame, or derive the value (`derivedState`,
+  `computed { }`), or run it as a follow-up action after the frame (see
+  "writes from an observer into its own committing store" above).
+- **Observers see every participant committed, from any thread.** No change
+  needed; code that worked around seeing a sibling store's old value (after a
+  `suspendAtomic` body hopped threads) can drop the workaround.
+- **One participant's failed fanout no longer rolls the others back.** A
+  participant whose fanout ends early because `uncaughtObserverHandler`
+  threw used to leave the later participants uncommitted. They have applied
+  now, so they fan out and commit; the frame still returns the failure (and
+  `FrameObserver.onFrameRolledBack` fires, although every value stands). In
+  a `suspendAtomic`, the same holds for a `CancellationException` from one
+  participant's `SuspendingBridge.publishAwaited`.
+- **`onTransactionError` fires only on participants that roll back.** A
+  blocking `atomic` used to fire it on every participant when its commit
+  failed partway, including the ones that had committed; middleware on a
+  participant that committed (or failed in its own apply or fanout) no
+  longer hears of the error, as for a single `action`'s commit failure.
+- **A savepoint participant rolls back when another participant's apply
+  fails.** In `a.action { atomic(a, b) { … } }`, `a` joins the frame as a
+  savepoint; when `b`'s apply throws (a `distinct` state's `equals`), `a`'s
+  frame writes used to stay in the outer action and commit with it. They are
+  discarded with the frame now.
+
+**`derivedState`/`merged` settle once per outermost entry.** An `action`,
+`atomic`, `suspendAction` or `suspendAtomic` is an entry, and one nested in
+another joins the outermost one on its thread. A derived state recomputes
+once, after the outermost entry has exited and released every store, from a
+committed cut of its sources — no longer after each source commit.
+
+- **Inside an outer action, a derived state no longer reflects writes
+  nested in it.** `outer.action { a.action { x mutate 1 }; println(d.value) }`
+  used to print the recomputed value when `d` is hosted elsewhere; it now
+  prints the value from before the outer action. Read the sources (or a
+  `computed { }` state) when you need your own writes inside the action; the
+  derived state has settled by the time `outer.action` returns.
+- **Nested frames and consistent reads.** A consistent read across a
+  frame's participants sees the frame whole or not at all when every
+  participant opens a root of its own: an outermost frame, or one sharing no
+  store with the action or frame it is nested in. A store the nested frame
+  shares joins as a savepoint and applies with the enclosing transaction.
+  Enroll every store in the outermost frame to keep the frame whole.
+- **Fewer recomputes.** Tests that counted one recompute (or one host
+  transaction, or one timeline emission) per nested commit now see one per
+  outermost entry. A derived state created inside an action no longer
+  recomputes when that action ends unless its initial compute read an
+  uncommitted value.
+- **A frame's queued post-commit work runs later when the frame is nested.**
+  The `derived`/`suspendDerived` work queued on the stores whose roots a
+  frame opened used to run when the frame exited; a frame nested in an action
+  or another frame now leaves it to the outermost one's exit.
+- The legacy `derived(...)` keeps its per-commit recompute (once per changed
+  source for a source on another store while its own store is idle) until
+  the 0.7.0 triage.
+- **An already-cancelled caller is refused.** An outermost `suspendAction` or
+  `suspendAtomic` now runs inside a child of its caller (its settle scope
+  travels with it), so called from an already-cancelled coroutine it throws
+  that `CancellationException` before taking the store, on every platform —
+  it used to run a body with no suspension point and commit it. Once the
+  body has returned, a caller cancelled meanwhile still gets the committed
+  `TransactionResult`, as before.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

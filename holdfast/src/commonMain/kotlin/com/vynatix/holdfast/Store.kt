@@ -260,13 +260,18 @@ abstract class Store<Self : Store<Self>> {
      *    `dispose()` is asymmetric with scope cancellation: cancelling the bound scope is
      *    a soft-pause (subsequent calls fall back to `defaultScope`); `dispose()` is terminal.
      *  - The bound clock is kept, and reading [clock] still works; [bindClock] throws.
-     *  - If this store's last commit changed a source of a `derivedState`/`merged`
-     *    hosted on another, live store, and that recompute has not run yet — only
-     *    when `dispose()` is called from inside that commit's fanout (one of its
-     *    observers) or races the commit from another thread — it runs before
-     *    `dispose()` returns, on the calling thread: that derived state's
-     *    compute, its host's middleware and its host's observers then run inside
-     *    `dispose()`. A recompute hosted on this store does nothing.
+     *  - A `derivedState`/`merged` hosted on another, live store still
+     *    recomputes after this store's last commit changed one of its sources,
+     *    even when `dispose()` is called from inside that commit's fanout (one
+     *    of its observers): the recompute runs once the outermost action or
+     *    frame on that thread has exited, as every recompute does. A recompute
+     *    still waiting in this store's post-commit queue — one that deferred
+     *    to this store's holder, or that fell back to it with no entry open
+     *    on the committing thread — for a derived state hosted on another,
+     *    live store runs before `dispose()` returns, on the calling thread:
+     *    that derived state's compute, its host's middleware and its host's
+     *    observers then run inside `dispose()`. A recompute hosted on this
+     *    store does nothing.
      *  - Library machinery attached to the store (`@StoreInternalApi`
      *    [StoreAttachment]s) is told last, once each, on the calling thread,
      *    holding no lock `dispose()` took (but under any lock its caller
@@ -296,8 +301,8 @@ abstract class Store<Self : Store<Self>> {
             }
         // Drain, not clear, outside the lock: this store's queue can hold the
         // recomputes of derived states hosted on OTHER, live stores (a
-        // DerivedState queues its recompute on the store whose commit changed
-        // a source), which must still see this store's last commit. A task
+        // DerivedState's recompute can wait for a holder of its source's
+        // store there), which must still see this store's last commit. A task
         // hosted here refuses itself (tryTopLevelAction answers Disposed), and
         // one hosted elsewhere never blocks: a busy host is handed the task.
         drainPostCommitTasks()
@@ -603,7 +608,10 @@ abstract class Store<Self : Store<Self>> {
      * [action] (middleware chain, commit, fanout; failures fold into the
      * [TopLevelAttempt.Ran] result), the locks release in `action`'s order, and
      * the post-commit queue drains. No frame policing: callers are library
-     * machinery that runs after commits, not user bodies.
+     * machinery that runs after commits, not user bodies. Like [action] it is
+     * an entry: it joins the settle scope open on this thread (a recompute a
+     * settle runs), else opens one that settles once it has released the
+     * store ([SettleScope]).
      *
      * **Hand-off invariant.** A caller that gets a busy answer may queue its
      * task with [handOffPostCommit] and retry once; if the retry is busy too,
@@ -613,11 +621,13 @@ abstract class Store<Self : Store<Self>> {
      * root it opened (a savepoint root defers to the enclosing holder),
      * `suspendAction` in its `finally`, `suspendAtomic` for a root it opened
      * (and for a mutex acquire cancelled after kotlinx handed it the mutex) —
-     * both frames once they have fully unwound — this function after it ran,
-     * and after it backed out busy from a serializer or lock it took (unless
-     * the store has another holder by then, which drains instead), and
-     * `:holdfast-testing`'s open-transaction commit, rollback and body-throw
-     * cleanup. The queue write happens before the busy retry, and that
+     * both frames once they have fully unwound, deferred to the settle of the
+     * outermost entry on their thread ([internalDrainPostCommitTasksWhenSettled]),
+     * which runs once that entry has released everything it took — this
+     * function after it ran, and after it backed out busy from a serializer or
+     * lock it took (unless the store has another holder by then, which drains
+     * instead), and `:holdfast-testing`'s open-transaction commit, rollback and
+     * body-throw cleanup. The queue write happens before the busy retry, and that
      * holder's drain after it releases, so the drain sees the task. [dispose]
      * holds the lock only to empty the active-transaction slot, then drains
      * the queue too: it can hold the recomputes of derived states hosted on
@@ -630,17 +640,18 @@ abstract class Store<Self : Store<Self>> {
         id: String,
         onAcquired: () -> Unit = {},
         body: Self.() -> Unit,
-    ): TopLevelAttempt {
-        val active = _activeTransaction
-        val attempt =
-            when {
-                isDisposed -> TopLevelAttempt.Disposed
-                active != null -> TopLevelAttempt.Busy(active)
-                else -> tryTopLevelUnderSerializer(id, onAcquired, body)
-            }
-        if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
-        return attempt
-    }
+    ): TopLevelAttempt =
+        settling {
+            val active = _activeTransaction
+            val attempt =
+                when {
+                    isDisposed -> TopLevelAttempt.Disposed
+                    active != null -> TopLevelAttempt.Busy(active)
+                    else -> tryTopLevelUnderSerializer(id, onAcquired, body)
+                }
+            if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
+            attempt
+        }
 
     private fun tryTopLevelUnderSerializer(
         id: String,
@@ -778,6 +789,13 @@ abstract class Store<Self : Store<Self>> {
      * savepoint of that transaction could never commit. Another thread's action
      * is not nested, and simply runs once the commit has finished.
      *
+     * An action is an entry: the [derivedState]/[merged] states whose sources
+     * it — or any action or frame nested in it, on any store — changes settle
+     * once, after the outermost entry on this thread has exited and released
+     * every store it took: each recomputes once, from a committed cut of its
+     * sources ([SettleScope]). Inside the action they reflect none of its
+     * writes.
+     *
      * @throws IllegalStateException when called from inside a state
      *   initializer (see [state]), a schema migration
      *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
@@ -799,6 +817,19 @@ abstract class Store<Self : Store<Self>> {
         appliedTransactionNestedHere()?.let { applied ->
             return refusedUnderAppliedTransaction(this, applied, actionId(body), "open a nested action")
         }
+        // An entry: derived states whose sources this action (or anything
+        // nested in it) changes settle once the outermost entry on this thread
+        // has exited — this action's own settle when it is the outermost.
+        val result = settling { runSerialized(body) }
+        escalateInFrameError(frame, result)
+        return result
+    }
+
+    /**
+     * The serialized part of [action]: the serializer bracket (unless nested),
+     * the transaction under `transactionLock`, then the post-commit drain.
+     */
+    private fun <R> runSerialized(body: Self.() -> R): TransactionResult<R> {
         // A nested action is a savepoint of a transaction this thread already
         // owns, so it is already inside the region the serializer brackets.
         // Re-acquiring there is never correct and is actively fatal: the
@@ -820,7 +851,6 @@ abstract class Store<Self : Store<Self>> {
         // this call a valid hand-off target (see tryTopLevelAction). Same
         // placement, and same reason, as suspendAtomic's drain.
         if (!nested) drainPostCommitTasks()
-        escalateInFrameError(frame, result)
         return result
     }
 
@@ -856,14 +886,18 @@ abstract class Store<Self : Store<Self>> {
      * `suspendAtomic`, whose recorded owner thread is only where they started,
      * that is the whole suspending commit, across thread hops: every
      * participant's fanout, bridge publish and event emit, and the frame
-     * observers ([fanningOutHere]). So an earlier `suspendAtomic` participant
-     * that already applied is refused from a later one's fanout too, and so is
-     * an `atomic` participant whose savepoint entry has already committed into
-     * an enclosing action.
+     * observers ([fanningOutHere]). So every `atomic` or `suspendAtomic`
+     * participant is refused from any participant's fanout, earlier or later,
+     * and so is an `atomic` participant whose savepoint entry has already
+     * committed into an enclosing action.
      *
      * Any other thread is not nested: its `action`/`atomic` waits for the store
-     * and then runs on its own. A participant whose transaction is still open
-     * (a later one, while an earlier one fans out) is not refused either.
+     * and then runs on its own. A frame applies every participant before it
+     * fans any out (R9), so from a frame's fanout a nested call is refused on
+     * every participant, a later one as much as an earlier one. Only a
+     * transaction still open (not applied, not ended) takes the nested call:
+     * after a partial apply failure, the later participants left open are
+     * rolled back with the frame.
      * `internal` for `atomic`, which refuses the same nesting.
      */
     internal fun appliedTransactionNestedHere(): Transaction? {
@@ -1320,9 +1354,10 @@ abstract class Store<Self : Store<Self>> {
         if (frame != null && !frame.isEnrolled(this) && !frame.policy.allowUnenrolled) {
             throw UnenrolledStoreException(unenrolledMessage(frame, "mutate"))
         }
-        // Closed to writes: its root has applied and its commit is fanning out
-        // (or, for an earlier participant of a frame whose later participants
-        // are fanning out, has finished), or it has already ended (an `atomic`
+        // Closed to writes: its root has applied — its commit is fanning out,
+        // has finished fanning out, or (a frame participant) is waiting for
+        // its turn to fan out after the whole frame applied, while the frame's
+        // participants fan out — or it has already ended (an `atomic`
         // participant's committed savepoint entry, a manual commit/rollback).
         // The write comes from an observer (or bridge, or event collector)
         // reacting to it, or from another thread while a suspending commit

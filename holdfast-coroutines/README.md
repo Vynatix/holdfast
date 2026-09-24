@@ -47,7 +47,11 @@ experimental `derivedState`/`merged` states like declared ones (their owning
 store is the one they were created on). `suspendAction`
 allows the transaction body to suspend; cancellation of the body rolls the
 transaction back, and the commit fanout runs under `NonCancellable` so it
-completes even if the surrounding scope cancels mid-commit. As with blocking
+completes even if the surrounding scope cancels mid-commit — the call then
+returns the committed result, and the caller sees its cancellation at its
+next suspension point. Called from an already-cancelled coroutine, an
+outermost `suspendAction`/`suspendAtomic` throws that `CancellationException`
+before taking the store. As with blocking
 `action`, code running inside the commit — an observer, a bridge publish, an
 event collector the emit resumes inline — must not write back into a store
 that commit has applied: `mutate`/`update`/`emit` throw, and a blocking
@@ -59,7 +63,15 @@ another thread's bare `mutate`/`update` is not isolated from it — before the
 commit applies it joins the transaction, after it throws — so write from other
 threads through `action { }`, which waits. A failing
 `SuspendingBridge.publishAwaited` never undoes the commit; it goes to
-`Store.uncaughtObserverHandler` (logged while none is set). `bridge(...)`
+`Store.uncaughtObserverHandler` (logged while none is set). A
+`suspendAction` or `suspendAtomic` is an entry like `action`: the
+`derivedState`/`merged` states whose sources it — and everything nested in it
+— changes settle once, when it has released every store, on whatever thread
+it ends on, even when its body or its commit resumed on another thread —
+except, on iOS and wasmJs, inside a nested `withContext(dispatcher)` in the
+entry, where a commit does not see the entry's settle scope and its derived
+states recompute after that commit instead.
+`bridge(...)`
 saves fire-and-forget (conflated — rapid publishes coalesce);
 `suspendingBridge(...)` returns an await-completion `SuspendingBridge` whose
 `publishAwaited` suspends until the value is persisted.
@@ -123,8 +135,20 @@ Same contract as core `atomic` (see the
 [GUIDE's cross-store chapter](../holdfast/GUIDE.md#15-cross-store-transactions)):
 enrollment is enforced, inner errors abort the frame, and blocking
 `action { }` on a participant fails fast with `FrameInteropException`
-instead of deadlocking. Commit runs under `NonCancellable` with suspending
-bridge publishes awaited and event back-pressure honored.
+instead of deadlocking. Commit runs under `NonCancellable`: every
+participant applies first, inside one write bracket, then each fans out in
+lock order with its suspending bridge publishes awaited and its event
+back-pressure honored — so no consistent read (a snapshot, a derived
+state's compute) ever sees one participant applied without the others, no
+reader sees one applied while another's publish is in flight (for an
+outermost frame, or a nested one that shares no store with its enclosing
+`suspendAtomic`: a store the enclosing frame already holds joins as a
+savepoint and applies when that frame commits, while the nested frame's
+other participants apply and fan out at its exit; enroll every store in the
+outermost frame to keep the frame whole), and an observer may not write into
+any participant. A participant whose fanout
+fails, or whose `publishAwaited` throws a `CancellationException`, does not
+keep the others from fanning out; the frame returns the failure.
 
 ## Build
 

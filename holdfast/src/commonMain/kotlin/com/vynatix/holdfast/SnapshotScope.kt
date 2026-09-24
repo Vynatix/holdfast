@@ -72,19 +72,43 @@ internal val SnapshotScope.readsSecrets: Boolean
 
 /**
  * The snapshot of this store in [scope]: materialize the declared states the
- * scope captures (taking no store lock), then read one consistent cut of them.
+ * scope captures (taking no store lock), then read one consistent cut of them
+ * ([captureConsistent] of this store alone).
  *
  * @throws IllegalStateException as [snapshot].
  */
-internal fun Store<*>.captureSnapshot(scope: SnapshotScope): StoreSnapshot {
+internal fun Store<*>.captureSnapshot(scope: SnapshotScope): StoreSnapshot = captureConsistent(listOf(this), scope)[0]
+
+/**
+ * The first half of capturing this store in [scope]: check it is not
+ * disposed, read its schema version, materialize the declared states [scope]
+ * captures, and list the states to read. [CapturePlan.build] turns the values
+ * one cut read for them into the snapshot.
+ */
+internal fun Store<*>.planCapture(scope: SnapshotScope): CapturePlan {
     checkNotDisposed()
     val schema = StoreSchema(this).version
     materializeDeclaredStates { scope.captures(it) }
     val captured = registry.materializedInOrder().filter { (decl, _) -> scope.captures(decl) }
-    val values = readConsistent(captured.map { it.second })
-    val content = Capture(scope)
-    captured.forEachIndexed { i, (decl, _) -> content.add(decl, values[i]) }
-    return StoreSnapshot(content.build(CaptureOrigin(lockOrderKey, this::class), schema))
+    return CapturePlan(this, scope, schema, captured)
+}
+
+/** One store's part of a capture: what [planCapture] listed, until a cut reads [states]. */
+internal class CapturePlan(
+    private val store: Store<*>,
+    private val scope: SnapshotScope,
+    private val schema: Int,
+    private val captured: List<Pair<StateDeclaration<*>, MutableState<*>>>,
+) {
+    /** The states to read, in declaration order. */
+    val states: List<MutableState<*>> = captured.map { it.second }
+
+    /** The snapshot holding [values], the raw values one consistent cut read for [states]. */
+    fun build(values: List<Any>): StoreSnapshot {
+        val content = Capture(scope)
+        captured.forEachIndexed { i, (decl, _) -> content.add(decl, values[i]) }
+        return StoreSnapshot(content.build(CaptureOrigin(store.lockOrderKey, store::class), schema))
+    }
 }
 
 /** The [CapturedContent] of one capture, state by state. */

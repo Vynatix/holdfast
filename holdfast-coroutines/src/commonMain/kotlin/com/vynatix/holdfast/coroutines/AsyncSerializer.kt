@@ -6,6 +6,7 @@ import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.fanOutApplied
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -123,17 +124,15 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
  * that code across thread hops. (A bare `mutate`/`update` from another thread
  * is refused too while the store is held: see `Store.stagesInto`.)
  *
- * Shared between [suspendAction] and [suspendAtomic] so the commit-phase
- * ordering contract is single-sourced.
+ * Used by [suspendAction]. [suspendAtomic] applies all its roots first and
+ * then fans each out with [suspendingFanOut]. Both paths go through
+ * [fanOutThenPublish], so the commit-phase ordering contract is written in one
+ * place.
  */
 internal suspend fun suspendingCommit(txn: Transaction) {
-    // Already marked by the caller (suspendAtomic marks its whole commit):
-    // skip the redundant nested marker.
-    if (FanoutMarkers.current()?.contains(txn) == true) {
-        commitThenPublish(txn)
-    } else {
-        inSuspendingCommitOf(listOf(txn)) { commitThenPublish(txn) }
-    }
+    // inSuspendingCommitOf adds txn to any marker an enclosing suspending
+    // commit on this coroutine already carries.
+    inSuspendingCommitOf(listOf(txn)) { commitThenPublish(txn) }
 }
 
 /**
@@ -156,12 +155,39 @@ internal suspend fun <T> inSuspendingCommitOf(
 }
 
 /** The body of [suspendingCommit]: apply and fan out, then publish, then drain events. */
-@Suppress("UNCHECKED_CAST")
 private suspend fun commitThenPublish(txn: Transaction) {
+    fanOutThenPublish { fanout, drainEvents -> txn.commitDispatching(fanout, drainEvents) }
+}
+
+/**
+ * The per-store fanout of a [suspendAtomic] participant that
+ * [com.vynatix.holdfast.applyFrameCommit] has already applied, with every
+ * other participant:
+ * observers, then the suspending bridge publishes, then the suspending event
+ * drain — the [suspendingCommit] contract without the apply pass. The caller
+ * runs it inside the frame's [inSuspendingCommitOf].
+ */
+internal suspend fun suspendingFanOut(txn: Transaction) {
+    fanOutThenPublish { fanout, drainEvents -> txn.fanOutApplied(fanout, drainEvents) }
+}
+
+/**
+ * Run [dispatch] — a commit's synchronous part, which calls its fanout with
+ * the writes that changed a state and its event drain with the staged events
+ * — then publish to bridges (awaiting a [SuspendingBridge]) and emit the
+ * events suspendingly.
+ */
+@Suppress("UNCHECKED_CAST")
+private suspend fun fanOutThenPublish(
+    dispatch: (
+        fanout: (List<Pair<MutableState<*>, Any>>) -> Unit,
+        drainEvents: (List<Pair<MutableSharedFlow<*>, Any>>) -> Unit,
+    ) -> Unit,
+) {
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
     val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
-    txn.commitDispatching(
-        fanout = { committed ->
+    dispatch(
+        { committed ->
             // Step 2: observers for every state whose value actually changed.
             // Deduped `distinct` states never reach here, so they correctly skip
             // the bridge publish too.
@@ -171,7 +197,7 @@ private suspend fun commitThenPublish(txn: Transaction) {
                 publishQueue += ms to value
             }
         },
-        drainEvents = { snapshot ->
+        { snapshot ->
             eventsQueue.addAll(snapshot)
         },
     )

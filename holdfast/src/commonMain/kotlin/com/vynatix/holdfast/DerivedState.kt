@@ -4,15 +4,17 @@ package com.vynatix.holdfast
 
 import kotlin.reflect.KProperty
 
-// Derived states with a contract and a name (issue #20, R6; plan decisions D14
-// and D15). `derivedState` and `merged` return a DerivedState: a read-only
-// State whose value a recompute commits on its store after each commit that
-// changes one of its sources. It runs on the machinery `derived` uses — one
-// stable recompute task, identity-deduplicated post-commit queues, a
-// never-blocking top-level attempt that hands off to a busy store — but its
-// backing state is never registered: no snapshot, restore, reset, encode or
-// `properties` sees it. The legacy `derived` Pair API stays as it is until the
-// 0.7.0 triage.
+// Derived states with a contract and a name (issue #20, R6 and R9; plan
+// decisions D14, D15 and D17). `derivedState` and `merged` return a
+// DerivedState: a read-only State whose value a recompute commits on its store
+// once per entry (action, frame, `suspendAction`, `suspendAtomic`) that
+// changes one of its sources, when that entry settles (SettleScope.kt),
+// reading its sources from one committed cut (ComputeReads.kt). It runs on the
+// machinery `derived` uses — one stable recompute task, identity-deduplicated
+// queues, a never-blocking top-level attempt that hands off to a busy store —
+// but its backing state is never registered: no snapshot, restore, reset,
+// encode or `properties` sees it. The legacy `derived` Pair API stays as it
+// is (recomputing once per source commit) until the 0.7.0 triage.
 
 /**
  * A state computed from other states and kept up to date by the library:
@@ -35,48 +37,45 @@ import kotlin.reflect.KProperty
  * }
  * ```
  *
- * **Recompute.** Its value is computed once when it is created — reading its
- * sources as any read on the calling thread does, so created inside an
- * action (or frame) on its host or on a source's store it sees that action's
- * pending writes, and is recomputed from committed values once that action
- * ends, whether it commits or rolls back — then again after every commit
- * that changes a source, in a transaction of its own on the store it was
- * created on (its host): the host's middleware sees that transaction, and
- * its observers fire in the normal commit order — only when the value
- * changes (`==`), as for a `distinct` state. However many of its sources one
- * commit changes, that commit recomputes it once, including sources on
- * another store. The recompute runs once the commit that changed a source
- * has fanned out and released its store, and never waits for the host: when
- * another action, frame or `suspendAction` holds the host, the recompute is
- * handed to that holder, and runs when it releases. A recompute reads
- * committed values only — never the pending writes of an action on its
- * thread, which may still roll back — and its compute may not write: a
- * write, action, `atomic`, `reset`, `restore` or `emit` from it throws. When
- * the thread it runs on is running a blocking action or `atomic` frame on a
- * source's store (a source commit on one store nested in an action on
- * another), it runs once that action ends instead, so it runs once. A
- * `suspendAction` or `suspendAtomic` holding a source's store never holds it
- * back, even one parked on its thread (Android's main thread, `runBlocking`,
- * any thread on wasmJs): it recomputes at once from committed values, and
- * again after that action's commit. A source value that arrives outside a
- * commit — through `bridge` or `observeFrom` — recomputes it at once on an
- * idle host. So after the committing call returns, the value can briefly
- * lag its sources; read the sources, or a [computed] state, when you need
- * the caller's own write. A throwing compute (or a middleware rejecting the
- * recompute) rolls that recompute back and is reported through the host's
- * [Store.uncaughtObserverHandler]; the value stays as it was until the next
- * source commit.
- *
- * **Known gaps, until frames settle derivations from a committed cut (issue
- * #20, R9).** A derived state whose sources live on more than one store can
- * be computed from a torn pair: a recompute that races another thread's
- * `atomic(...)` frame over its sources can read one participant's committed
- * values and the other's previous ones; that frame's own recompute then
- * corrects it. And the initial compute reads a state it does not list as a
- * source the way any read on its thread does: created on a thread holding an
- * action on that state's store, it reads the action's uncommitted writes,
- * and if that action rolls back, the value stays as computed until the next
- * commit that changes a source.
+ * **Recompute.** Its value is computed once when it is created, reading its
+ * sources from one committed cut taken just before — except where the calling
+ * thread holds a pending write, which it reads as any read there does: created
+ * inside an action (or frame) that has written a state its compute reads, it
+ * sees that write, and is recomputed from committed values once the outermost
+ * action or frame on that thread has ended, whether it commits or rolls back.
+ * Then it settles after every entry that changes a source: once the outermost
+ * `action`, `atomic` frame, `suspendAction` or `suspendAtomic` on the
+ * committing thread has exited and released everything it took, it recomputes
+ * once — however many of its sources that entry changed, on however many
+ * stores, in however many nested actions or frame participants — in a
+ * transaction of its own on the store it was created on (its host): the
+ * host's middleware sees that transaction, and its observers fire in the
+ * normal commit order — only when the value changes (`==`), as for a
+ * `distinct` state. A chain of derived states settles in the same pass, each
+ * after the derived states it reads. The recompute never waits for the host:
+ * when another action, frame or `suspendAction` holds the host, the recompute
+ * is handed to that holder, and runs when it releases. A recompute reads its
+ * sources from one committed cut — never another thread's pending writes or
+ * the pending writes of an action on its thread, which may still roll back,
+ * and never one participant of another thread's frame applied and another not
+ * yet — and a state its compute reads without listing it as a source at its
+ * committed value; its compute may not write: a write, action, `atomic`,
+ * `reset`, `restore` or `emit` from it throws. A `suspendAction` or
+ * `suspendAtomic` holding a source's store never holds it back, even one
+ * parked on its thread (Android's main thread, `runBlocking`, any thread on
+ * wasmJs): it recomputes from committed values, and again after that action's
+ * commit. A source value that arrives outside any entry — through `bridge` or
+ * `observeFrom` — recomputes it at once on an idle host. So after the
+ * committing call returns, the value can briefly lag its sources, and inside
+ * an action it reflects none of that action's writes; read the sources, or a
+ * [computed] state, when you need the caller's own write. A throwing compute
+ * (or a middleware rejecting the recompute) rolls that recompute back and is
+ * reported through the host's [Store.uncaughtObserverHandler]; the value
+ * stays as it was until the next source commit. A feedback loop through its
+ * observers — one writing a source of it — is cut after 1,000 recomputes in
+ * one settle and reported through the host's [Store.uncaughtObserverHandler];
+ * the next recompute waits in the host's post-commit queue, so the value may
+ * lag its sources until the host is next used or a source changes again.
  *
  * **Not store state.** Its value lives in memory only, computed from its
  * sources: [snapshot] does not capture it, `restore`, [reset] and
@@ -111,9 +110,10 @@ sealed interface DerivedState<T : Any> :
 
 /**
  * A [DerivedState] of this store, computed by [compute] from [sources] and
- * recomputed after each commit that changes one of them: once per commit,
- * however many sources it changes (see [DerivedState] for when and where the
- * recompute runs).
+ * recomputed after each action, frame, `suspendAction` or `suspendAtomic`
+ * that changes one of them: once, when the outermost one on the committing
+ * thread has exited, however many sources it changed (see [DerivedState] for
+ * when and where the recompute runs).
  *
  * ```
  * class CartStore : Store<CartStore>() {
@@ -154,8 +154,8 @@ fun <V : Store<V>, T : Any> V.derivedState(
 
 /**
  * A [DerivedState] merging [local] and [remote], two declared states of this
- * store, through [merge]; recomputed once per commit that changes either of
- * them (see [DerivedState]).
+ * store, through [merge]; recomputed once per outermost action (or frame) that
+ * changes either of them (see [DerivedState]).
  *
  * It names the split between what the user writes and what sync writes:
  * [local] holds the user's side (tag it [StateTag.UserAuthored]), [remote]
@@ -252,13 +252,12 @@ internal class DerivedStateNode<T : Any>(
  *
  * The follower subscribes BEFORE the initial compute, so a source commit
  * landing while the compute runs is recomputed once armed rather than lost
- * (see [SourceFollower]). And when this thread holds a transaction on the
- * host or on a source's store, the compute may have read that transaction's
- * pending writes, which can still roll back: arming then queues one recompute,
- * which reads committed values. It runs once that transaction ends (the host
- * hands it to its holder; a blocking holder of a source's store is deferred
- * to), except under a `suspendAction` or `suspendAtomic` on a source's store
- * other than the host, parked or running: then it runs at once.
+ * (see [SourceFollower]). The compute reads [sources] from one committed cut
+ * ([ComputeReads.initial]) where this thread holds no pending write for them;
+ * when it read anything uncommitted — a pending write of any state, on any
+ * store, which can still roll back — arming queues one recompute, which reads
+ * a committed cut: into this thread's settle scope, so it runs once the entry
+ * holding that write has settled.
  */
 private fun <V : Store<V>, T : Any> createDerivedState(
     host: V,
@@ -269,13 +268,12 @@ private fun <V : Store<V>, T : Any> createDerivedState(
     val follower = followSources(host, sources)
     // A throwing compute throws to the caller with nothing left subscribed.
     var computed = false
-    val initial =
+    val (initial, readUncommitted) =
         try {
-            host.compute().also { computed = true }
+            ComputeReads.initial(sources) { host.compute() }.also { computed = true }
         } finally {
             if (!computed) follower.dispose()
         }
-    val readOwnPendingWrites = (sources.map { it.owningStore } + host).any { it.heldByThisThread() }
     val backing = MutableState(initial, transformer = null, owningStore = host, distinct = true)
     backing.declaration =
         StateDeclaration(
@@ -291,14 +289,14 @@ private fun <V : Store<V>, T : Any> createDerivedState(
             sources = sources,
             tags = derivedTags(sources),
         )
-    // A source commit fanning out on another store queues the recompute on
-    // that store's post-commit queue, so the recompute withdraws itself from
-    // all of them.
+    // With no settle scope open, a source commit fanning out on another store
+    // queues the recompute on that store's post-commit queue, so the recompute
+    // withdraws itself from all of them.
     val queuedOn = sources.map { it.owningStore }.filter { it !== host }.distinct()
     val recompute =
-        DerivedRecompute(host, name, compute, queuedOn, committedReads = true) { value ->
+        DerivedRecompute(host, name, compute, queuedOn, cutSources = sources) { value ->
             stageRecomputedValue(backing, value)
         }
-    follower.arm(recompute, catchUp = readOwnPendingWrites)
+    follower.arm(recompute, catchUp = readUncommitted)
     return DerivedStateNode(backing, follower)
 }

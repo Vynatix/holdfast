@@ -1175,7 +1175,7 @@ never T1's pending writes.
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
 | `IllegalStateException: State must be created by this Store instance` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
 | `IllegalStateException: Cannot write S.x: S's transaction '…' has already been rolled back (status: RolledBack) …` (or `… has already applied its writes (status: Committed) …`) | Mutating after manually calling `rollback()` (or `commit()`) on the active transaction inside the action body; or writing into an `atomic` participant from a middleware's `onTransactionError` or a `FrameObserver` while the frame unwinds | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
-| `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it; the write could never commit | Write in the action itself, derive the value (`computed`/`derived`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4 |
+| `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it — or into any participant of the `atomic`/`suspendAtomic` frame that is committing, since every participant applies before any fans out; the write could never commit | Write in the action (or frame body) itself, derive the value (`computed`/`derived`/`derivedState`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4, §15.3 |
 | `IllegalStateException: Cannot write S.x: a suspendAction or suspendAtomic holds S …` | A bare `mutate`/`update` from another thread while a `suspendAction`/`suspendAtomic` on S is committing | Write through `S action { … }`, which waits for the store — see §8.2 |
 | `Holdfast: a post-commit side effect of S failed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | An effect, bridge publish or `derived` recompute threw after its commit; with no `uncaughtObserverHandler` set, the failure is logged | Fix the thrower, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
 | `Holdfast: library machinery attached to S (…) failed in onStoreDisposed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | Library machinery attached to S (an internal `StoreAttachment` of a companion module) threw while `S.dispose()` told it; with no `uncaughtObserverHandler` set, the failure is logged. S is disposed regardless | Report it to the module the named attachment comes from, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
@@ -1216,10 +1216,10 @@ never T1's pending writes.
 | `restore` (with a policy) | `fun <V : Store<V>> V.restore(snapshot: StoreSnapshot, policy: RestorePolicy, sterile: Boolean = false): TransactionResult<RestoreReport>` *(experimental, extension)* | `restore` (§14.1) under `Strict`, `IgnoreUnknown` or `BestEffort`, reporting the restored states, the declared states the snapshot holds no value for, and each skipped entry; a rejected restore changes nothing (§16.2). A snapshot of another schema version is migrated first, or refused (§16.3). `sterile = true` drops the snapshot's `Remote` entries and resets every `Remote` state to its initial value in the same transaction (§16.4) |
 | `snapshot` (with a scope) | `fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot` *(experimental, extension)* | `All` is `snapshot()`; `UserAuthored` captures only the `UserAuthored` states; `Raw` lets typed reads return a `Secret` state's plaintext, in memory only (§16.4) |
 | `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`), and the store's states carrying a tag in declaration order, never-read ones materialized first; `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
-| `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` recomputed once per commit that changes a source (sources on any store; not a `computed` one), after that commit releases its store, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
+| `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` that settles: recomputed once per outermost action or frame that changes a source (sources on any store; not a `computed` one), after it releases every store, from a committed cut of the sources, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
 | `merged` | `fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(local: State<L>, remote: State<R>, merge: (L, R) -> T): DerivedState<T>` *(experimental, extension)* | A `DerivedState` over two different states this store declares — the user's side (`local`, tag it `UserAuthored`) and sync's (`remote`, tag it `Remote`) — so an adoption writing `remote` never touches `local` and recomputes the merge once; carries neither tag; the input tags are not checked. Another store's, a derived, `computed` or internal input, or the same state twice, is an `IllegalArgumentException` (§16.5) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
-| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute that this store's last commit queued for a live store runs inside it, on the calling thread (§16.5) |
+| `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute still waiting on this store, for a live store, runs inside it, on the calling thread (§16.5) |
 | `isDisposed` | `val isDisposed: Boolean` | Whether `dispose()` has been called |
 | `properties` | `val properties: Map<String, State<*>>` | Snapshot of the materialized states (a never-read state is absent until something needs it) |
 | `getState` / `hasState` / `removeState` / `clearStates` | … | Reflection over the materialized states; `removeState`/`clearStates` dispose observers + bridge silently and keep the declaration, so the next read (or `snapshot()`/`restore()`/`reset()`) recreates the state from its initializer (derived backing and internal states have no initializer and go with their declarations). Both throw `IllegalStateException` for a state with a pending write in the active transaction or one enclosing it, or held by an open `reset()` (§16.1) or sterile `restore()` (§16.4) |
@@ -1423,8 +1423,13 @@ including a recompute that is already queued.
 
 The experimental `derivedState(sources) { … }` and `merged(local, remote)`
 (§16.5) return a read-only `DerivedState` instead of a `Pair`: it is its
-own `Disposable`, cannot be written, stays out of snapshots, and recomputes
-once per source commit for sources on another store too.
+own `Disposable`, cannot be written, stays out of snapshots, and settles —
+it recomputes once per outermost action or frame that changes its sources,
+on any stores, from a committed cut of them. `derived` keeps its per-commit
+recompute (once per changed source for a source on another store while its
+own store is idle) until the 0.7.0 triage; the post-commit work of an
+`atomic`/`suspendAtomic` frame's stores runs once the outermost action or
+frame on the thread has exited.
 
 ### 14.3 `atomic(vararg stores) { body }`
 
@@ -1439,8 +1444,8 @@ fun <R> atomic(
 Brackets multiple stores' transactions so they commit-or-rollback together.
 Inside `body`, `v1.action { … }` and `v2.action { … }` join the atomic
 frame as savepoints of each store's root. On body throw, every store is
-rolled back; on body return, every store commits in lock order with
-sequential observer fanout per-store.
+rolled back; on body return, every store applies its writes — all inside
+one write bracket — and only then does each store fan out, in lock order.
 
 ```kotlin
 val r = atomic(accountA, accountB) {
@@ -1601,7 +1606,11 @@ Mutually exclusive with blocking `Store.action` on the same store via an
 internal coroutine `Mutex` installed lazily. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
-cancels mid-commit.
+cancels mid-commit, and the call then returns the commit's
+`TransactionResult` (the caller sees its cancellation at its next suspension
+point). Since 0.6.0 an outermost `suspendAction` or `suspendAtomic` called
+from an already-cancelled coroutine throws that `CancellationException`
+before taking the store, on every platform.
 
 `Middleware<V>` sync hooks fire on `suspendAction` as well as `action`
 (2.0; was a documented no-op limitation in 1.1). Concentric-ring ordering:
@@ -2024,7 +2033,9 @@ Rules of the enforcement window:
 
 - It covers the **body only**. Middleware hooks, commit fanout, and observer
   callbacks run outside the window — an observer that reacts to a frame
-  commit by writing to a foreign store is post-commit and stays legal.
+  commit by writing to a store outside the frame is post-commit and stays
+  legal. (Writing to a participant from there is refused: every participant
+  has already applied, §15.3.)
 - **Reads** of unenrolled stores are always legal (they see committed values).
 - There is **no auto-enroll**: enrolling mid-frame would acquire a lock
   outside the sorted global order and reintroduce the deadlock class the
@@ -2071,47 +2082,78 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    ANY store commits, so a validation middleware throwing on store `c` still
    rolls `a` and `b` back. Corollary for middleware authors: for frames,
    `completed` does NOT mean durably-committed.
-5. **Commit** — per store, in lock order. Store `a`'s observer → bridge →
-   event fanout completes before store `b`'s commit applies. There is no
-   cross-store snapshot isolation; however, an observer on `a` running on the
-   frame's thread reads `b` through `b`'s still-active root, so it sees `b`'s
-   about-to-be-committed value and the cross-store invariant holds at every
-   fanout point. An observer may write to a participant that has not committed
-   yet (`b`, while `a` fans out) — the write stages into `b`'s root and
-   commits with it — but not to one that already has (`a`, while `b` fans out):
-   that throws, and a nested `action`/`atomic` on it returns an `Error` the
+5. **Apply** — EVERY store's writes are assigned, inside one write bracket
+   spanning all the participants' states, before any store fans out. A
+   consistent read across the participants — from any thread — sees the
+   whole frame or none of it: never `a`'s new value with `b`'s old one. This
+   holds when every participant opens a fresh top-level root: an outermost
+   frame, or a nested one that shares no store with the action or frame it
+   is nested in. A participant the frame shares with an enclosing action or
+   frame is a savepoint: its writes merge into the enclosing transaction and
+   apply when that one commits, while the frame's other participants apply
+   when the frame exits. Until then a consistent read can see those stores
+   new and the shared one old — and for good if the enclosing entry rolls
+   back (§15.4). Enroll every store in the outermost frame to keep the
+   guarantee.
+6. **Fanout** — per store, in lock order: store `a`'s observers, then its
+   bridge publishes, then its events; then `b`'s; then `c`'s. Every
+   participant has already applied, so an observer on `a`, on any thread,
+   reads `b`'s committed value. And an observer may no longer write to any
+   participant — `b` while `a` fans out as much as `a` while `b` does: that
+   throws, and a nested `action`/`atomic` on it returns an `Error` the
    observer must check, exactly like a write back into a store from its own
-   fanout (§4.4). `suspendAtomic` behaves the same way, with one gap: a
-   blocking `action`/`atomic` on a participant that has not committed yet
-   still waits for the frame's serializer forever — use `mutate` there.
-6. **Rollback** (body throw, `started`/`completed` throw, or inner-error
+   fanout (§4.4). Write in the frame body, or derive the value (§16.5). A
+   store whose fanout fails (only a throwing `uncaughtObserverHandler` can
+   make it) does not keep the later ones from fanning out; the frame returns
+   the failure as an `Error`, and `FrameObserver.onFrameRolledBack` fires
+   instead of `onFrameCommitted`, although every participant's values stand.
+   No participant's middleware gets `onTransactionError` then: all of them
+   committed, and a single `action`'s commit failure reaches no middleware
+   either. Otherwise `FrameObserver.onFrameCommitted` fires after the last
+   store.
+7. **Rollback** (body throw, `started`/`completed` throw, or inner-error
    escalation) — REVERSE lock order, `onTransactionError` per store first,
    then rollback. Rollback never touches state and never re-runs
    `Transformer.set`.
-7. **Post-commit drain** — deferred work (`derived` recomputes) runs at
-   frame exit, once every participant's transaction slot is restored and
-   its lock released, for each store whose root the frame opened.
+8. **Settle** — once the outermost action or frame on the thread has exited
+   and released every store it took (this frame, unless it is nested in an
+   action or another frame), derived states settle: every `derivedState`/
+   `merged` whose sources the frame changed recomputes once, from a committed
+   cut of its sources, and the post-commit work (`derived` recomputes) of each
+   store whose root the frame opened runs.
 
 `suspendAtomic` follows the same phases with the suspending machinery: the
-per-store `AsyncSerializer` mutex instead of the blocking lock, commit under
-`withContext(NonCancellable)`, `SuspendingBridge.publishAwaited` awaited, and
-the event drain honoring `BufferOverflow.SUSPEND` back-pressure.
+per-store `AsyncSerializer` mutex instead of the blocking lock, apply and
+fanout under `withContext(NonCancellable)`, each store's
+`SuspendingBridge.publishAwaited` awaited and its event drain honoring
+`BufferOverflow.SUSPEND` back-pressure before the next store fans out — all
+after every store has applied, so no reader ever sees one participant applied
+while another's publish is still in flight. A `CancellationException` from
+one store's publish (a `publishAwaited` that times out, say) does not keep
+the later stores from fanning out either; the frame returns it as an `Error`
+once they have. A blocking `action`/`atomic` on any participant from inside
+the commit returns an `Error` at once.
 (One caveat: `SuspendingMiddlewareHooks` async hooks do not fire for frame
 roots yet — sync hooks do.)
 
 **Durability non-goal:** a frame is in-memory 2PC across stores in ONE
 process. Bridge/persistence publishes remain per-store post-commit fanout;
-there is no crash-consistency across external stores, and if a commit itself
-throws partway through phase 5, already-committed stores stay committed.
+there is no crash-consistency across external stores. If the apply itself
+throws partway through phase 5 (only a `distinct` state's `equals` can), the
+stores applied before it stay committed and fan out, and the rest roll back —
+as does every participant the frame joined as a savepoint of an enclosing
+transaction, so none of its writes survives there. Only the participants
+that roll back get `onTransactionError`.
 
 ### 15.4 Nesting and interop
 
 - A frame nested inside an `action` or another frame on the same
   thread/coroutine opens SAVEPOINTS for shared stores: the nested frame's
-  commit merges into the enclosing scope; the enclosing rollback discards
-  everything, including nested writes. A nested frame's `Error` escalates to
-  the enclosing frame like an inner action's (same `TolerateInnerErrors`
-  opt-out).
+  commit merges their writes into the enclosing scope, and an enclosing
+  rollback discards them. The stores the nested frame introduces get fresh
+  roots, which commit when the nested frame exits: an enclosing rollback
+  cannot undo those. A nested frame's `Error` escalates to the enclosing
+  frame like an inner action's (same `TolerateInnerErrors` opt-out).
 - A nested frame may only INTRODUCE stores whose `lockOrderKey` sorts above
   every key the enclosing frame holds; otherwise `FrameLockOrderException`
   fires at entry, before any lock is taken. Prefer enrolling everything in
@@ -2797,43 +2839,60 @@ fun pinThenAdopt(notes: NotesStore) {
   `sources` — declared states, `derived` states or other derived states, of
   this store or another, but not a `computed { }` one — and `merged(local,
   remote) { l, r -> … }` from two states of its store. Both compute the
-  initial value at once, on the calling thread, reading as any read there
-  does: created inside an action (or frame) on its store or a source's store,
-  it sees that action's pending writes, and recomputes from committed values
-  once the action ends — so a rollback leaves it explained by its sources.
+  initial value at once, on the calling thread, reading its sources from one
+  committed cut except where that thread holds a pending write, which it
+  reads as any read there does: created inside an action (or frame) that has
+  written a state it reads — a source or not — it sees that write, and
+  recomputes from committed values once the outermost action or frame on the
+  thread ends — so a rollback leaves it explained by its sources.
   Declare one with `by`, which yields the `DerivedState` itself (its
   `getValue` returns it, as `val x by state { … }` yields its `State`), or
   with `=`. A state `compute`
   reads without listing it as a source does not trigger a recompute. The
   legacy `derived(...)` keeps its `Pair` until the 0.7.0 triage (§14.2).
-- **Once per commit.** After a commit that changes one or more sources,
-  the derived state recomputes once — however many sources that commit
-  changed, on its store or on another one. The recompute runs once the
-  commit has fanned out and released its store, never inside it (unless the
-  source's store is disposed from inside that commit: see Disposing), and
-  commits in a transaction of its own on the store the derived state was
-  created on (its host): the host's middleware sees it, and its observers
-  fire in the normal commit order, and only when the value changes (`==`),
-  as for a `distinct` state. It never waits for the host: when another action, frame
+- **Once per entry: it settles.** An `action`, `atomic` frame,
+  `suspendAction` or `suspendAtomic` is an entry; one nested in another
+  joins the outermost one on its thread. Once the outermost entry has exited
+  and released every store it took, each derived state whose sources it
+  changed recomputes once — however many sources, on however many stores, in
+  however many nested actions or frame participants — and a chain of derived
+  states settles in the same pass, each after the derived states it reads, so
+  none recomputes from another's previous value. Coalescing is not a mode:
+  derived states always settle (the legacy `derived` keeps its per-commit
+  recompute until the 0.7.0 triage, §14.2). Inside an entry, a derived state
+  therefore reflects none of that entry's writes yet. The recompute commits
+  in a transaction of its own on the store the derived state was created on
+  (its host): the host's middleware sees it, and its observers fire in the
+  normal commit order, and only when the value changes (`==`), as for a
+  `distinct` state. It never waits for the host: when another action, frame
   or `suspendAction` holds the host, the recompute is handed to that holder
   and runs when it releases. Nor does it commit writes that may still roll
-  back: a recompute's `compute` reads committed values only, never the
-  pending writes of an action on its thread, and may read states but not
+  back, or a torn pair: a recompute's `compute` reads its sources from one
+  committed cut, and any other state at its committed value — never the
+  pending writes of an action on its thread — and may read states but not
   write them (a write, `action`, `atomic`, `reset()`, `restore` or `emit` from
-  it throws, and is reported like any failing recompute). A source commit
-  nested in a blocking action (or frame) on another source's store
-  recomputes it once that action ends, so it recomputes once. A `suspendAction`
-  or `suspendAtomic` holding a source's store never holds a recompute back,
-  even one parked on the recomputing thread — Android's main thread,
-  `runBlocking`, any thread on wasmJs: the recompute runs at once from
-  committed values, and again after that action commits. A source value
-  that arrives outside a commit — through `bridge` or `observeFrom` —
-  recomputes it at once on an idle host. So after the committing call
-  returns the value can briefly lag its sources. Read the sources, or a
+  it throws, and is reported like any failing recompute). A `suspendAction`
+  or `suspendAtomic` settles on whatever thread it ends on, also when its
+  body or its commit resumed elsewhere (on iOS and wasmJs, not inside a
+  nested `withContext(dispatcher)` in it: a commit there does not see the
+  entry's scope, so the derived states it changes recompute after that
+  commit, once per commit rather than once per entry); one holding a
+  source's store never holds another entry's recompute back, even one
+  parked on the recomputing thread — Android's main thread, `runBlocking`,
+  any thread on wasmJs: that recompute runs from committed values, and
+  again after the parked action commits. A source value that arrives
+  outside any entry — through `bridge` or `observeFrom` — recomputes it at
+  once on an idle host. So after the committing call returns the value can
+  briefly lag its sources when its host is busy. Read the sources, or a
   `computed { }` state, when you need your own write at once. A throwing
   `compute` (or a middleware rejecting the recompute) rolls that recompute
   back, is reported through `uncaughtObserverHandler`, and leaves the value
-  as it was until the next source commit.
+  as it was until the next source commit. A feedback loop — an observer of
+  a derived state writing one of its sources — is cut after 1,000
+  recomputes in one settle and reported through the host's
+  `uncaughtObserverHandler`; the next recompute then waits in the host's
+  post-commit queue, so the value may lag its sources until the host is
+  next used (its next action or frame runs it) or a source changes again.
 - **`merged`'s inputs.** `local` and `remote` must be two different states
   its store declares: another store's state, a `derived` or derived state, a
   `computed { }` one or an internal one is refused with an
@@ -2861,27 +2920,31 @@ fun pinThenAdopt(notes: NotesStore) {
   — they write its sources, and it recomputes after their commit. As for
   `derived`, an initializer that `reset()` re-runs reads a derived state at
   its pre-reset value (§16.1).
-- **Across stores, until frames settle.** Sources on two stores written in
-  one `atomic(...)` frame recompute the derived state once, after the frame
-  has unwound, so its observers never see one participant's new value with
-  the other's old one. Two gaps remain until frames settle derivations once
-  per frame from a consistent cut (issue #20, R9, planned for 0.6.0). A
-  recompute that races another thread's frame over its sources can still
-  read a torn pair — one participant committed, the other not yet — and
-  commit it; that frame's own recompute then corrects it. And the initial
-  compute reads a state it does not list as a source the way any read on its
-  thread does: a derived state created on a thread that holds an action on
-  that state's store reads the action's uncommitted writes, and if that
-  action rolls back, the value stays as computed until the next commit that
-  changes a source. List what `compute` reads as sources.
+- **Across stores.** Sources on two stores written in one `atomic(...)` or
+  `suspendAtomic(...)` frame recompute the derived state once, after the
+  frame, and a derived state never holds, nor shows its observers, a torn
+  pair — one participant's new value with the other's old one: a frame
+  applies every participant inside one write bracket before any of them fans
+  out, and every compute — the initial one too — reads its sources from one
+  committed cut, so a recompute racing another thread's frame reads that
+  frame whole or not at all — for an outermost frame, or one whose
+  participants all open a root of their own; a participant that a nested
+  frame shares with its enclosing action or frame applies with that one
+  (§15.3, §15.4). (Before 0.6.0 such a race could commit a torn
+  pair until the frame's own recompute corrected it, and an initial compute
+  that read another action's uncommitted write of a state it does not list
+  kept that value after a rollback.) The cut covers the sources: a state
+  `compute` reads without listing it is read at its committed value of that
+  moment, so list what `compute` reads as sources.
 - **Disposing.** `dispose()` stops recomputation and releases the source
   subscriptions; a recompute already queued does not commit, and the value
   stays readable, frozen at its last recompute. Disposing the host store
   stops recomputation too, and the next commit of a source on another store
   drops that subscription. Disposing a source's store from one of its own
-  observers, or while another thread commits to it, runs the recompute that
-  commit queued at once, inside `dispose()` and on the calling thread (from
-  inside that commit's fanout, in the first case). Disposing twice is safe.
+  observers still lets that commit's recompute run when the entry settles,
+  and a recompute still waiting on the disposed store (deferred to its
+  holder) runs inside `dispose()`, on the calling thread. Disposing twice is
+  safe.
 
 ---
 

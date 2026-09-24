@@ -176,9 +176,14 @@ class SuspendFanoutWriteTest {
             assertEquals(0, s.echo.value)
         }
 
+    /**
+     * `suspendAtomic` applies every participant before any fans out (issue
+     * #20, R9), so a later participant's root has applied too when an earlier
+     * one's observer writes into it: refused, no longer joined to the frame.
+     */
     @OptIn(StoreInternalApi::class)
     @Test
-    fun observerWriteIntoAPendingSuspendAtomicParticipantCommitsWithTheFrame() =
+    fun observerWriteIntoALaterSuspendAtomicParticipantIsSurfaced() =
         runBlocking {
             val s = EchoStore()
             val t = CopyStore()
@@ -189,8 +194,9 @@ class SuspendFanoutWriteTest {
             val r = suspendAtomic(s, t) { s { trigger mutate 3 } }
 
             assertIs<TransactionResult.Success<*>>(r)
-            assertEquals(300, t.copy.value, "t's root has not applied yet, so the write commits with it")
-            assertEquals(emptyList(), failures)
+            assertEquals(3, s.trigger.value)
+            assertAppliedTransactionError(failures.single(), "Cannot write CopyStore.copy", "participant of the frame")
+            assertEquals(0, t.copy.value, "t's root had applied, so the write never lands")
         }
 
     /**

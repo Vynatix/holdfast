@@ -87,6 +87,13 @@ class MutableState<T : Any>(
     /** See [writesBegun]. */
     internal val writesEnded = atomic(0L)
 
+    /**
+     * How many derived-state computes, on any thread, are reading this state
+     * from a committed cut right now ([ComputeReads]). While it is zero,
+     * [value] skips the thread-local lookup of the cut.
+     */
+    internal val cutReaders = atomic(0)
+
     @kotlin.concurrent.Volatile
     private var currentBridge: Bridge<T>? = null
 
@@ -127,20 +134,32 @@ class MutableState<T : Any>(
      * that restore re-runs that way, and this store's other declared states at
      * the values the restore's transaction holds for them (restored, else an
      * enclosing action's pending writes).
+     *
+     * The compute of a `derivedState`/`merged` reads its sources from one
+     * committed cut taken just before it runs ([ComputeReads]), where this
+     * thread holds no pending write for them, so it never reads one source
+     * after another thread's frame applied and another before.
      */
     override val value: T
         get() {
             val resetValue = owningStore.activeTransaction?.pendingReset?.valueFor(this)
-            if (resetValue != null) return afterGet(resetValue)
+            if (resetValue != null) return afterGet(ComputeReads.uncommitted(resetValue))
+            // The cut's thread-local is read only while some compute reads
+            // this state from a cut, so an ordinary read pays one volatile
+            // read for it.
+            @Suppress("UNCHECKED_CAST")
+            val cut = if (cutReaders.value == 0) null else ComputeReads.cutValueOf(this) as T?
             return stateLock.withLock {
                 val txn = owningStore.activeTransaction
                 if (txn != null && txn.ownerThreadId == currentThreadId()) {
                     val pending = txn.findPendingValue(this)
                     // The thread-local is read only when there is a pending
                     // value to hide, so an ordinary read pays nothing for it.
-                    if (pending != null && NoWriteRegion.current() == null) return@withLock afterGet(pending)
+                    if (pending != null && NoWriteRegion.current() == null) {
+                        return@withLock afterGet(ComputeReads.uncommitted(pending))
+                    }
                 }
-                afterGet(currentValue)
+                afterGet(cut ?: currentValue)
             }
         }
 
@@ -175,15 +194,17 @@ class MutableState<T : Any>(
     /**
      * Commit pass 1 — **assignment only**. Writes `currentValue` and returns
      * whether the value changed. Runs no user code except `equals` on a
-     * [distinct] state. [Transaction.commitDispatching] applies every pending
-     * write with this before any fanout begins.
+     * [distinct] state. A commit's apply pass ([applyFrameCommit], or
+     * [Transaction.commitDispatching] for one transaction) applies every
+     * pending write with this before any fanout begins — a frame's, every
+     * participant's.
      *
      * Core-only: it must be called inside the commit's write bracket, which
-     * `Transaction.applyPendingWrites` opens on every pending state before the
-     * first assignment and closes in a `finally` after the last (see
-     * ConsistentRead.kt). An unbracketed call lets a concurrent `snapshot()`
-     * see half of a commit. The bracket helpers are `internal`, so companion
-     * modules must not call this.
+     * the apply pass (FrameCommit.kt) opens on every pending state — of every
+     * participant, for a frame — before the first assignment and closes in a
+     * `finally` after the last (see ConsistentRead.kt). An unbracketed call
+     * lets a concurrent `snapshot()` see half of a commit. The bracket helpers
+     * are `internal`, so companion modules must not call this.
      *
      * If [distinct] is true and the new processed value is `==` to
      * `currentValue`, nothing is written and this returns `false` — the caller

@@ -226,9 +226,9 @@ class FanoutWriteTest {
     @OptIn(StoreInternalApi::class)
     @Test
     fun frameObserverWritesIntoAnAppliedParticipantAreSurfaced() {
-        // Participants commit in lock order and each fans out before the next
-        // applies: an observer of the later participant `t` that writes the
-        // earlier participant `s` meets s's already-applied frame root.
+        // Every participant applies before any fans out (issue #20, R9): an
+        // observer of the later participant `t` that writes the earlier
+        // participant `s` meets s's already-applied frame root.
         val s = FanoutStore()
         val t = FanoutTarget()
         assertTrue(s.lockOrderKey < t.lockOrderKey)
@@ -328,11 +328,15 @@ class FanoutWriteTest {
         assertAppliedTransactionError(failures.single(), "emit an event on FanoutEventStore")
     }
 
+    /**
+     * The other direction too (issue #20, R9): a frame applies every
+     * participant before any fans out, so when `s` fans out, `t`'s frame root
+     * has already applied, and an observer's write into it is refused. (It
+     * used to stage into t's still-open root and commit with it.)
+     */
     @OptIn(StoreInternalApi::class)
     @Test
-    fun frameObserverWritesIntoAPendingParticipantCommitWithTheFrame() {
-        // The other direction still works: when `s` fans out, `t`'s frame root
-        // has not applied yet, so the write stages into it and commits with t.
+    fun frameObserverWritesIntoALaterParticipantAreSurfaced() {
         val s = FanoutStore()
         val t = FanoutTarget()
         assertTrue(s.lockOrderKey < t.lockOrderKey)
@@ -342,8 +346,9 @@ class FanoutWriteTest {
         val r = atomic(s, t) { s { trigger mutate 2 } }
 
         assertIs<TransactionResult.Success<*>>(r)
-        assertEquals(200, t.copy.value)
-        assertEquals(emptyList(), failures)
+        assertEquals(2, s.trigger.value)
+        assertAppliedTransactionError(failures.single(), "Cannot write FanoutTarget.copy", "participant of the frame")
+        assertEquals(0, t.copy.value)
     }
 
     @Test fun theStoreAcceptsWritesAgainOnceTheCommitIsDone() {
