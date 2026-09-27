@@ -64,11 +64,14 @@ final class <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any?> com.vynatix.ho
 final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.coroutines/HydrationSpec { // com.vynatix.holdfast.coroutines/HydrationSpec|null[0]
     final fun <#A1: kotlin/Any?> refresh(kotlin.coroutines/SuspendFunction1<#A, #A1>): com.vynatix.holdfast.coroutines/HydrationRefresh<#A, #A1> // com.vynatix.holdfast.coroutines/HydrationSpec.refresh|refresh(kotlin.coroutines.SuspendFunction1<1:0,0:0>){0§<kotlin.Any?>}[0]
     final fun base(kotlin/Function1<#A, kotlin/Unit>) // com.vynatix.holdfast.coroutines/HydrationSpec.base|base(kotlin.Function1<1:0,kotlin.Unit>){}[0]
+    final fun overlay(com.vynatix.holdfast.coroutines/SuspendingKvStore, kotlin/String, kotlin/Int = ...) // com.vynatix.holdfast.coroutines/HydrationSpec.overlay|overlay(com.vynatix.holdfast.coroutines.SuspendingKvStore;kotlin.String;kotlin.Int){}[0]
 }
 
 final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.coroutines/Hydrator { // com.vynatix.holdfast.coroutines/Hydrator|null[0]
     final val current // com.vynatix.holdfast.coroutines/Hydrator.current|{}current[0]
         final fun <get-current>(): com.vynatix.holdfast.coroutines/Hydration // com.vynatix.holdfast.coroutines/Hydrator.current.<get-current>|<get-current>(){}[0]
+    final val overlayKey // com.vynatix.holdfast.coroutines/Hydrator.overlayKey|{}overlayKey[0]
+        final fun <get-overlayKey>(): kotlin/String? // com.vynatix.holdfast.coroutines/Hydrator.overlayKey.<get-overlayKey>|<get-overlayKey>(){}[0]
     final val state // com.vynatix.holdfast.coroutines/Hydrator.state|{}state[0]
         final fun <get-state>(): com.vynatix.holdfast/State<com.vynatix.holdfast.coroutines/Hydration> // com.vynatix.holdfast.coroutines/Hydrator.state.<get-state>|<get-state>(){}[0]
 
@@ -76,6 +79,7 @@ final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.coroutines
     final fun stageInvalidate() // com.vynatix.holdfast.coroutines/Hydrator.stageInvalidate|stageInvalidate(){}[0]
     final fun toString(): kotlin/String // com.vynatix.holdfast.coroutines/Hydrator.toString|toString(){}[0]
     final suspend fun awaitSettled(): com.vynatix.holdfast.coroutines/Hydration // com.vynatix.holdfast.coroutines/Hydrator.awaitSettled|awaitSettled(){}[0]
+    final suspend fun clearOverlay() // com.vynatix.holdfast.coroutines/Hydrator.clearOverlay|clearOverlay(){}[0]
     final suspend fun hydrate(kotlinx.coroutines/CoroutineScope = ...) // com.vynatix.holdfast.coroutines/Hydrator.hydrate|hydrate(kotlinx.coroutines.CoroutineScope){}[0]
 }
 
@@ -86,6 +90,11 @@ final class com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore : com.vyna
     final suspend fun put(kotlin/String, kotlin/String) // com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore.put|put(kotlin.String;kotlin.String){}[0]
     final suspend fun remove(kotlin/String) // com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore.remove|remove(kotlin.String){}[0]
     final suspend fun snapshot(): kotlin.collections/Map<kotlin/String, kotlin/String> // com.vynatix.holdfast.coroutines/InMemorySuspendingKvStore.snapshot|snapshot(){}[0]
+}
+
+final class com.vynatix.holdfast.coroutines/OverlayException : kotlin/IllegalStateException { // com.vynatix.holdfast.coroutines/OverlayException|null[0]
+    final val key // com.vynatix.holdfast.coroutines/OverlayException.key|{}key[0]
+        final fun <get-key>(): kotlin/String // com.vynatix.holdfast.coroutines/OverlayException.key.<get-key>|<get-key>(){}[0]
 }
 
 final class com.vynatix.holdfast.coroutines/SuspendingFileSystemKvStore : com.vynatix.holdfast.coroutines/SuspendingKvStore { // com.vynatix.holdfast.coroutines/SuspendingFileSystemKvStore|null[0]

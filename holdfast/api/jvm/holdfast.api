@@ -355,6 +355,11 @@ public final class com/vynatix/holdfast/RestoreIssue$UnknownState : com/vynatix/
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/vynatix/holdfast/RestorePlannerKt {
+	public static final fun internalRestoreTagged (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/StateTag;Lcom/vynatix/holdfast/RestorePolicy;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun internalRestoreTagged$default (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StoreSnapshot;Lcom/vynatix/holdfast/StateTag;Lcom/vynatix/holdfast/RestorePolicy;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+}
+
 public final class com/vynatix/holdfast/RestorePolicy : java/lang/Enum {
 	public static final field BestEffort Lcom/vynatix/holdfast/RestorePolicy;
 	public static final field IgnoreUnknown Lcom/vynatix/holdfast/RestorePolicy;

@@ -494,6 +494,27 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **A restore limited to one tag** (`@StoreInternalApi` + experimental,
+  issue #20, R8/R3; plan PR 14): `internalRestoreTagged(snapshot, tag,
+  policy)` restores only the entries of the states and keyed state families
+  the store declares with `tag` — what `:holdfast-coroutines`' persisted
+  overlay applies of the blob it reads (its `UserAuthored` entries). An entry
+  of a state or family declared without the tag, or of a derived backing, is
+  dropped silently, neither restored nor an issue; a name the store does not
+  declare is still an unknown state; names are matched after the schema
+  check has migrated the snapshot. Unlike any other restore it replaces each
+  tagged keyed family the snapshot lists: before staging, it evicts every
+  entry live in the transaction's view whose key the snapshot does not hold
+  (an enclosing transaction's new entries included), while a family the
+  snapshot does not list, or whose entries raised a tolerated issue, keeps
+  its entries. An optional `targets` filter stages values only into the
+  states (and keyed entries) it accepts. Otherwise it is the experimental
+  `restore(snapshot, policy)`: one action (`Restore`, a savepoint inside an
+  action), failures returned with nothing changed and nothing evicted.
+  `RestoreTaggedTest` and a gated `DisposedEntrypointTest` row pin it.
+  `uncaughtObserverHandler`'s KDoc lists the overlay's reports
+  (`OverlayException`), none of which is made under the hydration gate.
+
 - **Sealed states, and hooks for machinery that drives a store**
   (`@StoreInternalApi`, issue #20, R8; plan PR 13): what `:holdfast-coroutines`'
   hydrator is built on (see its changelog). Nothing here is user surface, and

@@ -55,6 +55,24 @@ package com.vynatix.holdfast
 // by the plan, or by a first read (or `get`) in the pass — so the pass
 // recomputes it from the restored values too, as a fresh store's first read
 // would.
+//
+// A restore limited to a TAG (internalRestoreTagged; `:holdfast-coroutines`'
+// persisted overlay, issue #20 R8/R3) plans only the entries of the states and
+// keyed state families the store declares with that tag, matched by name
+// after the schema check has migrated the snapshot, so a renamed state is
+// matched under its new name. An entry of a state or family declared without
+// the tag is dropped silently, as a sterile restore drops a Remote one, and so
+// are the derived backings; an entry the store does not declare at all is an
+// unknown state, as in any restore. Unlike any other restore it REPLACES each
+// tagged family the snapshot lists (a planned family that raised no issue):
+// its action, before staging the planned writes, evicts every entry live in
+// its transaction's view whose key the snapshot does not hold — entries an
+// enclosing transaction created included — so the family holds the
+// snapshot's keys and no others. A family the snapshot does not list (one it
+// skipped for want of a codec, say) keeps its entries. It may also be limited
+// to TARGETS: a planned value whose state the filter refuses is not staged,
+// and the state keeps the value the transaction holds (a keyed entry the
+// snapshot lists is still kept).
 
 /**
  * One raw value a restore stages into [decl]'s state. [backing]: a derived
@@ -69,8 +87,10 @@ internal class PlannedWrite(
 
 /**
  * Restore [snapshot] into this store under [policy] — [sterile]ly, resetting
- * its Remote states instead of restoring them — as one action whose value is
- * [result] of the restore's report: plan, then stage.
+ * its Remote states instead of restoring them; [only] the entries of states
+ * and families declared with that tag, when it is set (see the top of this
+ * file) — as one action whose value is [result] of the restore's report:
+ * plan, then stage.
  *
  * @throws IllegalStateException like [Store.action]: when the store is
  *   disposed, or inside a state initializer or a schema migration.
@@ -79,17 +99,67 @@ internal fun <V : Store<V>, R> V.runRestore(
     snapshot: StoreSnapshot,
     policy: RestorePolicy,
     sterile: Boolean = false,
+    only: StateTag? = null,
+    targets: ((State<*>) -> Boolean)? = null,
     result: (RestoreReport) -> R,
 ): TransactionResult<R> {
     checkNotDisposed()
     NoWriteRegion.refuse { "restore $displayName" }
-    val planner = RestorePlanner(this, snapshot.content, sterile)
+    val planner = RestorePlanner(this, snapshot.content, sterile, only, targets)
     // A failing target initializer is carried into the action, which reports
     // it like one inside the restore, whatever the policy.
     val failure = runCatching { planner.plan() }.exceptionOrNull() ?: planner.rejection(policy)
     val sterileReset = if (sterile) planner::cameToLife else null
-    return action(Restore(planner.writes, failure, sterileReset) { result(planner.report()) })
+    return action(Restore(planner.writes, failure, sterileReset, planner.replaced) { result(planner.report()) })
 }
+
+/**
+ * [restore] under [policy], limited to [tag]: only the entries of [snapshot]
+ * whose state — or keyed state family — this store declares with [tag] are
+ * restored. An entry of a state or family declared without [tag] is dropped
+ * silently (neither restored nor an issue), as are the derived backing
+ * states; an entry of a name this store does not declare at all is a
+ * [RestoreIssue.UnknownState], as in any restore. Names are matched after the
+ * schema check has migrated the snapshot ([SchemaVersioned.migrate]), so a
+ * renamed state is matched under its new name.
+ *
+ * Unlike any other restore, it REPLACES each [tag]ged keyed state family the
+ * snapshot lists: before staging its values, it evicts every entry of the
+ * family live in the transaction's view whose key the snapshot does not hold
+ * — one an enclosing transaction (or another thread, meanwhile) created, too
+ * — so the family ends up with the snapshot's keys and no others. A family the snapshot does not list
+ * (a decoded one it skipped, having no codec or keyCodec to encode it)
+ * keeps its entries, and so does one whose entries raised an issue the
+ * [policy] tolerated.
+ *
+ * When [targets] is set, a value is staged only into a state it accepts
+ * (the declared state, or the keyed entry, the value would be restored
+ * into): any other keeps the value its transaction holds, and a keyed entry
+ * the snapshot lists is kept either way — not evicted.
+ *
+ * Everything else is the experimental `restore(snapshot, policy)`: the plan
+ * before the action, the one action (id `Restore`; a savepoint inside an
+ * action of this store), the failures it returns as
+ * [TransactionResult.Error] — a [SnapshotMigrationException], a
+ * [RestoreRejectedException], a target's initializer failure — with nothing
+ * changed (no entry evicted either).
+ *
+ * For `:holdfast-coroutines`' persisted overlay, which applies only the
+ * [StateTag.UserAuthored] entries of the blob it reads, whatever else the blob
+ * holds.
+ *
+ * @throws IllegalStateException like [Store.action]: if the store is
+ *   disposed, or when called from inside a state initializer or a
+ *   [SchemaVersioned.migrate].
+ */
+@ExperimentalStoreApi
+@StoreInternalApi
+fun <V : Store<V>> V.internalRestoreTagged(
+    snapshot: StoreSnapshot,
+    tag: StateTag,
+    policy: RestorePolicy,
+    targets: ((State<*>) -> Boolean)? = null,
+): TransactionResult<Unit> = runRestore(snapshot, policy, only = tag, targets = targets) { }
 
 /**
  * The body of a restore's action. A class rather than a lambda so the
@@ -100,11 +170,20 @@ private class Restore<V : Store<V>, R>(
     private val failure: Throwable?,
     /** For a sterile restore, which non-Remote declared states it brought to life (see [RestorePlanner.cameToLife]). */
     private val sterileReset: ((StateDeclaration<*>) -> Boolean)?,
+    /** For a tag-limited restore, the families it replaces, each with the keys the snapshot holds. */
+    private val replaced: Map<KeyedFamily<*, *>, Set<Any>>,
     private val result: () -> R,
 ) : (V) -> R {
     override fun invoke(store: V): R {
         failure?.let { throw it }
         val txn = checkNotNull(store.activeTransaction) { "restore() stages into the action it runs in" }
+        // Before the planned writes, none of which is to an entry evicted
+        // here: the family then holds the snapshot's keys and no others.
+        for ((family, keys) in replaced) {
+            family.stageEvictions("replace the entries of ${family.qualifiedName}") {
+                family.entries.mapNotNull { (key, entry) -> (entry as MutableState<*>).takeIf { key !in keys } }
+            }
+        }
         for (write in writes) {
             // Resolved again, for a state removeState/clearStates dropped since
             // the plan: a declared one is materialized again (its initializer
@@ -137,9 +216,20 @@ internal class RestorePlanner(
     private val store: Store<*>,
     private val content: SnapshotContent,
     private val sterile: Boolean,
+    /** When set, plan only the entries of states and families declared with this tag ([admitted]). */
+    private val only: StateTag? = null,
+    /** When set, plan a value only into a state (or keyed entry) it accepts. */
+    private val targets: ((State<*>) -> Boolean)? = null,
 ) {
     val writes = ArrayList<PlannedWrite>()
     private val written = HashSet<StateDeclaration<*>>()
+
+    /**
+     * For a restore limited to a tag ([only]), the families it replaces: each
+     * planned family that raised no issue, with the keys the snapshot holds
+     * for it (see the top of this file). Empty for any other restore.
+     */
+    val replaced = LinkedHashMap<KeyedFamily<*, *>, Set<Any>>()
 
     /**
      * The keyed entries this plan writes, by family and key: an entry evicted
@@ -196,7 +286,18 @@ internal class RestorePlanner(
     private val trusted = (content as? CapturedContent)?.originClass?.isInstance(store) == true
 
     /** The keyed state families' part of the plan (KeyedRestorePlanner.kt), adding to this plan's writes and report. */
-    private val families = KeyedRestorePlanner(store, sterile, trusted, writes, writtenEntries, restored, issues)
+    private val families =
+        KeyedRestorePlanner(
+            store,
+            sterile,
+            trusted,
+            writes,
+            writtenEntries,
+            restored,
+            issues,
+            accepts = ::accepts,
+            replaced = replaced.takeIf { only != null },
+        )
 
     /**
      * Check the schema version, then materialize every target and decide every
@@ -210,14 +311,14 @@ internal class RestorePlanner(
         when (content) {
             is CapturedContent -> {
                 schema.checkCaptured(content.schema)
-                content.rawValues.forEach { (name, raw) -> planCaptured(name, raw) }
-                content.families.forEach { (name, family) -> families.planCaptured(name, family) }
-                if (!sterile && content.originKey == store.lockOrderKey) planBackings(content)
+                content.rawValues.admitted(store, only).forEach { (name, raw) -> planCaptured(name, raw) }
+                content.families.admitted(store, only).forEach { (name, family) -> families.planCaptured(name, family) }
+                if (!sterile && only == null && content.originKey == store.lockOrderKey) planBackings(content)
             }
             is DecodedContent -> {
                 val body = schema.upcast(content.body)
-                body.states.forEach { (name, text) -> planDecoded(name, text) }
-                body.families.forEach { (name, entries) -> families.planDecoded(name, entries) }
+                body.states.admitted(store, only).forEach { (name, text) -> planDecoded(name, text) }
+                body.families.admitted(store, only).forEach { (name, entries) -> families.planDecoded(name, entries) }
             }
         }
         // The Remote states the action resets, never-read ones included: their
@@ -248,7 +349,7 @@ internal class RestorePlanner(
         name: String,
         raw: Any,
     ) {
-        val decl = target(name) ?: return
+        val decl = target(name)?.takeIf(::accepts) ?: return
         val mismatch = if (trusted) null else typeMismatch(name, raw, materialize(decl).rawCurrentValue)
         if (mismatch != null) issues += mismatch else write(decl, raw)
     }
@@ -258,7 +359,7 @@ internal class RestorePlanner(
         name: String,
         text: String?,
     ) {
-        val decl = target(name) ?: return
+        val decl = target(name)?.takeIf(::accepts) ?: return
         val codec = decl.codec
         when {
             text == null -> Unit
@@ -302,7 +403,36 @@ internal class RestorePlanner(
         written += decl
         restored += decl.name
     }
+
+    /** Whether a value may be planned into [decl]'s state, which exists: always, unless [targets] refuses it. */
+    private fun accepts(decl: StateDeclaration<*>): Boolean =
+        targets?.invoke(checkNotNull(decl.materialized) { "a planned target exists" }) != false
 }
+
+/**
+ * The entries of this map, by snapshot name, that a restore of [store]
+ * limited to [only] plans: all of them when [only] is `null`; else the
+ * entries of the states and keyed state families [store] declares with
+ * [only], and of the names it does not declare at all (which the plan reports
+ * as unknown). An entry of a state or family declared without [only] — a
+ * derived backing's included — is dropped.
+ */
+private fun <T> Map<String, T>.admitted(
+    store: Store<*>,
+    only: StateTag?,
+): Map<String, T> =
+    if (only == null) {
+        this
+    } else {
+        filterKeys { name ->
+            val declared = store.registry.declaration(name)?.tags
+            val tags =
+                declared ?: store.registry.keyed
+                    .family(name)
+                    ?.tags
+            tags == null || only in tags
+        }
+    }
 
 /** A value class without a simple name (an anonymous object), as [RestoreIssue.TypeMismatch] names it. */
 private const val ANONYMOUS = "<anonymous>"

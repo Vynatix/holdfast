@@ -30,7 +30,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 13. [API Reference](#13-api-reference)
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
-16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration
+16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
 
 ---
 
@@ -1206,7 +1206,7 @@ never T1's pending writes.
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
-| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action. Also receives a throwing dispose notification of library machinery attached to the store (an internal `StoreAttachment`), reported as `dispose()`'s last step on the disposing thread, holding no lock `dispose()` took; a throwing handler is ignored there, as `dispose()` never throws. And a `:holdfast-coroutines` hydration refresh whose outcome could not be recorded (a middleware rejected its `HydrationFailure` record too, or its settle threw), reported on the refresh's coroutine once the hydration gate has released the store; the hydration stays `Seeded` with nothing in flight, the next `hydrate()` retries it, and a throwing handler is ignored there (§16.7) |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action. Also receives a throwing dispose notification of library machinery attached to the store (an internal `StoreAttachment`), reported as `dispose()`'s last step on the disposing thread, holding no lock `dispose()` took; a throwing handler is ignored there, as `dispose()` never throws. And a `:holdfast-coroutines` hydration refresh whose outcome could not be recorded (a middleware rejected its `HydrationFailure` record too, or its settle threw), reported on the refresh's coroutine once the hydration gate has released the store; the hydration stays `Seeded` with nothing in flight, the next `hydrate()` retries it, and a throwing handler is ignored there (§16.7). And what a hydrator's persisted overlay could not do — apply the blob it read (kept, never written over), or write one (over its size limit, a failing capture or codec, a failing `put`, a cancelled scope) — as an `OverlayException`, never under the hydration gate; a throwing handler is ignored there too (§16.8) |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
@@ -1610,8 +1610,12 @@ fun Store<*>.hydratorOrNull(): Hydrator<*>?
 suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
 class Hydrator<V : Store<V>> {                       // state / current / hydrate / invalidate / stageInvalidate / awaitSettled
     suspend fun hydrate(scope: CoroutineScope = …)   // defaults to the store's Store.scope
+    val overlayKey: String?                          // the persisted overlay's key (§16.8)
+    suspend fun clearOverlay()                       // remove what the overlay wrote
 }
 sealed interface Hydration                           // Detached / Seeded / Hydrated / Failed(cause)
+// In hydrator { }: overlay(kv, key, sizeLimit = 8192) persists the UserAuthored states (§16.8).
+class OverlayException : IllegalStateException       // what the overlay reports; val key: String
 ```
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
@@ -3234,7 +3238,7 @@ What moves the phase, and the transaction middleware sees it in:
 
 | From | When | To | Transaction |
 |---|---|---|---|
-| `Detached` | `hydrate()` | `Seeded` | `HydrationSeed`: `base { }`, then the phase |
+| `Detached` | `hydrate()` | `Seeded` | `HydrationSeed`: `base { }`, then the persisted overlay if there is one (§16.8), then the phase |
 | `Failed` | `hydrate()` | `Seeded` | `HydrationRetry` |
 | `Seeded` | the refresh returned, and `adopt { }` succeeded | `Hydrated` | `HydrationAdopt`, with `adopt { }` as its savepoint `Adopt` |
 | `Seeded` | `adopt { }` threw, or wrote a state that is not `Remote` | `Failed(cause)` | `HydrationAdopt` (its savepoint rolled back whole) |
@@ -3362,6 +3366,167 @@ fun sessionExpired(app: AppStore, history: HistoryStore, profile: ProfileStore):
   (the `HydrationFailure` row above): nothing is in flight, so it returns
   `Failed(cause)` while `current` still reads `Seeded`, and the next
   `hydrate()` retries that refresh.
+
+### 16.8 The persisted overlay (`:holdfast-coroutines`)
+
+```kotlin
+// :holdfast-coroutines. What the user authored, persisted under one key and put back over base { }.
+@ExperimentalStoreApi
+class HydrationSpec<V : Store<V>> {
+    fun overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int = 8192)   // once; the key is pinned
+}
+
+@ExperimentalStoreApi
+class Hydrator<V : Store<V>> {
+    val overlayKey: String?                                 // the pinned key; null without an overlay
+    suspend fun clearOverlay()                              // remove what it wrote; nothing else stops
+}
+
+@ExperimentalStoreApi
+class OverlayException : IllegalStateException {          // reported through uncaughtObserverHandler
+    val key: String
+}
+```
+
+A hydrator's overlay keeps what the user authored — the store's
+`UserAuthored` states and keyed families (§16.4, §16.6) — across process
+death. It writes them under one key of a `SuspendingKvStore` after every
+commit that changes one, and puts them back in the seed transaction, after
+`base { }`. So a boot runs in the order issue #20 asks for: base, then the
+overlay, then the refresh. The overlay wins even when `base { }` restores a
+snapshot that holds the same states — and it replaces each `UserAuthored`
+keyed family it holds, so an entry the user evicted never comes back from
+base's seed data — and the refresh adopts into `Remote` states only
+(§16.7), so it can never overwrite what the overlay put back.
+
+```kotlin
+interface InboxApi {
+    suspend fun fetchInbox(): List<String>
+}
+
+@OptIn(ExperimentalStoreApi::class)
+class ComposerStore(prefs: SuspendingKvStore, api: InboxApi) : Store<ComposerStore>() {
+    val draft by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "" }
+    val inbox by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base { restore(Seeds.composer) }                    // bundled seed data, a draft included
+            overlay(prefs, key = "composer.overlay")            // then what the user wrote, over it
+            refresh { api.fetchInbox() } adopt { fetched -> inbox mutate fetched }
+        }
+}
+
+// First run: no blob yet, so the seed is base { } alone.
+//   composer.hydration.hydrate()                   // draft: "Hello," (bundled)
+//   composer action { draft mutate "Dear Ada," }   // written under "composer.overlay" soon after
+// After process death, a new ComposerStore on the same prefs:
+//   composer.hydration.hydrate()                   // base restores "Hello,"; the overlay puts "Dear Ada," over it
+```
+
+Where the overlay stands decides both directions:
+
+| Standing | Since | A seed puts back | A commit that changes a `UserAuthored` state |
+|---|---|---|---|
+| not loaded | the hydrator was created (a seed that rolled back changes nothing) | the blob it reads under the key, before taking the store | is not written |
+| loaded | a seed applied the blob, or found none | the `UserAuthored` values the store held when the seed began, into what `base { }` changed — the store is what the overlay persists, so the key is not read again | is written |
+| kept | a seed could not apply the blob | the blob it reads again | is not written: the blob is never written over |
+
+- **Inbound.** The seed transaction (`HydrationSeed`) runs `base { }`, then
+  restores the overlay as a savepoint (id `Restore`, which middleware sees),
+  then moves the phase to `Seeded`: all of it commits together, or none of
+  it. Only the entries of states and keyed families the store declares
+  `UserAuthored` are restored — after `migrate` has upcast an older blob
+  (§16.3), so a renamed state is restored under its new name — and a name
+  the store no longer declares is ignored. A blob holds no `Remote` state's
+  value, and a `Remote` or untagged state's text from another writer is never
+  restored — nor is an entry `migrate` renames into one, since names are
+  matched after it. The overlay replaces the live entries of each
+  `UserAuthored` keyed family the blob holds: an entry `base { }` created
+  (or restored) that the blob does not hold is evicted in the seed, so the
+  family holds the blob's keys and no others; a family the blob does not
+  list — one it skipped for want of a codec — keeps base's entries, and so
+  does every family when the blob is kept. A later seed of a loaded overlay
+  puts the held values back only into what `base { }` changed — the states
+  it wrote, the entries it evicted — and evicts the entries it created, so a
+  value a bridge delivered from another thread while the seed ran is kept.
+  What the store held before the first seed is not what the user authored,
+  and the seed puts the overlay over it: hydrate before the user edits.
+- **Outbound.** From the seed that loads it on, every commit that changes a
+  `UserAuthored` state, or evicts an entry of a `UserAuthored` family, is
+  written — an action's, a frame's, a `suspendAction`'s, a `reset()`'s, a
+  bridge's inbound value (one that lands while a seed runs, too) — except a
+  seed's own, which holds what the overlay (or `base { }`) put there. The
+  writer learns of a change from the commit's observer fanout, so a commit
+  whose fanout skips the overlay's observer is written only with the next
+  change of a `UserAuthored` state: one whose `Transformer.get` throws for
+  the new value (in a commit's fanout, or on a bridge's inbound value, which
+  then notifies no observer), or one where an earlier observer fails through
+  an `uncaughtObserverHandler` that throws, which ends the fanout. The blob
+  is exactly what `snapshot(SnapshotScope.UserAuthored).encode()` returns:
+  the R1 store envelope (§16.2) of the `UserAuthored` states. A state needs
+  a codec to be written
+  (`state(codec = …, tags = setOf(StateTag.UserAuthored))`): the blob lists
+  one without a codec as skipped, and a restore leaves it as it is. `Remote`
+  states are never written, and a `Secret` state cannot be `UserAuthored`.
+  (A `UserAuthored` state `removeState`/`clearStates` dropped and a read
+  brought back is watched again from the next seed.)
+- **The writer.** One coroutine at a time, launched on the store's
+  `Store.scope` — never the scope `hydrate()` was called with, so cancelling
+  that scope stops the refresh, never the writer. It coalesces: while it
+  writes, later commits wait for one more write, of the latest values, and it
+  skips a blob identical to the last one it put. Between bursts nothing of
+  it runs, so a scope has nothing of the overlay to wait for. It writes
+  behind the commit: a process that dies before the writer has run loses
+  that commit's change. `dispose()` stops it.
+- **A blob that cannot be applied is kept.** Text `StoreSnapshot.decode`
+  rejects, a snapshot of a newer schema than the store's (or one its
+  `migrate` throws on), or one the restore rejects (a type mismatch, a codec
+  that cannot decode an entry) is reported as an `OverlayException` through
+  the store's `uncaughtObserverHandler` — naming the store and the key, never
+  a value; its cause is the value-free `SnapshotFormatException`,
+  `SnapshotMigrationException` or `RestoreRejectedException` — and the seed
+  commits `base { }` without it. Nothing is written under the key until
+  `clearOverlay()` removes the blob, or a later seed (after `invalidate()`)
+  reads one it can apply; until then the user's changes live in memory only.
+- **A failing read** of the key makes `hydrate()` throw what the key-value
+  store threw, before anything is decided: the phase stays `Detached`, and
+  the next `hydrate()` reads again.
+- **Size.** A blob longer than `sizeLimit` characters — 8192 by default, the
+  most a `java.util.prefs` value holds — is reported and not written, so a
+  size-limited store never throws; the key keeps the last blob written. A
+  failing `put` is reported naming only the exception's class (a store's
+  message may quote the value it failed to write), and a write whose scope
+  was cancelled is reported too; the next change writes again. A capture or
+  codec that fails while writing (an initializer, or a `StateCodec.encode`,
+  that throws) is reported the same way — the codec's
+  `IllegalStateException` from `encode()` is the only cause chained — the
+  key keeps the last blob written, and the next change writes again. A
+  handler that throws for any of these reports is ignored. No report is made
+  while the hydration gate holds the store, so a handler may open an action
+  on it (inside a commit's fanout, where a writer a dispatcher runs inline
+  reports, a blocking action on the store returns an `Error`).
+- **`clearOverlay()`** removes the key and drops every write not made yet.
+  Nothing else stops and no state changes: the store keeps its values, the
+  phase stays as it is, and the next commit that changes a `UserAuthored`
+  state writes the blob again. A kept blob is gone with it, so the overlay
+  writes again. To forget what the user authored, `reset()` the store, then
+  `clearOverlay()`: the `UserAuthored` states hold their initial values and
+  the key is empty. The overlay stays loaded, so the seed that follows (the
+  `hydrate()` a `reset()` calls for) puts those initial values back over
+  `base { }`, where a fresh install shows base's own. A new process, finding
+  no blob, seeds `base { }` alone, so base's own `UserAuthored` values come
+  back only then — unless a commit that changes a `UserAuthored` state
+  writes the blob first. It takes the store under the hydration gate,
+  briefly, so it throws inside an action, frame or suspending entry, as
+  `hydrate()` does; once the key is removed, the rest runs even if the
+  caller is cancelled.
+- **The key is pinned.** It never derives from the store's class or state
+  names, so renaming either cannot orphan a blob. `overlayKey` returns it,
+  and so does the hydrator's store attachment for issue #21's self-check,
+  which will find two stores persisted under one key.
+- **Dispose.** After `dispose()`, `clearOverlay()` throws
+  `IllegalStateException` like the other entrypoints, and `overlayKey` keeps
+  answering.
 
 ---
 

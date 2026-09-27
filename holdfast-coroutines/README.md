@@ -49,7 +49,12 @@ class Hydrator<V : Store<V>> {
     fun invalidate(): TransactionResult<Unit>
     fun stageInvalidate()
     suspend fun awaitSettled(): Hydration
+    val overlayKey: String?                          // the persisted overlay's pinned key
+    suspend fun clearOverlay()                       // remove what the overlay wrote
 }
+// In hydrator { }: persist the store's UserAuthored states, put back over base { }.
+fun overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int = 8192)
+class OverlayException : IllegalStateException       // what the overlay reports; val key: String
 ```
 
 `asStateFlow`'s `scope` parameter defaults to the owning store's
@@ -110,6 +115,22 @@ wait for themselves.
 `Hydrator.state` is a read-only `State<Hydration>` of the store: observe it,
 or combine several stores' with `derivedState` for a health flag, with no
 cross-store frame.
+
+`overlay(kv, key)` in a hydrator's spec (experimental, issue #20's R8 and
+R3 — see the
+[GUIDE's §16.8](../holdfast/GUIDE.md#168-the-persisted-overlay-holdfast-coroutines))
+persists what the user authored: the store's `StateTag.UserAuthored` states
+(each with a codec), written under the pinned `key` of a `SuspendingKvStore`
+by a conflated writer on the store's `Store.scope` after every commit that
+changes one, as `snapshot(SnapshotScope.UserAuthored).encode()` — never a
+`Remote` or `Secret` state. The seed transaction puts them back after
+`base { }`, so the overlay wins over what base restored — replacing the
+entries of each `UserAuthored` keyed family it holds, so an entry the user
+evicted stays evicted — then the refresh runs. A blob the seed cannot apply — unreadable, of a newer schema, rejected
+by the restore — is reported as an `OverlayException` through the store's
+`uncaughtObserverHandler` and never written over, until `clearOverlay()`
+removes it; a blob longer than `sizeLimit` characters (8192 by default, the
+`java.util.prefs` limit) is reported and not written.
 
 ## Examples
 

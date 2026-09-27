@@ -9,10 +9,14 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
-/** The store every row runs against, with a hydrator. */
+/** The store every row runs against, with a hydrator and its persisted overlay. */
 private class DisposedProbe : Store<DisposedProbe>() {
     val remote by state(tags = setOf(StateTag.Remote)) { 0 }
-    val hydration = hydrator { refresh { 1 } adopt { remote mutate it } }
+    val hydration =
+        hydrator {
+            overlay(InMemorySuspendingKvStore(), "probe.overlay")
+            refresh { 1 } adopt { remote mutate it }
+        }
 }
 
 /** One `:holdfast-coroutines` entrypoint and a call to it on a disposed probe. */
@@ -39,6 +43,7 @@ class DisposedEntrypointTest {
             Entrypoint("Hydrator.stageInvalidate") { p -> p.hydration.stageInvalidate() },
             Entrypoint("Hydrator.awaitSettled") { p -> p.hydration.awaitSettled() },
             Entrypoint("hydrateEach") { p -> hydrateEach(p.hydration) },
+            Entrypoint("Hydrator.clearOverlay") { p -> p.hydration.clearOverlay() },
         )
 
     private val exempt =
@@ -47,6 +52,8 @@ class DisposedEntrypointTest {
             Entrypoint("Hydrator.state") { p -> p.hydration.state.value },
             Entrypoint("Hydrator.current") { p -> p.hydration.current },
             Entrypoint("Hydrator.toString") { p -> p.hydration.toString() },
+            // The pinned key: a constant of the hydrator.
+            Entrypoint("Hydrator.overlayKey") { p -> p.hydration.overlayKey },
         )
 
     @Test fun everyGatedEntrypointThrowsOnADisposedStore() {

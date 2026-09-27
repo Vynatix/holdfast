@@ -108,6 +108,9 @@ class DisposedEntrypointTest {
             Entrypoint("internalSealedState") { p, _ -> p.internalSealedState("probe", 0, "the probe's own") },
             Entrypoint("internalStageSealed") { p, _ -> p.internalStageSealed(checkNotNull(p.sealed), 1) },
             Entrypoint("internalTopLevelAction") { p, _ -> p.internalTopLevelAction("Probe") { } },
+            Entrypoint("internalRestoreTagged") { p, _ ->
+                p.internalRestoreTagged(StoreSnapshot(mapOf("n" to 1)), StateTag.UserAuthored, RestorePolicy.Strict)
+            },
         )
 
     private val exempt =

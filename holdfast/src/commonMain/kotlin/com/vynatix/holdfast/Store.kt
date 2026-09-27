@@ -411,7 +411,12 @@ abstract class Store<Self : Store<Self>> {
      *  - a `:holdfast-coroutines` hydration refresh whose outcome could not be
      *    recorded (a middleware rejected its `HydrationFailure` record too, or
      *    its settle threw): the hydration stays `Seeded` with nothing in
-     *    flight, and the next `hydrate()` retries it.
+     *    flight, and the next `hydrate()` retries it;
+     *  - what a `:holdfast-coroutines` hydrator's persisted overlay could not
+     *    do (an `OverlayException`): apply the blob it read — kept then, and
+     *    not written over — or write the store's `UserAuthored` states (a blob
+     *    over its size limit, a failing capture or codec, a failing `put`, a
+     *    cancelled scope).
      *
      * If null (the default), each failure is logged loudly instead: a line
      * naming this store, then the exception's stack trace — on standard error
@@ -437,7 +442,15 @@ abstract class Store<Self : Store<Self>> {
      * A hydration refresh's unrecorded outcome is reported on the refresh's
      * coroutine (the `hydrate()` call's `scope`) once the hydration gate has
      * released the store, holding no lock of it. A handler that throws there
-     * is ignored: the refresh is already stranded.
+     * is ignored: the refresh is already stranded. So is one that throws for
+     * an overlay's report, which is never made under the hydration gate: by
+     * the `hydrate()` whose seed read the blob once the gate has released the
+     * store, or by the overlay's writer — on the store's `scope`, holding no
+     * lock of the store, or inline where it was signalled on a dispatcher
+     * that runs it at once (such as `Dispatchers.Unconfined`): after a
+     * `hydrate()` or `clearOverlay()` has released the gate, or inside a
+     * commit's fanout, where a blocking action on the store returns an
+     * `Error`.
      *
      * A failed dispose notification is reported by [dispose] as its last step,
      * on the disposing thread, holding no lock `dispose()` took (but under any

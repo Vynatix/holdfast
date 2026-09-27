@@ -69,6 +69,12 @@ import kotlinx.coroutines.CoroutineScope
  *   stage [stageInvalidate] in the same action if its reset Remote states
  *   should be fetched again.
  * - **Adopt writes Remote only.** See [HydrationRefresh.adopt].
+ * - **The persisted overlay** ([HydrationSpec.overlay], optional) puts the
+ *   store's `StateTag.UserAuthored` states back in the seed transaction,
+ *   after `base { }` — base, then overlay, then refresh — and writes them
+ *   under its [overlayKey] after every commit that changes one (as its
+ *   observer fanout tells it), from the first seed on. [clearOverlay]
+ *   removes what it persisted.
  *
  * **Observing it.** [state] is a read-only state of the store: observe it with
  * `effect`, the coroutines flows or Compose, and use it as a source of a
@@ -85,17 +91,17 @@ import kotlinx.coroutines.CoroutineScope
  * them, once the transaction has returned; to detach inside an action, use
  * [stageInvalidate].
  *
- * After the store is disposed, [hydrate], [invalidate], [stageInvalidate]
- * and [awaitSettled] throw [IllegalStateException]; a refresh in flight is
- * cancelled and never adopted, and [state] and [current] keep their last
- * value.
+ * After the store is disposed, [hydrate], [invalidate], [stageInvalidate],
+ * [awaitSettled] and [clearOverlay] throw [IllegalStateException]; a refresh
+ * in flight is cancelled and never adopted, the overlay's writer stops, and
+ * [state], [current] and [overlayKey] keep answering.
  *
  * Experimental (issue #20, R8): new surface, which soaks for two minors
  * before it can be stabilized (ROADMAP principle 6).
  */
 @ExperimentalStoreApi
 class Hydrator<V : Store<V>> internal constructor(
-    private val engine: HydrationEngine<V, *>,
+    internal val engine: HydrationEngine<V, *>,
 ) {
     /**
      * The phase, as a read-only state of the store: observable, a valid
@@ -130,6 +136,11 @@ class Hydrator<V : Store<V>> internal constructor(
      * The wait for the store is polite — it never queues on the store's
      * serializer, and backs off in coroutine time, never through the store's
      * clock — and every decision holds the store only for its transaction.
+     * With a persisted overlay ([HydrationSpec.overlay]) that has not loaded
+     * yet, a call that will seed first reads the overlay's key, before it
+     * takes the store; a blob the seed cannot apply is reported through the
+     * store's `uncaughtObserverHandler` (a handler that throws there is
+     * ignored) and the seed commits without it.
      *
      * @throws IllegalStateException if the store is disposed; inside a state
      *   initializer, a schema migration or a derived state's compute; and
@@ -139,7 +150,8 @@ class Hydrator<V : Store<V>> internal constructor(
      *   `base { }`, a middleware rejecting it — the phase is unchanged, and
      *   nothing is launched; or a failure after the commit (an observer
      *   failing through a rethrowing `uncaughtObserverHandler`) — the phase
-     *   moved on, the refresh is launched, then this throws.
+     *   moved on, the refresh is launched, then this throws. Also what the
+     *   overlay's key-value store's `get` threw: nothing changed then.
      */
     suspend fun hydrate(scope: CoroutineScope = engine.store.scope) {
         engine.hydrate(scope)
@@ -190,6 +202,52 @@ class Hydrator<V : Store<V>> internal constructor(
      *   where it would wait for the transaction that waits for it.
      */
     suspend fun awaitSettled(): Hydration = engine.awaitSettled()
+
+    /**
+     * The key the persisted overlay ([HydrationSpec.overlay]) writes under,
+     * as pinned there; `null` when this hydrator has none. Keeps answering
+     * after the store is disposed.
+     */
+    val overlayKey: String? get() = engine.overlay?.key
+
+    /**
+     * Remove what the persisted overlay ([HydrationSpec.overlay]) wrote:
+     * `remove` its key from its key-value store, and drop every write not
+     * made yet. Nothing else stops, and no state changes: the store keeps
+     * its values — the `UserAuthored` ones included (to start them over too,
+     * `reset()` the store first, then clear: they then hold their initial
+     * values. The overlay stays loaded, so the seed that follows the reset
+     * puts those initial values back over `base { }`, not base's own. Base's
+     * `UserAuthored` values come back only in a new process, whose first
+     * seed finds no blob) — the phase stays as it is, and the next commit
+     * that changes a `UserAuthored` state writes the overlay again, from the
+     * store's values then. A blob the overlay could not apply — kept until
+     * now, never written over — is gone, so from here on the overlay writes
+     * again. Before the first seed, the next [hydrate] seeds without a blob.
+     *
+     * It takes the store under the hydration gate, briefly, once the key is
+     * removed, so it throws where [hydrate] does. Once the key is removed,
+     * that step runs even if the caller is cancelled, so the overlay's
+     * standing always follows the removal.
+     *
+     * Experimental (issue #20, R8 and R3).
+     *
+     * @throws IllegalStateException if the store is disposed; when this
+     *   hydrator has no overlay; inside a state initializer, a schema
+     *   migration or a derived state's compute; and inside an action, frame,
+     *   `suspendAction` or `suspendAtomic` of any store (see the class KDoc).
+     * @throws Throwable what the key-value store's `remove` threw: nothing
+     *   changed then.
+     */
+    suspend fun clearOverlay() {
+        check(!engine.store.isDisposed) { "store disposed" }
+        val overlay =
+            checkNotNull(engine.overlay) {
+                "hydrator.clearOverlay() on ${engine.storeName}: this hydrator has no overlay. Declare one in its " +
+                    "spec — hydrator { overlay(kv, key); … } — to persist the store's UserAuthored states."
+            }
+        overlay.clear()
+    }
 
     /** Names the store, never a value. */
     override fun toString(): String = "Hydrator(${engine.storeName}, ${engine.public.value::class.simpleName})"
@@ -266,10 +324,16 @@ suspend fun hydrateEach(vararg hydrators: Hydrator<*>) {
 /** Where a store keeps its hydrator: one per store. */
 private val HydratorKey = StoreAttachmentKey<HydratorAttachment>("hydrator")
 
-/** The hydrator's place in its store's attachments: told of the store's reset and dispose. */
+/**
+ * The hydrator's place in its store's attachments: told of the store's reset
+ * and dispose, and naming the key its overlay persists under (issue #21's
+ * self-check reads it).
+ */
 private class HydratorAttachment(
     val engine: HydrationEngine<*, *>,
 ) : StoreAttachment {
+    override val persistenceKeys: Set<String> get() = setOfNotNull(engine.overlay?.key)
+
     /** Inside the reset's transaction: initial values are not hydrated ones, so detach (plan deviation 8). */
     override fun onStoreReset() {
         engine.detach()

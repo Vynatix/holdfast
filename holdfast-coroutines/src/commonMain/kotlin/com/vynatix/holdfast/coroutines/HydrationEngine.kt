@@ -32,6 +32,14 @@ import kotlinx.coroutines.flow.update
 // restore captures or writes it, reset() only moves it to Detached (through
 // the hydrator's attachment, inside the reset's transaction), and every store
 // write entrypoint refuses it.
+//
+// A hydrator with an overlay (HydrationSpec.overlay; OverlayBinding.kt) reads
+// what the seed puts back BEFORE it takes the gate — the blob under the
+// overlay's key, suspending, outside every lock — and the seed transaction
+// restores it after `base { }`. A read the gate finds overtaken (the overlay
+// has stood anew since: another seed loaded it, clearOverlay() ran) is read
+// again before anything is decided. The overlay's report, and the signal that
+// lets its writer write, wait until the gate has released the store.
 
 /** The name [HydrationEngine.public] carries in messages and derived state names: `Store.hydration`. */
 internal const val HYDRATION_STATE_NAME = "hydration"
@@ -49,14 +57,22 @@ private class RunningRefresh(
 )
 
 /**
- * What a decision committed to: the refresh to launch, and what its
+ * What a decision committed to: the refresh to launch, what its
  * transaction's fanout failed with after the commit applied, if anything
- * (an observer failing through a rethrowing `uncaughtObserverHandler`).
+ * (an observer failing through a rethrowing `uncaughtObserverHandler`), and
+ * where its seed left the overlay: the report of a blob it could not apply,
+ * or whether it stands LOADED, so its writer is signalled.
  */
 private class Decision(
     val refresh: Long,
     val fanoutFailure: Throwable?,
-)
+    val overlay: OverlaySettled = OverlaySettled.NONE,
+) {
+    companion object {
+        /** No decision: the overlay read before the gate was overtaken, so read it again first. */
+        val REREAD = Decision(0L, null)
+    }
+}
 
 /**
  * The machinery behind one store's [Hydrator]: see the top of this file, and
@@ -77,6 +93,10 @@ internal class HydrationEngine<V : Store<V>, F>(
         store.internalSealedState(HYDRATION_STATE_NAME, Hydration.Detached, sealedRefusal(storeName))
 
     val gate = HydrationGate(store)
+
+    /** The persisted overlay ([HydrationSpec.overlay]), or `null` when the hydrator has none. */
+    val overlay: OverlayBinding<V>? = plan.overlay?.let { OverlayBinding(store, it, gate, storeName) }
+
     val hydrator = Hydrator(this)
 
     /** Numbers each refresh a decision launches, so a stale one is told from the one in flight. */
@@ -115,21 +135,48 @@ internal class HydrationEngine<V : Store<V>, F>(
     suspend fun hydrate(scope: CoroutineScope) {
         check(!store.isDisposed) { "store disposed" }
         refuseInsideEntry(store, "hydrate()", ::insideEntryMessage)
-        // A committed phase that decides nothing needs no gate: the call is
-        // ordered as if it ran before whatever commits next. (A phase staged
-        // by a transaction parked on this thread can only be a detach, which
-        // decides: the gate then reads the committed one.)
-        if (!phase.value.decides(stranded.value)) return
-        val decision = gate.hold { decide() } ?: return
-        HydrationRefreshRun(this, decision.refresh).start(scope)
-        decision.fanoutFailure?.let { throw it }
+        var inbound: OverlayInbound? = null
+        var decision: Decision? = Decision.REREAD
+        while (decision === Decision.REREAD) {
+            // A committed phase that decides nothing needs no gate: the call is
+            // ordered as if it ran before whatever commits next. (A phase staged
+            // by a transaction parked on this thread can only be a detach, which
+            // decides: the gate then reads the committed one.)
+            if (!phase.value.decides(stranded.value)) return
+            // What a seed would put back, read outside the gate.
+            if (overlay != null && phase.value == HydrationPhase.Detached) inbound = overlay.current(inbound)
+            decision = gate.hold { decide(inbound) }
+        }
+        val decided = decision ?: return
+        // Once the gate has released the store: the handler — and the writer,
+        // which a dispatcher may run inline here — may open an action on it.
+        decided.overlay.failure?.let { store.reportOverlay(it) }
+        if (decided.overlay.loaded) overlay?.writer?.signalIfBehind()
+        HydrationRefreshRun(this, decided.refresh).start(scope)
+        decided.fanoutFailure?.let { throw it }
     }
 
     /**
-     * Under the gate: seed a detached store, or retry a failed (or stranded)
-     * refresh, committing the in-flight mark in the same transaction, and
-     * return the decision — the new refresh's number; `null` when the phase
-     * decides nothing.
+     * Under the gate: seed a detached store — putting back [inbound], the
+     * overlay read before the gate, unless it was overtaken
+     * ([Decision.REREAD]) — or retry a failed (or stranded) refresh; `null`
+     * when the phase decides nothing. See [commit].
+     */
+    private fun decide(inbound: OverlayInbound?): Decision? {
+        val seen = phase.value
+        return when {
+            seen == HydrationPhase.Detached ->
+                if (overlay?.isCurrent(inbound) == false) Decision.REREAD else commit(seen, SEED_ID, inbound)
+            seen.decides(stranded.value) -> commit(seen, RETRY_ID, inbound = null)
+            else -> null
+        }
+    }
+
+    /**
+     * Under the gate: commit the decision [id] on the phase [seen] — the
+     * seed (`base { }`, then the overlay's [inbound]) or the retry — with the
+     * in-flight mark in the same transaction, and return it: the new
+     * refresh's number; `null` when the transaction found the phase moved.
      *
      * The transaction re-reads the phase once it holds the store's
      * transaction lock: the gate's serializer keeps out every holder but a
@@ -146,37 +193,51 @@ internal class HydrationEngine<V : Store<V>, F>(
      * its refresh is returned with that failure, for [hydrate] to launch and
      * then throw — as `action` reports an error while its values stay applied.
      *
+     * The overlay stands where the seed left it only when the seed's commit
+     * applied ([OverlayBinding.settle]); its report of a blob it could not
+     * apply, or that it stands LOADED, is returned with the decision, for
+     * [hydrate] to report, or to signal the writer, once the gate has
+     * released the store.
+     *
      * @throws Throwable what the deciding transaction failed with when it
      *   rolled back (a throwing `base { }`, a middleware rejecting it):
      *   nothing is launched.
      */
-    private fun decide(): Decision? {
-        val seen = phase.value
-        val id =
-            when {
-                seen == HydrationPhase.Detached -> SEED_ID
-                seen.decides(stranded.value) -> RETRY_ID
-                else -> return null
-            }
+    private fun commit(
+        seen: HydrationPhase,
+        id: String,
+        inbound: OverlayInbound?,
+    ): Decision? {
         var decided = 0L
+        var load: OverlayLoad<V>? = null
         val result =
             store.internalTopLevelAction(id) {
                 if (phase.value != seen) return@internalTopLevelAction null
-                if (seen == HydrationPhase.Detached) plan.base(this)
+                if (seen == HydrationPhase.Detached) {
+                    // Base, then the overlay, in this one transaction: the
+                    // overlay wins over whatever base wrote or restored.
+                    val opened = inbound?.let { overlay?.open(it) }
+                    load = opened
+                    plan.base(this)
+                    opened?.apply()
+                }
                 val refresh = refreshes.incrementAndGet()
                 decided = refresh
                 stagePhase(HydrationPhase.Seeded(refresh))
                 refresh
             }
-        return when (result) {
-            is TransactionResult.Success -> result.value?.let { Decision(it, fanoutFailure = null) }
-            // No transaction of this thread is open here, so this reads the
-            // committed phase: Seeded(decided) only if the commit applied,
-            // since the number is new.
-            is TransactionResult.Error -> {
-                if (decided == 0L || !isInFlight(decided)) throw result.exception
-                Decision(decided, result.exception)
+        // No transaction of this thread is open here, so this reads the
+        // committed phase: Seeded(decided) only if the commit applied, since
+        // the number is new.
+        val applied =
+            when (result) {
+                is TransactionResult.Success -> result.value != null
+                is TransactionResult.Error -> decided != 0L && isInFlight(decided)
             }
+        val settled = load?.let { checkNotNull(overlay).settle(it, applied) } ?: OverlaySettled.NONE
+        return when {
+            !applied -> if (result is TransactionResult.Error) throw result.exception else null
+            else -> Decision(decided, (result as? TransactionResult.Error)?.exception, settled)
         }
     }
 
@@ -261,10 +322,14 @@ internal class HydrationEngine<V : Store<V>, F>(
         if (next == HydrationPhase.Detached) running.getAndSet(null)?.job?.cancel()
     }
 
-    /** The store was disposed: stop the refresh in flight, and release [awaitSettled]'s waiters. */
+    /**
+     * The store was disposed: stop the refresh in flight and the overlay's
+     * writer, and release [awaitSettled]'s waiters.
+     */
     fun onDisposed() {
         committed.value = null
         running.getAndSet(null)?.job?.cancel()
+        overlay?.onDisposed()
     }
 }
 

@@ -8,6 +8,95 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Persisted `UserAuthored` overlay** (experimental, issue #20, R8 and R3;
+  plan PR 14): `overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int =
+  8192)` in a hydrator's spec persists what the user authored — the store's
+  `StateTag.UserAuthored` states and keyed families — under one pinned key,
+  and puts it back in the seed transaction. New surface: `HydrationSpec.overlay`,
+  `Hydrator.overlayKey`, `Hydrator.clearOverlay()` and `OverlayException`;
+  the hydrator's store attachment names the key in `persistenceKeys` (for
+  issue #21's self-check).
+  - Inbound, R8's ordering — base, then overlay, then refresh: the first
+    `hydrate()` that seeds reads the key (suspending, before it takes the
+    store, outside every lock), and the seed transaction (`HydrationSeed`)
+    runs `base { }`, then restores the blob as a savepoint (id `Restore`),
+    then moves to `Seeded` — one commit, in which the overlay wins over
+    anything `base { }` wrote or restored. Only the entries of states and
+    families declared `UserAuthored` are restored (core's new
+    `internalRestoreTagged`), after the store's `migrate` upcast an older
+    blob; unknown names are ignored. The blob replaces the live entries of
+    each `UserAuthored` keyed family it holds: an entry `base { }` created
+    that the blob does not hold is evicted in the seed, so an entry the user
+    evicted never comes back from base's seed data (a family the blob does
+    not list, and every family of a blob that is kept, keeps base's
+    entries). Once loaded, later seeds (after `invalidate()` or `reset()`)
+    put back the `UserAuthored` values the store held when they began,
+    captured in the seed transaction, without reading the key — a read could
+    miss a write still in flight and put an older blob over the user's
+    latest — into what `base { }` changed (the states it wrote, the entries
+    it evicted; the entries it created are evicted), so a value a bridge
+    delivered from another thread meanwhile is kept. A read the gate finds
+    overtaken (a `clearOverlay()` ran meanwhile) is read again before
+    anything is decided. A failing `get` makes `hydrate()` throw it, with
+    nothing changed.
+  - Outbound: from the seed that loads it on, every commit that changes a
+    `UserAuthored` state (or evicts an entry of a `UserAuthored` family) —
+    except a seed's own — is written by a conflated writer launched on the
+    store's `Store.scope`, never the scope `hydrate()` was called with: it
+    encodes `snapshot(SnapshotScope.UserAuthored)` — exactly the R1 store
+    envelope, so `Remote` states are never written and `Secret` ones cannot
+    be `UserAuthored` — and puts it under the key; commits during a write
+    cost one more write, of the latest values, and an identical blob is not
+    put again. No coroutine of it runs between bursts; `dispose()` stops it.
+    An encrypted (`EncryptingTransformer`) state is written as its ciphertext
+    and restored without being encrypted twice. A bridge's inbound value
+    from another thread while a seed runs is written too; only the seed's
+    own commit, on its own thread, is not. The writer learns of a change
+    from the commit's observer fanout, so a commit whose fanout skips the
+    overlay's observer — a `Transformer.get` that throws for the new value
+    (in a commit's fanout, or on a bridge's inbound value, which then
+    notifies no observer), an earlier observer failing through an
+    `uncaughtObserverHandler` that throws, which ends the fanout — is written
+    only with the next change of a `UserAuthored` state.
+  - Poisoned blobs are never overwritten: text `StoreSnapshot.decode`
+    rejects, a newer schema (or a throwing `migrate`), or a blob the restore
+    rejects is reported as an `OverlayException` through the store's
+    `uncaughtObserverHandler` (logged while none is set) — naming the store
+    and key, never a value; the cause is chained only when it is one of
+    Holdfast's value-free exceptions — the seed commits `base { }` without
+    it, and nothing is written under the key until `clearOverlay()` removes
+    it or a later seed applies a blob.
+  - A blob longer than `sizeLimit` characters (default 8192, the
+    `java.util.prefs` value limit) is reported and not written, so a
+    size-limited store never throws; a failing `put` is reported naming the
+    exception's class only, a capture or codec that fails while writing (an
+    initializer, or a `StateCodec.encode`, that throws) is reported (the
+    codec's `IllegalStateException` from `encode()` is the only cause
+    chained) with the key keeping the last blob written, and a writer whose
+    scope was cancelled is reported; the next change writes again. A handler
+    that throws for any of these reports is ignored. No report is made, and
+    the writer is never signalled, while the hydration gate holds the store:
+    a writer a dispatcher runs inline (`Dispatchers.Unconfined`,
+    `Dispatchers.Main.immediate`) may report to a handler that opens an
+    action on the store.
+  - `clearOverlay()` removes the key and drops every write not made yet; no
+    state and no phase changes, the next change writes again, and a kept blob
+    is gone with it. It takes the store under the hydration gate, so it
+    throws inside an action, frame or suspending entry, like `hydrate()`;
+    once the key is removed, the rest runs even if the caller is cancelled.
+    `reset()` then `clearOverlay()` leaves the `UserAuthored` states at their
+    initial values and the key empty; the overlay stays loaded, so the next
+    seed in that process puts those initial values back over `base { }`,
+    and base's own come back only in a new process, whose first seed finds
+    no blob.
+  - A store whose `UserAuthored` states include a `Secret` one is refused at
+    the seed; no store reaches that check, since declarations refuse the
+    pairing (a state's tags and a keyed family's).
+  `HydrationOverlayTest`, `HydrationOverlayWriteTest` and
+  `DisposedEntrypointTest` rows (common), and the watchdogged
+  `HydrationOverlayConcurrencyTest` (JVM and Android host) pin it. iOS
+  unverified until a macOS run.
+
 - **Hydration lifecycle** (experimental, issue #20, R8; plan PR 13, decision
   D19): `val hydration = hydrator { base { … }; refresh { store -> … } adopt
   { fetched -> … } }` gives a store its one `Hydrator<V>`, attached through
@@ -83,7 +172,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Deviations from #20's sketch (plan deviation 8): `hydrate { }:
     State<Hydration>` became `hydrator { }: Hydrator<V>`, `Failed(cause: Any)`
     became `Failed(cause: Throwable)`, `reset()` detaches too, and
-    `hydrateAll()` waits for #21. The persisted overlay is the next PR.
+    `hydrateAll()` waits for #21. The persisted overlay is its own entry,
+    above.
   `HydrationLifecycleTest`, `HydrationInvalidateTest`,
   `HydrationAdoptPolicyTest`, `HydrationFanoutFailureTest`,
   `HydrationHealthFlagTest`, `HydrationClockTest`, `HydrationDisposeTest` and

@@ -17,13 +17,19 @@ package com.vynatix.holdfast
 // fails, at its initial value, as a state the plan materialized does.
 //
 // A sterile restore drops a Remote family's entries, and resets the family's
-// live entries instead (Reset.kt).
+// live entries instead (Reset.kt). A restore limited to a tag
+// (internalRestoreTagged, RestorePlanner.kt) is the one that evicts: it
+// replaces each family it plans without an issue, so this planner records the
+// keys the snapshot holds for each.
 
 /**
  * Plans the keyed state families of one restore into [store], adding to the
  * enclosing plan's [writes], [written] entries (by family and key),
  * [restored] names and [issues]. [trusted]: the snapshot was captured by an
- * instance of the store's class, so no type witness runs.
+ * instance of the store's class, so no type witness runs. [accepts]: whether
+ * a value may be planned into an entry (a restore limited to targets).
+ * [replaced]: for a restore limited to a tag, where each family planned
+ * without an issue goes, with the keys the snapshot holds for it.
  */
 internal class KeyedRestorePlanner(
     private val store: Store<*>,
@@ -33,6 +39,8 @@ internal class KeyedRestorePlanner(
     private val written: MutableSet<Pair<KeyedFamily<*, *>, Any>>,
     private val restored: MutableSet<String>,
     private val issues: MutableList<RestoreIssue>,
+    private val accepts: (StateDeclaration<*>) -> Boolean = { true },
+    private val replaced: MutableMap<KeyedFamily<*, *>, Set<Any>>? = null,
 ) {
     /** Plan the captured family [name]: create its missing entries, and check and plan each value. */
     fun planCaptured(
@@ -40,12 +48,15 @@ internal class KeyedRestorePlanner(
         family: CapturedFamily,
     ) {
         val target = target(name) ?: return
+        val issuesBefore = issues.size
         for ((key, raw) in family.entries) {
             val decl = entryFor(target, key)
+            if (!accepts(decl)) continue
             val mismatch =
                 if (trusted) null else typeMismatch(name, raw, checkNotNull(decl.materialized).rawCurrentValue)
             if (mismatch != null) issues += mismatch else write(decl, raw)
         }
+        noteListed(target, family.entries.keys, issuesBefore)
     }
 
     /**
@@ -58,30 +69,54 @@ internal class KeyedRestorePlanner(
         entries: Map<String, String?>,
     ) {
         val target = target(name) ?: return
+        val issuesBefore = issues.size
+        val keys = HashSet<Any>()
         val keyCodec = target.spec.keyCodec
         when {
             keyCodec == null -> if (entries.isNotEmpty()) issues += RestoreIssue.Undecodable(name, NO_KEY_CODEC)
             target.spec.codec == null && entries.values.any { it != null } -> issues += RestoreIssue.NoCodec(name)
-            else -> entries.forEach { (encodedKey, text) -> planDecodedEntry(name, target, keyCodec, encodedKey, text) }
+            else ->
+                entries.forEach { (encodedKey, text) ->
+                    planDecodedEntry(name, target, keyCodec, encodedKey, text)?.let { keys += it }
+                }
         }
+        noteListed(target, keys, issuesBefore)
     }
 
-    /** One decoded entry: its key decoded (a failure is an issue), its entry created, its value planned. */
+    /**
+     * For a restore that replaces families: [target] holds [keys] once
+     * restored — unless planning it raised an issue (the issues numbered
+     * [issuesBefore] on), which leaves the family as it is.
+     */
+    private fun noteListed(
+        target: KeyedFamily<*, *>,
+        keys: Set<Any>,
+        issuesBefore: Int,
+    ) {
+        if (replaced != null && issues.size == issuesBefore) replaced[target] = keys
+    }
+
+    /**
+     * One decoded entry: its key decoded (a failure is an issue), its entry
+     * created, its value planned. Returns the key, or `null` when it cannot
+     * be decoded.
+     */
     private fun planDecodedEntry(
         name: String,
         target: KeyedFamily<*, *>,
         keyCodec: StateCodec<*>,
         encodedKey: String,
         text: String?,
-    ) {
+    ): Any? {
         val key = runCatching { keyCodec.decode(encodedKey) }
         val failure = key.exceptionOrNull()
         if (failure != null) {
             issues += RestoreIssue.Undecodable(name, "an entry's key cannot be decoded: ${threw(failure, KEYS)}")
-        } else {
-            val decl = entryFor(target, key.getOrThrow())
-            if (text != null) planDecodedValue(name, decl, text)
+            return null
         }
+        val decl = entryFor(target, key.getOrThrow())
+        if (text != null && accepts(decl)) planDecodedValue(name, decl, text)
+        return key.getOrThrow()
     }
 
     private fun planDecodedValue(
