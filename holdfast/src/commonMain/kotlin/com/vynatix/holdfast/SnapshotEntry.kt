@@ -61,14 +61,18 @@ private fun <T : Any> readableState(state: State<T>): MutableState<T> {
     @Suppress("UNCHECKED_CAST")
     val readable = state as? MutableState<T>
     // A DerivedState's backing (handed out by a timeline's EmissionEvent,
-    // say) has a declaration too, but no store registers it.
+    // say), and a sealed state (a hydrator's phase), have a declaration too,
+    // but no store registers them: a lookup by name could find another state.
     val decl = readable?.declaration
-    require(readable != null && decl != null && decl.kind != StateKind.ReadOnlyDerived) {
+    require(
+        readable != null && decl != null && decl.kind != StateKind.ReadOnlyDerived && decl.kind != StateKind.Sealed,
+    ) {
         "Cannot read this State from a snapshot: a snapshot holds the states a store declares " +
             "(`val x by state { … }` and the entries of `val x by keyedState { … }`) and the states of derived(...), " +
             "and this State is none of those — a computed { } " +
-            "state, for example, is recomputed on every read and has no value of its own to capture, and a " +
-            "derivedState(...) or merged(...) state is recomputed from its sources: read those instead."
+            "state, for example, is recomputed on every read and has no value of its own to capture, a " +
+            "derivedState(...) or merged(...) state is recomputed from its sources: read those instead, and a " +
+            "hydrator's state is the hydrator's own bookkeeping, which no snapshot captures."
     }
     return readable
 }

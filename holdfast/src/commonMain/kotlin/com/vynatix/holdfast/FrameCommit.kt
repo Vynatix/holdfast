@@ -12,7 +12,8 @@ import kotlin.coroutines.cancellation.CancellationException
 // write to its state inside one write bracket (ConsistentRead.kt), running no
 // user code but a `distinct` state's `equals`. The FANOUT pass then notifies
 // observers, publishes to bridges and drains events — the per-store contract
-// observers → bridge publish → events. A single transaction runs the two back
+// observers → bridge publish → events, the sealed states' observers
+// (SealedStates.kt) before any other's. A single transaction runs the two back
 // to back (Transaction.commitDispatching). A frame (`atomic`/`suspendAtomic`)
 // applies EVERY participant first, inside one bracket spanning all their
 // top-level transactions' states, and only then fans each participant out, in
@@ -237,10 +238,19 @@ private fun Transaction.mergeIntoParent(): Throwable? {
  * entries it evicted are shut down — their observers dropped, bridges
  * detached and `observeFrom` subscriptions disposed, silently — and their
  * families' membership listeners told ([shutDownEvicted]); then [fanout] with
- * every write that changed a state (observers, then bridge publishes), then
- * the staged events — through [drainEvents] when given, else `tryEmit` — then
- * Committed. A no-op for a transaction with no apply result: a savepoint, one
- * not applied, or one already fanned out.
+ * the writes that changed a SEALED state (SealedStates.kt); then what a
+ * shutdown threw is reported ([reportShutdownFailures]); then [fanout] with
+ * every other write that changed a state; then the staged events — through
+ * [drainEvents] when given, else `tryEmit` — then Committed. Each [fanout]
+ * call notifies observers, then publishes to bridges (a sealed state has no
+ * bridge), each in pending-write order. A no-op for a transaction with no
+ * apply result: a savepoint, one not applied, or one already fanned out.
+ *
+ * Sealed states go first because their owner keeps its bookkeeping in their
+ * observers (a hydrator mirrors its committed phase there): run before
+ * anything a rethrowing `uncaughtObserverHandler` can end the fanout with —
+ * a user observer, a bridge publish, a shutdown's `dispose` — they see every
+ * commit that applied.
  *
  * Runs outside every internal lock, with [Transaction.fanoutThreadId] naming
  * this thread. The transaction refuses writes throughout (see
@@ -259,8 +269,11 @@ fun Transaction.fanOutApplied(
     fanoutThreadId = currentThreadId()
     val failure =
         runCatching {
-            if (writes.evicted.isNotEmpty()) shutDownEvicted(writes.evicted)
-            if (writes.committed.isNotEmpty()) fanout(writes.committed)
+            val shutdownFailures = if (writes.evicted.isEmpty()) emptyList() else shutDownEvicted(writes.evicted)
+            val (sealed, others) = writes.committed.sealedFirst()
+            if (sealed.isNotEmpty()) fanout(sealed)
+            reportShutdownFailures(shutdownFailures)
+            if (others.isNotEmpty()) fanout(others)
             // Events drain AFTER observer fanout and AFTER bridge publishes: a
             // collector subscribed to both `state.asFlow()` and `store.events`
             // sees the state value before the event. Sync `commit()` cannot

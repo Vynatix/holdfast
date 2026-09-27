@@ -407,7 +407,11 @@ abstract class Store<Self : Store<Self>> {
      *    rejecting it: rolled back, and the derived keeps its value until the
      *    next source commit;
      *  - a throwing `onStoreDisposed` of library machinery attached to the
-     *    store (an `@StoreInternalApi` [StoreAttachment]), told by [dispose].
+     *    store (an `@StoreInternalApi` [StoreAttachment]), told by [dispose];
+     *  - a `:holdfast-coroutines` hydration refresh whose outcome could not be
+     *    recorded (a middleware rejected its `HydrationFailure` record too, or
+     *    its settle threw): the hydration stays `Seeded` with nothing in
+     *    flight, and the next `hydrate()` retries it.
      *
      * If null (the default), each failure is logged loudly instead: a line
      * naming this store, then the exception's stack trace — on standard error
@@ -429,6 +433,11 @@ abstract class Store<Self : Store<Self>> {
      * on another holder's thread, or inline in the observer fanout of a source
      * on another store. There, a throwing handler fails no action: the drain
      * swallows it, or the source's store reports it as that observer's failure.
+     *
+     * A hydration refresh's unrecorded outcome is reported on the refresh's
+     * coroutine (the `hydrate()` call's `scope`) once the hydration gate has
+     * released the store, holding no lock of it. A handler that throws there
+     * is ignored: the refresh is already stranded.
      *
      * A failed dispose notification is reported by [dispose] as its last step,
      * on the disposing thread, holding no lock `dispose()` took (but under any
@@ -628,8 +637,12 @@ abstract class Store<Self : Store<Self>> {
      * which runs once that entry has released everything it took — this
      * function after it ran, and after it backed out busy from a serializer or
      * lock it took (unless the store has another holder by then, which drains
-     * instead), and `:holdfast-testing`'s open-transaction commit, rollback and
-     * body-throw cleanup. The queue write happens before the busy retry, and that
+     * instead), `:holdfast-coroutines`' hydration gate (a hydrator's decision,
+     * seed, adopt or failure transaction, which [internalTopLevelAction] runs
+     * while the gate holds the serializer) once it has released the
+     * serializer, on every exit, and `:holdfast-testing`'s open-transaction
+     * commit, rollback and body-throw cleanup. The queue write happens before
+     * the busy retry, and that
      * holder's drain after it releases, so the drain sees the task. [dispose]
      * holds the lock only to empty the active-transaction slot, then drains
      * the queue too: it can hold the recomputes of derived states hosted on
@@ -1003,8 +1016,11 @@ abstract class Store<Self : Store<Self>> {
      * [action] turns observer nesting away before this, so this is the backstop
      * for any other route into a finished transaction (e.g. one committed by
      * hand).
+     *
+     * `internal` for [internalTopLevelAction], whose caller already holds the
+     * store.
      */
-    private fun <R> runTransaction(
+    internal fun <R> runTransaction(
         id: String,
         body: Self.() -> R,
     ): TransactionResult<R> {
@@ -1230,8 +1246,9 @@ abstract class Store<Self : Store<Self>> {
      * On detach, the previous bridge's inbound observer is disposed.
      *
      * @throws IllegalStateException for a [DerivedState] ([derivedState],
-     *   [merged]), which is read-only, and for an evicted keyed entry's stale
-     *   handle.
+     *   [merged]), which is read-only, for an evicted keyed entry's stale
+     *   handle, and for a hydrator's `state` (`:holdfast-coroutines`), which
+     *   only the hydrator writes.
      */
     infix fun <T : Any> State<T>.bridge(bridge: Bridge<T>?) {
         checkNotDisposed()
@@ -1248,8 +1265,9 @@ abstract class Store<Self : Store<Self>> {
      * disposes the subscription too.
      *
      * @throws IllegalStateException for a [DerivedState] ([derivedState],
-     *   [merged]), which is read-only, and for an evicted keyed entry's stale
-     *   handle.
+     *   [merged]), which is read-only, for an evicted keyed entry's stale
+     *   handle, and for a hydrator's `state` (`:holdfast-coroutines`), which
+     *   only the hydrator writes.
      */
     infix fun <T : Any> State<T>.observeFrom(observable: Observable<T>): Disposable {
         checkNotDisposed()
@@ -1302,8 +1320,10 @@ abstract class Store<Self : Store<Self>> {
      *   a state initializer (see [state]), a schema migration
      *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
      *   recompute: all three may read states but not write. And for a
-     *   [DerivedState] ([derivedState], [merged]), which is read-only, and
-     *   for the stale handle of an evicted keyed-state entry ([keyedState]).
+     *   [DerivedState] ([derivedState], [merged]), which is read-only, for
+     *   the stale handle of an evicted keyed-state entry ([keyedState]), and
+     *   for a state library machinery keeps sealed — a `:holdfast-coroutines`
+     *   hydrator's `state`, which only the hydrator writes.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         val state = writableState()
@@ -1437,7 +1457,10 @@ abstract class Store<Self : Store<Self>> {
      * brings to life), holds it: once a reset has
      * decided a state's value — staged it, or left it because it already held
      * its reset value — it holds the state until its transaction (or the
-     * action or frame it joined) commits or rolls back.
+     * action or frame it joined) commits or rolls back. Also thrown from inside
+     * a transaction whose library machinery forbids it: a `:holdfast-coroutines`
+     * hydrator's `adopt { }`, whose rollback could not bring a dropped state
+     * back.
      */
     fun removeState(name: String) {
         checkNotDisposed()
@@ -1464,7 +1487,8 @@ abstract class Store<Self : Store<Self>> {
      *
      * Throws [IllegalStateException] if any state has pending writes in the
      * active transaction or one enclosing it, or while an open experimental
-     * [reset] or sterile [restore] holds one (see [removeState]).
+     * [reset] or sterile [restore] holds one, or from inside a hydrator's
+     * `adopt { }` (see [removeState]).
      */
     fun clearStates() {
         checkNotDisposed()
@@ -1485,6 +1509,7 @@ abstract class Store<Self : Store<Self>> {
         name: String,
     ) {
         val active = _activeTransaction ?: return
+        active.refuseStructuralWriteHere(this, name)
         var txn: Transaction? = active
         while (txn != null) {
             if (state in txn.pendingWrites) {

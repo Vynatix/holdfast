@@ -46,6 +46,16 @@ internal enum class StateKind {
      * family and key.
      */
     Keyed,
+
+    /**
+     * A state library machinery keeps for itself (`internalSealedState`,
+     * SealedStates.kt) — `:holdfast-coroutines`' hydrator keeps its phase in
+     * two. Never registered, like a [ReadOnlyDerived] backing: no registry,
+     * snapshot, restore or reset sees it. Sealed: every store write entrypoint
+     * refuses it with its owner's teaching message ([MutableState.writeSeal]),
+     * and only its owner stages it (`internalStageSealed`).
+     */
+    Sealed,
 }
 
 /**
@@ -57,7 +67,8 @@ internal enum class StateKind {
  * registry. The exception is a [StateKind.ReadOnlyDerived] declaration, which
  * only names and tags a `DerivedState`'s backing state: `createDerivedState`
  * sets it on a MutableState it builds by hand, it is never in the registry,
- * and its [materialized] stays `null`. A [StateKind.Keyed] declaration is not
+ * and its [materialized] stays `null` — and, the same way, a
+ * [StateKind.Sealed] one, which `internalSealedState` sets. A [StateKind.Keyed] declaration is not
  * in the registry either: its family holds it while the entry is live, and
  * drops it when the entry is evicted (KeyedRegistry.kt).
  *
@@ -249,4 +260,5 @@ internal fun StateKind.describe(): String =
         StateKind.Internal -> "internal state"
         StateKind.ReadOnlyDerived -> "derived state (derivedState or merged)"
         StateKind.Keyed -> "keyed state entry"
+        StateKind.Sealed -> "sealed state (library machinery's own, such as a hydrator's phase)"
     }

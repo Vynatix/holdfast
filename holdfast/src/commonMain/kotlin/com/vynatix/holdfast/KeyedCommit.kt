@@ -25,8 +25,10 @@ package com.vynatix.holdfast
 // The fanout pass then starts by shutting the evicted entries down —
 // observers dropped, bridge detached, `observeFrom` subscriptions disposed,
 // no notification — and telling the membership listeners, before any
-// observer of the commit runs. Nothing else changes for the entries that
-// stay: their observers and bridges are untouched.
+// observer of the commit runs. What a shutdown threw is reported once the
+// sealed states' observers have run, before any other observer (see
+// fanOutApplied). Nothing else changes for the entries that stay: their
+// observers and bridges are untouched.
 
 /**
  * The states this top-level transaction's apply pass writes: its pending
@@ -67,22 +69,29 @@ internal fun Transaction.mergeEvictionsInto(parent: Transaction) {
 
 /**
  * The first step of an evicting commit's fanout: shut every entry in
- * [evicted] down silently, tell each family's membership listeners, then
- * report what a shutdown threw (a bridge's or an `observeFrom` subscription's
- * `dispose`) through its store's `uncaughtObserverHandler` — every entry is
- * shut down before the first report, so a throwing handler, which ends the
- * fanout like any fanout failure, leaves none running.
+ * [evicted] down silently and tell each family's membership listeners.
+ * Returns what a shutdown threw (a bridge's or an `observeFrom`
+ * subscription's `dispose`), for [reportShutdownFailures] — the fanout
+ * reports it once the sealed states' observers have run (FrameCommit.kt).
+ * Every entry is shut down before the first report, so a throwing handler,
+ * which ends the fanout like any fanout failure, leaves none running.
  */
-internal fun shutDownEvicted(evicted: List<MutableState<*>>) {
+internal fun shutDownEvicted(evicted: List<MutableState<*>>): List<Pair<MutableState<*>, Throwable>> {
     val failures =
         evicted.mapNotNull { state -> runCatching { state.shutdownSilently() }.exceptionOrNull()?.let { state to it } }
     for (state in evicted) keyedRegistryOf(state).announceEvicted(state)
+    return failures
+}
+
+/** Report what [shutDownEvicted] caught through each store's `uncaughtObserverHandler` (a throwing one propagates). */
+internal fun reportShutdownFailures(failures: List<Pair<MutableState<*>, Throwable>>) {
     for ((state, failure) in failures) state.owningStore.internalReportUncaughtFailure(failure)
 }
 
 /**
  * Refuse a write to [state] that no write may reach: a derived state's
- * ([refuseDerivedStateWrite]), or an evicted keyed entry's stale handle.
+ * ([refuseDerivedStateWrite]), an evicted keyed entry's stale handle, or a
+ * sealed state's ([refuseSealedWrite]).
  *
  * @throws IllegalStateException naming the state (never a key) and the fix.
  */
@@ -90,6 +99,7 @@ internal fun refuseUnwritable(state: State<*>) {
     refuseDerivedStateWrite(state)
     val entry = state as? MutableState<*> ?: return
     check(!entry.retired) { staleEntryMessage(entry) }
+    refuseSealedWrite(entry)
 }
 
 /** The keyed state families of [state]'s store. */
