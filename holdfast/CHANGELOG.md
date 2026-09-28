@@ -1512,6 +1512,48 @@ described here.
   reader cuts (never a mix), keyed churn, root dispose during capture, the
   wasmJs shared-thread-id model, and 1,000 sixteen-leaf captures under two
   seconds.
+- **The typed state tree, step 3: `Root.restore`/`Root.reset(node)` as one
+  frame, `TreeSnapshot.encode()`/`Root.decode(text)`, and the persisted-name
+  self-check** (issue #21 plan PR 21-4, decisions U10/T5/T6; GUIDE
+  §17.6–17.7). `restore(tree, policy, sterile)` puts a capture back into
+  the stores at its nodes NOW — a keyed leaf's into whichever store lives
+  under its key today, reported `rebound` when it is not the captured
+  instance, skipped when none is — and `reset(node)` re-runs the
+  initializers of every live leaf under a node; each plans or materializes
+  every leaf outside every lock (schema check and `migrate`, codecs, the
+  policy, never-read initializers), then stages each leaf raw into its
+  root of ONE outermost `atomic`, so the leaves apply in one write bracket
+  and observers see the subtree whole (never `Transformer.set`: an
+  encrypted leaf round-trips as its ciphertext). One transaction per leaf,
+  one shared frame id; a failing plan, initializer or refused write rolls
+  every leaf back; `RestorePolicy.Strict` fails before any leaf is touched
+  on a skipped leaf or an unresolved decoded path; an empty subtree is a
+  `Success` carrying a synthetic committed transaction; both refuse to nest
+  inside an action, frame, `suspendAction`/`suspendAtomic` body, fanout or
+  recompute, and wait out a foreign suspending holder from outside.
+  `TreeRestoreReport` (per-leaf `RestoreReport`s, `skipped`, `rebound`,
+  `unresolvedPaths`, flattened `issues`) and `TreeResetReport` (`reset`,
+  `skipped`) come back in the frame's `TransactionResult`. `encode()`
+  writes the `holdfast.tree` v1 text: the subtree's path, the structure by
+  node name (children sorted), and at every leaf the store's own
+  `holdfast.store` v1 body verbatim — a `Secret` is `null`, a codec-less
+  state absent, `Remote` absent unless `includeRemote` — keyed entries
+  under their keys through the branch's `keyCodec`, a codec-less keyed
+  branch left out and listed under `skipped`; under
+  `SnapshotScope.UserAuthored` a class-named leaf refuses (T6). `decode`
+  resolves paths against the root as declared now (an undeclared path
+  lands in `unresolvedPaths`, the tree's one string diagnostic; a keyed
+  entry with no live store becomes a typed `pendingKeys(branch)` for the
+  process-death idiom: create, then restore) and retains leaf bodies as
+  name-keyed text until the restore, so `migrate` runs per leaf then; a
+  bad envelope or an undecodable key throws `SnapshotFormatException`
+  quoting no value. `verifyPersistedNames(node)` lists every persisted
+  store (a `UserAuthored` state or family, `SchemaVersioned`, or an
+  attachment reporting `persistenceKeys`) at a class-named leaf and every
+  keyed branch without a key codec, reading declarations only. No tree
+  member takes a `String` except `decode` and `named`, gated by a test
+  over the JVM API dump. `equalsEncodable` now compares children by name,
+  as `encode()` orders them.
 
 ---
 

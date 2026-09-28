@@ -3,10 +3,12 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.RestorePolicy
 import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.internalDetach
 import kotlinx.atomicfu.atomic
 import kotlin.reflect.KClass
@@ -170,6 +172,85 @@ abstract class Root(
         node: StoreNode = this,
         scope: SnapshotScope = SnapshotScope.All,
     ): TreeSnapshot = captureTree(this, node, scope)
+
+    /**
+     * Restore [tree] into the stores at its nodes now, as ONE frame over
+     * them: every leaf is planned first, outside every lock (its schema
+     * version checked and `migrate` run, never-read targets materialized,
+     * codecs decoded, [policy] applied, as `Store.restore` plans), then each
+     * plan is staged raw into its store's root of one outermost `atomic`, so
+     * the leaves apply in one write bracket and every observer sees the
+     * restored tree whole. A keyed leaf's capture goes to whichever store
+     * lives under its key today (reported `rebound` when that is not the
+     * captured instance); a capture with no live store is skipped; under
+     * [RestorePolicy.Strict] a skipped leaf or an unresolved decoded path
+     * fails the restore before any leaf is touched. With [sterile], every
+     * leaf is restored sterile (`Remote` states reset, derived backings
+     * untouched). Attachments' `onStoreReset` is not called.
+     *
+     * @return the frame's result: `Success` with a [TreeRestoreReport], or
+     *   `Error` when a leaf's plan failed (a `SnapshotMigrationException`, a
+     *   codec, a rejected policy) or its store refused — nothing was written.
+     * @throws IllegalStateException if the root is disposed, or from inside
+     *   an action, frame, suspending entry, commit fanout or recompute.
+     * @throws IllegalArgumentException if [tree] was captured from another root.
+     */
+    fun restore(
+        tree: TreeSnapshot,
+        policy: RestorePolicy = RestorePolicy.IgnoreUnknown,
+        sterile: Boolean = false,
+    ): TransactionResult<TreeRestoreReport> = restoreTree(this, tree, policy, sterile)
+
+    /**
+     * Reset every live leaf of the subtree at [node] — the whole tree by
+     * default — as ONE frame: each store's declared states go back to what
+     * their initializers produce, re-run in fresh-store order and reading
+     * their own store's reset values (`Store.reset()` per leaf, staged into
+     * one outermost `atomic`), so the leaves apply in one write bracket. A
+     * state whose reset value equals its current one never fires. Each
+     * leaf's attachments hear `onStoreReset` inside the frame.
+     *
+     * @return the frame's result: `Success` with a [TreeResetReport]
+     *   listing the leaves reset and those disposed meanwhile, or `Error`
+     *   when a leaf's initializer or attachment threw — nothing was written.
+     * @throws IllegalStateException if the root is disposed, or from inside
+     *   an action, frame, suspending entry, commit fanout or recompute.
+     * @throws IllegalArgumentException if [node] belongs to another root.
+     */
+    fun reset(node: StoreNode = this): TransactionResult<TreeResetReport> = resetTree(this, node)
+
+    /**
+     * Read a `holdfast.tree` v1 text ([TreeSnapshot.encode]) back into a
+     * capture addressed by this root's nodes: each named node is resolved
+     * against the tree as declared now, a keyed entry with no live store
+     * under its key becomes a pending key ([TreeSnapshot.pendingKeys]), and
+     * a path this root does not declare is listed in
+     * [TreeSnapshot.unresolvedPaths] rather than failing. Leaf bodies are
+     * decoded lazily by the reading store's codecs, at [restore] or a typed
+     * read; no store code runs here.
+     *
+     * @throws IllegalStateException if the root is disposed, or the text is
+     *   not a well-formed `holdfast.tree` v1 envelope.
+     */
+    fun decode(text: String): TreeSnapshot = decodeTree(this, text)
+
+    /**
+     * The persisted-name self-check (T6): every persisted store — one that
+     * declares a `UserAuthored` state or family, implements
+     * `SchemaVersioned`, or has an attachment reporting `persistenceKeys` —
+     * sitting at a leaf named by its class rather than pinned, and every
+     * keyed branch declared without a key codec, in the subtree at [node].
+     * An obfuscator or a rename would orphan what those names persisted.
+     * Reads declarations only; runs no leaf code.
+     *
+     * @throws IllegalStateException if the root is disposed.
+     * @throws IllegalArgumentException if [node] belongs to another root.
+     */
+    fun verifyPersistedNames(node: StoreNode = this): List<NamingIssue> {
+        checkNotDisposed()
+        requireOwn(node)
+        return verifyNames(this, node)
+    }
 
     /**
      * Detach every leaf and drop every listener. Disposes no store: the

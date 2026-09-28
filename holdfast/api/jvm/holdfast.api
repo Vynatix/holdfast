@@ -979,6 +979,21 @@ public final class com/vynatix/holdfast/tree/NameOrigin : java/lang/Enum {
 	public static fun values ()[Lcom/vynatix/holdfast/tree/NameOrigin;
 }
 
+public final class com/vynatix/holdfast/tree/NamingIssue {
+	public final fun getKind ()Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getNode ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/tree/NamingIssue$Kind : java/lang/Enum {
+	public static final field ClassDerivedNameOnPersistedStore Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
+	public static final field KeyedBranchNotEncodable Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
+	public static fun values ()[Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
+}
+
 public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree/StoreNode {
 	public fun <init> ()V
 	public fun <init> (Ljava/lang/String;)V
@@ -986,6 +1001,7 @@ public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree
 	protected final fun branch ([Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/Branch;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
 	public static synthetic fun branch$default (Lcom/vynatix/holdfast/tree/Root;[Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/Branch;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
 	public final fun children (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public final fun decode (Ljava/lang/String;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 	public final fun dispose ()V
 	public final fun entries (Lcom/vynatix/holdfast/tree/KeyedBranch;)Ljava/util/Map;
 	public final fun get (Lcom/vynatix/holdfast/tree/KeyedBranch;Ljava/lang/Object;)Lcom/vynatix/holdfast/Store;
@@ -998,9 +1014,15 @@ public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public final fun keyedDeclaration (Lkotlin/reflect/KClass;Lkotlin/reflect/KClass;Lcom/vynatix/holdfast/tree/Branch;Lcom/vynatix/holdfast/StateCodec;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
 	public final fun nodeOf (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/LeafNode;
+	public final fun reset (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun reset$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+	public final fun restore (Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun snapshot (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 	public static synthetic fun snapshot$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 	public fun toString ()Ljava/lang/String;
+	public final fun verifyPersistedNames (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public static synthetic fun verifyPersistedNames$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public abstract interface class com/vynatix/holdfast/tree/StoreNode {
@@ -1015,7 +1037,24 @@ public final class com/vynatix/holdfast/tree/StoreNode$DefaultImpls {
 	public static fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/tree/StoreNode;)Z
 }
 
+public final class com/vynatix/holdfast/tree/TreeResetReport {
+	public final fun getReset ()Ljava/util/List;
+	public final fun getSkipped ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/tree/TreeRestoreReport {
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getPerNode ()Ljava/util/Map;
+	public final fun getRebound ()Ljava/util/List;
+	public final fun getSkipped ()Ljava/util/List;
+	public final fun getUnresolvedPaths ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/vynatix/holdfast/tree/TreeSnapshot {
+	public final fun encode (Z)Ljava/lang/String;
+	public static synthetic fun encode$default (Lcom/vynatix/holdfast/tree/TreeSnapshot;ZILjava/lang/Object;)Ljava/lang/String;
 	public final fun entry (Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/SnapshotEntry;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun equalsEncodable (Lcom/vynatix/holdfast/tree/TreeSnapshot;Z)Z

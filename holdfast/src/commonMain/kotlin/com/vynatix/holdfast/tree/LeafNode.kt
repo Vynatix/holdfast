@@ -35,10 +35,13 @@ class LeafNode internal constructor(
 
     override fun toString(): String = "LeafNode(${path()})"
 
-    internal fun path(): String {
+    internal fun path(): String = "${root.name}/${pathUnderRoot()}"
+
+    /** The names from the root's first child down to this leaf, joined by `/`: how a restore issue names it. */
+    internal fun pathUnderRoot(): String {
         val names = ArrayList<String>()
         var current: StoreNode? = this
-        while (current != null) {
+        while (current != null && current !is Root) {
             names.add(current.name)
             current = current.parent
         }

@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check
 
 ---
 
@@ -1357,7 +1357,7 @@ capability is independently usable; pick the ones you need.
 
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
-> A tree of stores is captured as one consistent cut through `Root.snapshot(node, scope)` (§17.5, experimental).
+> A tree of stores is captured as one consistent cut through `Root.snapshot(node, scope)` (§17.5), put back or reset as one frame through `Root.restore(tree)`/`Root.reset(node)` (§17.6), and carried as text through `TreeSnapshot.encode()`/`Root.decode(text)` (§17.7) — all experimental.
 
 ```kotlin
 class StoreSnapshot internal constructor(…) {
@@ -2220,6 +2220,13 @@ that roll back get `onTransactionError`.
   deadlocking on the suspend mutex — use `mutate`/`update` or
   `suspendAction { }` inside a suspending body. Inside `suspendAtomic`, a
   participant's `suspendAction { }` joins the frame as a savepoint.
+- `Root.restore(tree)` and `Root.reset(node)` (§17.6) are each ONE
+  outermost `atomic` over the subtree's live leaves — the write half of
+  `Root.snapshot`'s cut — and refuse to run inside an action, a frame, a
+  `suspendAction`/`suspendAtomic` body, a commit's fanout or a derived
+  state's recompute (a nested frame is not one frame: the stores the
+  enclosing entry holds would join as savepoints and apply with it, the
+  rest at the nested exit). Call them from outside every entry.
 
 ### 15.5 Frame observability
 
@@ -3642,7 +3649,7 @@ fun useTheTree() {
   with the same class, or a class with no simple name (anonymous, local),
   need a pin; sibling branch names must be unique. `StoreNode.nameOrigin`
   records where a name came from — `Property`, `ClassName`, `Key` or
-  `Pinned` — which the persisted-name self-check reads (§17.x, later).
+  `Pinned` — which the persisted-name self-check reads (§17.7).
 - **Lookups take nodes and stores, never strings.** `App.children(node)`
   lists the live stores under a node in tree order (a branch's listed
   stores, then what is declared under it; a keyed branch's in creation
@@ -3781,12 +3788,166 @@ fun readTheTree() {
   structure, scope and every leaf's values — `Secret`, `Remote` and
   codec-less states included — so a `distinct` consumer never drops a
   Secret-only change. `equalsEncodable(other, includeRemote = false)` is
-  the round-trip contract with `decode(encode())` (§17.x, later): it
+  the round-trip contract with `decode(encode())` (§17.7): it
   ignores `Secret` values, `Remote` states unless included, codec-less
   states and keyed branches without a key codec. Both compare captures of
   the same or of different roots by name and structure.
 
-### 17.6 API reference
+### 17.6 Restore and reset over a subtree
+
+`App.restore(tree, policy, sterile)` puts a `TreeSnapshot` back into the
+stores at its nodes NOW, and `App.reset(node)` re-runs the initializers of
+every live leaf under a node — each as ONE frame over the subtree's leaves
+(decision U10): every leaf is planned or materialized first, outside every
+lock, then staged into its root of one outermost `atomic`, so the leaves
+apply in one write bracket and an observer sees the whole subtree restored
+or reset, never half of it. Both return the frame's `TransactionResult`
+carrying a report, and both refuse to nest (§15.4).
+
+```kotlin
+class PrefsStore : Store<PrefsStore>() {
+    val theme by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "light" }
+    val etag by state(codec = StringCodec, tags = setOf(StateTag.Remote)) { "" }
+}
+
+class NoteStore(val id: String) : Store<NoteStore>(Notes.byId.at(id)) {
+    val body by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "" }
+}
+
+object Notes : Root("notes") {
+    val prefsStore = PrefsStore()
+    val prefs by branch(prefsStore).named(prefsStore, "prefs")   // pinned: this leaf is persisted (§17.7)
+    val byId by keyed<String, NoteStore>()
+}
+
+fun undoAndResetTheTree() {
+    val n1 = Notes.byId.create("n1", ::NoteStore)
+    n1 action { body mutate "draft" }
+    val before = Notes.snapshot()                                  // one consistent cut
+    Notes.prefsStore action { theme mutate "dark" }
+    n1 action { body mutate "final" }
+
+    val report = Notes.restore(before).getOrThrow()                // one frame over both leaves
+    println(Notes.prefsStore.theme.value)                          // "light"
+    println(n1.body.value)                                         // "draft"
+    println(report.perNode.keys.map { it.name })                   // "[prefs, n1]"
+
+    Notes.prefsStore action { theme mutate "dark" }
+    Notes.reset(Notes.byId).getOrThrow()                           // only the keyed subtree
+    println(n1.body.value == "")                                   // "true": back to its initializer
+    println(Notes.prefsStore.theme.value)                          // "dark": outside the subtree, untouched
+    Notes.reset().getOrThrow()                                     // the whole tree
+    println(Notes.prefsStore.theme.value)                          // "light"
+    n1.dispose()
+}
+```
+
+- **Restore is addressed by node, resolved at restore time.** A branch
+  leaf's capture goes to the store at that leaf; a keyed leaf's to
+  whichever store lives under its key *today* — the captured instance, or
+  one created since under the same key (listed in `report.rebound`); a
+  capture with no live store at its place (a keyed store since disposed)
+  is skipped and listed in `report.skipped`. `report.perNode` holds each
+  restored leaf's `RestoreReport` (§16.2: `restored`, `kept`, `issues`,
+  `sterilized`), `report.issues` flattens them. Under
+  `RestorePolicy.Strict` a skipped leaf or an unresolved decoded path
+  (§17.7) fails the restore before any leaf is touched, with a
+  `RestoreRejectedException` naming the paths; under `IgnoreUnknown` (the
+  default) they are tolerated. `sterile = true` restores every leaf
+  sterile (its `Remote` states reset, §16.4). Everything `Store.restore`
+  does per store — the schema check and `migrate` (§16.3), codec decoding,
+  the policy, never re-running `Transformer.set` (an encrypted state goes
+  back as its captured ciphertext) — happens per leaf, before the frame
+  opens; a failing plan or a refused write fails the whole frame and
+  nothing is written. A capture taken in `SnapshotScope.All` restores a
+  `Secret` state losslessly (it holds the raw value); a decoded text never
+  has one (encoded as `null`, so the state is `kept`). A tree captured from
+  another root is refused.
+- **Reset is the subtree's initializers, in one frame.** Every live leaf
+  under `node` — the whole tree by default — is reset as `Store.reset()`
+  resets one store (§16.1): never-read states are materialized before the
+  frame, initializers re-run in fresh-store order inside it, output is
+  staged raw and only where it differs, so observers fire once per changed
+  state and never for the rest; each leaf's attachments hear
+  `onStoreReset` inside the frame. A leaf's throwing initializer fails the
+  whole frame. `report.reset` lists the leaves reset, `report.skipped`
+  those disposed after the reset began. An empty subtree (a keyed branch
+  with no store) returns `Success` carrying a synthetic, already committed
+  transaction that no store or middleware saw.
+- **One frame, one transaction per leaf.** Each leaf's middleware sees one
+  root transaction whose `frameId` is shared across the subtree
+  (`atomic-…`), the id `restore`/`reset` return as the result's
+  `transaction`. A leaf disposed after the frame took its lock is skipped
+  and reported; the rest commit.
+
+### 17.7 Encoding, names and the persisted-name self-check
+
+`tree.encode(includeRemote = false)` writes a `TreeSnapshot` as a
+`holdfast.tree` v1 text and `App.decode(text)` reads one back, addressed by
+this root's nodes. Names appear here and in `render()` only: the structure
+is written by node name, and every leaf carries its store's own
+`holdfast.store` v1 body (§16.2) verbatim — the same bytes
+`store.snapshot().encode()` writes, so a blob persisted per store stays
+readable, and a `Secret` state is `null`, a codec-less state absent, a
+`Remote` one absent unless included. A keyed branch's entries are written
+under their keys through the branch's `keyCodec` (defaulted for `String`
+keys); a keyed branch without one is left out and listed under `skipped`.
+
+```kotlin
+fun persistTheTree(): String {
+    val n2 = Notes.byId.create("n2", ::NoteStore)
+    n2 action { body mutate "remember me" }
+    Notes.prefsStore action { theme mutate "dark" }
+    println(Notes.verifyPersistedNames())                                    // "[]": every persisted leaf is pinned or keyed
+    val text = Notes.snapshot(scope = SnapshotScope.UserAuthored).encode()   // names for structure; each leaf its store's body
+    n2.dispose()
+    return text
+}
+
+fun rehydrateTheTree(text: String) {
+    val tree = Notes.decode(text)                                            // resolves nodes; runs no store code
+    println(tree.pendingKeys(Notes.byId))                                    // "[n2]": a body with no live store yet
+    tree.pendingKeys(Notes.byId).forEach { Notes.byId.create(it, ::NoteStore) }   // the process-death idiom
+    val report = Notes.restore(tree, RestorePolicy.Strict).getOrThrow()
+    println(Notes[Notes.byId, "n2"]?.body?.value)                            // "remember me"
+    println(report.unresolvedPaths)                                          // "[]"
+    Notes[Notes.byId, "n2"]?.dispose()
+    Notes.reset()
+}
+```
+
+- **Decode resolves paths, retains bodies.** `decode` reads the envelope
+  once and matches each named node against the tree as declared now: a
+  path this root does not declare (a renamed branch, a leaf whose class
+  was renamed) lands in `tree.unresolvedPaths` — the one place the tree
+  hands out strings, a diagnostic — instead of failing, while an unknown
+  *state* name inside a leaf body is that leaf's `RestoreIssue` at
+  restore, as for a single store (§16.2). A keyed entry with no live store
+  under its key becomes a typed pending key (`tree.pendingKeys(branch)`):
+  create those stores, then restore — the process-death idiom above. Leaf
+  bodies stay name-keyed text until the restore, so `migrate` (§16.3) runs
+  per leaf then, in the reading store's version. A text that is not a
+  `holdfast.tree` v1 envelope, or a key its codec cannot decode, throws
+  `SnapshotFormatException`; no exception quotes a value or a key.
+  `decode(encode(tree)).equalsEncodable(tree)` is the round-trip contract;
+  full `equals` fails whenever a `Secret`, `Remote` or codec-less value
+  exists, since the text never carried it.
+- **Persisted names must be pinned (T6).** A class-derived leaf name
+  (`NameOrigin.ClassName`) changes under obfuscation or a rename and
+  orphans what was persisted under it, so `encode()` under
+  `SnapshotScope.UserAuthored` — the persistence scope — fails fast on
+  one; `All` and `Raw` write it (an in-memory undo or a debug dump does
+  not outlive the class). Keyed leaves are named by key and never pinned.
+  `App.verifyPersistedNames(node = App)` is the self-check to run in a
+  test: it lists every persisted store — one declaring a `UserAuthored`
+  state or keyed family, one that `is SchemaVersioned`, or one whose
+  attachments report `persistenceKeys` (the overlay's, §16.8) — sitting at
+  a class-named leaf (`NamingIssue.Kind.ClassDerivedNameOnPersistedStore`:
+  pin it with `branch(store).named(store, "…")`), and every keyed branch
+  declared without a key codec (`KeyedBranchNotEncodable`, empty or not).
+  It reads declarations only and runs no initializer.
+
+### 17.8 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
@@ -3809,7 +3970,13 @@ class KeyedBranch<K : Any, S : Store<S>> : StoreNode {
     fun getOrCreate(key: K, factory: (K) -> S): S
 }
 class LeafNode : StoreNode { val store: Store<*>?; val key: Any? }
-abstract class Root { fun snapshot(node: StoreNode = this, scope: SnapshotScope = SnapshotScope.All): TreeSnapshot }
+abstract class Root {
+    fun snapshot(node: StoreNode = this, scope: SnapshotScope = SnapshotScope.All): TreeSnapshot
+    fun restore(tree: TreeSnapshot, policy: RestorePolicy = RestorePolicy.IgnoreUnknown, sterile: Boolean = false): TransactionResult<TreeRestoreReport>
+    fun reset(node: StoreNode = this): TransactionResult<TreeResetReport>
+    fun decode(text: String): TreeSnapshot
+    fun verifyPersistedNames(node: StoreNode = this): List<NamingIssue>
+}
 class TreeSnapshot {
     val node: StoreNode; val children: List<TreeSnapshot>; val scope: SnapshotScope; val isLeaf: Boolean
     val unresolvedPaths: List<List<String>>          // decode diagnostic; empty for a capture
@@ -3818,9 +3985,13 @@ class TreeSnapshot {
     fun <T : Any> entry(state: State<T>): SnapshotEntry<T>
     fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K>
     fun render(): String
+    fun encode(includeRemote: Boolean = false): String
     fun equalsEncodable(other: TreeSnapshot, includeRemote: Boolean = false): Boolean
     override fun equals(other: Any?): Boolean; override fun hashCode(): Int; override fun toString(): String
 }
+class TreeRestoreReport { val perNode: Map<StoreNode, RestoreReport>; val skipped: List<StoreNode>; val rebound: List<StoreNode>; val unresolvedPaths: List<List<String>>; val issues: List<RestoreIssue> }
+class TreeResetReport { val reset: List<StoreNode>; val skipped: List<StoreNode> }
+class NamingIssue { val node: StoreNode; val kind: Kind; val message: String; enum class Kind { ClassDerivedNameOnPersistedStore, KeyedBranchNotEncodable } }
 class BranchDeclaration { fun named(store: Store<*>, name: String): BranchDeclaration; fun named(name: String): BranchDeclaration }
 class KeyedDeclaration<K : Any, S : Store<S>>
 @StoreInternalApi abstract class LeafMembershipListener { open fun onAttached(leaf: LeafNode) {}; open fun onDetached(leaf: LeafNode) {} }

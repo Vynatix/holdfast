@@ -108,6 +108,22 @@ class TreeSnapshot internal constructor(
     fun render(): String = renderTree(this)
 
     /**
+     * The `holdfast.tree` v1 wire text of this capture: the subtree's path
+     * from its root, the node structure by name, and at every leaf its
+     * store's `holdfast.store` v1 body verbatim (`StoreSnapshot.encode()`:
+     * a `Secret` state is written `null`, a codec-less state and a `Remote`
+     * one unless [includeRemote] are left out). A keyed branch without a
+     * key codec is left out and listed under `skipped`. Under
+     * `SnapshotScope.UserAuthored` a leaf named by its class refuses (T6:
+     * that name would change with the class; pin it). Runs the leaves'
+     * codecs, no other user code.
+     *
+     * @throws IllegalStateException for a class-named leaf under
+     *   `SnapshotScope.UserAuthored`, or two children of one node sharing a name.
+     */
+    fun encode(includeRemote: Boolean = false): String = encodeTree(this, includeRemote)
+
+    /**
      * Whether [other] holds the same encodable projection as this capture
      * — the round-trip contract `decode(encode()).equalsEncodable(this)`:
      * `Secret` values, `Remote` states (unless [includeRemote]), codec-less
