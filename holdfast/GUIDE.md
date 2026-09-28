@@ -4309,8 +4309,8 @@ class KeyedDeclaration<K : Any, S : Store<S>>
 
 ## Appendix A — One-page cheatsheet
 
-Lines marked `exp.` are `@ExperimentalStoreApi` (§16 has the detail); the rest
-is the stable surface.
+Lines marked `exp.` are `@ExperimentalStoreApi` (§16 and §17 have the detail); the
+rest is the stable surface.
 
 ```kotlin
 class V : Store<V>(), SchemaVersioned {                                      // SchemaVersioned: exp.
@@ -4392,6 +4392,19 @@ val hydration = v.hydrator {
 hydration.hydrate(scope); hydration.awaitSettled()    // Detached → Seeded → Hydrated
 hydration.invalidate()                                // back to Detached
 
+// Typed tree (exp., §17): the root names its branches by property; leaves are unchanged stores.
+object App : Root("app") {
+    val session by branch(v, other).named(v, "v")                     // leaf name: class minus "Store", or pinned
+    val threads by keyed<String, ThreadStore>(under = session, keyCodec = StringCodec)
+}
+class ThreadStore(id: String) : Store<ThreadStore>(App.threads.at(id))
+val t = App.threads.create("t1") { ThreadStore(it) }                 // live once the factory returns; t.dispose() leaves
+val tree = App.snapshot(App.session)                                 // one lock-free consistent cut; tree[v.x]: Int?
+App.restore(tree); App.reset(App.session)                            // one outermost frame over the subtree, each
+App.decode(tree.encode()); App.verifyPersistedNames()                // names exist only here; pin every persisted leaf
+App.value                                                            // State<TreeSnapshot>, settled once per outermost entry
+App.middlewares(MyTreeMiddleware()); App.hydrateAll()                // every leaf, now and later (hydrateAll: holdfast-coroutines)
+
 // Cleanup.
-sub.dispose(); sub2.dispose(); total.dispose(); shown.dispose(); d.dispose(); v.dispose()
+sub.dispose(); sub2.dispose(); total.dispose(); shown.dispose(); d.dispose(); v.dispose(); App.dispose()
 ```
