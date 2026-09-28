@@ -233,6 +233,23 @@ internal class TreeRegistry(
     /** The branches and keyed branches declared directly under [node], in declaration order. */
     fun childNodes(node: StoreNode): List<StoreNode> = lock.withLock { childrenOf[node]?.toList() ?: emptyList() }
 
+    /** The subtree at [node] as of this call: live leaves with their stores, declared children; copied under [lock]. */
+    fun shapeOf(node: StoreNode): TreeShape =
+        lock.withLock {
+            checkOpen()
+            shapeUnlocked(node)
+        }
+
+    private fun shapeUnlocked(node: StoreNode): TreeShape {
+        val leaves =
+            if (node is LeafNode) {
+                listOfNotNull(node.storeRef?.let { node to it })
+            } else {
+                liveLeavesUnlocked(node).mapNotNull { leaf -> leaf.storeRef?.let { leaf to it } }
+            }
+        return TreeShape(node, leaves, childrenOf[node]?.map(::shapeUnlocked) ?: emptyList())
+    }
+
     /**
      * The tree's nodes in pre-order: each node, then its live leaves, then
      * its declared children recursively. Snapshot of one moment under the lock.

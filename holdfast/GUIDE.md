@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads
 
 ---
 
@@ -1356,6 +1356,8 @@ Everything below ships in 1.1 on top of the 1.0 baseline above. Each
 capability is independently usable; pick the ones you need.
 
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
+
+> A tree of stores is captured as one consistent cut through `Root.snapshot(node, scope)` (§17.5, experimental).
 
 ```kotlin
 class StoreSnapshot internal constructor(…) {
@@ -3718,7 +3720,73 @@ no entry, listener bookkeeping, observer or middleware behind.
   holds and may only mark and schedule — never open an action, frame,
   `reset` or `restore`.
 
-### 17.5 API reference (PR 21-2 surface)
+### 17.5 Tree snapshots and typed reads
+
+`App.snapshot(node = App, scope = SnapshotScope.All)` captures a subtree as
+ONE consistent cut across its live leaves and returns a `TreeSnapshot`:
+the nodes as of the capture, with a `StoreSnapshot` (§14.1, §16.2) at every
+leaf. Reads are by identity, never by name.
+
+```kotlin
+fun readTheTree() {
+    val t2 = App.threads.create("t2", ::ThreadStore)
+    val title = t2.title
+    t2 action { title mutate "hello" }
+    val tree = App.snapshot()                                  // one consistent cut across every live leaf
+    val read: String? = tree[title]                            // typed by the state; null outside the capture
+    println(read)                                              // "hello"
+    println(tree[App.threads]?.children?.map { it.node.name }) // "[t2]"
+    println(App.snapshot(App.threads)[title] == read)          // "true": a subtree capture
+    println(tree == App.snapshot())                            // "true": value equality
+    t2.dispose()
+    println(tree[title])                                       // "hello": the capture outlives the store
+}
+```
+
+- **Consistency (T4).** Every leaf is read from one lock-free cut
+  (`captureConsistent`, §15.3): a commit, or an `atomic`/`suspendAtomic`
+  frame applying while the capture runs, is seen whole or not at all —
+  never one participant's new value with another's old one, and never a
+  single store half-applied. The capture takes no leaf's transaction lock
+  and blocks no writer: it retries while a write bracket is open, so it
+  returns from inside an observer, a middleware hook, a frame body holding
+  higher keys, or while a `suspendAction` body is parked holding the
+  serializer. On a committing thread it reads committed values, not the
+  action's pending writes (an observer, running after the apply pass, sees
+  the new values; `onTransactionCompleted`, running before it, the old).
+  A leaf disposed while the capture runs is left out; a keyed store still
+  inside its factory is never included. Never-read declared states are
+  materialized first, as `Store.snapshot()` does. What it is NOT:
+  `atomic(*leaves)` — that would hold every serializer and transaction
+  lock, fail nested lock order and deadlock from observers. Pinned gaps:
+  a participant a frame joined as a savepoint applies with its enclosing
+  transaction, so user-composed mixed nesting can still tear (issue #20
+  amendment (d)); a legacy `derived` backing may lag inside a cut.
+- **Typed reads (T5).** `tree[state]` has the state's type and returns
+  `null` for `Absent` (a state of a store outside the captured subtree)
+  or `Redacted` (a `Secret` state outside `SnapshotScope.Raw`);
+  `tree.entry(state)` tells them apart. A state of a store that never
+  belonged to the root, or one no store declared (a `computed { }`, a
+  `derivedState`), throws `IllegalArgumentException`. The capture holds
+  the leaf's `StoreSnapshot`, so it keeps reading after the store is
+  disposed — hold the `State` reference, since the store's own delegate
+  is gated after `dispose()`. `tree[node]` is the subtree's capture, or
+  `null` outside it; `tree.children`, `tree.node`, `tree.isLeaf` and
+  `tree.scope` walk it.
+- **Scopes.** `SnapshotScope.Raw` lets `Secret` values read; `UserAuthored`
+  captures exactly the tagged states and prunes leaves and branches with
+  nothing captured (the requested node itself is always returned);
+  `render()` and `toString()` never show a `Secret` value in any scope.
+- **Equality.** `equals`/`hashCode` are full value equality over names,
+  structure, scope and every leaf's values — `Secret`, `Remote` and
+  codec-less states included — so a `distinct` consumer never drops a
+  Secret-only change. `equalsEncodable(other, includeRemote = false)` is
+  the round-trip contract with `decode(encode())` (§17.x, later): it
+  ignores `Secret` values, `Remote` states unless included, codec-less
+  states and keyed branches without a key codec. Both compare captures of
+  the same or of different roots by name and structure.
+
+### 17.6 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
@@ -3741,6 +3809,18 @@ class KeyedBranch<K : Any, S : Store<S>> : StoreNode {
     fun getOrCreate(key: K, factory: (K) -> S): S
 }
 class LeafNode : StoreNode { val store: Store<*>?; val key: Any? }
+abstract class Root { fun snapshot(node: StoreNode = this, scope: SnapshotScope = SnapshotScope.All): TreeSnapshot }
+class TreeSnapshot {
+    val node: StoreNode; val children: List<TreeSnapshot>; val scope: SnapshotScope; val isLeaf: Boolean
+    val unresolvedPaths: List<List<String>>          // decode diagnostic; empty for a capture
+    operator fun get(node: StoreNode): TreeSnapshot?
+    operator fun <T : Any> get(state: State<T>): T?  // null = Absent or Redacted
+    fun <T : Any> entry(state: State<T>): SnapshotEntry<T>
+    fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K>
+    fun render(): String
+    fun equalsEncodable(other: TreeSnapshot, includeRemote: Boolean = false): Boolean
+    override fun equals(other: Any?): Boolean; override fun hashCode(): Int; override fun toString(): String
+}
 class BranchDeclaration { fun named(store: Store<*>, name: String): BranchDeclaration; fun named(name: String): BranchDeclaration }
 class KeyedDeclaration<K : Any, S : Store<S>>
 @StoreInternalApi abstract class LeafMembershipListener { open fun onAttached(leaf: LeafNode) {}; open fun onDetached(leaf: LeafNode) {} }

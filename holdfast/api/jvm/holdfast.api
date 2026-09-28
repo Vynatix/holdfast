@@ -998,6 +998,8 @@ public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public final fun keyedDeclaration (Lkotlin/reflect/KClass;Lkotlin/reflect/KClass;Lcom/vynatix/holdfast/tree/Branch;Lcom/vynatix/holdfast/StateCodec;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
 	public final fun nodeOf (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/LeafNode;
+	public final fun snapshot (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public static synthetic fun snapshot$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -1011,5 +1013,23 @@ public abstract interface class com/vynatix/holdfast/tree/StoreNode {
 
 public final class com/vynatix/holdfast/tree/StoreNode$DefaultImpls {
 	public static fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/tree/StoreNode;)Z
+}
+
+public final class com/vynatix/holdfast/tree/TreeSnapshot {
+	public final fun entry (Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/SnapshotEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun equalsEncodable (Lcom/vynatix/holdfast/tree/TreeSnapshot;Z)Z
+	public static synthetic fun equalsEncodable$default (Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/tree/TreeSnapshot;ZILjava/lang/Object;)Z
+	public final fun get (Lcom/vynatix/holdfast/State;)Ljava/lang/Object;
+	public final fun get (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public final fun getChildren ()Ljava/util/List;
+	public final fun getNode ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public final fun getScope ()Lcom/vynatix/holdfast/SnapshotScope;
+	public final fun getUnresolvedPaths ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isLeaf ()Z
+	public final fun pendingKeys (Lcom/vynatix/holdfast/tree/KeyedBranch;)Ljava/util/Set;
+	public final fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
 }
 

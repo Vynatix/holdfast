@@ -349,6 +349,7 @@ abstract class com.vynatix.holdfast.tree/Root : com.vynatix.holdfast.tree/StoreN
     final fun children(com.vynatix.holdfast.tree/StoreNode): kotlin.collections/List<com.vynatix.holdfast/Store<*>> // com.vynatix.holdfast.tree/Root.children|children(com.vynatix.holdfast.tree.StoreNode){}[0]
     final fun dispose() // com.vynatix.holdfast.tree/Root.dispose|dispose(){}[0]
     final fun nodeOf(com.vynatix.holdfast/Store<*>): com.vynatix.holdfast.tree/LeafNode? // com.vynatix.holdfast.tree/Root.nodeOf|nodeOf(com.vynatix.holdfast.Store<*>){}[0]
+    final fun snapshot(com.vynatix.holdfast.tree/StoreNode = ..., com.vynatix.holdfast/SnapshotScope = ...): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/Root.snapshot|snapshot(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.SnapshotScope){}[0]
     final inline fun <#A1: reified kotlin/Any, #B1: reified com.vynatix.holdfast/Store<#B1>> keyed(com.vynatix.holdfast.tree/Branch? = ..., com.vynatix.holdfast/StateCodec<#A1>? = ...): com.vynatix.holdfast.tree/KeyedDeclaration<#A1, #B1> // com.vynatix.holdfast.tree/Root.keyed|keyed(com.vynatix.holdfast.tree.Branch?;com.vynatix.holdfast.StateCodec<0:0>?){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
     open fun toString(): kotlin/String // com.vynatix.holdfast.tree/Root.toString|toString(){}[0]
 }
@@ -604,6 +605,29 @@ final class com.vynatix.holdfast.tree/LeafNode : com.vynatix.holdfast.tree/Store
         final fun <get-store>(): com.vynatix.holdfast/Store<*>? // com.vynatix.holdfast.tree/LeafNode.store.<get-store>|<get-store>(){}[0]
 
     final fun toString(): kotlin/String // com.vynatix.holdfast.tree/LeafNode.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/TreeSnapshot { // com.vynatix.holdfast.tree/TreeSnapshot|null[0]
+    final val children // com.vynatix.holdfast.tree/TreeSnapshot.children|{}children[0]
+        final fun <get-children>(): kotlin.collections/List<com.vynatix.holdfast.tree/TreeSnapshot> // com.vynatix.holdfast.tree/TreeSnapshot.children.<get-children>|<get-children>(){}[0]
+    final val isLeaf // com.vynatix.holdfast.tree/TreeSnapshot.isLeaf|{}isLeaf[0]
+        final fun <get-isLeaf>(): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.isLeaf.<get-isLeaf>|<get-isLeaf>(){}[0]
+    final val node // com.vynatix.holdfast.tree/TreeSnapshot.node|{}node[0]
+        final fun <get-node>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/TreeSnapshot.node.<get-node>|<get-node>(){}[0]
+    final val scope // com.vynatix.holdfast.tree/TreeSnapshot.scope|{}scope[0]
+        final fun <get-scope>(): com.vynatix.holdfast/SnapshotScope // com.vynatix.holdfast.tree/TreeSnapshot.scope.<get-scope>|<get-scope>(){}[0]
+    final val unresolvedPaths // com.vynatix.holdfast.tree/TreeSnapshot.unresolvedPaths|{}unresolvedPaths[0]
+        final fun <get-unresolvedPaths>(): kotlin.collections/List<kotlin.collections/List<kotlin/String>> // com.vynatix.holdfast.tree/TreeSnapshot.unresolvedPaths.<get-unresolvedPaths>|<get-unresolvedPaths>(){}[0]
+
+    final fun <#A1: kotlin/Any, #B1: com.vynatix.holdfast/Store<#B1>> pendingKeys(com.vynatix.holdfast.tree/KeyedBranch<#A1, #B1>): kotlin.collections/Set<#A1> // com.vynatix.holdfast.tree/TreeSnapshot.pendingKeys|pendingKeys(com.vynatix.holdfast.tree.KeyedBranch<0:0,0:1>){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    final fun <#A1: kotlin/Any> entry(com.vynatix.holdfast/State<#A1>): com.vynatix.holdfast/SnapshotEntry<#A1> // com.vynatix.holdfast.tree/TreeSnapshot.entry|entry(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> get(com.vynatix.holdfast/State<#A1>): #A1? // com.vynatix.holdfast.tree/TreeSnapshot.get|get(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.equals|equals(kotlin.Any?){}[0]
+    final fun equalsEncodable(com.vynatix.holdfast.tree/TreeSnapshot, kotlin/Boolean = ...): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.equalsEncodable|equalsEncodable(com.vynatix.holdfast.tree.TreeSnapshot;kotlin.Boolean){}[0]
+    final fun get(com.vynatix.holdfast.tree/StoreNode): com.vynatix.holdfast.tree/TreeSnapshot? // com.vynatix.holdfast.tree/TreeSnapshot.get|get(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.tree/TreeSnapshot.hashCode|hashCode(){}[0]
+    final fun render(): kotlin/String // com.vynatix.holdfast.tree/TreeSnapshot.render|render(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/TreeSnapshot.toString|toString(){}[0]
 }
 
 final class com.vynatix.holdfast/EncodedSnapshotView { // com.vynatix.holdfast/EncodedSnapshotView|null[0]

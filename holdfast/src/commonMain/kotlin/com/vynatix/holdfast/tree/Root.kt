@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
@@ -149,6 +150,26 @@ abstract class Root(
         checkNotDisposed()
         return registry.leafOf(store)
     }
+
+    /**
+     * Capture the subtree at [node] — the whole tree by default — as ONE
+     * consistent cut across its live leaves, in [scope] (see [TreeSnapshot]).
+     * Never-read declared states the scope captures are materialized first
+     * (their initializers run); no leaf's transaction lock is taken, no writer
+     * is blocked, and on a committing thread the capture reads committed
+     * values. A leaf disposed while the capture runs is left out; a keyed
+     * store still inside its factory is never included. Under
+     * `SnapshotScope.UserAuthored`, leaves and branches with nothing captured
+     * are pruned.
+     *
+     * @throws IllegalStateException if the root is disposed, or as
+     *   `Store.snapshot()` does (a throwing or cyclic initializer).
+     * @throws IllegalArgumentException if [node] belongs to another root.
+     */
+    fun snapshot(
+        node: StoreNode = this,
+        scope: SnapshotScope = SnapshotScope.All,
+    ): TreeSnapshot = captureTree(this, node, scope)
 
     /**
      * Detach every leaf and drop every listener. Disposes no store: the

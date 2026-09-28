@@ -1486,6 +1486,32 @@ described here.
     exercised for 1,000 keyed create/dispose cycles, racing lookups,
     concurrent `create`/`getOrCreate`, root-dispose racing leaf-dispose,
     and GC-collectability of disposed and abandoned keyed stores.
+- **The typed state tree, step 2: `TreeSnapshot` and a consistent
+  `Root.snapshot(node, scope)`** (issue #21 plan PR 21-3, decisions U8,
+  U10; GUIDE §17.5). A capture of a subtree is ONE lock-free cut across
+  its live leaves (`captureConsistent`, the R9 primitive): a commit or an
+  `atomic`/`suspendAtomic` frame applying meanwhile is seen whole or not
+  at all, never a mix, never a single store half-applied; no leaf's
+  transaction lock is taken and no writer blocked, so a capture returns
+  from inside observers, middleware hooks, frames holding higher keys, and
+  while a `suspendAction` body is parked; on a committing thread it reads
+  committed values. Never-read declared states are materialized first; a
+  leaf disposed meanwhile is left out; a keyed store still inside its
+  factory is never included. Reads are by identity: `tree[state]` is typed
+  by the state (`null` for `Absent` or `Redacted`, `tree.entry(state)`
+  tells them apart; a state outside the captured subtree is `Absent`; one
+  of a store never in the root, or no store declared, throws), keeps
+  reading after the store is disposed, and `tree[node]` is the subtree's
+  capture. `SnapshotScope.Raw` reads `Secret` values, `UserAuthored`
+  captures exactly the tagged states and prunes empty leaves and branches;
+  `render()`/`toString()` never show a `Secret`. `equals`/`hashCode` are
+  full value equality (names, structure, scope, every leaf's values,
+  `Secret`/`Remote`/codec-less included); `equalsEncodable(other,
+  includeRemote)` is the round-trip projection. Verified against 3,000
+  two-store `atomic`, `suspendAtomic` and nested frames with at least 1,000
+  reader cuts (never a mix), keyed churn, root dispose during capture, the
+  wasmJs shared-thread-id model, and 1,000 sixteen-leaf captures under two
+  seconds.
 
 ---
 
