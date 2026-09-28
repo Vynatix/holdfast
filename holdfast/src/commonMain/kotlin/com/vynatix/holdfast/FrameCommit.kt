@@ -25,6 +25,19 @@ import kotlin.coroutines.cancellation.CancellationException
 // shares no store with the action or frame it is nested in. A participant a
 // frame shares with an enclosing action or frame is a savepoint: its writes
 // merge into the enclosing transaction and apply when that one commits.
+//
+// Between the two passes a root is applied but still active, and still the
+// store's active transaction (and its middleware's context): a frame leaves
+// every root in that window while the earlier ones fan out. A `commit()` (or
+// `rollback()`) by hand on such a root — from an observer, say — is a no-op:
+// its fanout belongs to the frame (or to the action's own commit, whose root
+// sits in the same window while it fans out). `applyAlone` (and
+// `Transaction.rollback`) decides that under the root's pending lock, where
+// the apply pass marks it applied; and the other way round, a frame's pass
+// leaves a root alone that a commit from another thread applied first under
+// that lock (`applyBracketed`) — its fanout belongs to that commit. Likewise
+// a savepoint whose parent has applied or ended meanwhile refuses to merge
+// (D16) instead of leaving its writes in a buffer nobody applies again.
 
 /**
  * What a transaction's apply pass left for its fanout: the writes that
@@ -70,8 +83,10 @@ class FrameApply internal constructor(
  * and a write racing the pass from another thread either lands before it or
  * is refused — and only then commit every savepoint among them into its
  * parent. Pass the participants in lock order; a transaction that is not
- * active is skipped. A savepoint's writes apply with its parent, when the
- * enclosing action or frame commits, not here.
+ * active is skipped, and so is a root that a commit from another thread
+ * applied meanwhile — it is not in [FrameApply.applied], since its fanout
+ * belongs to that commit ([applyBracketed]). A savepoint's writes apply with
+ * its parent, when the enclosing action or frame commits, not here.
  *
  * Each top-level transaction is then applied — [Transaction.applied], closed
  * to writes — but still active: the caller fans each out with
@@ -79,14 +94,19 @@ class FrameApply internal constructor(
  * is committed here and needs no fanout.
  *
  * Nothing here throws. A top-level transaction whose apply throws (a
- * `distinct` state's `equals`), or a savepoint whose merge throws, is marked
+ * `distinct` state's `equals`), or a savepoint whose merge throws (its
+ * parent has applied or ended meanwhile, see [mergeIntoParent]), is marked
  * Failed and ends the pass: [FrameApply.failure] carries the failure (wrapped
  * in a [TransactionException] naming the transaction, store and phase), and
  * the top-level transactions applied before it are in [FrameApply.applied].
  * The ones after it are left active, for the caller to roll back — and so is
  * every savepoint when an apply fails: none has merged yet, so none of its
  * writes survives in the enclosing transaction of a frame that reports an
- * error. The states the pass had assigned stay assigned; the write bracket is
+ * error. When a savepoint's MERGE fails (its parent was finished by hand),
+ * the savepoints merged before it stay merged into their enclosing
+ * transactions, which may still commit them; it is Failed, its buffers
+ * cleared; and the ones after it are left active for the caller to roll
+ * back. The states the pass had assigned stay assigned; the write bracket is
  * closed either way.
  */
 @StoreInternalApi
@@ -110,20 +130,56 @@ fun applyFrameCommit(transactions: List<Transaction>): FrameApply {
  * The apply pass of one transaction ([Transaction.commitDispatching]): a
  * savepoint merges into its parent, a top-level transaction applies inside a
  * write bracket of its own. [applyFrameCommit] of this transaction alone,
- * without its bookkeeping — every commit runs it. Returns the failure, or
- * `null` (also when the transaction is not active: nothing to do).
+ * without its bookkeeping — every commit runs it. Returns whether THIS call
+ * applied a top-level transaction, which the caller must now fan out with
+ * [fanOutApplied]; `false` when there was nothing to do — the transaction is
+ * not active, it is a savepoint (merged here; a savepoint needs no fanout),
+ * or its writes have already applied — and throws the apply or merge failure
+ * (a [TransactionException], after marking the transaction Failed).
+ *
+ * "Already applied" is decided under [Transaction.pendingLock], where
+ * [applyWrites] sets it: a frame ([applyFrameCommit]) leaves each root
+ * applied but still active until its turn to fan out, and a `commit()` by
+ * hand on such a root meanwhile — from an observer of an earlier participant,
+ * through `Store.activeTransaction` or a middleware context — must leave it
+ * alone. It used to re-run the pass over the emptied buffers and replace the
+ * fanout's input ([Transaction.applyResult]) with nothing, so when the frame
+ * reached the root there was nothing left to fan out: its observers, bridges
+ * and events never fired while its values stood. The same check makes a hand
+ * commit from an observer of the transaction's own fanout a no-op (the
+ * status transition it forced used to fail the running fanout), and covers a
+ * commit from another thread that read the root as unapplied before the
+ * frame's pass took the lock. [Transaction.closedToWrites] rather than
+ * [Transaction.applied] alone, so a rollback that raced the status check is
+ * left alone too.
  */
-internal fun Transaction.applyAlone(): Throwable? =
-    when {
-        status != TransactionStatus.Active -> null
-        parent != null -> mergeIntoParent()
-        else -> pendingLock.withLock { applyBracketed(listOf(this), applied = null) }
-    }
+internal fun Transaction.applyAlone(): Boolean {
+    if (status != TransactionStatus.Active) return false
+    val appliedHere = ArrayList<Transaction>(1)
+    val failure =
+        if (parent != null) {
+            mergeIntoParent()
+        } else {
+            pendingLock.withLock {
+                if (closedToWrites) null else applyBracketed(listOf(this), appliedHere)
+            }
+        }
+    failure?.let { throw it }
+    return appliedHere.isNotEmpty()
+}
 
 /**
  * Apply [roots] one after the other inside one write bracket over all their
  * states, adding each that applied to [applied], and stop at the first that
  * fails: its failure, or `null`. The caller holds every root's pending lock.
+ *
+ * A root that is already [Transaction.applied] is left alone, and not added
+ * to [applied]: a `commit()` by hand from another thread took its pending
+ * lock before this pass did and applied it (the caller's status check ran
+ * before the locks were taken), so its buffers are empty and its fanout
+ * belongs to that commit. Re-running the pass over them would replace the
+ * fanout's input ([Transaction.applyResult]) with nothing, and both commits
+ * would then try to turn the root Committed.
  */
 private fun applyBracketed(
     roots: List<Transaction>,
@@ -144,6 +200,7 @@ private fun applyBracketed(
     openWriteBracket(states)
     try {
         for (root in roots) {
+            if (root.applied) continue
             val failure = root.applyWrites()
             if (failure != null) return failure
             applied?.add(root)
@@ -174,6 +231,13 @@ private fun <R> List<Transaction>.withPendingLocks(
  * reading a sibling state sees the committed value directly. The events are
  * drained after the pending lock is released: `tryEmit` may invoke ready
  * collectors synchronously, and no internal lock is ever held across user code.
+ *
+ * A `distinct` state's `equals` does run here, under the pending lock, and
+ * may first-read — so materialize — a state of the store, waiting on its
+ * initializer latch: the one place a pending lock is held while waiting on a
+ * latch, which is why nothing takes a pending lock under a latch
+ * ([Transaction.pendingLock]; [MutableState.value] peeks at no pending write
+ * inside an initializer).
  *
  * Once every write is assigned, the keyed entries this transaction evicts
  * are retired and dropped from their families ([retireEvictions]) — inside
@@ -210,6 +274,19 @@ private fun Transaction.applyWrites(): Throwable? {
  * preserving stage order across the whole tree. Its keyed-entry evictions
  * merge the same way, last operation winning ([mergeEvictionsInto]). Returns
  * `null`, or the failure after marking it Failed.
+ *
+ * A parent that is [Transaction.closedToWrites] — it, or an ancestor, has
+ * applied its writes or ended, typically by a `commit()`/`rollback()` by
+ * hand on the enclosing transaction from this savepoint's body or middleware
+ * — refuses the merge (D16, like every other write into its buffers), with
+ * an [IllegalStateException] in the [appliedTransactionMessage] family, so
+ * the nested action returns `Error` instead of Success with its writes in a
+ * buffer nobody applies again. Checked under the parent's pending lock, where
+ * its apply pass, merge or rollback closes the buffers, so the merge either
+ * lands before that or is refused, never dropped in between. Either way this
+ * savepoint's buffers are closed and cleared — merged, or refused: a Failed
+ * savepoint keeps nothing staged, like a rolled-back one. (A savepoint that
+ * rolled ITSELF back never gets here: [applyAlone] finds it not active.)
  */
 private fun Transaction.mergeIntoParent(): Throwable? {
     var storeLabel: String? = null
@@ -218,14 +295,28 @@ private fun Transaction.mergeIntoParent(): Throwable? {
             val parentTxn = checkNotNull(parent)
             pendingLock.withLock {
                 storeLabel = pendingWrites.keys.firstOrNull()?.describeOwner()
-                parentTxn.pendingLock.withLock {
-                    parentTxn.pendingWrites.putAll(pendingWrites)
-                    parentTxn.pendingEvents.addAll(pendingEvents)
-                    mergeEvictionsInto(parentTxn)
+                try {
+                    parentTxn.pendingLock.withLock {
+                        check(!parentTxn.closedToWrites) {
+                            appliedTransactionMessage(
+                                "merge nested transaction '$id' into its enclosing transaction",
+                                storeLabel,
+                                parentTxn,
+                            )
+                        }
+                        parentTxn.pendingWrites.putAll(pendingWrites)
+                        parentTxn.pendingEvents.addAll(pendingEvents)
+                        mergeEvictionsInto(parentTxn)
+                    }
+                } finally {
+                    // Consumed for good either way, merged or refused; still
+                    // under this savepoint's pending lock, so the closing is
+                    // one step against every staging path.
+                    buffersClosed = true
+                    pendingWrites.clear()
+                    pendingEvents.clear()
+                    evictions.clear()
                 }
-                buffersClosed = true
-                pendingWrites.clear()
-                pendingEvents.clear()
             }
             updateStatus(TransactionStatus.Committed)
         }.exceptionOrNull()

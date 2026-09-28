@@ -49,8 +49,9 @@ internal class KeyedRegistry(
 
     /**
      * Record [candidate], or return the family it repeats — the same
-     * declaration running again (see [StateRegistry.declare]); any other
-     * second declaration of its name, as a family or as a state, fails.
+     * declaration site running again ([isSameSiteAs], the rule
+     * [StateRegistry.declare] applies to states); any other second
+     * declaration of its name, as a family or as a state, fails.
      */
     fun <K : Any, T : Any> declare(candidate: KeyedFamily<K, T>): KeyedFamily<K, T> =
         registry.lock.withLock {
@@ -63,7 +64,7 @@ internal class KeyedRegistry(
                         families[it.name] = it
                         declaredFamilies.incrementAndGet()
                     }
-                existing.local == candidate.local && (existing.local || existing.property == candidate.property) -> {
+                existing isSameSiteAs candidate -> {
                     @Suppress("UNCHECKED_CAST")
                     existing as KeyedFamily<K, T>
                 }

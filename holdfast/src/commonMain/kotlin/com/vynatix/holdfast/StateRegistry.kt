@@ -36,12 +36,9 @@ internal class StateRegistry(
      * local property named like a member would otherwise silently share one
      * state and one initializer.
      * A name a keyed state family ([KeyedRegistry]) holds fails too: states
-     * and families share the store's names.
-     *
-     * Local delegated properties are matched by name alone: Kotlin/Native
-     * does not promise one property-reference instance per local declaration
-     * site, so two different local properties with one name share one state
-     * on every platform.
+     * and families share the store's names, and one rule for a repeated
+     * declaration site ([isSameSiteAs], which also says how local properties
+     * are matched).
      */
     fun <T : Any> declare(candidate: StateDeclaration<T>): StateDeclaration<T> =
         lock.withLock {
@@ -58,14 +55,14 @@ internal class StateRegistry(
             }
         }
 
+    /** Whether [candidate] is [existing]'s declaration site running again: only a delegated state has a site. */
     private fun repeats(
         existing: StateDeclaration<*>,
         candidate: StateDeclaration<*>,
     ): Boolean =
         existing.kind == StateKind.Declared &&
             candidate.kind == StateKind.Declared &&
-            existing.local == candidate.local &&
-            (existing.local || existing.property == candidate.property)
+            existing isSameSiteAs candidate
 
     /**
      * Make [state] the live state of [decl]. Refused on a disposed store, so

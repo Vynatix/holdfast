@@ -27,10 +27,11 @@ internal class KeyedFamily<K : Any, T : Any>(
     val name: String,
     val spec: KeyedFamilySpec<K, T>,
     /** The delegated property this family was declared from; see [StateDeclaration.property]. */
-    val property: KProperty<*>?,
+    override val property: KProperty<*>?,
     /** Whether [property] is a local (or top-level) delegated property. */
-    val local: Boolean,
-) : KeyedState<K, T> {
+    override val local: Boolean,
+) : KeyedState<K, T>,
+    DeclarationSite {
     /** Entries by key, in creation order. Guarded by [store]'s registry lock. */
     private val live = LinkedHashMap<K, StateDeclaration<T>>()
 

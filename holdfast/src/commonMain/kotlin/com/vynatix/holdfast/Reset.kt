@@ -360,7 +360,11 @@ internal class ResetPass(
             // transaction holds for it (its restored value), as a fresh
             // store's initializer would read it once restored. One the
             // restore brought to life only now, first read from pre-restore
-            // values, is recomputed through the pass instead.
+            // values, is recomputed through the pass instead. (The chain is
+            // read under its pending locks, from a read that has not taken
+            // its state lock yet, inside the pass's own body — before its
+            // chain's apply pass, the pending-lock holder that may wait on
+            // an initializer latch, can begin: Transaction.pendingLock.)
             readsStagedWrites && decl.kind.isWritable ->
                 txn.findPendingValue(state) ?: if (select(decl)) resolve(decl) else null
             else -> null
@@ -393,7 +397,10 @@ internal class ResetPass(
      * Stage [initial] raw as [decl]'s state's pending write, unless the value
      * [txn] holds for it — an enclosing transaction's pending write, else the
      * committed one — is already equal. Either way the state is [hold]: its
-     * reset is decided.
+     * reset is decided. The chain is read under its pending locks
+     * ([Transaction.findPendingValue]) once [hold] has released the registry
+     * lock, and no state lock is held here: the order the apply pass takes
+     * those in ([Transaction.pendingLock]).
      */
     private fun <T : Any> stageIfChanged(
         decl: StateDeclaration<T>,

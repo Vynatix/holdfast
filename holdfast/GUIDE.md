@@ -356,7 +356,10 @@ drops that `Error`; `.getOrThrow()` turns it into a coroutine failure that
 reaches the scope's exception handler. (Use `action` there, not a bare
 `mutate`: while a `suspendAction` holds the store, another thread's bare
 `mutate` is refused too — see §8.2.) Writing to another store whose
-transaction is not committing still works.
+transaction is not committing still works. Calling `commit()` or `rollback()`
+by hand on the committing transaction from there (`store.activeTransaction`)
+is a no-op: its writes have applied, and its fanout — this one — belongs to
+the commit that applied them.
 
 **A throwing effect never undoes the commit, and never stops the other effects
 unless the handler itself throws** (which ends that commit's fanout and makes
@@ -980,6 +983,13 @@ To abort the outer when the inner fails, re-throw explicitly —
 `if (inner is TransactionResult.Error) throw inner.exception` — which lands
 in the outer's catch and rolls back everything, including `a`.
 
+The other direction is refused: a nested `action` whose enclosing transaction
+was committed or rolled back by hand while it ran (through `activeTransaction`
+from its body, or from its middleware) returns `Error` — its writes cannot
+merge into a finished transaction (`Cannot merge nested transaction '…' into
+its enclosing transaction: …`) — and the enclosing action's own commit is
+then a no-op, as after any hand commit (§12).
+
 ### 9.9 Idempotent rollback for cancellation
 
 A transaction handed to you (e.g. via `TransactionResult.Success.transaction`)
@@ -1034,13 +1044,23 @@ The library acquires locks in this consistent global order; respect it
 when extending:
 
 ```
-transactionLock  →  middlewareLock  →  initializer latch  →  attachment slot lock  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
+transactionLock  →  middlewareLock  →  pendingLock  →  initializer latch  →  attachment slot lock  →  propertiesLock  →  bridgeLock  →  stateLock  →  observersLock
 ```
 
 The attachment slot lock is internal: companion modules take it through the
 `@StoreInternalApi` `internalAttachIfAbsent`, whose `create` runs under it
 and may take only the locks to its right (registering an internal state
 takes `propertiesLock`).
+
+`pendingLock` is a transaction's write-buffer lock: every stage into, read of
+and consumption of its pending writes takes it. A commit's apply pass holds
+it while it assigns each written state under `stateLock`, unlinks evicted
+keyed entries under `propertiesLock`, and may wait on an initializer latch (a
+`distinct` state's `equals` that first-reads a state of the store) — so
+nothing takes it under a latch, `propertiesLock` or `stateLock`: a read's peek
+at the owner's pending writes runs before the read takes `stateLock` and
+never inside an initializer, and `removeState`/`clearStates` take the active
+chain's pending locks before `propertiesLock`.
 
 Of these, only adjacent acquisitions actually nest in practice; the
 critical AB-BA candidate fixed in earlier work was `stateLock ↔
@@ -1174,7 +1194,7 @@ never T1's pending writes.
 | Observer fires twice for one logical event | Subscribed via `effect` AND wired through a bridge | Pick one |
 | Test sees `expected=N, actual=N+1` for first event | Forgot the initial-fire on subscribe | `seen.clear()` before the assertion |
 | `IllegalStateException: State must be created by this Store instance` | Mutating a state owned by a different store | The state belongs to a different store — pass the state declared on the store you're acting on |
-| `IllegalStateException: Cannot write S.x: S's transaction '…' has already been rolled back (status: RolledBack) …` (or `… has already applied its writes (status: Committed) …`) | Mutating after manually calling `rollback()` (or `commit()`) on the active transaction inside the action body; or writing into an `atomic` participant from a middleware's `onTransactionError` or a `FrameObserver` while the frame unwinds | Let `action` manage commit/rollback; start a new `store action { … }` for further writes |
+| `IllegalStateException: Cannot write S.x: S's transaction '…' has already been rolled back (status: RolledBack) …` (or `… has already applied its writes (status: Committed) …`; or `Cannot merge nested transaction '…' into its enclosing transaction: …` as the cause of a nested `action`'s `Error`; or `Cannot restore S …` as the cause of a `restore()`'s `Error`) | Mutating — or committing a nested `action`, or running `restore()` — after manually calling `rollback()` (or `commit()`) on the active transaction inside the action body or from a middleware hook; or writing into an `atomic` participant from a middleware's `onTransactionError` or a `FrameObserver` while the frame unwinds | Let `action` manage commit/rollback; start a new `store action { … }` for further writes. (A hand `commit()`/`rollback()` on a transaction whose writes have already applied — from its own fanout, or on a frame participant awaiting its fanout — is a no-op, §15.3) |
 | `IllegalStateException: Cannot write S.x: S's transaction '…' has already applied its writes …` (or `emit an event on S`, or an `Error` from a nested `action`/`atomic`) | An effect/observer writes back into the store whose commit is notifying it — or into any participant of the `atomic`/`suspendAtomic` frame that is committing, since every participant applies before any fans out; the write could never commit | Write in the action (or frame body) itself, derive the value (`computed`/`derived`/`derivedState`), or run a follow-up action after the commit (as `store action { … }` on another thread, or launched on a dispatching scope with `.getOrThrow()`) — see §4.4, §15.3 |
 | `IllegalStateException: Cannot write S.x: a suspendAction or suspendAtomic holds S …` | A bare `mutate`/`update` from another thread while a `suspendAction`/`suspendAtomic` on S is committing | Write through `S action { … }`, which waits for the store — see §8.2 |
 | `Holdfast: a post-commit side effect of S failed …` on standard error (JVM/Android) or standard output (iOS/wasmJs) | An effect, bridge publish or `derived` recompute threw after its commit; with no `uncaughtObserverHandler` set, the failure is logged | Fix the thrower, or set `uncaughtObserverHandler` to route (or `{ }` to silence) these failures |
@@ -1246,8 +1266,8 @@ never T1's pending writes.
 | `parent` | `val parent: Transaction?` *(opt-in)* | Outer transaction for savepoint chains |
 | `modifiedStates` | `val modifiedStates: Set<State<*>>` | Read-only view of pending-write keys (owner-thread only) |
 | `stagedEvictions` | `val stagedEvictions: Set<State<*>>` *(experimental)* | The keyed-state entries this transaction evicts when it commits (owner-thread only); disjoint from `modifiedStates` (§16.6) |
-| `commit` | `fun commit()` | Idempotent. No-op if not Active |
-| `rollback` | `fun rollback()` | Idempotent. No-op if not Active |
+| `commit` | `fun commit()` | Idempotent. No-op if not Active, or once its writes have applied (a frame participant awaiting its fanout, or the transaction whose fanout is running — §15.3). A savepoint's commit into an enclosing transaction that has applied or ended by hand throws `TransactionException`; the nested `action` returns it as `Error` (§9.8) |
+| `rollback` | `fun rollback()` | Idempotent. No-op if not Active, or once its writes have applied (as `commit`) |
 
 You normally do not call `commit` / `rollback` yourself — `action`
 manages them.
@@ -2123,7 +2143,11 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    participant — `b` while `a` fans out as much as `a` while `b` does: that
    throws, and a nested `action`/`atomic` on it returns an `Error` the
    observer must check, exactly like a write back into a store from its own
-   fanout (§4.4). Write in the frame body, or derive the value (§16.5). A
+   fanout (§4.4). Write in the frame body, or derive the value (§16.5). Nor
+   may an observer finish a participant by hand: `commit()` or `rollback()`
+   on `b`'s transaction (through `b.activeTransaction`, or a middleware
+   context) while `a` fans out is a no-op — `b` has applied, and its fanout
+   belongs to the frame, which runs it in its turn. A
    store whose fanout fails (only a throwing `uncaughtObserverHandler` can
    make it) does not keep the later ones from fanning out; the frame returns
    the failure as an `Error`, and `FrameObserver.onFrameRolledBack` fires
@@ -2445,6 +2469,11 @@ fun moveSettings(from: SettingsStore, to: SettingsStore): RestoreReport {
   target states, and the codecs decoding a decoded snapshot's text. The
   action then stages the raw values in one transaction, whose id is
   `Restore`; middleware, observers and bridges run in it, as for any action.
+  A middleware that commits or rolls that transaction back by hand from
+  `onTransactionStarted` — or an initializer re-run while the restore
+  stages — fails the restore: it returns an `Error` carrying the
+  `IllegalStateException` a `mutate` into a finished transaction throws
+  (§12), and nothing is staged into the finished transaction.
   (A target state that a concurrent `removeState`/`clearStates` drops after
   that is materialized again inside the action, under its locks; an internal
   state dropped that way fails the restore.)

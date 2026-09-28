@@ -28,6 +28,27 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `Store.internalTransactionLockFree()`, the never-blocking probe a
   serializer holder waits with.
 
+- **The owner thread's read-your-own-writes peek, and `removeState`/
+  `clearStates`' pending-write check, read a transaction's write buffer under
+  its lock.** While a `suspendAction`/`suspendAtomic` holds a store, a bare
+  `mutate` from any thread stages into its transaction, and the body may
+  resume on any thread; the transaction's owner is the thread the body
+  started on, whose reads peek at the pending writes. So a read of `x.value`
+  there — while the body was parked in `withContext(Dispatchers.IO) { x
+  mutate v }`, say — walked the buffer the IO thread was writing to with no
+  lock: it could miss a write that had landed (a later read seeing the older
+  value), or, on Kotlin/Native's array-backed map, index the table
+  mid-resize; `removeState`/`clearStates` checked the same buffer the same
+  way. `MutableState.value` now reads each level of the savepoint chain under
+  that level's pending lock — before it takes the state's own lock (the apply
+  pass takes the two in that order), and not at all inside an initializer,
+  migration or derived compute, where the pending value is hidden anyway —
+  and `removeState`/`clearStates` hold the active transaction chain's pending
+  locks, then the registry lock, across the check and the drop, so no write
+  stages into a state between them. `SuspendActionPendingReadRaceTest`
+  (`:holdfast-coroutines`, JVM/Android) stresses an owner-thread reader
+  against an IO-thread writer.
+
 - **`suspendAction` on a store with a `derived()` state no longer deadlocks.**
   The post-commit drain ran inside `serializer.mutex.withLock`, so the derived
   recompute's blocking `action` spun on a mutex its own call stack held —
@@ -312,7 +333,23 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   already been rolled back (status: RolledBack)") where `mutate` used to
   report "Cannot mutate state on a Committed/RolledBack transaction", and a
   nested `action` there, which used to open a savepoint of the finished
-  transaction and return `Success`, returns it as an `Error`. Writes to
+  transaction and return `Success`, returns it as an `Error`. So does a
+  nested `action` already running when its enclosing transaction is committed
+  or rolled back by hand — from the nested body, or from the nested action's
+  own middleware in `onTransactionCompleted`: its commit refuses to merge into
+  the finished transaction ("Cannot merge nested transaction '…' into its
+  enclosing transaction: S's transaction '…' has already applied its writes
+  …"), and it returns an `Error` (a `TransactionException` whose cause is
+  that exception) where it used to return `Success` with its writes in a
+  buffer nobody applies again; a frame participant joined as a savepoint of
+  such a transaction fails its `atomic` the same way. And `restore()` — which
+  stages after a middleware's `onTransactionStarted` has had its transaction
+  in hand, and re-runs an initializer for a state dropped since the plan —
+  returns an `Error` carrying that exception when either committed or rolled
+  the transaction back by hand: nothing is staged into the finished
+  transaction (a keyed family's replacement is refused there too, never
+  deferred past the commit), where it used to return `Success` reporting the
+  states as restored with nothing applied. Writes to
   another store whose transaction has not applied still commit, as before. See
   [MIGRATING.md](../MIGRATING.md#behavior-change-writes-from-an-observer-into-its-own-committing-store-040).
 
@@ -464,6 +501,20 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     used to stage into that participant's still-open root and commit with the
     frame (the same already held for earlier participants). Make the write
     part of the frame body, or derive the value;
+  - a `commit()` or `rollback()` by hand on a LATER participant's transaction
+    (`b`'s, reached through `b.activeTransaction` or a middleware context's
+    `transaction` while `a` fans out) is a no-op: `b` has applied, and its
+    fanout belongs to the frame, which runs it in its turn. A hand `commit()`
+    used to re-run `b`'s apply pass over its emptied buffers and leave the
+    frame nothing to fan out — `b`'s observers, bridges and events never
+    fired while its values stood, and the frame reported `Success` — and a
+    hand `rollback()` turned `b`'s root `RolledBack`, so the frame's own
+    fanout of `b` then failed its status transition and the frame reported
+    an `Error`, and `onFrameRolledBack`, for a commit that had applied and
+    fanned out in full. (The same holds for a single `action`: a hand
+    `commit()`/`rollback()` from an observer of its own fanout is a no-op,
+    where it used to turn the action into an `Error` after it had applied
+    and fanned out);
   - every thread reads every participant's committed value during the
     fanout (see Fixed);
   - a participant whose fanout fails (a throwing `uncaughtObserverHandler`)

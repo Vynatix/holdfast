@@ -92,12 +92,12 @@ internal class StateDeclaration<T : Any>(
     /**
      * The delegated property this declaration came from, or `null` for an
      * eagerly registered state. A second declaration of [name] from the same
-     * property binds to this declaration instead of failing
-     * ([StateRegistry.declare]).
+     * site binds to this declaration instead of failing
+     * ([StateRegistry.declare], [isSameSiteAs]).
      */
-    val property: KProperty<*>?,
+    override val property: KProperty<*>?,
     /** Whether [property] was declared without a receiver: a local (or top-level) delegated property. */
-    val local: Boolean,
+    override val local: Boolean,
     /** The sources of a [StateKind.DerivedBacking] or [StateKind.ReadOnlyDerived] state; empty otherwise. */
     val sources: List<State<*>> = emptyList(),
     /**
@@ -110,7 +110,7 @@ internal class StateDeclaration<T : Any>(
     val tags: Set<StateTag> = emptySet(),
     /** The family and key of a [StateKind.Keyed] entry; `null` for every other kind. */
     val keyed: KeyedEntry? = null,
-) {
+) : DeclarationSite {
     /** The live state, or `null` until materialized (and again after `removeState`/`clearStates`/`dispose`). */
     @kotlin.concurrent.Volatile
     var materialized: MutableState<T>? = null
@@ -137,6 +137,45 @@ internal class StateDeclaration<T : Any>(
 
 /** [StateDeclaration.latchOwner] while no thread holds the latch. No platform hands out this thread id. */
 internal const val NO_LATCH_OWNER = Long.MIN_VALUE
+
+/**
+ * Where a declaration came from: the delegated property it was declared
+ * through. What a [StateDeclaration] and a [KeyedFamily] have in common, so
+ * states and keyed state families — which share a store's names — share one
+ * rule for a second declaration of a name ([isSameSiteAs]), called by both
+ * registries ([StateRegistry.declare], [KeyedRegistry.declare]).
+ */
+internal interface DeclarationSite {
+    /** The delegated property, or `null` for a declaration with no site (an eagerly registered state). */
+    val property: KProperty<*>?
+
+    /** Whether [property] was declared without a receiver: a local (or top-level) delegated property. */
+    val local: Boolean
+}
+
+/**
+ * Whether this declaration and [other], declared under one name, come from
+ * the same declaration site running again — the same member property of
+ * another object delegating to the store (a helper class instantiated
+ * twice), or a local delegated property evaluated again (a function called
+ * twice) — so the second binds to the first instead of failing. A member and
+ * a local property are never one site, and a declaration with no [property]
+ * repeats nothing.
+ *
+ * Local delegated properties are matched by name alone (the registries keep
+ * one declaration per name, so two locals under one name are one site):
+ * Kotlin/Native does not promise one property-reference instance per local
+ * declaration site, so comparing their references would bind on one platform
+ * and fail on another. Hence two different local properties with one name
+ * share one state (or family) on every platform.
+ */
+internal infix fun DeclarationSite.isSameSiteAs(other: DeclarationSite): Boolean =
+    when {
+        property == null || other.property == null -> false
+        local != other.local -> false
+        local -> true
+        else -> property == other.property
+    }
 
 /**
  * The delegate [Store.state] returns. Unbound ([declaration] `null`) as

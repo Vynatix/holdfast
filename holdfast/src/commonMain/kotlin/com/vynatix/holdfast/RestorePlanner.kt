@@ -208,14 +208,38 @@ internal class PlannedRestore(
     /**
      * Stage the planned restore into [txn], [store]'s active transaction, or
      * throw the planned failure. What was staged when a later step throws
-     * stays in [txn], and the caller rolls it back.
+     * stays in [txn], and the caller rolls it back — unless user code
+     * committed [txn] by hand meanwhile (below): what had been staged by then
+     * is applied, as after a hand commit mid-body in any action, and only the
+     * rest is refused.
+     *
+     * [txn] has been in user hands since the plan — a middleware's
+     * `onTransactionStarted` saw it as its context's transaction, and an
+     * initializer re-run here for a state dropped since the plan can reach it
+     * through `activeTransaction` — so it may have been committed or rolled
+     * back by hand. It is then closed to writes, and this throws the
+     * [IllegalStateException] every other staging path throws for such a
+     * transaction (issue #20, D16): before staging anything; with each keyed
+     * family's replacement, refused rather than deferred the way an eviction
+     * from a commit's own fanout is ([stageEvictionsOrRefuse]); and again
+     * with each write, under [txn]'s pending lock
+     * ([Transaction.stagePendingRaw]) — so no planned value lands in a buffer
+     * nobody applies again, no entry is evicted for a restore that fails, and
+     * the restore ends as `Error` instead of reporting the states as restored.
      */
     fun stage(txn: Transaction) {
         failure?.let { throw it }
+        // Checked first, so no entry is listed for eviction and no initializer
+        // re-run for a restore that will be refused; and again with each write.
+        check(!txn.closedToWrites) {
+            appliedTransactionMessage("restore ${store.displayName}", store.displayName, txn)
+        }
         // Before the planned writes, none of which is to an entry evicted
         // here: the family then holds the snapshot's keys and no others.
+        // Refused, never deferred, should [txn] have closed since the check
+        // above (a commit by hand on it from another thread).
         for ((family, keys) in planner.replaced) {
-            family.stageEvictions("replace the entries of ${family.qualifiedName}") {
+            family.stageEvictionsOrRefuse(txn, "replace the entries of ${family.qualifiedName}") {
                 family.entries.mapNotNull { (key, entry) -> (entry as MutableState<*>).takeIf { key !in keys } }
             }
         }
@@ -232,7 +256,9 @@ internal class PlannedRestore(
                     write.decl.kind == StateKind.Declared -> materialize(write.decl)
                     else -> error("${store.displayName} state '${write.decl.name}' was removed while restore() ran")
                 }
-            txn.stagePendingRaw(state, write.raw)
+            check(txn.stagePendingRaw(state, write.raw)) {
+                appliedTransactionMessage("restore ${store.describeState(state)}", store.displayName, txn)
+            }
         }
         // After the planned writes, which never touch a Remote state here: the
         // reset compares each Remote state with the value the transaction

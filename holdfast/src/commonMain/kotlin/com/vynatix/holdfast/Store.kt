@@ -1503,13 +1503,20 @@ abstract class Store<Self : Store<Self>> {
      */
     fun removeState(name: String) {
         checkNotDisposed()
+        // The active transaction's pending locks are taken before the registry
+        // lock, never under it: the apply pass takes the registry lock under
+        // them (Transaction.pendingLock). Held across the check and the drop,
+        // so no write stages into the dropped state in between.
+        val active = _activeTransaction
         val removed =
-            registry.lock.withLock {
-                val state = registry.states[name] ?: return
-                checkNoPendingWrites(state, name)
-                registry.dematerialize(name)
-                state
-            }
+            active.holdingPendingLocks {
+                registry.lock.withLock {
+                    val state = registry.states[name] ?: return@withLock null
+                    checkNoPendingWrites(active, state, name)
+                    registry.dematerialize(name)
+                    state
+                }
+            } ?: return
         // Outside the registry's lock, as in dispose(): shutting down disposes
         // the bridge's inbound subscription, which is user code — and user code
         // may read a state another thread is materializing, which needs this
@@ -1531,41 +1538,19 @@ abstract class Store<Self : Store<Self>> {
      */
     fun clearStates() {
         checkNotDisposed()
+        // Pending locks before the registry lock, as in removeState.
+        val active = _activeTransaction
         val removed =
-            registry.lock.withLock {
-                registry.states.forEach { (name, state) -> checkNoPendingWrites(state, name) }
-                val live = registry.states.toMap()
-                live.keys.forEach { registry.dematerialize(it) }
-                live.values
+            active.holdingPendingLocks {
+                registry.lock.withLock {
+                    registry.states.forEach { (name, state) -> checkNoPendingWrites(active, state, name) }
+                    val live = registry.states.toMap()
+                    live.keys.forEach { registry.dematerialize(it) }
+                    live.values
+                }
             }
         // Outside the registry's lock, then edges are told; see removeState.
         shutDownDematerialized(removed)
-    }
-
-    /** The caller holds the registry lock, under which a reset takes its hold (`ResetPass.hold`). */
-    private fun checkNoPendingWrites(
-        state: MutableState<*>,
-        name: String,
-    ) {
-        val active = _activeTransaction ?: return
-        active.refuseStructuralWriteHere(this, name)
-        var txn: Transaction? = active
-        while (txn != null) {
-            if (state in txn.pendingWrites) {
-                error(
-                    "Cannot remove state '$name' with pending writes in an active transaction; " +
-                        "commit or rollback first",
-                )
-            }
-            txn = txn.parent
-        }
-        val root = active.root
-        if (!root.closedToWrites && state in root.resetHeld) {
-            error(
-                "Cannot remove state '$name' while a reset() or sterile restore() in the active transaction " +
-                    "holds it; commit or rollback first",
-            )
-        }
     }
 
     /**
@@ -1720,5 +1705,45 @@ abstract class Store<Self : Store<Self>> {
                     "Store.defaultScope is settable-once; it has already been assigned."
                 }
             }
+    }
+}
+
+/**
+ * `removeState`/`clearStates`' check that [state] (named [name]) may be
+ * dropped. The caller holds the pending locks of [active]'s chain — the
+ * store's active transaction as it read it before taking them, `null` for
+ * none — and, under them, the registry lock, under which a reset takes its
+ * hold (`ResetPass.hold`). Each level's buffer is read under its own lock,
+ * so the check is exact against a write staging from another thread (a
+ * `suspendAction` body resumed elsewhere), and the drop that follows under
+ * the same locks cannot race one — exact for the transaction that was active
+ * when the caller read the slot, that is: a transaction another thread
+ * installs afterwards (an `action` starting there takes neither the pending
+ * nor the registry lock) is not checked, as before. Outside the class, which
+ * is at its size limit.
+ */
+private fun Store<*>.checkNoPendingWrites(
+    active: Transaction?,
+    state: MutableState<*>,
+    name: String,
+) {
+    if (active == null) return
+    active.refuseStructuralWriteHere(this, name)
+    var txn: Transaction? = active
+    while (txn != null) {
+        if (state in txn.pendingWrites) {
+            error(
+                "Cannot remove state '$name' with pending writes in an active transaction; " +
+                    "commit or rollback first",
+            )
+        }
+        txn = txn.parent
+    }
+    val root = active.root
+    if (!root.closedToWrites && state in root.resetHeld) {
+        error(
+            "Cannot remove state '$name' while a reset() or sterile restore() in the active transaction " +
+                "holds it; commit or rollback first",
+        )
     }
 }

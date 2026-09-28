@@ -335,6 +335,7 @@ class KeyedStateConcurrencyTest {
         store.initializerGraph = graph
         val firstEntered = CountDownLatch(1)
         val firstFailed = CountDownLatch(1)
+        val secondStarted = CountDownLatch(1)
         val thirdStarted = CountDownLatch(1)
         store.onCall = { call ->
             when (call) {
@@ -344,6 +345,13 @@ class KeyedStateConcurrencyTest {
                     error("the first run fails")
                 }
                 2 -> {
+                    // B's re-run of A's failed declaration. C is started only
+                    // once this run has begun (secondStarted, below): B wakes
+                    // from A's latch and C from A's failure at the same moment,
+                    // so nothing else orders B's re-run before C's fresh run —
+                    // C could draw this call and B the third, which then spins
+                    // for a waiter that never comes.
+                    secondStarted.countDown()
                     check(thirdStarted.await(10, TimeUnit.SECONDS)) { "C never started its run" }
                     2
                 }
@@ -368,6 +376,7 @@ class KeyedStateConcurrencyTest {
             check(firstEntered.await(10, TimeUnit.SECONDS)) { "the first run never started" }
             val tb = daemon("waiting-getter") { b.set(runCatching { store.items["k"] }) }
             check(firstFailed.await(10, TimeUnit.SECONDS)) { "A never returned its failure" }
+            check(secondStarted.await(10, TimeUnit.SECONDS)) { "B never re-ran the failed initializer" }
             val tc = daemon("late-getter") { c.set(runCatching { store.items["k"] }) }
             listOf(ta, tb, tc).forEach { it.join() }
         }

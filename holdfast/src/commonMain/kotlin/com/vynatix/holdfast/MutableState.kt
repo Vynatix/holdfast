@@ -154,7 +154,18 @@ class MutableState<T : Any>(
      * its reset value when it is one of the declared states (or keyed
      * entries) that reset is resetting, running this state's own initializer
      * first if its reset is still pending (see [ResetPass]). That runs user
-     * code, so it happens before [stateLock] is taken. An initializer a
+     * code, so it happens before [stateLock] is taken — as does the owner's
+     * peek at the pending writes: [Transaction.findPendingValue] takes each
+     * level's pending lock, which a commit's apply pass holds while it takes
+     * [stateLock] to assign the value, so the peek must never run under this
+     * lock (a `suspendAction` may commit on another thread than the one its
+     * body started on, whose reads peek). Nor does the peek run inside a
+     * no-write region, where the pending value is hidden anyway: an
+     * initializer's read would otherwise take the pending lock under its
+     * declaration's latch, which the apply pass may wait on while holding
+     * the pending lock (see [Transaction.pendingLock]). Only the committed
+     * read runs under [stateLock].
+     * An initializer a
      * sterile `restore()` re-runs — a Remote state's, or one the restore
      * brought to life — reads the states that restore re-runs that way, and
      * this store's other declared states (and entries) at the values the
@@ -168,25 +179,32 @@ class MutableState<T : Any>(
      */
     override val value: T
         get() {
-            val resetValue = owningStore.activeTransaction?.pendingReset?.valueFor(this)
+            val txn = owningStore.activeTransaction
+            val resetValue = txn?.pendingReset?.valueFor(this)
             if (resetValue != null) return afterGet(ComputeReads.uncommitted(resetValue))
+            // The owner's peek runs outside stateLock: findPendingValue takes
+            // the pending lock of each level, and the apply pass takes
+            // stateLock under that lock (applyCommittedValue) — a peek under
+            // stateLock would deadlock a suspendAction's commit against a
+            // read on the thread its body started on. And it runs outside
+            // any no-write region, where the pending value is hidden anyway:
+            // an initializer's read would otherwise take the pending lock
+            // under its declaration's latch, while the apply pass may wait on
+            // a latch under the pending lock (a `distinct` state's `equals`
+            // that first-reads a state of the store) — the reverse order. So
+            // the region's thread-local is read before the peek: once per
+            // owner-thread read inside a transaction; a read outside a
+            // transaction pays nothing for it.
+            if (txn != null && txn.ownerThreadId == currentThreadId() && NoWriteRegion.current() == null) {
+                val pending = txn.findPendingValue(this)
+                if (pending != null) return afterGet(ComputeReads.uncommitted(pending))
+            }
             // The cut's thread-local is read only while some compute reads
             // this state from a cut, so an ordinary read pays one volatile
             // read for it.
             @Suppress("UNCHECKED_CAST")
             val cut = if (cutReaders.value == 0) null else ComputeReads.cutValueOf(this) as T?
-            return stateLock.withLock {
-                val txn = owningStore.activeTransaction
-                if (txn != null && txn.ownerThreadId == currentThreadId()) {
-                    val pending = txn.findPendingValue(this)
-                    // The thread-local is read only when there is a pending
-                    // value to hide, so an ordinary read pays nothing for it.
-                    if (pending != null && NoWriteRegion.current() == null) {
-                        return@withLock afterGet(ComputeReads.uncommitted(pending))
-                    }
-                }
-                afterGet(cut ?: currentValue)
-            }
+            return stateLock.withLock { afterGet(cut ?: currentValue) }
         }
 
     /**

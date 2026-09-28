@@ -75,10 +75,33 @@ class Transaction internal constructor(
     private val endTimeLock = StoreLock()
 
     /**
-     * Guards [pendingWrites] and [pendingEvents]: every write into them, the
+     * Guards [pendingWrites], [pendingEvents] and [evictions]: every write into
+     * them, every read of them ([findPendingValue], [evictsInChain]), the
      * commit's apply pass (or merge) that consumes them, and rollback's
      * discard. `internal` for the apply pass (FrameCommit.kt), which holds the
-     * pending locks of every root of a frame at once.
+     * pending locks of every root of a frame at once, and for
+     * `Store.removeState`/`clearStates`, which hold those of the active
+     * transaction's chain while they check for a pending write and drop a
+     * state ([holdingPendingLocks]).
+     *
+     * Lock order: it is taken under the store's `transactionLock` and
+     * `middlewareLock` (a write inside an action body), and the apply pass
+     * takes the store's registry lock (`KeyedFamily.unlink`) and each written
+     * state's own lock (`applyCommittedValue`) while holding it — and may
+     * wait on a state declaration's initializer latch there: a `distinct`
+     * state's `equals` runs under it and may first-read, so materialize, a
+     * state of the store (FrameCommit.kt, `applyWrites`). So nothing may take
+     * it while holding a registry lock, a per-state lock or an initializer
+     * latch: [MutableState.value] peeks at the pending writes BEFORE it takes
+     * its state lock and not at all inside a no-write region (an initializer,
+     * a migration, a derived compute — where the pending value is hidden
+     * anyway), and `removeState`/`clearStates` take the chain's pending locks
+     * before the registry lock. (A reset pass reads the chain from its own
+     * transaction's body, Reset.kt — before that chain's apply pass, the one
+     * holder of its pending locks that waits on a latch, can begin.) Within
+     * one chain the nesting is child before parent (a savepoint's merge,
+     * [holdingPendingLocks]); across a frame's roots, list order
+     * ([applyFrameCommit]).
      */
     internal val pendingLock = StoreLock()
 
@@ -106,8 +129,12 @@ class Transaction internal constructor(
      * and rollback's discard, so a write either lands before the buffer is
      * consumed or is refused: while a `suspendAction`/`suspendAtomic` holds the
      * store, a bare `mutate` from another thread stages here too (see
-     * `Store.stagesInto`). Reads ([findPendingValue]) stay unlocked, on the
-     * owner's read-your-own-writes path.
+     * `Store.stagesInto`). Every read takes the same lock ([findPendingValue],
+     * `Store.removeState`'s check): the owner's read-your-own-writes peek runs
+     * on the thread a `suspendAction` started on while its body may be staging
+     * from another, and an unlocked walk of the map could miss the entry — or
+     * index Kotlin/Native's array-backed map mid-resize. Nothing takes the
+     * lock while holding a registry or per-state lock (see [pendingLock]).
      * For nested (savepoint) transactions, [commit] merges this into
      * `parent.pendingWrites`. For top-level transactions, [commit] applies via
      * [MutableState.applyCommitted].
@@ -149,7 +176,11 @@ class Transaction internal constructor(
      * locks, FrameCommit.kt), and never cleared. From then
      * on the transaction only fans out, then ends: anything staged into it —
      * or into a savepoint of it — would never be applied, so every staging
-     * path refuses it (see [closedToWrites]).
+     * path refuses it (see [closedToWrites]), a savepoint's merge included,
+     * and a [commit] or [rollback] on it meanwhile does nothing (`applyAlone`,
+     * [rollback]; both decided under [pendingLock], where the apply pass sets
+     * this). A frame's apply pass leaves a root alone that another commit
+     * applied first, for the same reason (`applyBracketed`).
      */
     @kotlin.concurrent.Volatile
     internal var applied: Boolean = false
@@ -248,7 +279,9 @@ class Transaction internal constructor(
      * commits into the enclosing transaction and stays installed while the
      * frame's participants fan out (or is rolled back while the frame's error
      * hooks run). `mutate`, `emit`, nested `action`/`atomic` and the savepoint
-     * factories refuse such a transaction instead of losing the write silently.
+     * factories refuse such a transaction instead of losing the write silently
+     * — as do a savepoint's merge into it (`mergeIntoParent`, FrameCommit.kt)
+     * and `restore`'s staging ([stagePendingRaw]).
      */
     internal val closedToWrites: Boolean
         get() {
@@ -293,16 +326,26 @@ class Transaction internal constructor(
      * asymmetric ones (e.g. [com.vynatix.holdfast.crypto.EncryptingTransformer]),
      * the difference is critical — restoring already-encrypted ciphertext via
      * `mutate` would re-encrypt it.
+     *
+     * Like [stagePendingWrite], stages nothing and returns `false` when this
+     * transaction is [closedToWrites] — checked under [pendingLock],
+     * atomically with the stage. The restore stages inside its action after
+     * user code has had the transaction in hand (a middleware's
+     * `onTransactionStarted`, an initializer re-run for a state dropped since
+     * the plan), which may have committed or rolled it back by hand; the
+     * caller then fails the restore instead of reporting as restored values
+     * that landed in a buffer nobody applies again (issue #20, D16).
      */
     internal fun stagePendingRaw(
         state: MutableState<*>,
         rawValue: Any,
-    ) {
+    ): Boolean =
         pendingLock.withLock {
+            if (closedToWrites) return@withLock false
             pendingWrites[state] = rawValue
             cancelStagedEviction(state)
+            true
         }
-    }
 
     /**
      * Stage [raw], a post-`Transformer.set` value, as [state]'s pending write —
@@ -405,15 +448,26 @@ class Transaction internal constructor(
     /**
      * Walk the savepoint chain (this → parent → … → root) for a pending write.
      * Used by [MutableState.value] when a caller wants in-transaction
-     * read-your-own-writes.
+     * read-your-own-writes, and by a reset pass for the value the chain holds
+     * for a state ([ResetPass]).
+     *
+     * Each level's buffer is read under its own [pendingLock], child before
+     * parent and never two at once (as [evictsInChain] reads the evictions):
+     * while a `suspendAction`/`suspendAtomic` holds the store, its body stages
+     * from whatever thread it resumed on while the thread it started on — the
+     * transaction's owner, whose reads peek here — may be reading, and an
+     * unlocked read of the map could miss an entry or index a table
+     * mid-resize. The caller must hold no registry or per-state lock, which
+     * the apply pass takes under the pending lock (see [pendingLock]).
      */
     @Suppress("UNCHECKED_CAST")
     internal fun <T : Any> findPendingValue(state: MutableState<T>): T? {
         var current: Transaction? = this
         while (current != null) {
-            val pending = current.pendingWrites[state]
+            val level = current
+            val pending = level.pendingLock.withLock { level.pendingWrites[state] }
             if (pending != null) return pending as T
-            current = current.parent
+            current = level.parent
         }
         return null
     }
@@ -428,6 +482,20 @@ class Transaction internal constructor(
      * [MutableState.applyCommittedValue] first, and only then does fanout run:
      * all observers ([MutableState.fanOutToObservers]), then all bridge
      * publishes ([MutableState.publishToBridge]).
+     *
+     * A commit on a top-level transaction whose writes have already applied
+     * but that has not fanned out yet is a no-op too: a participant of an
+     * `atomic`/`suspendAtomic` frame waiting for its turn to fan out, or the
+     * transaction of the very commit whose fanout is running — both still
+     * `Store.activeTransaction`, and a middleware context's `transaction`.
+     * Its fanout belongs to the frame (or to that commit), which runs it
+     * exactly once, in its turn; a [rollback] on such a root is a no-op for
+     * the same reason. A savepoint whose parent has applied or
+     * ended meanwhile — a commit or rollback by hand on the enclosing
+     * transaction — does not merge into it: this throws a
+     * [TransactionException] whose cause names the finished transaction, and
+     * the nested `action` returns it as [TransactionResult.Error] (issue #20,
+     * D16).
      */
     fun commit() {
         @OptIn(StoreInternalApi::class)
@@ -482,15 +550,20 @@ class Transaction internal constructor(
      *
      * The two passes — apply, then [fanOutApplied] — run here back to back; a
      * frame (`atomic`/`suspendAtomic`) runs the apply pass over all its
-     * participants at once ([applyFrameCommit]), then fans each out.
+     * participants at once ([applyFrameCommit]), then fans each out. The
+     * fanout runs only when the apply pass here applied this transaction: on
+     * a root a frame has applied but not yet fanned out (or one fanning out
+     * right now) this is a no-op as a whole — [fanout] is not called, since
+     * fanning the root out from here would run it out of the frame's lock
+     * order, before its turn, and with this caller's fanout instead of the
+     * frame's — and a savepoint's merge needs no fanout ([applyAlone]).
      */
     @StoreInternalApi
     fun commitDispatching(
         fanout: (List<Pair<MutableState<*>, Any>>) -> Unit,
         drainEvents: ((List<Pair<MutableSharedFlow<*>, Any>>) -> Unit)?,
     ) {
-        applyAlone()?.let { throw it }
-        fanOutApplied(fanout, drainEvents)
+        if (applyAlone()) fanOutApplied(fanout, drainEvents)
     }
 
     /**
@@ -498,27 +571,53 @@ class Transaction internal constructor(
      * On a non-Active transaction this is a no-op.
      *
      * Discards pending writes without touching state, observers, or bridges.
+     *
+     * A no-op, too, on a transaction whose buffers have already been
+     * consumed for good ([buffersClosed]; decided under [pendingLock], like
+     * [commit]'s no-op): a top-level transaction whose writes have applied but
+     * that has not fanned out yet — a participant of an
+     * `atomic`/`suspendAtomic` frame waiting for its turn, or the transaction
+     * of the very commit whose fanout is running, both still
+     * `Store.activeTransaction` — or a savepoint that has just merged. There
+     * is nothing left to discard: the applied values stand, and the fanout
+     * belongs to the frame (or to that commit), which runs it exactly once.
+     * It used to turn such a root RolledBack, so the frame's later fanout —
+     * every observer already notified — failed its own status transition,
+     * and the frame reported an error, and a rollback, for a commit that had
+     * applied and fanned out in full.
      */
     fun rollback() {
         val current = statusLock.withLock { _status }
         if (current != TransactionStatus.Active) return
 
+        var ending = false
         try {
-            pendingLock.withLock {
-                buffersClosed = true
-                pendingWrites.clear()
-                pendingEvents.clear()
-                evictions.clear()
-            }
-            updateStatus(TransactionStatus.RolledBack)
+            ending =
+                pendingLock.withLock {
+                    // Consumed for good already — applied, or merged — by a
+                    // commit that owns the fanout, if any: nothing to discard,
+                    // no status to change (see the KDoc). Decided under the
+                    // lock the apply pass sets it under, so a rollback racing
+                    // a frame's pass either discards before it or does
+                    // nothing after it.
+                    if (buffersClosed) return@withLock false
+                    buffersClosed = true
+                    pendingWrites.clear()
+                    pendingEvents.clear()
+                    evictions.clear()
+                    true
+                }
+            if (ending) updateStatus(TransactionStatus.RolledBack)
         } catch (e: CancellationException) {
+            ending = true
             runCatching { updateStatus(TransactionStatus.Failed) }
             throw e
         } catch (e: Throwable) {
+            ending = true
             runCatching { updateStatus(TransactionStatus.Failed) }
             throw TransactionException("Rollback of transaction '$id' failed", e)
         } finally {
-            recordEndTime()
+            if (ending) recordEndTime()
         }
     }
 
@@ -559,6 +658,21 @@ private fun isValidStatusTransition(
 
 /** [Transaction.fanoutThreadId] while no fanout runs. No platform hands out this thread id. */
 internal const val NOT_FANNING_OUT = Long.MIN_VALUE
+
+/**
+ * Run [block] holding the pending lock of every transaction of this chain —
+ * this one, its parent, up to the root — innermost first, the one order a
+ * chain's pending locks nest in (a savepoint's merge, FrameCommit.kt); with
+ * no lock at all when this is `null`. For `Store.removeState`/`clearStates`:
+ * under these locks, checking that no level holds a pending write to a state
+ * and dropping the state are one step against every staging path, including
+ * a write from another thread while a `suspendAction` holds the store. The
+ * registry lock they take inside is then taken under the pending locks — the
+ * order the apply pass takes the two in ([Transaction.pendingLock]), never
+ * the reverse.
+ */
+internal fun <R> Transaction?.holdingPendingLocks(block: () -> R): R =
+    if (this == null) block() else pendingLock.withLock { parent.holdingPendingLocks(block) }
 
 /** Lifecycle status of a [Transaction]. Active is the only non-terminal state. */
 enum class TransactionStatus {

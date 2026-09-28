@@ -268,6 +268,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A read on the thread a `suspendAction` started on sees every bare
+  `mutate` another thread has staged into it.** That thread is the
+  transaction's owner, so its reads peek at the pending writes for
+  read-your-own-writes — while the body may be staging from another thread
+  (`withContext(Dispatchers.IO) { x mutate v }`, or a bare `mutate` from
+  anywhere while the suspending call holds the store). The peek walked the
+  buffer with no lock and could miss a write that had landed, or index
+  Kotlin/Native's array-backed map mid-resize. Core now reads the buffer
+  under the lock the writes take (see `:holdfast`'s changelog);
+  `SuspendActionPendingReadRaceTest` (JVM/Android host) stresses the pair.
+
 - **The first `suspendAction`, `suspendAtomic` or hydration decision on a store
   waits out a blocking action that started before it, instead of spinning
   forever.** Installing the store's serializer raced a blocking
@@ -374,7 +385,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   applied, so they fan out and commit, and the frame returns the failure as
   an `Error` (the cancellation, when there is one, carrying any other
   failure as suppressed). Only the participants that roll back get
-  `onTransactionError`.
+  `onTransactionError`. A `commit()` or `rollback()` by hand on a LATER
+  participant's transaction, from an earlier one's observer, is a no-op: its
+  fanout belongs to the frame's suspending fanout, which runs it in its turn
+  (see `:holdfast`'s changelog for what it used to do).
 
 - **BREAKING (behavior): derived states settle once per outermost suspending
   entry, and a frame's post-commit work runs then.** A `derivedState` over

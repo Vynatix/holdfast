@@ -69,12 +69,7 @@ private fun KeyedFamily<*, *>.stageEvictionsInto(
     attempt: String,
     targets: () -> List<MutableState<*>>,
 ) {
-    // The frame rule stageWrite applies: an unenrolled store's transaction
-    // here is an enclosing action's, which commits whatever the frame does.
-    val frame = FrameMarkers.current()
-    if (frame != null && !frame.isEnrolled(store) && !frame.policy.allowUnenrolled) {
-        throw UnenrolledStoreException(store.unenrolledMessage(frame, "evict"))
-    }
+    refuseUnenrolledFrame()
     // Listed once: a deferred eviction evicts exactly the entries live now.
     val states = targets()
     when {
@@ -86,6 +81,45 @@ private fun KeyedFamily<*, *>.stageEvictionsInto(
         }
         else -> throw IllegalStateException(store.evictionRefusal(attempt, txn))
     }
+}
+
+/**
+ * The frame rule `stageWrite` applies, for an eviction: inside a frame that
+ * does not enroll this family's store (and whose policy does not allow
+ * unenrolled writes) refuse, since the store's transaction here is an
+ * enclosing action's, which commits whatever the frame does.
+ */
+private fun KeyedFamily<*, *>.refuseUnenrolledFrame() {
+    val frame = FrameMarkers.current()
+    if (frame != null && !frame.isEnrolled(store) && !frame.policy.allowUnenrolled) {
+        throw UnenrolledStoreException(store.unenrolledMessage(frame, "evict"))
+    }
+}
+
+/**
+ * A restore's replacement of this family's entries (`PlannedRestore.stage`):
+ * stage the eviction of the entries [targets] lists into [txn] — the
+ * restore's own transaction, on its owner thread — as [stageEvictions] would,
+ * but never deferred. A transaction that applied or ended between the
+ * restore's checks (a `commit()` by hand on it from another thread) refuses
+ * the eviction like every other write into it (D16), so the restore fails as
+ * a whole instead of evicting, once it has returned as `Error`, the entries
+ * it meant to replace. [attempt] names the call for the refusal.
+ *
+ * @throws IllegalStateException if the store is disposed, inside a no-write
+ *   region, or when [txn] is closed to writes.
+ * @throws UnenrolledStoreException inside a frame that does not enroll the
+ *   store.
+ */
+internal fun KeyedFamily<*, *>.stageEvictionsOrRefuse(
+    txn: Transaction,
+    attempt: String,
+    targets: () -> List<MutableState<*>>,
+) {
+    store.checkNotDisposed()
+    NoWriteRegion.refuse { attempt }
+    refuseUnenrolledFrame()
+    check(txn.stageEviction(targets())) { store.evictionRefusal(attempt, txn) }
 }
 
 /**
