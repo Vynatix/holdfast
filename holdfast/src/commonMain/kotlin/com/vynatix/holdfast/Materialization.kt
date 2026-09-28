@@ -28,12 +28,20 @@ import kotlinx.atomicfu.locks.SynchronousMutex
  * thread.) A throwing initializer propagates to its caller and publishes
  * nothing, so the next read runs it again.
  *
+ * Outside any entry, the outermost materialization on this thread is an
+ * entry of its own: it opens a settle scope (SettleScope.kt), which settles
+ * once the state is published and its latch released. So a change its
+ * initializer makes that a derived state follows as a whole — a keyed entry
+ * it creates (StoreEdges.kt) — recomputes that derived state once, after
+ * the initializer, never in its middle. Nested in an entry, or in another
+ * materialization, it joins the open scope.
+ *
  * @throws IllegalStateException when the store is disposed, or when the
  *   initializer would (transitively) need this very state: an initializer
  *   cycle, on one thread or across threads.
  */
 internal fun <T : Any> materialize(decl: StateDeclaration<T>): MutableState<T> =
-    decl.materialized ?: decl.store.initializerGraph.materialize(decl)
+    decl.materialized ?: settling { decl.store.initializerGraph.materialize(decl) }
 
 /**
  * Materialize every [StateKind.Declared] state of this store that is not live

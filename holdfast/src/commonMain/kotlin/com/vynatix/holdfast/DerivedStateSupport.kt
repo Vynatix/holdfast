@@ -112,8 +112,19 @@ internal fun <V : Store<V>> followSources(
  * once on an idle host rather than waiting for whoever holds the source's
  * store.
  *
- * A change that finds the host disposed releases every subscription, so a
- * disposed host does not stay referenced by another store's states.
+ * **Whole stores.** Besides its state sources, a follower can follow whole
+ * stores — store-level edges ([addSourceStore], StoreEdges.kt): any change
+ * of such a store queues the recompute the same way, and so does adding or
+ * removing an edge, or disposing a followed store (which drops its edge), so
+ * the value covers exactly the stores followed. A change noticed inside a
+ * state initializer, a schema migration or a compute (a keyed entry one
+ * creates) finds a settle scope open even outside any entry — the outermost
+ * first-read materialization and a restore from its plan on open one, and a
+ * recompute's compute runs in its top-level attempt's — so it recomputes
+ * once that code has returned, never in its middle.
+ *
+ * A change that finds the host disposed releases every subscription and
+ * edge, so a disposed host does not stay referenced by another store's states.
  */
 internal class SourceFollower<V : Store<V>>(
     private val host: V,
@@ -130,7 +141,15 @@ internal class SourceFollower<V : Store<V>>(
     @kotlin.concurrent.Volatile
     private var subscriptions: List<Disposable> = emptyList()
 
+    /** The stores followed as a whole, and the queues other than the host's the recompute can sit in. */
+    val followed = FollowedStores(host)
+
+    /** The stores this follower follows as a whole ([addSourceStore]), in the order added. */
+    val sourceStores: List<Store<*>>
+        get() = followed.stores
+
     fun start(sources: List<MutableState<*>>) {
+        followed.noteStateSources(sources)
         subscriptions = sources.map { follow(it) }
         // Released while subscribing (a concurrent dispose saw the list
         // before it was assigned): drop what was just subscribed. Disposing
@@ -163,6 +182,66 @@ internal class SourceFollower<V : Store<V>>(
         if ((missed || catchUp) && SettleScopes.current()?.enqueue(task) != true) host.postCommit(task)
     }
 
+    /**
+     * Follow [store] as a whole from now on (see StoreEdges.kt), and — with
+     * [catchUp] — queue a recompute, which reads [store] after the edge is
+     * registered, so a commit racing this call is never missed. `false`,
+     * changing nothing, when [store] is followed already or this follower is
+     * released (its derived state, or its host, disposed).
+     *
+     * @throws IllegalStateException if [store] is disposed.
+     */
+    fun addSourceStore(
+        store: Store<*>,
+        catchUp: Boolean = true,
+    ): Boolean {
+        check(!store.isDisposed) { disposedSourceStore(store) }
+        if (host.isDisposed) dispose()
+        // Attached before [FollowedStores]' lock is taken: the slot's lock
+        // must not nest in it.
+        val edges = store.storeEdgesOrNull() ?: error(disposedSourceStore(store))
+        val added =
+            when (followed.addWithEdge(store, edges, this)) {
+                EdgeAdd.UNCHANGED -> false
+                // Disposed meanwhile, its edges already told.
+                EdgeAdd.DISPOSED -> error(disposedSourceStore(store))
+                // Unless released meanwhile: its release takes this edge off
+                // again (FollowedStores.releaseAll lists it, or refused the add).
+                EdgeAdd.ADDED -> !released.value
+            }
+        if (added && catchUp) onStoreChanged(host)
+        return added
+    }
+
+    /**
+     * Stop following [store] as a whole, and queue a recompute, so the value
+     * stops covering it. `false`, changing nothing, when it was not followed.
+     */
+    fun removeSourceStore(store: Store<*>): Boolean {
+        if (!followed.removeWithEdge(store, this)) return false
+        // A recompute a commit of the store queued behind it, which nothing
+        // would withdraw any more: the one queued below covers that commit.
+        if (followed.queuedOn.none { it === store }) recompute?.let { store.withdrawPostCommit(it) }
+        onStoreChanged(host)
+        return true
+    }
+
+    /** [store], followed as a whole, changed ([StoreEdges.changed]). */
+    fun onStoreChanged(store: Store<*>) {
+        if (host.isDisposed) dispose() else onSourceChanged(store, edge = true)
+    }
+
+    /**
+     * [store], followed as a whole, was disposed: its edge is gone, so
+     * recompute without it. Never throws: a failure goes to the host's
+     * handler, and a handler that throws there is ignored, so [StoreEdges]
+     * tells the next follower. The store is forgotten first, whatever fails.
+     */
+    fun onSourceStoreDisposed(store: Store<*>) {
+        runCatching { if (followed.forget(store)) onStoreChanged(host) }
+            .onFailure { failure -> if (!host.isDisposed) runCatching { host.internalReportUncaughtFailure(failure) } }
+    }
+
     private fun follow(source: MutableState<*>): Disposable {
         val initialFire = atomic(true)
         @Suppress("UNCHECKED_CAST")
@@ -174,16 +253,20 @@ internal class SourceFollower<V : Store<V>>(
             if (host.isDisposed) {
                 dispose()
             } else {
-                onSourceChanged(source)
+                onSourceChanged(source.owningStore, edge = false)
             }
         }
     }
 
-    private fun onSourceChanged(source: MutableState<*>) {
+    /** A source of [sourceStore] changed — a followed store as a whole, when [edge]. */
+    private fun onSourceChanged(
+        sourceStore: Store<*>,
+        edge: Boolean,
+    ) {
         while (true) {
             val current = phase.value
             if (current == ARMED) {
-                recompute?.let { queue(source, it) }
+                recompute?.let { queue(sourceStore, it, edge) }
                 return
             }
             if (current == MISSED || phase.compareAndSet(current, MISSED)) return
@@ -191,20 +274,34 @@ internal class SourceFollower<V : Store<V>>(
     }
 
     private fun queue(
-        source: MutableState<*>,
+        sourceStore: Store<*>,
         task: DerivedRecompute<V, *>,
+        edge: Boolean,
     ) {
         if (SettleScopes.current()?.enqueue(task) == true) return
-        val sourceStore = source.owningStore
         val inItsCommit = sourceStore.activeTransaction?.fanningOutHere() == true
-        (if (inItsCommit) sourceStore else host).postCommit(task)
+        when {
+            inItsCommit -> sourceStore.postCommit(task)
+            // A store-level change inside an initializer, migrate or compute
+            // with no settle scope open — none such is known: each of those
+            // runs in a scope (see the class KDoc). Not a recompute to run in
+            // the middle of that code, so a fallback, reported.
+            edge && NoWriteRegion.current() != null -> task.handOffLagging(sourceStore)
+            else -> host.postCommit(task)
+        }
     }
 
     override fun dispose() {
         if (!released.compareAndSet(expect = false, update = true)) return
         subscriptions.forEach { it.dispose() }
+        // Before the edges go: it withdraws itself from their stores' queues too.
         recompute?.dispose()
+        followed.releaseAll(this)
     }
+
+    /** Why a store this follower is asked to follow cannot be. */
+    private fun disposedSourceStore(store: Store<*>): String =
+        "store disposed: ${store.displayName}, a source store of a derived state of ${host.displayName}"
 
     private companion object {
         const val UNARMED = 0

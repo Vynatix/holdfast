@@ -1487,8 +1487,8 @@ abstract class Store<Self : Store<Self>> {
         // Outside the registry's lock, as in dispose(): shutting down disposes
         // the bridge's inbound subscription, which is user code — and user code
         // may read a state another thread is materializing, which needs this
-        // lock to publish it.
-        removed.shutdownSilently()
+        // lock to publish it. Then store-level edges are told (StoreEdges.kt).
+        shutDownDematerialized(listOf(removed))
     }
 
     /**
@@ -1512,8 +1512,8 @@ abstract class Store<Self : Store<Self>> {
                 live.keys.forEach { registry.dematerialize(it) }
                 live.values
             }
-        // Outside the registry's lock; see removeState.
-        removed.forEach { it.shutdownSilently() }
+        // Outside the registry's lock, then edges are told; see removeState.
+        shutDownDematerialized(removed)
     }
 
     /** The caller holds the registry lock, under which a reset takes its hold (`ResetPass.hold`). */

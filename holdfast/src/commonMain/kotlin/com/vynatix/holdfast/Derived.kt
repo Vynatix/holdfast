@@ -145,15 +145,16 @@ fun <V : Store<V>, T : Any> V.derived(
  * it must stay a single instance for the derived's lifetime. [queuedOn] lists
  * the stores other than [host] whose queues it may have been put on (a
  * [DerivedState]'s, by a source commit outside any entry, or deferring to a
- * holder); it withdraws itself from all of them, and while this thread runs a
- * blocking action or frame on one of them it defers to that holder, so it
- * runs once, after it ends. With [cutSources] (a [DerivedState]'s, its
- * sources), [compute] runs in a [ComputingFrame] and reads the sources from
- * one committed cut ([ComputeReads]): it reads committed values only, so it
- * never commits a value built from another transaction's pending writes — a
- * blocking one it does not defer to, or a `suspendAction` parked on this
- * thread — nor one source after another thread's frame applied and another
- * before; and a write from it throws.
+ * holder) — read at each use, since a derived state's store-level edges
+ * (StoreEdges.kt) come and go; it withdraws itself from all of them, and
+ * while this thread runs a blocking action or frame on one of them it defers
+ * to that holder, so it runs once, after it ends. With [cutSources] (a
+ * [DerivedState]'s, its sources), [compute] runs in a [ComputingFrame] and
+ * reads the sources from one committed cut ([ComputeReads]): it reads
+ * committed values only, so it never commits a value built from another
+ * transaction's pending writes — a blocking one it does not defer to, or a
+ * `suspendAction` parked on this thread — nor one source after another
+ * thread's frame applied and another before; and a write from it throws.
  *
  * It commits through [Store.tryTopLevelAction] and never blocks or spins: a
  * busy host gets the task handed to its post-commit queue, and the host's
@@ -170,7 +171,7 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
     private val host: V,
     private val id: String,
     private val compute: V.() -> T,
-    private val queuedOn: List<Store<*>> = emptyList(),
+    private val queuedOn: () -> List<Store<*>> = { emptyList() },
     private val cutSources: List<MutableState<*>>? = null,
     private val commit: V.(T) -> Unit,
 ) : () -> Unit,
@@ -202,6 +203,30 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
         }
     }
 
+    /**
+     * A change of [changed], a store this derived state follows as a whole
+     * (StoreEdges.kt), was noticed inside a no-write region with no settle
+     * scope open — a fallback no known path takes (see SourceFollower): leave
+     * the recompute in [host]'s post-commit queue for its next holder rather
+     * than run it in the middle of that code, and report that its value may
+     * lag until then (hand-off first). Value-free; never throws — a handler
+     * that throws here is ignored, so the store's other followers are told.
+     */
+    fun handOffLagging(changed: Store<*>) {
+        host.handOffPostCommit(this)
+        if (host.isDisposed) return
+        runCatching {
+            host.internalReportUncaughtFailure(
+                IllegalStateException(
+                    "derived state ${host.displayName}.$id follows ${changed.displayName}, which changed inside a " +
+                        "state initializer, a migrate or a compute with no settle scope open; its recompute is left " +
+                        "in ${host.displayName}'s post-commit queue for its next holder, so its value may lag " +
+                        "${changed.displayName} until then",
+                ),
+            )
+        }
+    }
+
     fun dispose() {
         disposed.value = true
         withdrawEverywhere()
@@ -209,7 +234,7 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
 
     private fun withdrawEverywhere() {
         host.withdrawPostCommit(this)
-        queuedOn.forEach { it.withdrawPostCommit(this) }
+        queuedOn().forEach { it.withdrawPostCommit(this) }
     }
 
     override fun invoke() {
@@ -233,7 +258,7 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
         // needs no such check: a transaction there makes the attempt below
         // busy, which hands off the same way. Legacy `derived` has no
         // [queuedOn].
-        val held = queuedOn.firstOrNull { it.internalOwnsActiveTransaction() }
+        val held = queuedOn().firstOrNull { it.internalOwnsActiveTransaction() }
         if (held != null) {
             held.postCommit(this)
             return

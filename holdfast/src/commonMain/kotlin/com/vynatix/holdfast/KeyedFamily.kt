@@ -130,7 +130,10 @@ internal class KeyedFamily<K : Any, T : Any>(
                     }
                 }
             if (!state.retired) {
-                store.registry.keyed.announceAdded(decl, state)
+                // Announced here, outside every lock the family took: a new
+                // entry is a change of its store, which derived states that
+                // follow the store as a whole recompute on (StoreEdges.kt).
+                if (store.registry.keyed.announceAdded(decl, state)) store.tellStoreEdges()
                 return state
             }
         }

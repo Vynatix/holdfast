@@ -234,10 +234,12 @@ private fun Transaction.mergeIntoParent(): Throwable? {
 }
 
 /**
- * The fanout pass of this applied top-level transaction: first the keyed
- * entries it evicted are shut down — their observers dropped, bridges
- * detached and `observeFrom` subscriptions disposed, silently — and their
- * families' membership listeners told ([shutDownEvicted]); then [fanout] with
+ * The fanout pass of this applied top-level transaction: first the derived
+ * states following its store as a whole are told (StoreEdges.kt; that only
+ * queues their recomputes); then the keyed entries it evicted are shut down —
+ * their observers dropped, bridges detached and `observeFrom` subscriptions
+ * disposed, silently — and their families' membership listeners told
+ * ([shutDownEvicted]); then [fanout] with
  * the writes that changed a SEALED state (SealedStates.kt); then what a
  * shutdown threw is reported ([reportShutdownFailures]); then [fanout] with
  * every other write that changed a state; then the staged events — through
@@ -269,6 +271,9 @@ fun Transaction.fanOutApplied(
     fanoutThreadId = currentThreadId()
     val failure =
         runCatching {
+            // First, as it runs no user code: a derived state following this
+            // store as a whole queues its recompute (StoreEdges.kt).
+            writes.tellStoreEdges()
             val shutdownFailures = if (writes.evicted.isEmpty()) emptyList() else shutDownEvicted(writes.evicted)
             val (sealed, others) = writes.committed.sealedFirst()
             if (sealed.isNotEmpty()) fanout(sealed)

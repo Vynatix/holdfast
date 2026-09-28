@@ -494,6 +494,68 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **Internal primitives for issue #21's `Root`: a one-frame restore and
+  store-level derivation edges** (issue #20 plan PR 15, decision D21). No
+  public or `@StoreInternalApi` surface — the API dumps are unchanged; #21
+  builds its public API on these:
+  - `restoreInOneFrame(snapshots, policy)` — the write half of
+    `captureConsistent(stores)`: restores each store from its snapshot in ONE
+    outermost `atomic` frame over them all. Every store's restore is planned
+    first, before the frame opens and outside every lock (schema check and
+    `migrate`, never-read targets' initializers, codecs), then staged raw
+    into the store's frame root — so an encrypted state's ciphertext goes
+    back as captured, never encrypted twice — and applied in one write
+    bracket: a consistent cut sees every store restored or none. One store
+    whose snapshot is rejected (a `RestoreRejectedException` under the
+    policy, a `SnapshotMigrationException`, a failing initializer) rolls
+    every store back. It refuses to run inside any entry — an action, frame,
+    `suspendAction`/`suspendAtomic`, a commit's fanout or a derived state's
+    settle — with a teaching `IllegalStateException`, because a nested frame
+    is not all-or-nothing (a shared store joins as a savepoint, any other
+    commits at the nested frame's exit; `USABILITY-ANALYSIS.md`'s two
+    frame-nesting findings) until mixed-frame nesting is fixed (a
+    non-suspending call, it sees a suspending entry through the settle scope
+    that entry installs on its thread, so on iOS and wasmJs a call inside a
+    nested `withContext(Dispatchers.X)` block of a `suspendAction` or
+    `suspendAtomic` body is not refused). An encoded and decoded cut
+    restores its encodable projection: a `Secret` state, a `Remote` one
+    encoded without `includeRemote` and one without a codec keep their
+    values. The restore's plan and stage halves are one internal
+    `PlannedRestore`, which `restore` now uses too.
+  - Store-level derivation edges: a derived state can follow whole stores,
+    added and removed at runtime (`DerivedStateNode.addSourceStore(store)` /
+    `removeSourceStore(store)`, and `derivedStateOverStores(name, stores)` for
+    a node with no state source — what #21's `Root.value` recomputes on over
+    keyed branches; it also takes state `sources`, which a compute reading
+    a followed store's derived state must list — a derived state's own
+    commit is no change of its store, and an edge orders nothing in a
+    settle). A followed store's change — a commit that changes a state a
+    capture of it holds or evicts a keyed entry, an inbound bridge write, a
+    keyed entry coming to life, a state `removeState`/`clearStates` drops;
+    not a derived state's own backing or a sealed state — queues the
+    recompute where a source change would, so it settles once per outermost
+    entry or frame (a two-store frame over two followed stores recomputes it
+    once). A change noticed inside a state initializer, a `migrate` or a
+    compute outside any entry (a keyed entry it creates) settles once that
+    code has returned: the outermost first-read materialization now opens or
+    joins a settle scope, and so does `restore`/`restoreInOneFrame` from its
+    plan on (plan and transaction are one entry), so a restore whose plan
+    creates keyed entries recomputes such a node once, after its commit or
+    rollback. The followed store holds its followers in a `StoreAttachment`,
+    whose `onStoreDisposed` drops the edge (each follower told in isolation,
+    even when a host's handler throws); adding, removing or dropping an edge
+    queues one recompute, so the value covers exactly the stores followed,
+    and a commit racing an add is never missed (the add's recompute reads
+    the store after it). An add and a remove of one store racing on two
+    threads change the node's list and the store's followers as one step.
+    Edges subscribe no observer, and a disposed node or followed store
+    leaves no follower behind (a disposed host's edges are released at each
+    followed store's next change): `DynamicDerivationTest` runs 1,000
+    attach/commit/dispose cycles at exactly three recomputes each,
+    `StoreEdgeConcurrencyTest` (JVM, watchdogged) races adds, removes and
+    disposes against commits and frames, and `ConsistentCutTest`
+    round-trips a three-store cut through text.
+
 - **A restore limited to one tag** (`@StoreInternalApi` + experimental,
   issue #20, R8/R3; plan PR 14): `internalRestoreTagged(snapshot, tag,
   policy)` restores only the entries of the states and keyed state families

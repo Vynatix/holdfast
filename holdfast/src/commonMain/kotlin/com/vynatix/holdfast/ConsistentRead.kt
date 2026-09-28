@@ -82,7 +82,9 @@ private fun tryReadCut(
  * one sharing no store with its enclosing entry) either before it or after
  * it, never a mix — the multi-store cut issue #21's `Root` snapshot builds on.
  * A participant joined as a savepoint of an enclosing transaction applies with
- * that transaction instead (see the note at the top of this file).
+ * that transaction instead (see the note at the top of this file). Its write
+ * half is [restoreInOneFrame] (OneFrameRestore.kt), which puts such a cut back
+ * in one outermost frame.
  *
  * Keyed entries are listed as the plan finds them live; one an eviction
  * retires before the cut is left out, in the same cut (KeyedCommit.kt).

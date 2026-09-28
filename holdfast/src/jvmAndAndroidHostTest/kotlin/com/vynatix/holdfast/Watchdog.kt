@@ -50,3 +50,21 @@ internal fun daemon(
         isDaemon = true
         start()
     }
+
+/**
+ * Start [body] on a named daemon thread, adding what it throws to [failures]
+ * — which the test then asserts empty — instead of losing it to the thread's
+ * default handler.
+ */
+internal fun daemon(
+    name: String,
+    failures: MutableCollection<Throwable>,
+    body: () -> Unit,
+): Thread =
+    daemon(name) {
+        try {
+            body()
+        } catch (t: Throwable) {
+            failures += t
+        }
+    }

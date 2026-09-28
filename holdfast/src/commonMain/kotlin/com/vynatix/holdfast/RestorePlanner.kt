@@ -16,7 +16,9 @@ package com.vynatix.holdfast
 // ACTION then only stages the planned raw values, or throws the planned
 // failure, so a rejected restore changes nothing and middleware still sees it
 // as one failed transaction — inside an atomic(...) frame, one that aborts the
-// frame.
+// frame. The two halves are one PlannedRestore: restoreInOneFrame
+// (OneFrameRestore.kt) plans several stores this way before its frame opens,
+// then stages each plan into that store's root of the frame.
 //
 // The type witness. A state's declared type is erased at runtime, so a restore
 // cannot ask whether a value fits it. What it can see is the class of the value
@@ -90,7 +92,10 @@ internal class PlannedWrite(
  * its Remote states instead of restoring them; [only] the entries of states
  * and families declared with that tag, when it is set (see the top of this
  * file) — as one action whose value is [result] of the restore's report:
- * plan, then stage.
+ * plan, then stage. The plan and the action are one entry: what the plan
+ * changes that a derived state follows as a whole — a keyed entry it
+ * creates (StoreEdges.kt) — settles with the action's own commit, once,
+ * after it (SettleScope.kt).
  *
  * @throws IllegalStateException like [Store.action]: when the store is
  *   disposed, or inside a state initializer or a schema migration.
@@ -105,12 +110,10 @@ internal fun <V : Store<V>, R> V.runRestore(
 ): TransactionResult<R> {
     checkNotDisposed()
     NoWriteRegion.refuse { "restore $displayName" }
-    val planner = RestorePlanner(this, snapshot.content, sterile, only, targets)
-    // A failing target initializer is carried into the action, which reports
-    // it like one inside the restore, whatever the policy.
-    val failure = runCatching { planner.plan() }.exceptionOrNull() ?: planner.rejection(policy)
-    val sterileReset = if (sterile) planner::cameToLife else null
-    return action(Restore(planner.writes, failure, sterileReset, planner.replaced) { result(planner.report()) })
+    return settling {
+        val plan = PlannedRestore(this, snapshot.content, policy, sterile, only, targets)
+        action(Restore(plan, result))
+    }
 }
 
 /**
@@ -166,28 +169,60 @@ fun <V : Store<V>> V.internalRestoreTagged(
  * transaction's id — the body's simple name — reads `Restore`.
  */
 private class Restore<V : Store<V>, R>(
-    private val writes: List<PlannedWrite>,
-    private val failure: Throwable?,
-    /** For a sterile restore, which non-Remote declared states it brought to life (see [RestorePlanner.cameToLife]). */
-    private val sterileReset: ((StateDeclaration<*>) -> Boolean)?,
-    /** For a tag-limited restore, the families it replaces, each with the keys the snapshot holds. */
-    private val replaced: Map<KeyedFamily<*, *>, Set<Any>>,
-    private val result: () -> R,
+    private val plan: PlannedRestore,
+    private val result: (RestoreReport) -> R,
 ) : (V) -> R {
     override fun invoke(store: V): R {
+        plan.stage(checkNotNull(store.activeTransaction) { "restore() stages into the action it runs in" })
+        return result(plan.report())
+    }
+}
+
+/**
+ * One restore of [content] into [store], planned — at construction, before
+ * any transaction opens and taking no lock of [store] (see the top of this
+ * file) — and ready to [stage] into a transaction of [store]: the action
+ * [runRestore] opens, or the root an `atomic` frame opened for [store]
+ * ([restoreInOneFrame]). What the plan throws (a target's initializer, the
+ * schema check), else the failure [policy] makes of the issues it found, is
+ * kept for [stage] to throw, so a rejected restore fails inside its
+ * transaction, having changed nothing.
+ */
+internal class PlannedRestore(
+    val store: Store<*>,
+    content: SnapshotContent,
+    policy: RestorePolicy,
+    sterile: Boolean = false,
+    only: StateTag? = null,
+    targets: ((State<*>) -> Boolean)? = null,
+) {
+    private val planner = RestorePlanner(store, content, sterile, only, targets)
+
+    // A failing target initializer is carried into the transaction, which
+    // reports it like one inside the restore, whatever the policy.
+    private val failure = runCatching { planner.plan() }.exceptionOrNull() ?: planner.rejection(policy)
+
+    /** For a sterile restore, which non-Remote declared states it brought to life (see [RestorePlanner.cameToLife]). */
+    private val sterileReset: ((StateDeclaration<*>) -> Boolean)? = if (sterile) planner::cameToLife else null
+
+    /**
+     * Stage the planned restore into [txn], [store]'s active transaction, or
+     * throw the planned failure. What was staged when a later step throws
+     * stays in [txn], and the caller rolls it back.
+     */
+    fun stage(txn: Transaction) {
         failure?.let { throw it }
-        val txn = checkNotNull(store.activeTransaction) { "restore() stages into the action it runs in" }
         // Before the planned writes, none of which is to an entry evicted
         // here: the family then holds the snapshot's keys and no others.
-        for ((family, keys) in replaced) {
+        for ((family, keys) in planner.replaced) {
             family.stageEvictions("replace the entries of ${family.qualifiedName}") {
                 family.entries.mapNotNull { (key, entry) -> (entry as MutableState<*>).takeIf { key !in keys } }
             }
         }
-        for (write in writes) {
+        for (write in planner.writes) {
             // Resolved again, for a state removeState/clearStates dropped since
             // the plan: a declared one is materialized again (its initializer
-            // then runs here, under the action's locks); a dropped derived
+            // then runs here, under the transaction's locks); a dropped derived
             // backing is skipped; a dropped internal state lost its
             // declaration with it, so it fails the restore. A keyed entry
             // evicted since is created again the same way.
@@ -203,8 +238,10 @@ private class Restore<V : Store<V>, R>(
         // reset compares each Remote state with the value the transaction
         // holds for it, and its initializers read the restored values.
         sterileReset?.let { store.stageResetOfRemoteStates(txn, it) }
-        return result()
     }
+
+    /** What the restore did, once [stage] has run. */
+    fun report(): RestoreReport = planner.report()
 }
 
 /**

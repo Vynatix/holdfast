@@ -124,18 +124,20 @@ internal class KeyedRegistry(
      * was announced already: once per entry, on the first thread that returns
      * it, holding no lock of the store but the entry's announcement lock
      * ([KeyedEntry.announceLock]) — never after the entry's eviction was
-     * announced ([announceEvicted]).
+     * announced ([announceEvicted]). Returns whether this call announced it.
      */
     fun announceAdded(
         decl: StateDeclaration<*>,
         state: MutableState<*>,
-    ) {
-        val entry = decl.keyed ?: return
-        entry.announceLock.withLock {
-            if (entry.phase == KeyedEntry.Phase.NEW) {
+    ): Boolean {
+        val entry = decl.keyed ?: return false
+        return entry.announceLock.withLock {
+            val announcing = entry.phase == KeyedEntry.Phase.NEW
+            if (announcing) {
                 entry.phase = KeyedEntry.Phase.ADDED
                 tell(state) { it.onEntryAdded(entry.family.name, entry.key, state) }
             }
+            announcing
         }
     }
 

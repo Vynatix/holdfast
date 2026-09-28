@@ -14,7 +14,10 @@ import kotlin.reflect.KProperty
 // queues, a never-blocking top-level attempt that hands off to a busy store —
 // but its backing state is never registered: no snapshot, restore, reset,
 // encode or `properties` sees it. The legacy `derived` Pair API stays as it
-// is (recomputing once per source commit) until the 0.7.0 triage.
+// is (recomputing once per source commit) until the 0.7.0 triage. Internally
+// a derived state can also follow whole stores, added and removed at runtime
+// (store-level edges, StoreEdges.kt) — the primitive issue #21's `Root.value`
+// builds on.
 
 /**
  * A state computed from other states and kept up to date by the library:
@@ -149,7 +152,7 @@ fun <V : Store<V>, T : Any> V.derivedState(
     }
     val backings = sources.map { observedSource(it, "derivedState") }
     val name = "derivedState(${backings.joinToString { it.sourceName(this) }})"
-    return createDerivedState(this, name, backings, compute)
+    return createDerivedState(this, name, backings, compute = compute)
 }
 
 /**
@@ -227,18 +230,55 @@ fun <T : Any> State<T>.observableBacking(): MutableState<T>? {
 /**
  * The one [DerivedState] implementation: a read-only view of [backing], an
  * unregistered `distinct` [MutableState] of the host store that only the
- * derived state's recompute writes ([stageRecomputedValue]). [release] stops
- * following the sources and disposes the recompute.
+ * derived state's recompute writes ([stageRecomputedValue]). [follower]
+ * follows its sources; disposing the node releases it and the recompute.
+ *
+ * It can also follow whole stores — store-level edges (StoreEdges.kt), for
+ * issue #21's `Root.value` over branches that attach and detach at runtime:
+ * [addSourceStore] and [removeSourceStore], from any thread.
  */
 internal class DerivedStateNode<T : Any>(
     val backing: MutableState<T>,
-    private val release: Disposable,
+    private val follower: SourceFollower<*>,
 ) : DerivedState<T> {
     override val value: T
         get() = backing.value
 
+    /** The stores this node follows as a whole, in the order added; a disposed one is dropped. */
+    val sourceStores: List<Store<*>>
+        get() = follower.sourceStores
+
+    /**
+     * Recompute after every change of [store] from now on — every commit that
+     * changes a state a capture of it holds or evicts a keyed entry, every
+     * inbound bridge write, every keyed entry that comes to life, every
+     * state `removeState`/`clearStates` drops — settling once per outermost
+     * entry like any source change (one noticed inside a state initializer,
+     * a `migrate` or a compute settles once that code has returned), until
+     * [removeSourceStore], the node's [dispose], or [store]'s `dispose()`
+     * (which drops the edge and recomputes once more). Queues one recompute
+     * now, which reads [store] after the edge exists, so a commit racing this
+     * call is never missed (see StoreEdges.kt). `false`, changing nothing,
+     * when [store] is followed already or the node (or its host) is disposed.
+     *
+     * Call it once [store] is constructed, holding no per-state lock (not
+     * from a `Bridge.publish`): it attaches to [store]'s attachment slot, and
+     * outside any entry its recompute can run at once, reading [store].
+     *
+     * @throws IllegalStateException if [store] is disposed.
+     */
+    fun addSourceStore(store: Store<*>): Boolean = follower.addSourceStore(store)
+
+    /**
+     * Stop recomputing on [store]'s changes, and queue one recompute, so the
+     * value stops covering it. A commit of [store] already fanning out may
+     * still recompute the node once more; none after this returns does.
+     * `false`, changing nothing, when [store] was not followed.
+     */
+    fun removeSourceStore(store: Store<*>): Boolean = follower.removeSourceStore(store)
+
     override fun dispose() {
-        release.dispose()
+        follower.dispose()
     }
 
     /** Names the derived state — `DerivedState(CartStore.derivedState(items))` — never its value. */
@@ -246,9 +286,45 @@ internal class DerivedStateNode<T : Any>(
 }
 
 /**
- * Build a [DerivedState] of [host] named [name]: follow [sources], compute its
- * initial value, create its unregistered backing, then arm the follower with
- * its recompute.
+ * A [DerivedState] of this store named [name], computed by [compute] and
+ * recomputed after every change of the stores it follows as a whole — none
+ * at first but [sourceStores], then whatever [DerivedStateNode.addSourceStore]
+ * adds — and of its state [sources], if any (see StoreEdges.kt). What
+ * [compute] reads of a followed store it reads from committed values; for
+ * one consistent cut across stores it reads through [captureConsistent].
+ * Otherwise a [derivedState]: [compute] runs once here, on the calling
+ * thread, for the initial value, after the edges to [sourceStores] exist.
+ *
+ * A derived state's own commit (`derivedState`/`merged`) is no change of its
+ * store, and an edge orders nothing in a settle: a derived state of a
+ * followed store that [compute] reads belongs in [sources], which recomputes
+ * this one on its commits and settles it after it (and taints it
+ * [StateTag.Secret] when it is). Read without being listed, it lags until
+ * that store's next change. A branch attached at runtime, whose derived
+ * states cannot be listed up front, is read through the states under them.
+ *
+ * For issue #21's `Root.value`, whose branches attach and detach at runtime.
+ *
+ * @throws IllegalStateException if this store, one of [sourceStores] or the
+ *   store of one of [sources] is disposed.
+ * @throws IllegalArgumentException if one of [sources] is a [computed] state
+ *   (or any State no store produced).
+ */
+internal fun <V : Store<V>, T : Any> V.derivedStateOverStores(
+    name: String,
+    sourceStores: List<Store<*>> = emptyList(),
+    sources: List<State<*>> = emptyList(),
+    compute: V.() -> T,
+): DerivedStateNode<T> {
+    checkNotDisposed()
+    val backings = sources.map { observedSource(it, "derivedStateOverStores") }
+    return createDerivedState(this, name, backings, sourceStores, compute)
+}
+
+/**
+ * Build a [DerivedState] of [host] named [name]: follow [sources] (and
+ * [sourceStores] as whole stores), compute its initial value, create its
+ * unregistered backing, then arm the follower with its recompute.
  *
  * The follower subscribes BEFORE the initial compute, so a source commit
  * landing while the compute runs is recomputed once armed rather than lost
@@ -263,13 +339,18 @@ private fun <V : Store<V>, T : Any> createDerivedState(
     host: V,
     name: String,
     sources: List<MutableState<*>>,
+    sourceStores: List<Store<*>> = emptyList(),
     compute: V.() -> T,
-): DerivedState<T> {
+): DerivedStateNode<T> {
     val follower = followSources(host, sources)
-    // A throwing compute throws to the caller with nothing left subscribed.
+    // A throwing compute (or a disposed source store) throws to the caller
+    // with nothing left subscribed or attached.
     var computed = false
     val (initial, readUncommitted) =
         try {
+            // Edges before the compute, like the subscriptions: a change
+            // landing in between queues a catch-up once armed.
+            sourceStores.forEach { follower.addSourceStore(it, catchUp = false) }
             ComputeReads.initial(sources) { host.compute() }.also { computed = true }
         } finally {
             if (!computed) follower.dispose()
@@ -291,10 +372,11 @@ private fun <V : Store<V>, T : Any> createDerivedState(
         )
     // With no settle scope open, a source commit fanning out on another store
     // queues the recompute on that store's post-commit queue, so the recompute
-    // withdraws itself from all of them.
-    val queuedOn = sources.map { it.owningStore }.filter { it !== host }.distinct()
+    // withdraws itself from all of them — the followed stores' too, which
+    // change as edges come and go.
+    val followed = follower.followed
     val recompute =
-        DerivedRecompute(host, name, compute, queuedOn, cutSources = sources) { value ->
+        DerivedRecompute(host, name, compute, queuedOn = { followed.queuedOn }, cutSources = sources) { value ->
             stageRecomputedValue(backing, value)
         }
     follower.arm(recompute, catchUp = readUncommitted)

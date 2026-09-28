@@ -322,6 +322,9 @@ class MutableState<T : Any>(
             writesEnded.incrementAndGet()
         }
         notifyObservers(afterGet(processed))
+        // A change of the store's state with no commit: derived states that
+        // follow the store as a whole recompute (StoreEdges.kt).
+        owningStore.tellStoreEdges()
     }
 
     /**
