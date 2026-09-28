@@ -1412,6 +1412,40 @@ described here.
   `state effect { ... }` (uses the new top-level `State<T>.effect`
   extension exposed by `:holdfast-coroutines`).
 
+### Added
+
+- **Kernel seams for issue #21's typed tree** (issue #21 plan PR 21-1,
+  decisions U3/U12). No production consumer yet — #21's `tree` package is
+  the first:
+  - `Store` and `EventfulStore` each gain a protected, experimental
+    secondary constructor taking a `StoreMembership<Self>` token —
+    `@ExperimentalStoreApi abstract class StoreMembership<S : Store<S>>
+    internal constructor()`, mintable only inside the `:holdfast` module (a
+    leaf's `KeyedBranch.at(key)` will mint the only implementation). The
+    token's `bind(store)` runs once, after every `Store` field — and, for
+    `EventfulStore`, its own `events` — has initialized, and before any
+    subclass property initializer or delegated state runs. The frozen no-arg
+    constructors (`Store()`'s `<init>()V`, `EventfulStore(extraBufferCapacity,
+    onBufferOverflow)`) are byte-identical to before this PR.
+  - `@StoreInternalApi internalSetOuterMiddleware`/`internalRemoveMiddleware`:
+    a library-owned outer middleware ring, always outermost of the
+    consumer-registered `middlewares(...)` chain (for #21's future
+    `Root.middlewares`). `internalRemoveMiddleware` is not gated on
+    `checkNotDisposed()` — see the exception list next to
+    `snapshotMiddleware()` in CLAUDE.md — so a caller unwinding a store that
+    disposed mid-teardown can tell "already gone" apart from "removed"
+    without catching.
+  - `@StoreInternalApi internalDetach`: releases one attachment by
+    `StoreAttachmentKey` before the store itself disposes (the #20 PR 10
+    amendment for #21), returning `null` on a closed slot or an absent key.
+
+### Changed
+
+- **`clearMiddleware()` now drops only consumer-registered middleware.**
+  Previously the only middleware list on a store; the new
+  `@StoreInternalApi` outer ring (above) is untouched by it and torn down
+  only by `dispose()`.
+
 ---
 
 ## [0.4.0] — 2026-05-03

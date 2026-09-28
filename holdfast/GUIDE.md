@@ -425,6 +425,12 @@ to subsequent actions.
 `MiddlewareContext.metadata` is a per-transaction `MutableMap<String, Any>`
 for cross-middleware communication.
 
+`middlewares`/`clearMiddleware` register and clear only this
+consumer-registered list. Library-installed middleware (issue #21's typed
+tree, reserved) lives in a separate outer ring that is always outermost of
+everything registered here — `clearMiddleware()` never reaches it, and only
+`dispose()` tears it down alongside the list above (§13).
+
 ### 4.7 `invoke { … }` — Context block
 
 `store { … }` — the operator on `Store` — runs `block(self)` with no locks

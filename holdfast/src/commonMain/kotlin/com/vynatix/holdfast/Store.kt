@@ -88,7 +88,23 @@ class FrameMiddlewareSession internal constructor(
  */
 @StoreActionDsl
 @Suppress("TooManyFunctions") // The Store DSL is intentionally broad; each member is a single primitive.
-abstract class Store<Self : Store<Self>> {
+abstract class Store<Self : Store<Self>>() {
+    /**
+     * Binds this store into library-owned membership machinery at
+     * construction, via a [StoreMembership] token minted only by that
+     * machinery (issue #21's typed tree: `KeyedBranch.at(key)`). Delegates to
+     * the primary constructor above first, so every [Store] field above has
+     * initialized — and, for an [EventfulStore] subclass, its own fields too
+     * — before [StoreMembership.bind] runs, and every subclass property
+     * initializer and delegated state still runs after it, exactly as with
+     * the plain no-arg constructor. The primary constructor's `<init>()V`
+     * signature is unchanged by this overload existing.
+     */
+    @ExperimentalStoreApi
+    protected constructor(membership: StoreMembership<Self>) : this() {
+        membership.bind(this)
+    }
+
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
      * sorts its store arguments by this key before acquiring locks, giving
@@ -314,8 +330,11 @@ abstract class Store<Self : Store<Self>> {
         val toShutdown = registry.releaseAll()
         toShutdown.forEach { runCatching { it.shutdownSilently() } }
         // Drop middleware so a stray reference to a disposed store can't keep
-        // captured state alive.
+        // captured state alive. Both lists: the outer ring is not a consumer
+        // registration and clearMiddleware() never reaches it, but dispose()
+        // tears down everything.
         middlewareLock.withLock { middlewareList.clear() }
+        outerMiddleware.clear()
         // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
         runCatching { onDispose() }
         // Last, holding no lock dispose() took (a caller inside an action of
@@ -394,6 +413,16 @@ abstract class Store<Self : Store<Self>> {
         }
 
     private val middlewareList = mutableListOf<Middleware<Self>>()
+
+    /**
+     * This store's outer middleware ring (issue #21's `Root.middlewares`),
+     * installed and torn down through [internalSetOuterMiddleware] and
+     * [internalRemoveMiddleware]. Independent of [middlewareList]:
+     * [clearMiddleware] never touches it, and [dispose] clears both.
+     * [snapshotMiddleware] and [runMiddlewareChain] append it after the
+     * consumer list, so it is always outermost.
+     */
+    internal val outerMiddleware = OuterMiddlewareRing<Self>()
 
     /**
      * Handler for failures the store cannot propagate: those of post-commit
@@ -801,6 +830,11 @@ abstract class Store<Self : Store<Self>> {
      * thrown by another middleware, it must be listed AFTER that middleware. Place
      * a logging/audit middleware LAST so it sees errors from validation middleware
      * placed earlier.
+     *
+     * This is the consumer-registered list. Library-installed middleware
+     * (issue #21's `Root.middlewares`) lives in a separate outer ring that is
+     * always outermost of everything registered here — see
+     * [internalSetOuterMiddleware].
      */
     fun middlewares(vararg middleware: Middleware<Self>) {
         checkNotDisposed()
@@ -809,7 +843,10 @@ abstract class Store<Self : Store<Self>> {
         }
     }
 
-    /** Drop every registered middleware. */
+    /**
+     * Drop every consumer-registered middleware. Never touches the outer
+     * ring (issue #21's `Root.middlewares`) — see [internalSetOuterMiddleware].
+     */
     fun clearMiddleware() {
         checkNotDisposed()
         middlewareLock.withLock {
@@ -1092,7 +1129,11 @@ abstract class Store<Self : Store<Self>> {
 
     private fun runMiddlewareChain(block: () -> Unit) {
         middlewareLock.withLock {
-            val currentMiddleware = middlewareList.toList()
+            // The outer ring is appended last, so it is outermost (last =
+            // outermost, per Middleware's KDoc): its started fires first,
+            // its completed/error fires last, wrapping every consumer
+            // middleware.
+            val currentMiddleware = middlewareList + outerMiddleware.snapshot()
             currentMiddleware
                 .fold(block) { acc, middleware ->
                     { middleware(self, acc) }
@@ -1601,18 +1642,24 @@ abstract class Store<Self : Store<Self>> {
 
     /**
      * Internal hook for `:holdfast-coroutines.suspendAction`. Returns a stable
-     * snapshot of the currently-registered middleware list, taken under the
-     * middleware lock — same snapshot semantics as [runMiddlewareChain] uses
-     * for the blocking [action] path. The suspending chain runner uses this
-     * to invoke each hook directly with its own `runCatching` wrapper, in
-     * concentric-ring order matching the sync path: reverse chain order on
-     * `started` (LAST-registered = outermost fires first), forward chain
-     * order on `completed`/`error` (innermost first; outermost last).
+     * snapshot of the currently-registered middleware list — the consumer
+     * list ([middlewares]/[clearMiddleware]) followed by the outer ring
+     * ([internalSetOuterMiddleware], issue #21's `Root.middlewares`), which is
+     * therefore always outermost — same snapshot semantics as
+     * [runMiddlewareChain] uses for the blocking [action] path. The
+     * suspending chain runner uses this to invoke each hook directly with its
+     * own `runCatching` wrapper, in concentric-ring order matching the sync
+     * path: reverse chain order on `started` (LAST-registered = outermost
+     * fires first), forward chain order on `completed`/`error` (innermost
+     * first; outermost last).
+     *
+     * Not gated on [checkNotDisposed]: see the CLAUDE.md exception list next
+     * to [internalRemoveMiddleware].
      */
     @StoreInternalApi
     fun snapshotMiddleware(): List<Middleware<Self>> =
         middlewareLock.withLock {
-            middlewareList.toList()
+            middlewareList + outerMiddleware.snapshot()
         }
 
     /**
