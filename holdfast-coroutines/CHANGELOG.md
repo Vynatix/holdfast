@@ -8,6 +8,243 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Persisted `UserAuthored` overlay** (experimental, issue #20, R8 and R3;
+  plan PR 14): `overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int =
+  8192)` in a hydrator's spec persists what the user authored — the store's
+  `StateTag.UserAuthored` states and keyed families — under one pinned key,
+  and puts it back in the seed transaction. New surface: `HydrationSpec.overlay`,
+  `Hydrator.overlayKey`, `Hydrator.clearOverlay()` and `OverlayException`;
+  the hydrator's store attachment names the key in `persistenceKeys` (for
+  issue #21's self-check).
+  - Inbound, R8's ordering — base, then overlay, then refresh: the first
+    `hydrate()` that seeds reads the key (suspending, before it takes the
+    store, outside every lock), and the seed transaction (`HydrationSeed`)
+    runs `base { }`, then restores the blob as a savepoint (id `Restore`),
+    then moves to `Seeded` — one commit, in which the overlay wins over
+    anything `base { }` wrote or restored. Only the entries of states and
+    families declared `UserAuthored` are restored (core's new
+    `internalRestoreTagged`), after the store's `migrate` upcast an older
+    blob; unknown names are ignored. The blob replaces the live entries of
+    each `UserAuthored` keyed family it holds: an entry `base { }` created
+    that the blob does not hold is evicted in the seed, so an entry the user
+    evicted never comes back from base's seed data (a family the blob does
+    not list, and every family of a blob that is kept, keeps base's
+    entries). Once loaded, later seeds (after `invalidate()` or `reset()`)
+    put back the `UserAuthored` values the store held when they began,
+    captured in the seed transaction, without reading the key — a read could
+    miss a write still in flight and put an older blob over the user's
+    latest — into what `base { }` changed (the states it wrote, the entries
+    it evicted; the entries it created are evicted), so a value a bridge
+    delivered from another thread meanwhile is kept. A read the gate finds
+    overtaken (a `clearOverlay()` ran meanwhile) is read again before
+    anything is decided. A failing `get` makes `hydrate()` throw it, with
+    nothing changed.
+  - Outbound: from the seed that loads it on, every commit that changes a
+    `UserAuthored` state (or evicts an entry of a `UserAuthored` family) —
+    except a seed's own — is written by a conflated writer launched on the
+    store's `Store.scope`, never the scope `hydrate()` was called with: it
+    encodes `snapshot(SnapshotScope.UserAuthored)` — exactly the R1 store
+    envelope, so `Remote` states are never written and `Secret` ones cannot
+    be `UserAuthored` — and puts it under the key; commits during a write
+    cost one more write, of the latest values, and an identical blob is not
+    put again. No coroutine of it runs between bursts; `dispose()` stops it.
+    An encrypted (`EncryptingTransformer`) state is written as its ciphertext
+    and restored without being encrypted twice. A bridge's inbound value
+    from another thread while a seed runs is written too; only the seed's
+    own commit, on its own thread, is not. The writer learns of a change
+    from the commit's observer fanout, so a commit whose fanout skips the
+    overlay's observer — a `Transformer.get` that throws for the new value
+    (in a commit's fanout, or on a bridge's inbound value, which then
+    notifies no observer), an earlier observer failing through an
+    `uncaughtObserverHandler` that throws, which ends the fanout — is written
+    only with the next change of a `UserAuthored` state.
+  - Poisoned blobs are never overwritten: text `StoreSnapshot.decode`
+    rejects, a newer schema (or a throwing `migrate`), or a blob the restore
+    rejects is reported as an `OverlayException` through the store's
+    `uncaughtObserverHandler` (logged while none is set) — naming the store
+    and key, never a value; the cause is chained only when it is one of
+    Holdfast's value-free exceptions — the seed commits `base { }` without
+    it, and nothing is written under the key until `clearOverlay()` removes
+    it or a later seed applies a blob.
+  - A blob longer than `sizeLimit` characters (default 8192, the
+    `java.util.prefs` value limit) is reported and not written, so a
+    size-limited store never throws; a failing `put` is reported naming the
+    exception's class only, a capture or codec that fails while writing (an
+    initializer, or a `StateCodec.encode`, that throws) is reported (the
+    codec's `IllegalStateException` from `encode()` is the only cause
+    chained) with the key keeping the last blob written, and a writer whose
+    scope was cancelled is reported; the next change writes again. A handler
+    that throws for any of these reports is ignored. No report is made, and
+    the writer is never signalled, while the hydration gate holds the store:
+    a writer a dispatcher runs inline (`Dispatchers.Unconfined`,
+    `Dispatchers.Main.immediate`) may report to a handler that opens an
+    action on the store.
+  - `clearOverlay()` removes the key and drops every write not made yet; no
+    state and no phase changes, the next change writes again, and a kept blob
+    is gone with it. It takes the store under the hydration gate, so it
+    throws inside an action, frame or suspending entry, like `hydrate()`;
+    once the key is removed, the rest runs even if the caller is cancelled.
+    `reset()` then `clearOverlay()` leaves the `UserAuthored` states at their
+    initial values and the key empty; the overlay stays loaded, so the next
+    seed in that process puts those initial values back over `base { }`,
+    and base's own come back only in a new process, whose first seed finds
+    no blob.
+  - A store whose `UserAuthored` states include a `Secret` one is refused at
+    the seed; no store reaches that check, since declarations refuse the
+    pairing (a state's tags and a keyed family's).
+  `HydrationOverlayTest`, `HydrationOverlayWriteTest` and
+  `DisposedEntrypointTest` rows (common), and the watchdogged
+  `HydrationOverlayConcurrencyTest` (JVM and Android host) pin it. iOS
+  unverified until a macOS run.
+
+- **Hydration lifecycle** (experimental, issue #20, R8; plan PR 13, decision
+  D19): `val hydration = hydrator { base { … }; refresh { store -> … } adopt
+  { fetched -> … } }` gives a store its one `Hydrator<V>`, attached through
+  core's `StoreAttachment` slot (a second `hydrator { }` on the store throws;
+  `hydratorOrNull()`, on any `Store<*>`, finds it). New surface — experimental, and per the
+  roadmap's principle 6 it soaks for two minors before it can stabilize.
+  - `hydrate(scope = store.scope)` on `Hydration.Detached` runs `base { }` in
+    ONE transaction (id `HydrationSeed`) that also moves the phase to
+    `Seeded` and marks a refresh in flight (R8's guard guarantee); only once
+    that transaction has committed is `refresh { }` launched on `scope`, with
+    `CoroutineStart.ATOMIC`, so a seed a middleware rolls back launches
+    nothing and a hydration marked in flight always gets its refresh. What
+    it fetched is adopted in one transaction (id `HydrationAdopt`) whose
+    savepoint (id `Adopt`) runs `adopt { }`, then the phase moves to
+    `Hydrated`; a refresh that throws (a cancelled `scope` included) moves it
+    to `Failed(cause)` (id `HydrationFailure`). Middleware sees every one.
+    When a middleware rejects the `HydrationFailure` record too, the phase
+    stays `Seeded` with nothing in flight: once the gate has released the
+    store, the rejection goes to the store's `uncaughtObserverHandler` (a
+    throwing handler is ignored there), `awaitSettled()` returns
+    `Failed(cause)`, and the next `hydrate()` retries the refresh (id
+    `HydrationRetry`). A seed or retry whose commit applied but whose fanout
+    an observer then failed through a rethrowing `uncaughtObserverHandler`
+    still launches its refresh, and `hydrate()` then throws that failure; the
+    hydrator's own bookkeeping observer runs first in every commit (core
+    fans sealed states out first), so it never misses an applied phase. Outside the gate a refresh checks the
+    committed phase, never a detach a `suspendAction` parked on its thread
+    has staged (and may roll back), and each gate transaction reads the phase
+    again under the transaction lock, so a detach committed meanwhile is never
+    overtaken.
+  - Idempotent: `hydrate()` while `Seeded` or `Hydrated` does nothing. Single
+    flight: every decision reads the phase and commits the next while the
+    hydration gate holds the store's serializer — only for that decision's
+    transaction — so concurrent calls seed and fetch once, and fifty calls on
+    a `Failed` hydration retry once: the retry (id `HydrationRetry`) moves
+    back to `Seeded` in the deciding transaction and never re-runs
+    `base { }`. The gate takes the store politely — `tryLock`, then a yield
+    and delays doubling from 1 ms to 32 ms, in coroutine time — and never
+    queues on the store's mutex, so it never spins and never reads the
+    store's clock; it drains the store's post-commit queue once it releases
+    the store, inside one settle scope.
+  - `hydrate()` and `awaitSettled()` throw `IllegalStateException` inside an
+    action, an `atomic` frame, a `suspendAction` or a `suspendAtomic` of any
+    store — body or commit, and a child coroutine of a
+    `suspendAction`/`suspendAtomic` body (or a plain `runBlocking { }` on a
+    blocking body's own thread) — where they would wait for themselves, or
+    `hydrate()` would commit its seed outside the enclosing transaction. Not
+    detected: a coroutine on another scope, or one a blocking body runs on
+    another thread, that the body then waits for.
+  - `adopt { }` may write only `StateTag.Remote` states (and evict entries of
+    `Remote` keyed families): anything else — directly, in a nested action,
+    through `restore` or `reset()` — fails the adoption, naming the states,
+    rolls it back whole and moves the phase to `Failed` in the same
+    transaction; `removeState`/`clearStates` throw inside it.
+  - Back to `Detached` only through `invalidate()` (id
+    `HydrationInvalidate`), `stageInvalidate()` inside an action, and the
+    store's `reset()`, which detaches inside its transaction (plan deviation
+    8). A refresh in flight then is cancelled — also one whose launch the
+    detach overtook before it was recorded — and its result discarded, even
+    one that ignores cancellation; a sterile `restore` does not detach.
+    `stageInvalidate()` stages only into a transaction this thread writes
+    into (core's new `internalStagesHere()`), and throws otherwise.
+  - `Hydrator.state` is a read-only, observable `State<Hydration>` of the
+    store (`Detached`, `Seeded`, `Hydrated`, `Failed(cause: Throwable)`),
+    usable as a `derivedState` source — a health flag over several stores'
+    hydrations needs no cross-store frame — that no snapshot or restore
+    captures or writes (`reset()` only detaches it), and that every store
+    write entrypoint refuses.
+    `current`, `awaitSettled()` (waits until no refresh is in flight), and
+    `hydrateEach(vararg)` until issue #21's `hydrateAll()`. After `dispose()`
+    the entrypoints throw, a refresh in flight is cancelled and never adopted,
+    and `state` keeps its last value.
+  - Deviations from #20's sketch (plan deviation 8): `hydrate { }:
+    State<Hydration>` became `hydrator { }: Hydrator<V>`, `Failed(cause: Any)`
+    became `Failed(cause: Throwable)`, `reset()` detaches too, and
+    `hydrateAll()` waits for #21. The persisted overlay is its own entry,
+    above.
+  `HydrationLifecycleTest`, `HydrationInvalidateTest`,
+  `HydrationAdoptPolicyTest`, `HydrationFanoutFailureTest`,
+  `HydrationHealthFlagTest`, `HydrationClockTest`, `HydrationDisposeTest` and
+  `DisposedEntrypointTest` (common, so iOS runs them too), and `HydrationSingleFlightTest` and the watchdogged
+  `HydrationSerializerContractTest` and `HydrationCrossThreadTest` (JVM and
+  Android host) pin it. iOS
+  unverified until a macOS run.
+
+- **Keyed-state evictions under `suspendAction`/`suspendAtomic`** (issue #20,
+  R7; see `:holdfast`'s changelog): `KeyedState.evict`/`evictAll` stage like
+  `mutate`, so inside a suspending body they stage into its transaction and
+  commit or roll back with it, and from its commit's fanout (observers,
+  bridge publishes, event collectors, across thread hops) they are deferred
+  until the suspending call has released the store — then run by a
+  transaction that never waits for the store, so the drain in the call's
+  `finally` never spins waiting for the coroutine it just handed the
+  store's mutex to (`KeyedDeferredEvictionTest`). Inside a suspending body
+  only a write to an entry cancels its staged eviction, never a `get`:
+  another coroutine on the body's thread would look like the body. Another thread's
+  eviction while a suspending call holds the store joins its transaction
+  before it applies and is refused after — the foreign-thread staging gap
+  that bare `mutate` has, pinned by `KeyedEvictSuspendGapTest` until the
+  planned "body is running" marker closes it.
+
+- **`suspendAction` and `suspendAtomic` are settle entries** (issue #20, R9;
+  see `:holdfast`'s changelog): the `derivedState`/`merged` states whose
+  sources one of them — and everything nested in it: `suspendAction`s,
+  blocking `action`s, frames — changes recompute once, when the outermost
+  entry has released every store, on whatever thread it ends on. Its settle
+  scope travels with the coroutine (`SettleAmbientContext.kt`: a
+  `ThreadContextElement` on JVM/Android, a bracketing interceptor on
+  iOS/wasmJs, as for the frame marker), so a commit that fans out on another
+  thread than the one that opened the entry still queues into it, and a
+  parked entry's scope never leaks into another coroutine sharing its
+  thread. `SuspendSettleCommonTest` (common, so iOS runs it too),
+  `SuspendSettleTest`, `SuspendAtomicHopDerivationTest`,
+  `SettleScopeInterceptedTest` (the iOS/wasmJs carrier, on the JVM) and
+  `SharedThreadIdentityTest` (the wasmJs one-thread model, on the JVM) pin
+  it.
+  On iOS/wasmJs a nested `withContext(dispatcher)` inside the entry replaces
+  the interceptor: a commit in that section does not see the entry's scope —
+  a blocking entry opened there settles on its own, and a nested suspending
+  one joins the entry but its commit falls back to the per-commit routing —
+  so the derived states it changes recompute after that commit, once per
+  commit rather than once per entry.
+
+- **Core's derived states work with every adapter** (issue #20, R6):
+  `asFlow`, `asStateFlow` (whose default scope is the scope of the store the
+  derived state was created on), `first` and `awaitValue` accept a
+  `derivedState`/`merged` state, and so does `suspendDerived` as a source.
+  `MergedSuspendTest` pins the flows over a merged state, that an adoption
+  committed by `suspendAction` recomputes it once, that a `suspendAction`
+  or `suspendAtomic` commit on a source's store recomputes a derived state on
+  another store once, before the suspending call returns, and that a
+  `suspendAction` parked on the recomputing thread (as under `runBlocking`
+  or on Android's main thread) neither delays a recompute nor leaks its
+  pending writes into it, and that a store disposed from its own commit's
+  fanout launches no `suspendDerived` recompute (core's `dispose()` now
+  drains the queued launch instead of dropping it, and the launch checks
+  the store first). `DerivedStateSourceRoutingTest` (JVM and Android host)
+  pins the same once-after-the-commit recompute for a suspending commit
+  that fans out on another thread than the one that opened it.
+
+- **`suspendDerived` inherits the `Secret` tag of its sources** (issue #20,
+  R3, through `:holdfast`'s `registerDerivedBackingState`): a suspending
+  derived with a `StateTag.Secret` state among its sources is `Secret`
+  itself, so its value is withheld from encoded snapshots, renders and test
+  timelines like its source's. `SecretRedactionSuspendTest` pins that no built-in
+  middleware writes a `Secret` value under `suspendAction` or
+  `suspendAtomic`.
+
 - **`suspendAtomic` graduated to a first-class cross-store frame**, matching
   the core `atomic` contract (see `:holdfast`'s changelog and GUIDE §15):
   `policy: FramePolicy = FramePolicy.Strict` parameter, enrollment
@@ -31,6 +268,91 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **On iOS and wasmJs, `delay` and `withTimeout` inside a suspending entry
+  run on the caller's dispatcher clock.** A `suspendAction`/`suspendAtomic`
+  body, a suspending commit's fanout and the hydration gate carry a
+  thread-local slot across resumptions through an interceptor that stands in
+  for the dispatcher on the targets without `ThreadContextElement`; it
+  forwarded the dispatch but not the dispatcher's timer, so every `delay`,
+  `withTimeout` and back-off inside such an entry ran on kotlinx.coroutines'
+  real-time default: under `runTest` the body's waits no longer advanced the
+  virtual clock (the hydration gate's back-off waited real milliseconds while
+  `advanceTimeBy` stood still — `HydrationOverlayTest` on iOS), and under
+  `Dispatchers.Main` a delay resumed from the default timer thread instead of
+  the main run loop's. The interceptor now forwards the dispatcher's timer
+  when it has one (`slotBracketingInterceptor`). `SettleScopeInterceptedTest`
+  (JVM, over the same carrier) and `SuspendEntryVirtualTimeTest` pin it.
+  JVM and Android, which carry the slot in a `ThreadContextElement`, were
+  never affected.
+
+- **A read on the thread a `suspendAction` started on sees every bare
+  `mutate` another thread has staged into it.** That thread is the
+  transaction's owner, so its reads peek at the pending writes for
+  read-your-own-writes — while the body may be staging from another thread
+  (`withContext(Dispatchers.IO) { x mutate v }`, or a bare `mutate` from
+  anywhere while the suspending call holds the store). The peek walked the
+  buffer with no lock and could miss a write that had landed, or index
+  Kotlin/Native's array-backed map mid-resize. Core now reads the buffer
+  under the lock the writes take (see `:holdfast`'s changelog);
+  `SuspendActionPendingReadRaceTest` (JVM/Android host) stresses the pair.
+
+- **The first `suspendAction`, `suspendAtomic` or hydration decision on a store
+  waits out a blocking action that started before it, instead of spinning
+  forever.** Installing the store's serializer raced a blocking
+  `action`/`atomic` (or a derived recompute) that had read it as not
+  installed yet and held the store under its transaction lock alone: the
+  suspending entry installed its transaction over the blocking one's, the
+  blocking body's writes leaked into it, and the blocking action's exit
+  cleared it — so the suspending body's next `mutate` opened a one-shot
+  action that spun on the serializer its own coroutine held, and a
+  `suspendAtomic` body's failed with a `FrameInteropException`. Every
+  suspending holder of the serializer now waits, suspending and holding no
+  thread, until no thread holds the store's transaction lock before it
+  installs anything (after the first install that is one uncontended probe),
+  and core's blocking `action`/`atomic` re-read the serializer under that
+  lock. The hydration gate waits the same way before it decides, where it
+  used to park its thread on the transaction lock; a `hydrate()` racing a
+  detach committed by such an action therefore now sees the detach and seeds
+  afresh, rather than deciding on the old phase and then deciding nothing.
+
+- **A blocking `action`/`atomic` on a later `suspendAtomic` participant, from
+  an earlier one's commit, no longer waits forever** (issue #20, R9). The
+  frame still held that participant's serializer and had not committed it
+  yet, so the call was not recognised as nested and waited for the frame.
+  Every participant now applies before any fans out, so it is refused at once
+  with an `Error`, like one on an earlier participant — closing the last
+  frame gap named below.
+
+- **`suspendAtomic` no longer tears across a thread hop** (issue #20, R9).
+  Participants committed one after the other, so while the first one's
+  `SuspendingBridge.publishAwaited` suspended, every thread saw it applied
+  and the second one not; and after the body resumed on another thread, an
+  observer of the first participant read the second one's old value (only
+  the frame's own thread saw its pending writes). Every participant now
+  applies, inside one write bracket, before any fans out — every participant
+  this frame opens a root for; a store a nested `suspendAtomic` shares with
+  its enclosing frame still applies with that frame (enroll every store in
+  the outermost frame).
+
+- **A blocking `action` or `atomic` from inside a `suspendAction` or
+  `suspendAtomic` commit no longer spins forever** when it targets a store
+  that commit has applied: from an observer, a sync `Bridge.publish` or a
+  `SuspendingBridge.publishAwaited` (also after a dispatcher hop on
+  JVM/Android), an event collector the suspending emit resumes inline, a
+  `FrameObserver.onFrameCommitted`, or a later `suspendAtomic` participant's
+  observer targeting an earlier participant. It was not recognised as nested
+  (`suspendingOwner` is set, and the commit may run on another thread than the
+  one it started on), so it waited for the store's serializer, held by the
+  very commit running it. The commit phase now runs under a fanout marker
+  (`FanoutMarkers`, a `ThreadContextElement` on JVM/Android, a bracketing
+  interceptor on iOS/wasmJs) that follows its coroutine, and the call returns
+  `TransactionResult.Error` at once. A blocking call from any other thread
+  still waits its turn and commits. Remaining gaps: on iOS/wasmJs, a nested
+  `withContext(dispatcher)` inside the commit replaces the interceptor, so a
+  blocking call from there still waits; and a blocking call on a later
+  `suspendAtomic` participant that has not committed yet (from an earlier
+  one's fanout) still waits for the frame (closed since: see above).
+
 - **Nested `suspendAtomic` no longer leaks writes into the outer frame on
   failure.** Stores shared with an enclosing frame get a savepoint of the
   outer root; a failed nested frame discards only its own writes.
@@ -40,8 +362,120 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the store's mutex releases.** Previously the drain ran while the frame
   still held the mutex, so a recompute (a blocking `action`) could spin
   forever.
+- **Blocking actions on two threads no longer fail on a store that has used
+  a coroutine entry point.** The store's serializer locked its mutex with one
+  shared owner for every blocking caller, and kotlinx `Mutex.tryLock(owner)`
+  throws — rather than returning `false` — when that owner already holds it.
+  So while one thread's blocking `action` (or `atomic`) held the serializer, a
+  second thread's blocking action on the same store threw a raw
+  `"This mutex is already locked by the specified owner"` instead of waiting.
+  Each blocking acquire now locks with its own owner token.
+- **A `suspendAction` that hands the store's mutex to a queued
+  `suspendAction` no longer spins in its `derived` recompute.** kotlinx
+  `Mutex.unlock` transfers ownership straight to the first waiter, so the
+  first action's post-commit drain met a mutex held by a coroutine that had
+  not resumed; the recompute's blocking acquire spun on it — forever when both
+  ran on one thread (`runBlocking`, a single-threaded dispatcher). The
+  recompute now hands itself to the new holder, which runs it after its own
+  commit. A `suspendAtomic` waiter that is cancelled after being handed the
+  mutex (kotlinx then gives the mutex back and `lock` throws) drains that
+  recompute on its way out, once the frame has unwound.
+- **`suspendAtomic` runs its post-commit work only once the whole frame has
+  unwound.** Each participant's queue drained at that participant's own unwind
+  step, while the frame still held the EARLIER participants' mutexes with its
+  roots installed. So an observer on a `derived` recompute that wrote to an
+  earlier participant hit the frame's finished root and threw, and a blocking
+  `action` on it waited forever for a mutex the frame held. The frame now
+  drains every store whose root it opened after releasing all of them.
 
 ### Changed
+
+- **BREAKING (behavior): `suspendAtomic` applies every participant before
+  any fans out** (issue #20, R9; see `:holdfast`'s changelog for `atomic`).
+  Then each participant fans out in lock order — observers, awaited bridge
+  publishes, suspending event drain. An observer's `mutate`/`update`/`emit`
+  into a LATER participant is refused like one into an earlier participant
+  (it used to stage into that participant's open root and commit with the
+  frame), and a participant whose fanout fails — a throwing failure handler,
+  or a `CancellationException` from its `SuspendingBridge.publishAwaited`
+  (one that times out, say) — no longer rolls the later ones back: they have
+  applied, so they fan out and commit, and the frame returns the failure as
+  an `Error` (the cancellation, when there is one, carrying any other
+  failure as suppressed). Only the participants that roll back get
+  `onTransactionError`. A `commit()` or `rollback()` by hand on a LATER
+  participant's transaction, from an earlier one's observer, is a no-op: its
+  fanout belongs to the frame's suspending fanout, which runs it in its turn
+  (see `:holdfast`'s changelog for what it used to do).
+
+- **BREAKING (behavior): derived states settle once per outermost suspending
+  entry, and a frame's post-commit work runs then.** A `derivedState` over
+  sources written by two `suspendAction`s nested in a third recomputes once,
+  after the outer one, instead of after each; inside the outer one it
+  reflects none of their writes. The `derived`/`suspendDerived` work queued
+  on the stores whose roots a `suspendAtomic` opened runs once the outermost
+  entry has exited, not when the frame does.
+
+- **BREAKING (behavior, edge): an outermost `suspendAction`/`suspendAtomic`
+  checks for cancellation first.** Before it takes anything it checks the
+  caller's job, on every platform: a call from an already-cancelled
+  coroutine now throws its `CancellationException` before taking the store,
+  where it used to take a free store and run — and, with no suspension point
+  in the body, commit — the body. It then runs inside a child of the caller
+  carrying its settle scope (a `withContext` on JVM/Android, an undispatched
+  child on iOS/wasmJs); once the body has returned, the call still returns
+  the committed `TransactionResult` even if the caller was cancelled
+  meanwhile — while its commit awaited a `SuspendingBridge.publishAwaited`,
+  say — as it did before: the caller sees its cancellation at its next
+  suspension point. `SuspendEntryCancellationTest` pins both edges.
+
+- **BREAKING (behavior): writes into a `suspendAction` or `suspendAtomic`
+  commit from its own fanout fail loudly** (see `:holdfast`'s changelog, issue
+  #20). The suspending root stays installed while `suspendingCommit` fans out,
+  and `suspendingOwner` relaxes `mutate`'s owner check to any thread, so an
+  observer's `mutate`/`update`/`emit` on the committing store staged into the
+  applied root and was lost. It now throws an `IllegalStateException` that
+  reaches `uncaughtObserverHandler`. So does a write, from a later
+  participant's observer, into a nested `suspendAtomic`'s savepoint entry for
+  a store its enclosing frame holds, once that entry has committed into the
+  enclosing root (it used to be rejected as "Cannot mutate state on a
+  Committed transaction"). The same relaxation means a bare
+  `mutate`/`update` on that store from any other thread while the commit runs
+  (its fanout, a slow `publishAwaited`, a suspending event emit) throws too,
+  with a message saying a suspending transaction holds the store — it used to
+  be lost silently during the observer fanout, or rejected as "Cannot mutate
+  state on a Committed transaction" in the bridge and event phases. Before the
+  apply pass such a write joins the transaction; the check and the stage are
+  atomic with the apply pass, so it is applied with the commit or refused,
+  never lost in between. Write from other threads through `action { }`, which
+  waits for the serializer.
+
+- **BREAKING (behavior): a failed `SuspendingBridge.publishAwaited` is logged
+  when no `uncaughtObserverHandler` is set**, like every other post-commit
+  failure, instead of being dropped silently. The commit still succeeds.
+
+- **BREAKING (behavior): `suspendAction` and `suspendAtomic` refuse to run
+  inside a state initializer** (issue #20, R5; see `:holdfast`'s changelog).
+  State initializers may read states but not write them; like the blocking
+  `action` and `atomic`, a suspending entrypoint reached from one — through
+  `runBlocking` — throws an `IllegalStateException` naming the state being
+  initialized.
+
+- **BREAKING (behavior): a `suspendDerived`'s backing state leaves
+  `StoreSnapshot.stateNames`.** It is registered with the new
+  `Store.registerDerivedBackingState`, like `derived`'s: `snapshot()` still
+  captures it and an undo on the same store restores it in the restore's own
+  commit, but it is no longer a state name, and restoring the snapshot into
+  another store instance skips it instead of failing on an unknown
+  `__suspendDerived_N` state. `suspendDerived` on a disposed store now throws.
+
+- **BREAKING (behavior, misuse only): a `computed` source of `suspendDerived`
+  fails with `IllegalArgumentException`** (issue #20, R6; see `:holdfast`'s
+  changelog). A `computed { }` state (or any `State` no store produced)
+  passed as a source used to fail with a bare `ClassCastException`; it now
+  fails with an `IllegalArgumentException` that says why (a `computed` state
+  has no commits to follow) and what to list instead: the states it reads.
+  The check runs first, so a refused call neither blocks on the initial
+  compute nor leaves a backing state or a subscription behind.
 
 - `suspendAtomic`'s vararg parameter is named `stores` (was pre-rename
   `vaults`) — source-compatible for positional calls.

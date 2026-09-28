@@ -221,7 +221,13 @@ interface FrameObserver {
     /** Every participant's root transaction committed. */
     fun onFrameCommitted(frameId: String) {}
 
-    /** The frame rolled back; [cause] is what aborted it. */
+    /**
+     * The frame returned an error; [cause] is what aborted it. Usually every
+     * participant rolled back. When the commit itself failed partway — an
+     * apply that threw on a later participant, or a participant's fanout that
+     * failed — the participants that had applied keep their values: they
+     * fanned out and committed, and only the others rolled back.
+     */
     fun onFrameRolledBack(
         frameId: String,
         cause: Throwable,

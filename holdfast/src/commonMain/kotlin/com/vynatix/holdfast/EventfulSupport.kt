@@ -108,6 +108,16 @@ class EventfulSupport<E : Any>(
      * Throws [IllegalStateException] if [bindStore] has not been called or if
      * called outside an `action` / `suspendAction`. Events MUST be
      * transactional so rollback can discard them.
+     *
+     * Also throws [IllegalStateException] when the bound store's active
+     * transaction has already applied its writes — an observer emitting while
+     * that store's commit is notifying it. The event would never be drained;
+     * thrown out of an observer, it reaches the store's
+     * [Store.uncaughtObserverHandler].
+     *
+     * Also throws [IllegalStateException] from inside a state initializer, in
+     * an action or not (see [Store.state]), or a schema migration
+     * ([SchemaVersioned.migrate]).
      */
     override fun emit(event: E) {
         val store =
@@ -115,12 +125,14 @@ class EventfulSupport<E : Any>(
                 "EventfulSupport.emit called before bindStore. The hosting Store must " +
                     "call support.bindStore(this) in its init block.",
             )
+        // Before the transaction check: an initializer emits outside any action too.
+        NoWriteRegion.refuse { "emit an event on ${store.displayName}" }
         val txn =
             store.activeTransaction ?: error(
                 "emit(event) called outside of an action / suspendAction. " +
                     "Events must be staged inside a transaction so rollback can discard them.",
             )
-        txn.stagePendingEvent(_events, event)
+        txn.stageEmittedEvent(store, _events, event)
     }
 
     private companion object {

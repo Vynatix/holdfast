@@ -2,10 +2,9 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.FrameMarker
-import com.vynatix.holdfast.FrameMarkers
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.Continuation
+import com.vynatix.holdfast.Transaction
 import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 
@@ -19,8 +18,9 @@ import kotlin.coroutines.CoroutineContext
  * Platform split: on JVM/Android this is a `kotlinx.coroutines.ThreadContextElement`
  * (which survives nested `withContext(otherDispatcher)` sections); on iOS and
  * wasmJs — where `ThreadContextElement` is not available — it is a delegating
- * [ContinuationInterceptor] ([FrameMarkerInterceptor]). The interceptor
- * occupies the context's single interceptor slot, so a nested
+ * [ContinuationInterceptor] ([SlotBracketingInterceptor], built by
+ * [slotBracketingInterceptor] so the dispatcher's timer is kept). The
+ * interceptor occupies the context's single interceptor slot, so a nested
  * `withContext(Dispatchers.X)` inside the body REPLACES it there: writes in
  * that section are not policed (a documented enforcement gap on those
  * platforms, not a false positive — the same class of gap as
@@ -35,48 +35,22 @@ internal expect fun frameMarkerContext(
 ): CoroutineContext
 
 /**
- * Non-JVM implementation of the frame-marker propagation: a
- * [ContinuationInterceptor] that wraps every intercepted continuation so its
- * `resumeWith` brackets the real resumption with thread-local marker
- * install/restore, then hands the wrapped continuation to [delegate] (the
- * actual dispatcher) for ordinary dispatch.
+ * Run [block] — a suspending commit phase — with the core thread-local
+ * commit-fanout marker ([FanoutMarkers]) naming [roots] on whatever thread
+ * each of its resumptions lands: its observer fanout, bridge publishes, event
+ * emits and frame observers. A blocking `action`/`atomic` on one of those
+ * stores from inside the commit is then recognised as nested and refused,
+ * instead of waiting for the serializer the commit itself holds.
+ *
+ * Starts [block] on the calling thread without a dispatch, so a commit whose
+ * body never suspended still does not yield the thread while it holds the
+ * store. Platform split as in [frameMarkerContext]: a `ThreadContextElement`
+ * on JVM/Android; [withFanoutMarkerIntercepted] on iOS and wasmJs, with the
+ * same gap — a nested `withContext(Dispatchers.X)` inside the commit (in a
+ * `SuspendingBridge.publishAwaited`, say) replaces the interceptor, so a
+ * blocking call from that section is not recognised and still waits.
  */
-internal class FrameMarkerInterceptor(
-    private val delegate: ContinuationInterceptor?,
-    private val marker: FrameMarker,
-) : AbstractCoroutineContextElement(ContinuationInterceptor),
-    ContinuationInterceptor {
-    override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> {
-        val wrapped = MarkerBracketingContinuation(continuation, marker)
-        return delegate?.interceptContinuation(wrapped) ?: wrapped
-    }
-
-    override fun releaseInterceptedContinuation(continuation: Continuation<*>) {
-        // `continuation` is what OUR interceptContinuation returned — i.e. the
-        // delegate's wrapper (when a delegate exists), so pass it straight back.
-        delegate?.releaseInterceptedContinuation(continuation)
-    }
-}
-
-/**
- * The bracketing continuation: installs [marker] into the thread-local slot
- * for exactly the duration of one resumption (the coroutine runs inside
- * `delegate.resumeWith`), restoring the previous value when the coroutine
- * suspends again or completes. Single-threaded wasmJs gets the same property:
- * interleaved OTHER coroutines never observe this frame's marker.
- */
-private class MarkerBracketingContinuation<T>(
-    private val delegate: Continuation<T>,
-    private val marker: FrameMarker,
-) : Continuation<T> {
-    override val context: CoroutineContext get() = delegate.context
-
-    override fun resumeWith(result: Result<T>) {
-        val prior = FrameMarkers.install(marker)
-        try {
-            delegate.resumeWith(result)
-        } finally {
-            FrameMarkers.install(prior)
-        }
-    }
-}
+internal expect suspend fun <T> withFanoutMarker(
+    roots: Set<Transaction>,
+    block: suspend () -> T,
+): T

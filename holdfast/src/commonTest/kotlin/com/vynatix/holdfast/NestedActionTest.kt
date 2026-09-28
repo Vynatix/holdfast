@@ -11,6 +11,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 private class NestedTwoStateVault : Store<NestedTwoStateVault>() {
     val state1 by state { "initial1" }
@@ -390,5 +391,181 @@ class ActionInsideEffectTest {
             "m must roll back to 'init' even though an effect-triggered nested action ran",
         )
         d.dispose()
+    }
+}
+
+/**
+ * A nested action's commit merges its writes into the enclosing transaction's
+ * buffers — unless that transaction was committed or rolled back by hand
+ * meanwhile (issue #20, D16; PR #22 review): `Store.activeTransaction` (or a
+ * middleware context) hands out the enclosing transaction, and a `commit()` on
+ * it applies its own writes and closes its buffers. The merge used to land in
+ * that closed buffer, the nested action returned Success, the enclosing
+ * action's own commit was a no-op, and the nested write was gone without a
+ * word — while the same `mutate` issued after the hand commit is refused. The
+ * nested action must return Error instead, like every other write into a
+ * finished transaction.
+ */
+class NestedActionIntoFinishedParentTest {
+    /** The nested action failed to commit because its parent is finished: [fragment] names how. */
+    private fun assertRefusedMerge(
+        nested: TransactionResult<*>?,
+        fragment: String,
+    ) {
+        val error = assertIs<TransactionResult.Error>(nested, "the nested action must not merge into a finished parent")
+        val exception = assertIs<TransactionException>(error.exception)
+        val cause = assertIs<IllegalStateException>(exception.cause)
+        val message = assertNotNull(cause.message)
+        assertTrue(fragment in message, "not the finished-transaction refusal: $message")
+        assertTrue("Cannot merge nested transaction" in message, "unexpected: $message")
+        assertEquals(TransactionStatus.Failed, error.transaction.status)
+    }
+
+    @Test
+    fun nestedActionCommittingIntoAHandCommittedOuterReturnsError() {
+        val v = NestedTwoStateVault()
+        var nested: TransactionResult<*>? = null
+
+        val outer =
+            v action {
+                val outerTxn = assertNotNull(v.activeTransaction)
+                nested =
+                    v action {
+                        state2 mutate "x"
+                        outerTxn.commit()
+                    }
+            }
+
+        assertRefusedMerge(nested, "has already applied its writes")
+        assertIs<TransactionResult.Success<*>>(outer, "the hand-committed outer's own commit is a no-op")
+        assertEquals("initial2", v.state2.value, "the refused write never lands")
+    }
+
+    @Test
+    fun nestedActionWhoseMiddlewareCommitsTheOuterReturnsError() {
+        val v = NestedTwoStateVault()
+        var outerTxn: Transaction? = null
+        var innerTxn: Transaction? = null
+        v.middlewares(
+            object : Middleware<NestedTwoStateVault>() {
+                // After the nested body, before its commit: finish the outer by hand.
+                override fun onTransactionCompleted(context: MiddlewareContext<NestedTwoStateVault>) {
+                    if (context.transaction === innerTxn) assertNotNull(outerTxn).commit()
+                }
+            },
+        )
+        var nested: TransactionResult<*>? = null
+
+        v action {
+            outerTxn = v.activeTransaction
+            nested =
+                v action {
+                    innerTxn = v.activeTransaction
+                    state2 mutate "x"
+                }
+        }
+
+        assertRefusedMerge(nested, "has already applied its writes")
+        assertEquals("initial2", v.state2.value)
+    }
+
+    @Test
+    fun nestedActionCommittingIntoAHandRolledBackOuterReturnsError() {
+        val v = NestedTwoStateVault()
+        var nested: TransactionResult<*>? = null
+
+        v action {
+            state1 mutate "outer"
+            val outerTxn = assertNotNull(v.activeTransaction)
+            nested =
+                v action {
+                    state2 mutate "x"
+                    outerTxn.rollback()
+                }
+        }
+
+        assertRefusedMerge(nested, "has already been rolled back (status: RolledBack)")
+        assertEquals("initial1", v.state1.value)
+        assertEquals("initial2", v.state2.value)
+    }
+
+    /**
+     * A closed ANCESTOR closes the whole chain: the innermost savepoint's
+     * parent is still active, but the grandparent was rolled back by hand, so
+     * the merge is refused and the message names the enclosing transaction.
+     * The middle savepoint's own merge is then refused too, naming the
+     * rolled-back transaction itself.
+     */
+    @Test
+    fun nestedActionWhoseGrandparentWasHandRolledBackNamesTheEnclosingTransaction() {
+        val v = NestedTwoStateVault()
+        var innermost: TransactionResult<*>? = null
+        var middle: TransactionResult<*>? = null
+
+        v action {
+            val outerTxn = assertNotNull(v.activeTransaction)
+            middle =
+                v action {
+                    innermost =
+                        v action {
+                            state2 mutate "x"
+                            outerTxn.rollback()
+                        }
+                }
+        }
+
+        assertRefusedMerge(innermost, "has already been rolled back (status: RolledBack of its enclosing transaction '")
+        assertRefusedMerge(middle, "has already been rolled back (status: RolledBack)")
+        assertEquals("initial2", v.state2.value)
+    }
+
+    /**
+     * The frame composition: a participant an `atomic` shares with the
+     * enclosing action is a savepoint whose merge runs in the frame's apply
+     * pass (`applyFrameCommit`). Refused there — the enclosing transaction was
+     * committed by hand from the frame body — the frame returns Error carrying
+     * the refusal, while its fresh root has applied and fans out once; the
+     * Failed savepoint is skipped by the frame's unwind (no second status
+     * transition), and the enclosing action's own commit is a no-op.
+     */
+    @Test
+    fun aFrameParticipantMergingIntoAHandCommittedEnclosingActionFailsTheFrame() {
+        val a = NestedTwoStateVault()
+        val b = NestedTwoStateVault()
+        val fired = mutableListOf<String>()
+        var initial = true
+        val effect = b.state1.effect { if (initial) initial = false else fired += this }
+        var frame: TransactionResult<*>? = null
+        var savepoint: Transaction? = null
+        var root: Transaction? = null
+
+        val outer =
+            a action {
+                val outerTxn = assertNotNull(a.activeTransaction)
+                frame =
+                    atomic(a, b) {
+                        a { state1 mutate "x" }
+                        b { state1 mutate "y" }
+                        savepoint = a.activeTransaction
+                        root = b.activeTransaction
+                        outerTxn.commit()
+                    }
+            }
+
+        val error = assertIs<TransactionResult.Error>(frame, "the refused merge fails the frame")
+        val refusal =
+            generateSequence(error.exception) { it.cause }
+                .filterIsInstance<IllegalStateException>()
+                .firstOrNull()
+        val message = assertNotNull(refusal?.message, "no refusal in the cause chain of ${error.exception}")
+        assertTrue("Cannot merge nested transaction" in message, "unexpected: $message")
+        assertTrue("has already applied its writes" in message, "unexpected: $message")
+        assertEquals(TransactionStatus.Failed, assertNotNull(savepoint, "a's participant is a savepoint").status)
+        assertEquals(TransactionStatus.Committed, assertNotNull(root, "b's participant is a fresh root").status)
+        assertEquals("y", b.state1.value, "the fresh root applied")
+        assertEquals(listOf("y"), fired, "b's observer fires once, from the frame's fanout")
+        assertEquals("initial1", a.state1.value, "the refused write never lands")
+        assertIs<TransactionResult.Success<*>>(outer, "the hand-committed outer's own commit is a no-op")
+        effect.dispose()
     }
 }

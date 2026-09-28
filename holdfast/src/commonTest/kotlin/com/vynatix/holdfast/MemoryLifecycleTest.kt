@@ -229,9 +229,29 @@ class MemoryLifecycleTest {
     }
 
     @Test
+    fun removeStateInsideANestedActionRefusesAStateTheEnclosingActionWrote() {
+        val v = LifecycleVault()
+        var removeCaught: Throwable? = null
+        var clearCaught: Throwable? = null
+        v action {
+            a mutate 7
+            action {
+                // a's pending write is in the enclosing transaction, not this savepoint.
+                removeCaught = runCatching { removeState("a") }.exceptionOrNull()
+                clearCaught = runCatching { clearStates() }.exceptionOrNull()
+            }
+        }
+        assertIs<IllegalStateException>(removeCaught, "the enclosing action's pending write refuses removeState")
+        assertIs<IllegalStateException>(clearCaught, "the enclosing action's pending write refuses clearStates")
+        assertEquals(7, v.a.value, "a stayed in the store and its write committed")
+        assertTrue("a" in v.properties.keys)
+    }
+
+    @Test
     fun uncaughtObserverHandlerReceivesObserverExceptionsOnCommitFire() {
-        // A10 contract: observer exceptions on commit-fire are silently swallowed by
-        // default; a non-null uncaughtObserverHandler captures them. Initial-subscribe
+        // A10 contract: observer exceptions on commit-fire never abort the commit;
+        // a non-null uncaughtObserverHandler captures them (with no handler they
+        // are logged loudly — see FanoutWriteDefaultLogTest on JVM). Initial-subscribe
         // fires propagate to the caller (observe is synchronous from their POV).
         val v = LifecycleVault()
         val captured = mutableListOf<Throwable>()
@@ -253,9 +273,11 @@ class MemoryLifecycleTest {
     }
 
     @Test
-    fun uncaughtObserverHandlerNullPreservesSilentSwallow() {
-        // Default behavior: null handler swallows silently; other observers continue
-        // to fire even when one throws on commit. (The existing contract — see
+    fun uncaughtObserverHandlerNullStillNotifiesTheOtherObservers() {
+        // Default behavior: with a null handler the failure is no longer swallowed
+        // silently — it is logged loudly (asserted on JVM by FanoutWriteDefaultLogTest,
+        // which captures standard error) — but, as before, the other observers
+        // continue to fire even when one throws on commit. (See also
         // EffectTest.effectThatThrowsExceptionDoesNotPreventOtherSubscribersFromBeingNotified.)
         val v = LifecycleVault()
         val seen = mutableListOf<Int>()

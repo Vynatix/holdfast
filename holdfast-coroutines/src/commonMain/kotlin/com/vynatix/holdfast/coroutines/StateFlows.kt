@@ -6,6 +6,7 @@ import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.effect
+import com.vynatix.holdfast.observableBacking
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -61,16 +62,18 @@ fun <T : Any> State<T>.asFlow(): Flow<T> =
 
 /**
  * Package-internal accessor: resolves the [CoroutineScope] of the [Store] that
- * owns this [State]. The cast to [MutableState] stays here — never in any public
- * signature. Throws if the [State] was not produced by `store.state { … }`.
+ * owns this [State] — for a `derivedState`/`merged` state, the store it was
+ * created on. The resolution to a [MutableState] stays here — never in any
+ * public signature. Throws for a State no store produced (a `computed` one).
  *
  * Used as the default for [asStateFlow]'s `scope` parameter so callers can write
  * `state.asStateFlow()` and pick up the store's scope automatically.
  */
 internal val <T : Any> State<T>.owningScope: CoroutineScope
     get() {
-        @Suppress("UNCHECKED_CAST")
-        val mutable = (this as? MutableState<T>) ?: error("owningScope is only defined for State produced by store.state { ... }")
+        val mutable =
+            observableBacking()
+                ?: error("owningScope is only defined for a State a store produced, not a computed { } one")
         return mutable.owningStore.scope
     }
 

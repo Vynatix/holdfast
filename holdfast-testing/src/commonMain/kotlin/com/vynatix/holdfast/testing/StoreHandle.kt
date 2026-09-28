@@ -12,11 +12,13 @@ import com.vynatix.holdfast.testing.bridge.BridgeView
 import com.vynatix.holdfast.testing.bridge.LatchedBridge
 import com.vynatix.holdfast.testing.bridge.RecordingBridge
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.Recorder
 import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.reflect.KProperty1
+import kotlin.time.Clock
 
 /**
  * Test-scope handle to a tracked [Store]. Returned by [StoreTestScope.track]; the
@@ -40,6 +42,18 @@ import kotlin.reflect.KProperty1
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
  * known limits (commit-time errors after the body returns, user middlewares
  * not auto-wrapped, suspendAction not running middleware in 1.1).
+ *
+ * The handle also remembers the store's clock binding (`Store.bindClock`) as
+ * it was when the store was first tracked, and teardown puts it back — after
+ * the body, and again once the test's un-joined child coroutines finish — so a
+ * clock a test binds on a long-lived (singleton) store after tracking it does
+ * not leak into the next test. Track the store before binding its clock, with
+ * `track` or an auto-registering extension such as `store.read { }` (a bare
+ * `store.action { }` resolves to the `Store` member and does not track): a
+ * clock bound before the first track counts as the pre-test binding and is
+ * kept. Work in `backgroundScope` or on a scope outside the test is not waited
+ * for, so a binding it makes after the test ends is not undone; join such work
+ * before the body ends.
  */
 class StoreHandle<V : Store<V>> internal constructor(
     val store: V,
@@ -47,6 +61,15 @@ class StoreHandle<V : Store<V>> internal constructor(
 ) {
     private val handleLock = SynchronizedObject()
     private val pendingErrorList: MutableList<TransactionResult.Error> = mutableListOf()
+
+    /**
+     * The store's raw clock binding when this handle was created (`null` when
+     * none), which [StoreTestScope] restores at teardown and again when the
+     * test's job completes (see
+     * [com.vynatix.holdfast.testing.internal.PrivilegedHooks.restoreBoundClock]).
+     * Read before `init` installs anything, so it is the pre-track binding.
+     */
+    internal val clockAtTrack: Clock? = PrivilegedHooks.boundClock(store)
 
     /**
      * Privileged recorder. `null` when [captureMode] is [Capture.None] — the
@@ -69,6 +92,11 @@ class StoreHandle<V : Store<V>> internal constructor(
      * track(v) replaces the wrapped reference with the unwrapped one and
      * subsequent BridgePublished/Observed events will not fire for that
      * state.
+     *
+     * Only [Store.properties] are walked, so a bridge attached to an entry of
+     * a keyed state family (`keyedState`) is never wrapped: its publishes and
+     * inbound values do not reach the timeline (its writes do, as
+     * EmissionEvents).
      */
     private val bridgeWrappers: MutableMap<State<*>, RecordingBridgeWrapper<*>> = mutableMapOf()
 
@@ -158,10 +186,12 @@ class StoreHandle<V : Store<V>> internal constructor(
      * Filter of [timeline] for [EmissionEvent]s targeting [prop]'s state on
      * this store. Resolves [prop] against the live store instance, so
      * `MyStore::count` returns events for the same `State<*>` reference the
-     * recorder pushed at commit time. Order is preserved.
+     * recorder pushed at commit time — for a `derivedState`/`merged`
+     * property, its backing state, which its recomputes commit. Order is
+     * preserved.
      */
     fun emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<EmissionEvent>().filter { it.state === target }
     }
 
@@ -170,10 +200,11 @@ class StoreHandle<V : Store<V>> internal constructor(
      * store. Populated by the [Recorder] when bridges attached to tracked
      * states publish / observe — see [RecordingBridgeWrapper] for the wrap
      * strategy and the v1 limit (bridges attached AFTER `track(v)` are not
-     * wrapped).
+     * wrapped). A bridge on a keyed state family's entry is never wrapped, so
+     * its publishes and inbound values are not recorded.
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<BridgeEvent>().filter { it.state === target }
     }
 
@@ -197,14 +228,25 @@ class StoreHandle<V : Store<V>> internal constructor(
      * [com.vynatix.holdfast.bridge.KvBridge]) only the wrapper-tracked publishes
      * are visible — but only if the bridge was wrapped at install time.
      *
+     * For a `StateTag.Secret` state the view withholds every published value
+     * (each entry of `published` is [com.vynatix.holdfast.Redacted]), and the
+     * bridge value matchers refuse it; see [BridgeView].
+     *
      * @throws IllegalStateException if the state has no bridge attached.
      */
     fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
-        val state = prop.get(store)
+        val state = PrivilegedHooks.recordedState(prop.get(store))
         val wrapper = bridgeWrappers[state]
-        if (wrapper != null) {
-            return BridgeView(BridgeView.WrappedSource(wrapper))
-        }
+        val view = wrapper?.let { BridgeView(BridgeView.WrappedSource(it)) } ?: attachedBridgeView(prop, state)
+        // A Secret state's published values are withheld here, as in the timeline.
+        return if (PrivilegedHooks.isSecret(state)) view.withheldFor(prop.name) else view
+    }
+
+    /** [bridge]'s view of a state no install-time wrapper covers. */
+    private fun attachedBridgeView(
+        prop: KProperty1<V, State<*>>,
+        state: State<*>,
+    ): BridgeView<*> {
         // Fallback: no install-time wrapper, but the state may have a bridge
         // attached after track(v). Probe the MutableState.bridge directly and
         // try to construct a view from a known test-bridge type.

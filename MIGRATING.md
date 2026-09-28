@@ -53,6 +53,251 @@ Only the default-parameter forms remain. Migration:
   `Store.defaultScope` (the bridge factories) — which is what the context
   overloads were resolving away from.
 
+## Source break: `Store.clock` (0.3.0)
+
+`Store` gains an experimental `open val clock: kotlin.time.Clock` (with
+`bindClock(Clock?)`), so time-relative store code can read `clock.now()` and a
+test can pin it (issue #20, R10). A property named `clock` in your own `Store`
+subclass now collides with it and stops compiling — whatever its type, and
+including `val clock by state { … }` or a `private val clock`.
+
+- **Rename it** (for example to `appClock`) when it is not the clock your store
+  should read time through.
+- **Or override it** when it is a `kotlin.time.Clock`. Overriding an
+  experimental member needs the opt-in, and use a getter rather than a `val`
+  initializer (an initializer's backing field is still `null` while earlier
+  properties initialize):
+
+  ```kotlin
+  class SessionStore(private val source: Clock) : Store<SessionStore>() {
+      @OptIn(ExperimentalStoreApi::class)
+      override val clock: Clock get() = source
+  }
+  ```
+
+  An override beats `bindClock`, so a test cannot pin that store's time with
+  `bindClock`. Unless the store must always read one specific clock, drop your
+  member and call `store.bindClock(yourClock)` instead — at app init, or with a
+  fixed clock in a test.
+
+One resolution change needs no error to surface. An unqualified `clock` can
+appear inside a `Store` subclass's own body (property initializers,
+`state { … }` initializers, member functions) or inside any lambda whose
+receiver is a store (`store.action { … }`, `store { … }`). If it used to resolve
+to a top-level `clock`, an enclosing class's property or the subclass's own
+`companion object` member, it now resolves to `Store.clock`: Kotlin tries the
+members of `this`, inherited ones included, before companion objects, outer
+classes and top-level declarations. Without the `ExperimentalStoreApi` opt-in
+this fails to compile. In a file or module that already opts in, it silently
+reads the store's clock, which is `Clock.System` unless bound. Qualify the old
+reference where you meant it: `Companion.clock` (or `SessionStore.clock`),
+`this@Outer.clock`, or a package-qualified name. Better still, drop it and call
+`bindClock`.
+
+`bindClock` throws on a disposed store. Reading `clock` never throws.
+
+## Behavior change: writes from an observer into its own committing store (0.4.0)
+
+An effect (or `observe` callback, bridge publish, event collector) runs during
+its store's commit fanout — after the transaction has applied its writes, while
+it is still the store's active transaction. A write back into that store from
+there used to be staged into the finished transaction and silently lost. It is
+now refused (issue #20):
+
+- `mutate`, `update` and `emit` on that store throw `IllegalStateException`
+  ("Cannot write S.x: S's transaction '…' has already applied its writes …").
+  Thrown out of an effect, it reaches `uncaughtObserverHandler` — or the default
+  log below.
+- A nested `action { }` or `atomic(...) { }` on that store returns
+  `TransactionResult.Error` carrying that exception, without running its body.
+  Check that result (e.g. `.getOrThrow()`, which rethrows into
+  `uncaughtObserverHandler`): an effect that ignores it still drops the write,
+  and nothing is logged.
+
+If a test or an app relied on such a write "working", it never did: the value
+never committed. Pick one of:
+
+- **Write in the action itself.** If a write to `x` should always follow a
+  write to `y`, do both in the same `action`.
+- **Derive the value.** `computed { }` recomputes on read; `derived(...)`
+  recomputes in its own transaction after each source commit.
+- **Run a follow-up action after the commit**: a follow-up `action { }` from
+  another thread, or one launched on a dispatcher that does not run it inline,
+  checking the result —
+  `store.scope.launch(Dispatchers.Default) { store action { … }.getOrThrow() }`.
+  On `Dispatchers.Unconfined`, or `Dispatchers.Main.immediate` when the commit
+  already runs on the main thread (a store bound to `viewModelScope`, say), the
+  launched body runs at once, inside the commit's fanout, and is refused like
+  any nested action; the launch alone drops that `Error`, and `.getOrThrow()`
+  turns it into a coroutine failure that reaches the scope's exception handler.
+  Another thread's `action` is not refused: it waits for the
+  store and then commits normally. Use `action` there rather than a bare
+  `mutate`/`update`: while a `suspendAction`/`suspendAtomic` holds the store, a
+  bare write from any thread stages into its transaction — before that
+  transaction applies it silently joins it, after it throws ("Cannot write S.x:
+  a suspendAction or suspendAtomic holds S …") until the suspending call
+  returns.
+
+Writes to a *different* store from an effect keep working (subject to the
+cross-store lock-ordering caveat in the README's known issues).
+
+## Behavior change: post-commit failures are logged by default (0.4.0)
+
+With no `Store.uncaughtObserverHandler` set, a throwing effect, bridge publish
+(`Bridge.publish` or `SuspendingBridge.publishAwaited`) or `derived` recompute
+used to be dropped without a trace. It is now logged: a line naming the store,
+then the stack trace, on standard error (JVM/Android) or standard output
+(iOS/wasmJs). Nothing else changes — the commit still stands and the remaining
+observers still run.
+
+- To keep failures out of standard error, route them:
+  `store.uncaughtObserverHandler = { e -> logger.warn("post-commit failure", e) }`.
+- To restore the old silence deliberately: `store.uncaughtObserverHandler = { }`.
+
+## Behavior change: states are declared eagerly (0.4.0)
+
+`val x by state { … }` now declares `x` on its store while the store is being
+constructed; the initializer still runs lazily, when the state is first
+needed. What changes (issue #20, R5):
+
+- **`snapshot()` holds every declared state.** It runs the initializer of any
+  state nobody has read yet, so a snapshot of a fresh store is complete — and
+  an initializer with side effects, or one that throws, now runs (or throws)
+  inside `snapshot()`. Code that touched states before snapshotting, or before
+  `restore`-ing into a fresh store, can drop the touches. The backing states
+  of `derived`/`suspendDerived` are no longer in `stateNames`/`size`.
+- **Initializers may read, not write.** A `mutate`/`update`, `action`,
+  `atomic`, `emit`, `suspendAction` or `suspendAtomic` inside an initializer
+  throws `IllegalStateException`. Compute the initial value from what the
+  initializer can read, and make the write in an action after construction.
+- **Initializers read committed values only.** An initializer that runs
+  inside an action (because the action is the first to need its state) no
+  longer sees that action's pending writes: `action { a mutate 5; b.value }`
+  seeds a never-read `b` from the committed `a`, not from `5`. If `b` should
+  follow `a`, compute it with `computed { }`/`derived(...)` instead of seeding
+  a state from it.
+- **Initializer cycles throw** an `IllegalStateException` naming the chain,
+  where they used to overflow the stack or deadlock. Give one state of the
+  cycle an initial value that does not read the others.
+- **One declaration per name.** A subclass that redeclares a state of its base
+  class (`override val x by state { … }`) — or any second property with the
+  same name on one store — now fails when the store is constructed, instead of
+  silently sharing one state. Rename one of them. A local delegated property
+  evaluated again, or a helper object's property declared again over the same
+  store, still binds to the existing state.
+- **Custom delegates wrapping `state(…)`** should forward
+  `provideDelegate(thisRef, property)` to the wrapped delegate (as
+  `:holdfast-hallmark`'s `boxedHandle` does); otherwise their state is
+  declared only on its first read, and a snapshot taken before that misses it.
+
+## Behavior change: `restore` ignores unknown state names (0.5.0)
+
+`store.restore(snapshot)` used to return `TransactionResult.Error` when the
+snapshot held a state name the store does not declare — a state renamed or
+removed since the snapshot was taken, or one of another store class. It now
+ignores that name, restores the rest, and leaves every declared state the
+snapshot has no value for as it was, without firing its observers (issue #20,
+R1). That is what restoring a persisted snapshot after an app update needs.
+
+- **Relied on the error to detect a mismatched snapshot?** Use the
+  experimental overload with the strict policy, which fails as before and
+  names every offending state:
+  `store.restore(snapshot, RestorePolicy.Strict)` (opt in with
+  `@OptIn(ExperimentalStoreApi::class)`). Or read what was skipped from the
+  `RestoreReport` that `restore(snapshot, RestorePolicy.IgnoreUnknown)`
+  returns.
+- **Restoring another store class's snapshot?** A value whose class differs
+  from the class of the value its target state holds now fails the restore,
+  naming the state, when either class is a built-in value type (`String`,
+  `Boolean`, `Char`, a primitive number): a `String` restored into a state
+  holding an `Int` or a `List`, say, or a data-class value restored into an
+  `Int` state. Before, such a value was written and threw
+  `ClassCastException` at a later read. Values of two other classes
+  (subclasses, sealed siblings) are still written unchecked. See GUIDE §16.2,
+  "The type witness".
+- **Comparing snapshots?** They now have value equality: `==` compares state
+  names and raw values, not identity. Code that kept snapshots in a set or
+  as map keys by identity should wrap them.
+
+## Behavior change: frames apply whole, derived states settle once per entry (0.6.0)
+
+Issue #20, R9. Two changes that work together:
+
+**An `atomic`/`suspendAtomic` frame applies every participant before any of
+them fans out.** Participants used to commit one after the other in lock
+order, each notifying its observers (and publishing, and emitting) before the
+next one applied. Now all of them apply first, inside one write bracket, then
+each fans out in lock order. What that changes for code reacting to a frame:
+
+- **An observer can no longer write into a later participant.** From an
+  observer of `a` in `atomic(a, b) { … }`, `b { x mutate … }` used to stage
+  into `b`'s still-open root and commit with the frame. `b` has applied too
+  by then, so the write is refused exactly like a write back into `a`:
+  `mutate`/`update`/`emit` throw `IllegalStateException` ("… has already
+  applied its writes …", reaching `uncaughtObserverHandler`), a nested
+  `action`/`atomic` returns an `Error`. Move the write into the frame body,
+  where it belongs to the frame, or derive the value (`derivedState`,
+  `computed { }`), or run it as a follow-up action after the frame (see
+  "writes from an observer into its own committing store" above).
+- **Observers see every participant committed, from any thread.** No change
+  needed; code that worked around seeing a sibling store's old value (after a
+  `suspendAtomic` body hopped threads) can drop the workaround.
+- **One participant's failed fanout no longer rolls the others back.** A
+  participant whose fanout ends early because `uncaughtObserverHandler`
+  threw used to leave the later participants uncommitted. They have applied
+  now, so they fan out and commit; the frame still returns the failure (and
+  `FrameObserver.onFrameRolledBack` fires, although every value stands). In
+  a `suspendAtomic`, the same holds for a `CancellationException` from one
+  participant's `SuspendingBridge.publishAwaited`.
+- **`onTransactionError` fires only on participants that roll back.** A
+  blocking `atomic` used to fire it on every participant when its commit
+  failed partway, including the ones that had committed; middleware on a
+  participant that committed (or failed in its own apply or fanout) no
+  longer hears of the error, as for a single `action`'s commit failure.
+- **A savepoint participant rolls back when another participant's apply
+  fails.** In `a.action { atomic(a, b) { … } }`, `a` joins the frame as a
+  savepoint; when `b`'s apply throws (a `distinct` state's `equals`), `a`'s
+  frame writes used to stay in the outer action and commit with it. They are
+  discarded with the frame now.
+
+**`derivedState`/`merged` settle once per outermost entry.** An `action`,
+`atomic`, `suspendAction` or `suspendAtomic` is an entry, and one nested in
+another joins the outermost one on its thread. A derived state recomputes
+once, after the outermost entry has exited and released every store, from a
+committed cut of its sources — no longer after each source commit.
+
+- **Inside an outer action, a derived state no longer reflects writes
+  nested in it.** `outer.action { a.action { x mutate 1 }; println(d.value) }`
+  used to print the recomputed value when `d` is hosted elsewhere; it now
+  prints the value from before the outer action. Read the sources (or a
+  `computed { }` state) when you need your own writes inside the action; the
+  derived state has settled by the time `outer.action` returns.
+- **Nested frames and consistent reads.** A consistent read across a
+  frame's participants sees the frame whole or not at all when every
+  participant opens a root of its own: an outermost frame, or one sharing no
+  store with the action or frame it is nested in. A store the nested frame
+  shares joins as a savepoint and applies with the enclosing transaction.
+  Enroll every store in the outermost frame to keep the frame whole.
+- **Fewer recomputes.** Tests that counted one recompute (or one host
+  transaction, or one timeline emission) per nested commit now see one per
+  outermost entry. A derived state created inside an action no longer
+  recomputes when that action ends unless its initial compute read an
+  uncommitted value.
+- **A frame's queued post-commit work runs later when the frame is nested.**
+  The `derived`/`suspendDerived` work queued on the stores whose roots a
+  frame opened used to run when the frame exited; a frame nested in an action
+  or another frame now leaves it to the outermost one's exit.
+- The legacy `derived(...)` keeps its per-commit recompute (once per changed
+  source for a source on another store while its own store is idle) until
+  the 0.7.0 triage.
+- **An already-cancelled caller is refused.** An outermost `suspendAction` or
+  `suspendAtomic` now runs inside a child of its caller (its settle scope
+  travels with it), so called from an already-cancelled coroutine it throws
+  that `CancellationException` before taking the store, on every platform —
+  it used to run a body with no suspension point and commit it. Once the
+  body has returned, a caller cancelled meanwhile still gets the committed
+  `TransactionResult`, as before.
+
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

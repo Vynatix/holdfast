@@ -15,6 +15,7 @@ import com.vynatix.holdfast.testing.TransactionCommitted
 import com.vynatix.holdfast.testing.TransactionErrored
 import com.vynatix.holdfast.testing.TransactionRolledBack
 import com.vynatix.holdfast.testing.TransactionStarted
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import kotlin.reflect.KProperty1
 
 /**
@@ -130,8 +131,9 @@ class TimelineMatcher<V : Store<V>> internal constructor(
     /**
      * Match any [EmissionEvent] for the [State] referenced by [prop]. Resolves
      * the property reference to a State reference at predicate-construction
-     * time using [vaultRef], so subsequent matching is `===` against the
-     * EmissionEvent's `state` field.
+     * time using [vaultRef] — for a `derivedState`/`merged` property, its
+     * backing state, which its recomputes commit — so subsequent matching is
+     * `===` against the EmissionEvent's `state` field.
      *
      * Throws [IllegalStateException] if [vaultRef] is null (i.e. when invoked
      * via the [List]-receiver combinator without a store context).
@@ -149,19 +151,35 @@ class TimelineMatcher<V : Store<V>> internal constructor(
     /**
      * Match any [EmissionEvent] for [prop] whose `newValue` equals [value]
      * (`==`). [value] may be `null` to match emissions whose `newValue` is null.
+     *
+     * Refused for a `StateTag.Secret` state, whose events record
+     * [com.vynatix.holdfast.Redacted] instead of its values: match that it
+     * emitted with [emitted] without a value, count
+     * [com.vynatix.holdfast.testing.StoreHandle.emissions], or read the value
+     * itself.
+     *
+     * @throws IllegalArgumentException for a Secret state.
      */
     fun emitted(
         prop: KProperty1<V, State<*>>,
         value: Any?,
-    ): EmissionPredicate =
-        register(
+    ): EmissionPredicate {
+        val target = resolveState(prop, "emitted")
+        require(!PrivilegedHooks.isSecret(target)) {
+            val name = prop.name
+            "emitted($name, value) cannot match a value: $name is a Secret state, so its timeline events record " +
+                "Redacted in place of its values. Match that it emitted with emitted($name), count " +
+                "handle.emissions(…::$name), or assert the value itself with handle.read { $name.value }."
+        }
+        return register(
             EmissionPredicate(
-                target = resolveState(prop, "emitted"),
+                target = target,
                 propName = prop.name,
                 checkNewValue = true,
                 expectedNewValue = value,
             ),
         )
+    }
 
     /** Match any [BridgePublished] event for the State referenced by [prop]. */
     fun bridgePublished(prop: KProperty1<V, State<*>>): BridgePublishedPredicate =
@@ -186,7 +204,9 @@ class TimelineMatcher<V : Store<V>> internal constructor(
                         "StoreHandle.$surface { … } instead of List<StoreEvent>.$surface { … }, " +
                         "or build a synthetic-timeline test that doesn't reference state properties.",
                 )
-        return prop.get(v)
+        // A derivedState/merged property resolves to its backing state, the
+        // one its recomputes commit and the recorder's events name.
+        return PrivilegedHooks.recordedState(prop.get(v))
     }
 
     /**
@@ -340,8 +360,9 @@ class MiddlewareErroredPredicate internal constructor(
 
 /**
  * Match [EmissionEvent] events for a specific State. [target] is pre-resolved
- * via `prop.get(store)` at builder-construction time; matching uses `===` so
- * structurally-equal but distinct State instances do not collide.
+ * from the property at builder-construction time (a `derivedState`/`merged`
+ * property to its backing state, which its recomputes commit); matching uses
+ * `===` so structurally-equal but distinct State instances do not collide.
  *
  * If [checkNewValue] is true, the predicate additionally requires
  * `event.newValue == expectedNewValue` (`==`, allowing nullable comparison).

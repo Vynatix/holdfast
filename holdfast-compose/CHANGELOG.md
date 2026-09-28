@@ -4,6 +4,18 @@ All notable changes to `:holdfast-compose` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`collectAsState` over core's derived states** (issue #20, R6): a
+  `derivedState`/`merged` state observes through `effect` like a declared
+  one, so `collectAsState` accepts it unchanged. `jvmTest` gains
+  `ComposeRecompositionTest`, which drives a headless `Recomposer` (with
+  `kotlinx-coroutines-test`, test-only) and pins that a one-commit adoption of
+  a merged state recomposes its reader exactly once, and a commit that leaves
+  the merged value as it was does not recompose it.
+
 ## 2.0.0 — 2026-05-03
 
 Coordinated 2.0 cut across `:holdfast`, `:holdfast-coroutines`, `:holdfast-compose`,

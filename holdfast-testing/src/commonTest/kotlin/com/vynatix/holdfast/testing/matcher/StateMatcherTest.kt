@@ -1,5 +1,6 @@
 package com.vynatix.holdfast.testing.matcher
 
+import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.storeTest
 import kotlin.test.Test
@@ -200,23 +201,40 @@ class StateMatcherTest {
         }
 
     @Test
-    fun shouldMatchSnapshotOfFailsOnStateNameMismatch() =
+    fun shouldMatchSnapshotOfComparesUntouchedDeclaredStates() =
         storeTest {
-            // Two vaults of different shape — touch a different subset on each so
-            // their snapshot.stateNames differ.
+            // Snapshots cover every declared state, read or not: a store that
+            // only ever touched `count` still matches one that touched both,
+            // when the untouched `name` is at the value the other one set.
             val ctr = track(CountVault())
             ctr.action { count mutate 1 }.shouldBeSuccess() // touches only `count`
 
             val expected = CountVault()
             expected action {
                 count mutate 1
-                name mutate "x" // touches both
+                name mutate "x" // the initial value
             }
+
+            ctr shouldMatchSnapshotOf expected
+        }
+
+    @Test
+    fun shouldMatchSnapshotOfFailsOnStateNameMismatch() =
+        storeTest {
+            // Two vaults of different shape: `expected` declares one more state,
+            // as a local delegated property of this test.
+            val ctr = track(CountVault())
+            ctr.action { count mutate 1 }.shouldBeSuccess()
+
+            val expected = CountVault()
+            val extra: State<Int> by expected.state { 0 }
+            expected action { count mutate extra.value + 1 }
 
             val err =
                 assertFailsWith<AssertionError> {
                     ctr shouldMatchSnapshotOf expected
                 }
             assertContains(err.message.orEmpty(), "state-name mismatch")
+            assertContains(err.message.orEmpty(), "only in other: extra")
         }
 }

@@ -2,9 +2,13 @@ package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.Validator
+import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.State
+import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.StateDelegate
+import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.tags
 import kotlin.reflect.KProperty
 
 /**
@@ -30,21 +34,32 @@ import kotlin.reflect.KProperty
  * The two-step `state mutate civilize(...)` pattern is the closest we can
  * get to a one-line `email assign "..."` infix without enabling Kotlin
  * context parameters in the compiler. `civilize` is just sugar for
- * `validator of primitive` — same throw semantics.
+ * `validator of primitive` — same throw semantics, except that for a
+ * `StateTag.Secret` [state] the exception withholds the value (see the
+ * experimental `boxed` overload).
  */
 data class BoxedHandle<P : Any, O : Boxed<P>>(val state: State<O>, val validator: Validator<P, O>) {
-    /** Civilize [primitive] through the bundled validator. Throws on rejection. */
-    fun civilize(primitive: P): O = validator of primitive
+    /** Civilize [primitive] through the bundled validator. Throws on rejection, withholding a Secret state's value. */
+    @OptIn(ExperimentalStoreApi::class)
+    fun civilize(primitive: P): O = validator.ofWithheldIf(StateTag.Secret in state.tags, primitive)
 }
 
 /**
  * Property delegate that returns a [BoxedHandle] (state + validator) on every
  * read.
+ *
+ * [provideDelegate] forwards to the wrapped state delegate, so the state is
+ * declared on its store when the property is (see
+ * [com.vynatix.holdfast.StateDelegate.provideDelegate]) — a never-read handle's
+ * state is still captured by `snapshot()`.
  */
 class BoxedHandleDelegate<P : Any, O : Boxed<P>> internal constructor(
     private val backing: StateDelegate<O>,
     private val validator: Validator<P, O>,
 ) {
+    operator fun provideDelegate(thisRef: Any?, property: KProperty<*>): BoxedHandleDelegate<P, O> =
+        BoxedHandleDelegate(backing.provideDelegate(thisRef, property), validator)
+
     operator fun getValue(thisRef: Any?, property: KProperty<*>): BoxedHandle<P, O> =
         BoxedHandle(backing.getValue(thisRef, property), validator)
 }
@@ -60,6 +75,29 @@ class BoxedHandleDelegate<P : Any, O : Boxed<P>> internal constructor(
 fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxedHandle(validator: Validator<P, O>, initial: () -> P): BoxedHandleDelegate<P, O> =
     BoxedHandleDelegate(
         backing = state(transformer = ValidatingTransformer(validator)) { validator of initial() },
+        validator = validator,
+    )
+
+/**
+ * [boxedHandle], declared through the experimental [boxed] overload: with a
+ * [codec] and [tags] for the underlying state. For a `StateTag.Secret`
+ * state, validation — the initializer, writes, [BoxedHandle.civilize] and
+ * [assign] — never quotes the rejected value.
+ *
+ * Calls that pass neither [codec] nor [tags] resolve to the stable
+ * [boxedHandle].
+ *
+ * Experimental (issue #20, R1 and R3).
+ */
+@ExperimentalStoreApi
+fun <V : Store<V>, P : Any, O : Boxed<P>> Store<V>.boxedHandle(
+    validator: Validator<P, O>,
+    codec: StateCodec<O>? = null,
+    tags: Set<StateTag> = emptySet(),
+    initial: () -> P,
+): BoxedHandleDelegate<P, O> =
+    BoxedHandleDelegate(
+        backing = boxed(validator, codec, tags, initial),
         validator = validator,
     )
 

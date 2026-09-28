@@ -4,6 +4,7 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreLock
 import com.vynatix.holdfast.TransactionStatus
+import com.vynatix.holdfast.keyedEntryName
 import kotlin.time.Duration
 import kotlin.time.TimeSource
 
@@ -25,7 +26,11 @@ import kotlin.time.TimeSource
  * for plain sync actions.
  *
  * [modifiedStates] holds the property names of the states this transaction
- * staged writes for. For a savepoint sample, only the savepoint's own writes;
+ * staged writes for — names only, never values, so a sample may be logged even
+ * when a `StateTag.Secret` state was written. An entry of a keyed state family
+ * (`keyedState`) is named after its family, `docs[*]`, never by its key (a key
+ * can be data); writes to several entries of one family count once. For a
+ * savepoint sample, only the savepoint's own writes;
  * a committed savepoint's writes merge into the parent and so surface again in
  * the parent's sample. Empty when name attribution is unavailable (see
  * [ProfilingMiddleware] docs).
@@ -45,7 +50,8 @@ data class TransactionSample(
  * construction or the last [ProfilingMiddleware.reset].
  *
  * [stateWriteCounts] maps state property name → number of profiled
- * transactions that staged a write for it, regardless of outcome — it measures
+ * transactions that staged a write for it (a keyed state family's entries
+ * together, under `family[*]`), regardless of outcome — it measures
  * mutation activity, not committed results (check [rolledBackCount] to see how
  * much activity was discarded).
  *
@@ -228,7 +234,8 @@ class ProfilingMiddleware<V : Store<V>>(
             val namesByState =
                 context.store.properties.entries
                     .associate { (name, state) -> state to name }
-            states.mapNotNullTo(mutableSetOf<String>()) { namesByState[it] }
+            // A keyed entry is not a property: it is named after its family.
+            states.mapNotNullTo(mutableSetOf<String>()) { namesByState[it] ?: it.keyedEntryName() }
         }.getOrElse { emptySet() }
     }
 

@@ -10,8 +10,13 @@ import com.vynatix.holdfast.testing.bridge.BridgeView
  * Equality uses `==` so structurally-equal values match regardless of identity.
  * Throws [AssertionError] listing the full published history when [value] is
  * absent, so failures pinpoint what was actually published.
+ *
+ * Every matcher in this file refuses a view of a `StateTag.Secret` state's
+ * bridge (see [BridgeView]) with an [IllegalStateException] that says how to
+ * assert on it instead: the harness never compares or prints a secret.
  */
 infix fun <T : Any> BridgeView<T>.shouldHavePublished(value: T) {
+    refuseWithheldValues("shouldHavePublished")
     val history = published
     if (value !in history) {
         throw AssertionError(
@@ -29,6 +34,7 @@ infix fun <T : Any> BridgeView<T>.shouldHavePublished(value: T) {
  * pinpoints both expected and actual sequences.
  */
 infix fun <T : Any> BridgeView<T>.shouldHavePublishedInOrder(values: List<T>) {
+    refuseWithheldValues("shouldHavePublishedInOrder")
     val history = published
     if (history != values) {
         throw AssertionError(
@@ -46,10 +52,24 @@ infix fun <T : Any> BridgeView<T>.shouldHavePublishedInOrder(values: List<T>) {
  * publish is meaningful.
  */
 infix fun <T : Any> BridgeView<T>.shouldHaveLastPublished(value: T) {
+    refuseWithheldValues("shouldHaveLastPublished")
     val last = lastPublished
     if (last != value) {
         throw AssertionError(
             "Bridge last published $last, expected $value (full history: $published)",
         )
     }
+}
+
+/**
+ * Refuse value matching on a view that withholds its values (a Secret
+ * state's bridge), teaching what to assert instead.
+ */
+private fun BridgeView<*>.refuseWithheldValues(matcher: String) {
+    val state = withheldState ?: return
+    throw IllegalStateException(
+        "$matcher cannot match a value: '$state' is a Secret state, so the harness records every value its " +
+            "bridge publishes as Redacted, never the value itself. Count the publishes with published.size, " +
+            "match bridgePublished($state) in a timeline matcher, or assert on a RecordingBridge of your own.",
+    )
 }

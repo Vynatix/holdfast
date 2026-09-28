@@ -1,6 +1,8 @@
 package com.vynatix.holdfast.testing.bridge
 
 import com.vynatix.holdfast.Bridge
+import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Redacted
 import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
 
 /**
@@ -41,14 +43,25 @@ import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
  * val view = ctr.bridge(SettingsVault::theme)
  * (view.published as List<String>) shouldBe listOf("dark")
  * ```
+ *
+ * A view from [com.vynatix.holdfast.testing.StoreHandle.bridge] on a
+ * `StateTag.Secret` state withholds its values: [published] holds
+ * [Redacted] once per publish (so `published.size` still counts them), and
+ * the value matchers (`shouldHavePublished` and the like) refuse it with a
+ * teaching [IllegalStateException] rather than print or compare a secret. A
+ * view you build from your own [RecordingBridge] or [LatchedBridge] knows no
+ * state, and shows what that bridge recorded.
  */
 class BridgeView<T : Any> internal constructor(
     private val source: Source<T>,
+    /** The name of the Secret state this view withholds the values of, or `null`. */
+    internal val withheldState: String? = null,
 ) {
     /**
      * Snapshot of every value passed to [Bridge.publish] on the underlying
      * bridge in call order. Returns a defensive copy; safe to iterate after
-     * return.
+     * return. On a view of a Secret state's bridge, every entry is
+     * [Redacted].
      */
     val published: List<T>
         get() = source.published()
@@ -74,6 +87,9 @@ class BridgeView<T : Any> internal constructor(
     infix fun receiving(value: T) {
         source.simulateInbound(value)
     }
+
+    /** This view, withholding every published value: the view of Secret state [stateName]'s bridge. */
+    internal fun withheldFor(stateName: String): BridgeView<T> = BridgeView(RedactedSource(source), stateName)
 
     /**
      * Sealed source adapter so [BridgeView] can wrap any of the three
@@ -113,6 +129,23 @@ class BridgeView<T : Any> internal constructor(
 
         override fun simulateInbound(value: T) {
             wrapper.simulateInbound(value)
+        }
+    }
+
+    /**
+     * [inner] with every published value replaced by [Redacted], erased into
+     * `T` (a withheld view is only handed out star-projected). Inbound
+     * updates pass through.
+     */
+    internal class RedactedSource<T : Any>(
+        private val inner: Source<T>,
+    ) : Source<T> {
+        @OptIn(ExperimentalStoreApi::class)
+        @Suppress("UNCHECKED_CAST")
+        override fun published(): List<T> = inner.published().map { Redacted as T }
+
+        override fun simulateInbound(value: T) {
+            inner.simulateInbound(value)
         }
     }
 }

@@ -16,8 +16,10 @@ private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
  * these prove the API surface compiles and resolves correctly across the
  * KMP targets, which is the contract the module owes its consumers.
  *
- * End-to-end recomposition behavior is verified by app-level tests in the
- * consuming module (`:shared`).
+ * Recomposition itself is verified on the JVM only, by `jvmTest`'s
+ * `ComposeRecompositionTest`, which drives a headless `Recomposer` (no UI
+ * toolkit) and counts recompositions; app-level tests in a consuming module
+ * cover the rest.
  */
 class ComposeBindingsCompileTest {
     @Test

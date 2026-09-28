@@ -96,9 +96,16 @@ class OpenTransaction internal constructor(
     }
 
     /**
-     * Discard the pending writes staged in [transaction]. The store's
-     * committed values stay unchanged; observers and bridges receive no
-     * notification. After return, [Transaction.status] is `RolledBack`.
+     * Discard the pending writes staged in [transaction]. Those writes never
+     * reach committed state and notify no observer, bridge or middleware.
+     * After return, [Transaction.status] is `RolledBack`.
+     *
+     * Rollback then runs any post-commit work queued on this store while the
+     * transaction was open, as a production action's exit would — for
+     * example a `derived` hosted on this store whose source on another store
+     * committed in the meantime. That work commits as its own top-level
+     * transaction: its state changes, its observers and bridges fire, and it
+     * appears on this handle's timeline.
      *
      * Subsequent calls to [commit] or [rollback] throw
      * [IllegalStateException] "OpenTransaction already closed".

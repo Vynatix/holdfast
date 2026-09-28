@@ -9,3 +9,11 @@ internal actual fun currentFrameLocal(): Any? = frameLocal
 internal actual fun setFrameLocal(value: Any?) {
     frameLocal = value
 }
+
+private var fanoutLocal: Any? = null
+
+internal actual fun currentFanoutLocal(): Any? = fanoutLocal
+
+internal actual fun setFanoutLocal(value: Any?) {
+    fanoutLocal = value
+}

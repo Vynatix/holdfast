@@ -49,6 +49,51 @@ class StoreLock {
         lockCount = 1
     }
 
+    /**
+     * Non-blocking [acquire]: deepen the lock if this thread already holds it,
+     * take it if it is free, and otherwise return `false` at once instead of
+     * parking. A `true` return must be paired with [release], exactly like
+     * [acquire].
+     *
+     * Reentrancy is read the same way [acquire] reads it. On wasmJs every
+     * caller reports thread id `0`, so a held lock always reads as this
+     * thread's and the call deepens it; that is only sound because that
+     * target is single-threaded, which [acquire] already assumes.
+     */
+    internal fun tryAcquire(): Boolean {
+        val currentThreadId = currentThreadId()
+        val acquired =
+            when {
+                locked && ownerThreadId == currentThreadId -> true
+                mutex.tryLock() -> {
+                    locked = true
+                    ownerThreadId = currentThreadId
+                    lockCount = 0
+                    true
+                }
+                else -> false
+            }
+        if (acquired) lockCount++
+        return acquired
+    }
+
+    /**
+     * Non-blocking, non-reentrant [acquire]: take the lock only if NO thread
+     * holds it, this one included, and otherwise return `false` at once. A
+     * `true` return must be paired with [release].
+     *
+     * For a caller that needs every other holder gone, not a deeper hold of
+     * its own: a coroutine running inline inside a holder's critical section
+     * on this thread must not count that holder as released. On wasmJs, where
+     * every caller reports thread id `0`, any held lock reads as this
+     * thread's, so the call returns `false` while anyone holds it — which is
+     * what this caller needs there too.
+     */
+    internal fun tryAcquireIfUnheld(): Boolean {
+        if (locked && ownerThreadId == currentThreadId()) return false
+        return tryAcquire()
+    }
+
     fun release() {
         val currentThreadId = currentThreadId()
         check(locked && ownerThreadId == currentThreadId) {

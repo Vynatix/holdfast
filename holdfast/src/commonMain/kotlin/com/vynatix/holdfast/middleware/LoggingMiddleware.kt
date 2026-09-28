@@ -12,6 +12,11 @@ import com.vynatix.holdfast.Store
  * two (started + errored) on failure. The transaction's id is included so
  * concurrent traces can be untangled.
  *
+ * It logs ids and, on failure, the exception's class and message — never a
+ * state's value. The library's own exception messages name states, never
+ * their values, so a `StateTag.Secret` value cannot reach the log through
+ * them; an exception your code throws is logged with the message you gave it.
+ *
  * Example:
  * ```
  * store.middlewares(LoggingMiddleware("CounterVault"))

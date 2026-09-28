@@ -2,7 +2,6 @@ package com.vynatix.holdfast.hallmark
 
 import com.vynatix.hallmark.Boxed
 import com.vynatix.hallmark.HallmarkException
-import com.vynatix.hallmark.HallmarkResult
 import com.vynatix.hallmark.Validator
 import com.vynatix.holdfast.Transformer
 
@@ -19,15 +18,23 @@ import com.vynatix.holdfast.Transformer
  *
  * Wired automatically by [boxed]. Ship it standalone if you need a custom
  * `state(transformer = …) { … }` declaration.
+ *
+ * Hallmark's rules may quote the rejected value in the exception's message
+ * ("must be at least 1000; got 42"). The `boxed(validator, tags = …)` and
+ * `boxedHandle(validator, tags = …)` overloads withhold it for a
+ * `StateTag.Secret` state; a transformer you construct yourself does not know
+ * its state's tags and keeps hallmark's messages, so declare a Secret boxed
+ * state through those overloads.
  */
-class ValidatingTransformer<P : Any, O : Boxed<P>>(
+class ValidatingTransformer<P : Any, O : Boxed<P>> internal constructor(
     private val validator: Validator<P, O>,
+    /** Whether a rejection withholds the value (a Secret state's transformer). */
+    private val withheld: Boolean,
 ) : Transformer<O> {
+    constructor(validator: Validator<P, O>) : this(validator, withheld = false)
+
     override fun set(value: O): O {
-        val result = validator.validate(value.value)
-        if (result is HallmarkResult.Failure) {
-            throw HallmarkException(result.violations)
-        }
+        validator.ofWithheldIf(withheld, value.value)
         return value
     }
 

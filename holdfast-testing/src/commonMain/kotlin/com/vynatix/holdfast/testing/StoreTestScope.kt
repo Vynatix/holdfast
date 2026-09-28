@@ -8,7 +8,9 @@ import com.vynatix.holdfast.testing.internal.BarrierRegistry
 import com.vynatix.holdfast.testing.internal.HandleRegistry
 import com.vynatix.holdfast.testing.internal.OpenTransactionRegistry
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.job
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 
@@ -47,7 +49,20 @@ class StoreTestScope internal constructor(
     /** Background scope whose work is not awaited at test end. */
     val backgroundScope: CoroutineScope get() = testScope.backgroundScope
 
-    private val registry = HandleRegistry()
+    /**
+     * Each new handle also gets its clock restored when [testScope]'s job
+     * completes. [tearDown] runs in the body's `finally`, but `runTest` then
+     * still runs every child coroutine the body left un-joined, and one of
+     * them may bind a clock (or track a store) after [tearDown]. The job
+     * completes only after those children, so this second restore catches
+     * them; for a store nobody rebound it is a no-op.
+     */
+    private val registry =
+        HandleRegistry { handle ->
+            testScope.coroutineContext.job.invokeOnCompletion {
+                PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
+            }
+        }
     private val barriers = BarrierRegistry()
     private val openTransactions = OpenTransactionRegistry()
     private val awaitings = AwaitingRegistry()
@@ -64,6 +79,12 @@ class StoreTestScope internal constructor(
      * self-event into [StoreHandle.timeline]; see [StoreHandle] for the typed
      * views built on top. The recorder is detached and its buffer cleared at
      * scope tearDown — see [tearDown].
+     *
+     * First registration also remembers [store]'s clock binding
+     * (`Store.bindClock`); tearDown restores it, and so does the test's
+     * completion (after un-joined child coroutines finish), so bind a test
+     * clock AFTER tracking the store — a clock bound before counts as the
+     * pre-test binding.
      *
      * Tests that rely on user middlewares should install them on the store
      * BEFORE calling `track`; see [com.vynatix.holdfast.testing.internal.Recorder]
@@ -143,7 +164,9 @@ class StoreTestScope internal constructor(
      * live `awaiting { ... }` subscriber channels, rolls back any leaked
      * open transactions, disposes each tracked handle's recorder middleware,
      * removes every tracked handle's entries from the global
-     * [PendingErrorRegistry], and clears the handle registry. When
+     * [PendingErrorRegistry], restores each tracked store's clock binding
+     * (`Store.bindClock`) to what it was when the store was first tracked,
+     * and clears the handle registry. When
      * [bodyAlreadyFailed] is `false`, also aggregates any unconsumed
      * [TransactionResult.Error] values across all handles and throws an
      * [AssertionError] listing them — forcing tests to actively assert on (or
@@ -162,8 +185,16 @@ class StoreTestScope internal constructor(
      * `transaction(...)` never leaks pending writes into the next test); then
      * recorders dispose (stopping further event capture and dropping their
      * subscriber refs); then the handle registry's pending-error bookkeeping
-     * is cleared. Recorder disposal swallows exceptions to keep teardown
-     * robust even when [bodyAlreadyFailed] is `true`.
+     * is cleared; then each tracked store's clock binding is restored (after
+     * the rollbacks, whose post-commit drain may still read `clock`), so a
+     * clock bound after the store was tracked does not leak into the next
+     * test through a long-lived store. The same restore runs again when the
+     * test's job completes (see [registry]), which covers bindings made by
+     * un-joined child coroutines that `runTest` runs after this method; work
+     * in `backgroundScope` or on scopes outside the test is not waited for,
+     * so tests must join it. Recorder disposal and clock restoration swallow
+     * exceptions (a disposed store is skipped) to keep teardown robust even
+     * when [bodyAlreadyFailed] is `true`.
      */
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
         barriers.cancelAll()
@@ -181,6 +212,7 @@ class StoreTestScope internal constructor(
             handle.disposeRecorderInternal()
             PendingErrorRegistry.unregisterAll(handle)
             handle.clearPendingErrorsInternal()
+            PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
         }
         registry.clear()
 
