@@ -386,19 +386,17 @@ class StoreHandle<V : Store<V>> internal constructor(
      * (after barriers cancel, before the handle registry clears) so no
      * post-teardown action accidentally records events.
      *
-     * Detachment is "all-middleware-clear" because :holdfast only exposes
-     * [com.vynatix.holdfast.Store.clearMiddleware] for removal — there is no
-     * single-entry uninstall. Tests that install user middlewares before
-     * `track(v)` and expect them to persist past teardown should re-install
-     * them in the next test. (Pragmatically, store instances rarely outlive a
-     * `storeTest` block.)
+     * Detachment removes the recorder alone: every middleware the test
+     * installed on the store — before or after `track(v)` — and a tree's
+     * `Root.middlewares` ring stay in place, so a store that outlives the
+     * `storeTest` block keeps behaving as the test left it.
      */
     internal fun disposeRecorderInternal() {
         val r = recorder ?: return
-        // Order: clear store's middleware list first (so no subsequent action on
-        // this store can fire the recorder), then drop the recorder's buffer.
-        // Catch any throw so teardown stays robust under leaked handles.
-        runCatching { store.clearMiddleware() }
+        // Order: remove the recorder from the store first (so no subsequent
+        // action on this store can fire it), then drop its buffer. Catch any
+        // throw so teardown stays robust under leaked handles.
+        runCatching { PrivilegedHooks.removeMiddleware(store, r) }
         // Drop the wrapper map; the wrappers remain attached to states (the
         // store still references them) but they hold a reference to a
         // recorder we are about to clear, so future publishes from a leaked

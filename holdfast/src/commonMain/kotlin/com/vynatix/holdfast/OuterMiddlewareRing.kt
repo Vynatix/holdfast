@@ -64,18 +64,24 @@ fun <Self : Store<Self>> Self.internalSetOuterMiddleware(middleware: List<Middle
 }
 
 /**
- * Remove [middleware] from this store's outer ring by identity. Returns
- * `false` on a disposed store, without throwing — `dispose()` already
- * cleared the ring, so there is nothing to remove, and a caller unwinding a
- * store that disposed mid-teardown (issue #21's `Root.removeMiddleware`)
- * must be able to tell "already gone" apart from "removed" without catching
- * an exception. Not gated by `checkNotDisposed()`, unlike most entrypoints —
+ * Remove [middleware] from this store by identity — from the consumer list
+ * (`middlewares(...)`) or the outer ring, wherever it sits — leaving every
+ * other middleware in place: the single-entry uninstall `clearMiddleware()`
+ * is not (`:holdfast-testing`'s recorder leaves a store's own middleware
+ * installed at teardown through it). Returns `false` on a disposed store,
+ * without throwing — `dispose()` already cleared both lists, so there is
+ * nothing to remove, and a caller unwinding a store that disposed
+ * mid-teardown (issue #21's `Root.removeMiddleware`, the harness) must be
+ * able to tell "already gone" apart from "removed" without catching an
+ * exception. Not gated by `checkNotDisposed()`, unlike most entrypoints —
  * see the CLAUDE.md exception list next to [Store.snapshotMiddleware].
  */
 @StoreInternalApi
 fun <Self : Store<Self>> Self.internalRemoveMiddleware(middleware: Middleware<Self>): Boolean {
     if (isDisposed) return false
-    return outerMiddleware.remove(middleware)
+    val fromList = middlewareLock.withLock { middlewareList.removeAll { it === middleware } }
+    val fromRing = outerMiddleware.remove(middleware)
+    return fromList || fromRing
 }
 
 /**

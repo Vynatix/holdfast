@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree
 
 ---
 
@@ -1217,6 +1217,13 @@ never T1's pending writes.
 ```
 
 ---
+
+### 11.6 Testing a tree
+
+`trackTree(root)` (§17.10, experimental) tracks every leaf of a typed
+tree, keyed stores created mid-test included, records every leaf
+transaction with its node into one tree timeline, and resets the tree at
+teardown so the next test finds the initial values.
 
 ## 12. Common Pitfalls
 
@@ -4126,7 +4133,51 @@ fun auditTheTree() {
   disposed root answers `false` rather than throwing, so teardown code can
   unwind a root disposed meanwhile.
 
-### 17.10 API reference
+### 17.10 Testing a tree
+
+`:holdfast-testing`'s `trackTree(root)` (§11.6) tracks every leaf of a
+root — the ones attached now and every keyed store created later — as a
+`StoreHandle`, and records every leaf transaction with its node into one
+tree timeline.
+
+```kotlin
+fun testTheTree() =
+    storeTest {
+        val tree = trackTree(Notes)                                   // every leaf, now and later; reset at teardown
+        val n5 = Notes.byId.create("n5", ::NoteStore)                 // tracked as it joins
+        atomic(Notes.prefsStore, n5) {
+            Notes.prefsStore { theme mutate "dark" }
+            n5 { body mutate "hi" }
+        }.getOrThrow()
+        println(tree.timeline.map { "${it.phase} ${it.node.name}" }) // "[Started prefs, Started n5, Completed prefs, Completed n5]"
+        println(tree.shouldCommitTogether(Notes) == tree.committedFrameIds(Notes).single())   // "true": one frame over both
+        println(tree.handle(n5).transactions.size)                    // "2": the leaf's own timeline, started and committed
+        n5.dispose()
+        println(tree.events(Notes.byId).size)                         // "2": a disposed leaf's events stay under its branch
+    }
+```
+
+- **Handles.** `tree.handle(store)` is the same handle `track(store)`
+  answers, with the tree's `Capture` mode; `tree.group(node)` groups the
+  live leaves under a node for the cross-store matchers (§15.6);
+  `tree.consumeAllPendingErrors()` consumes every leaf handle's pending
+  `TransactionResult.Error`s.
+- **The tree timeline.** `TreeEvent(node, store, phase, transaction, cause,
+  timestamp)`, in observation order across the tree; `events(node)` narrows
+  to a subtree; `committedFrameIds(node)` lists the frames committed under
+  a node (a frame vetoed on its last participant committed nowhere);
+  `shouldCommitTogether(node)`/`shouldNotCommitTogether(node)` judge a
+  subtree's frames from those events. A `Secret` never reaches a tree
+  event.
+- **Teardown.** The fixture's middleware and recorders come off — every
+  middleware the test installed on a leaf or the root stays — and, unless
+  `resetAtTeardown = false`, the tree is reset as one frame so the next
+  test finds the initial values: a leaf disposed in the body is skipped; a
+  vetoed reset fails the test naming the leaf and the veto, unless the body
+  already failed. The root is never disposed. `trackTree` is idempotent by
+  root identity and throws on a disposed root.
+
+### 17.11 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }

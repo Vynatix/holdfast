@@ -2,8 +2,10 @@
 
 package com.vynatix.holdfast.testing.internal
 
+import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.KeyedState
+import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
@@ -11,10 +13,15 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
 import com.vynatix.holdfast.internalKeyedFamily
+import com.vynatix.holdfast.internalRemoveMiddleware
 import com.vynatix.holdfast.internalSettling
 import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
+import com.vynatix.holdfast.tree.LeafMembershipListener
+import com.vynatix.holdfast.tree.LeafNode
+import com.vynatix.holdfast.tree.Root
+import com.vynatix.holdfast.tree.internalAddMembershipListener
 import kotlin.time.Clock
 
 /**
@@ -48,6 +55,7 @@ import kotlin.time.Clock
  *    but run brief critical sections under the store's reentrant
  *    `transactionLock` rather than across the entire open-period.
  */
+@Suppress("TooManyFunctions") // The module's one opt-in funnel: it grows with every core seam used.
 internal object PrivilegedHooks {
     /**
      * Read every state currently registered on [store] mapped to its committed
@@ -324,4 +332,31 @@ internal object PrivilegedHooks {
             store.internalDrainPostCommitTasks()
         }
     }
+
+    /**
+     * Remove one middleware from [store] by identity — the recorder at
+     * teardown — leaving every other middleware the test installed in place.
+     * `false` on a disposed store, without throwing.
+     */
+    fun <V : Store<V>> removeMiddleware(
+        store: V,
+        middleware: Middleware<V>,
+    ): Boolean = store.internalRemoveMiddleware(middleware)
+
+    /**
+     * Hear of every store that joins [root] from now on (the tree fixture's
+     * auto-tracking): [onAttached] runs once per joining store, under the
+     * attaching caller's locks, so it may only record and track — never open
+     * an action, frame, reset or restore.
+     */
+    @OptIn(ExperimentalStoreApi::class)
+    fun addMembershipListener(
+        root: Root,
+        onAttached: (LeafNode) -> Unit,
+    ): Disposable =
+        root.internalAddMembershipListener(
+            object : LeafMembershipListener() {
+                override fun onAttached(leaf: LeafNode) = onAttached(leaf)
+            },
+        )
 }

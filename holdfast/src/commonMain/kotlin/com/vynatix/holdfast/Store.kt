@@ -364,7 +364,7 @@ abstract class Store<Self : Store<Self>>() {
      * window (`SerializerInstallWindow.kt`).
      */
     internal val transactionLock = StoreLock()
-    private val middlewareLock = StoreLock()
+    internal val middlewareLock = StoreLock()
 
     /**
      * Every state of this store: its declarations, in declaration order, and
@@ -412,7 +412,7 @@ abstract class Store<Self : Store<Self>>() {
             return registry.lock.withLock { registry.states.toMap() }
         }
 
-    private val middlewareList = mutableListOf<Middleware<Self>>()
+    internal val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
      * This store's outer middleware ring (issue #21's `Root.middlewares`),

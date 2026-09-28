@@ -1629,6 +1629,12 @@ described here.
   before. An inbound bridge write and `removeState`/`clearStates` on a leaf
   now settle an attached root's `value` (they were already changes of the
   store for store-level edges).
+- **`@StoreInternalApi internalRemoveMiddleware` removes one middleware by
+  identity from either list** (issue #21 PR 21-7): the consumer-registered
+  list or the outer ring, wherever it sits — the single-entry uninstall that
+  `clearMiddleware()` is not. `:holdfast-testing`'s teardown uses it to
+  detach the recorder alone; see that module's new CHANGELOG for the
+  behavior change and the tree fixture (`trackTree`).
 - **`observableBacking()` resolves one more shape**: a `State` that is
   neither a `MutableState` nor a `DerivedState` but observes through one
   (internal `ObservableBacked`, the tree value). Every observation path —

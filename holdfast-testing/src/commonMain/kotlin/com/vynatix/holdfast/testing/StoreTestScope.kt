@@ -9,6 +9,7 @@ import com.vynatix.holdfast.testing.internal.HandleRegistry
 import com.vynatix.holdfast.testing.internal.OpenTransactionRegistry
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
+import com.vynatix.holdfast.testing.internal.TreeFixtures
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -57,13 +58,16 @@ class StoreTestScope internal constructor(
      * completes only after those children, so this second restore catches
      * them; for a store nobody rebound it is a no-op.
      */
-    private val registry =
+    internal val registry =
         HandleRegistry { handle ->
             testScope.coroutineContext.job.invokeOnCompletion {
                 PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
             }
         }
     private val barriers = BarrierRegistry()
+
+    /** The tracked trees (`trackTree`), unwound at teardown after the leaf handles. */
+    internal val treeFixtures = TreeFixtures()
     private val openTransactions = OpenTransactionRegistry()
     private val awaitings = AwaitingRegistry()
 
@@ -214,8 +218,15 @@ class StoreTestScope internal constructor(
             handle.clearPendingErrorsInternal()
             PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
         }
+        val treeFailures = treeFixtures.tearDown()
         registry.clear()
 
+        if (!bodyAlreadyFailed && treeFailures.isNotEmpty()) {
+            throw AssertionError(
+                "storeTest teardown could not reset ${treeFailures.size} tracked tree(s):\n" +
+                    treeFailures.joinToString("\n") { " - $it" },
+            )
+        }
         if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
             val msg =
                 buildString {
