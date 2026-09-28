@@ -64,6 +64,7 @@ class RootDisposedEntrypointTest {
             RootEntrypoint("value observed (never read before)") { it.value effect { } },
             RootEntrypoint("bindToScope") { it.bindToScope(CoroutineScope(Dispatchers.Unconfined + Job())) },
             RootEntrypoint("internalSettleNow (never read before)") { it.internalSettleNow() },
+            RootEntrypoint("middlewares") { it.middlewares(object : TreeMiddleware() {}) },
             RootEntrypoint("KeyedBranch.at") { it.keyed.at("k") },
             RootEntrypoint("KeyedBranch.create") { r -> r.keyed.create("k") { DisposedKeyedStore(it, r) } },
             RootEntrypoint("KeyedBranch.getOrCreate") { r -> r.keyed.getOrCreate("k") { DisposedKeyedStore(it, r) } },
@@ -95,6 +96,7 @@ class RootDisposedEntrypointTest {
                 check(it.scope === Store.defaultScope && it.uncaughtObserverHandler == null)
             },
             RootEntrypoint("internalHost") { check(it.internalHost().isDisposed) },
+            RootEntrypoint("removeMiddleware answers false") { check(!it.removeMiddleware(object : TreeMiddleware() {})) },
         )
 
     @Test

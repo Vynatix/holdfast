@@ -11,7 +11,7 @@ README.md#2: Gradle install snippet (settings.gradle.kts + build.gradle.kts frag
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
 holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#87: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
+holdfast/GUIDE.md#88: cheatsheet with `…` placeholders and undeclared helpers, illustrative by design
 
 # --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
 holdfast/GUIDE.md#28: API-reference signature listing (Bridge/Observable/Publisher)
@@ -43,7 +43,7 @@ holdfast/GUIDE.md#72: API-reference signature listing (DerivedState, derivedStat
 holdfast/GUIDE.md#74: API-reference signature listing (keyedState, KeyedState, keysOf, stagedEvictions, EncodedSnapshotView.Families; bodiless members)
 holdfast/GUIDE.md#76: API-reference signature listing (:holdfast-coroutines hydrator, HydrationSpec, HydrationRefresh, Hydrator, Hydration; bodiless members, `…` default-value placeholder)
 holdfast/GUIDE.md#79: API-reference signature listing (:holdfast-coroutines HydrationSpec.overlay, Hydrator.overlayKey/clearOverlay, OverlayException; bodiless members)
-holdfast/GUIDE.md#86: API-reference signature listing (tree: StoreNode, NameOrigin, Root, Branch, KeyedBranch, LeafNode, declarations, LeafMembershipListener, TreeSnapshot, TreeRestoreReport, TreeResetReport, NamingIssue, Root.value/scope/handler, the @StoreInternalApi views; bodiless members)
+holdfast/GUIDE.md#87: API-reference signature listing (tree: StoreNode, NameOrigin, Root, Branch, KeyedBranch, LeafNode, declarations, LeafMembershipListener, TreeSnapshot, TreeRestoreReport, TreeResetReport, NamingIssue, Root.value/scope/handler, the @StoreInternalApi views, Root.middlewares/removeMiddleware, TreeMiddleware; bodiless members)
 
 # --- holdfast/GUIDE.md §14.11: requires the Hallmark validation modules, excluded from the default build ---
 holdfast/GUIDE.md#49: requires Hallmark modules (off the default build); also an API-reference signature listing

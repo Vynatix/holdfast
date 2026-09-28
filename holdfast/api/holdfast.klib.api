@@ -358,13 +358,26 @@ abstract class com.vynatix.holdfast.tree/Root : com.vynatix.holdfast.tree/StoreN
     final fun children(com.vynatix.holdfast.tree/StoreNode): kotlin.collections/List<com.vynatix.holdfast/Store<*>> // com.vynatix.holdfast.tree/Root.children|children(com.vynatix.holdfast.tree.StoreNode){}[0]
     final fun decode(kotlin/String): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/Root.decode|decode(kotlin.String){}[0]
     final fun dispose() // com.vynatix.holdfast.tree/Root.dispose|dispose(){}[0]
+    final fun middlewares(kotlin/Array<out com.vynatix.holdfast.tree/TreeMiddleware>...) // com.vynatix.holdfast.tree/Root.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.tree.TreeMiddleware>...){}[0]
     final fun nodeOf(com.vynatix.holdfast/Store<*>): com.vynatix.holdfast.tree/LeafNode? // com.vynatix.holdfast.tree/Root.nodeOf|nodeOf(com.vynatix.holdfast.Store<*>){}[0]
+    final fun removeMiddleware(com.vynatix.holdfast.tree/TreeMiddleware): kotlin/Boolean // com.vynatix.holdfast.tree/Root.removeMiddleware|removeMiddleware(com.vynatix.holdfast.tree.TreeMiddleware){}[0]
     final fun reset(com.vynatix.holdfast.tree/StoreNode = ...): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast.tree/TreeResetReport> // com.vynatix.holdfast.tree/Root.reset|reset(com.vynatix.holdfast.tree.StoreNode){}[0]
     final fun restore(com.vynatix.holdfast.tree/TreeSnapshot, com.vynatix.holdfast/RestorePolicy = ..., kotlin/Boolean = ...): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast.tree/TreeRestoreReport> // com.vynatix.holdfast.tree/Root.restore|restore(com.vynatix.holdfast.tree.TreeSnapshot;com.vynatix.holdfast.RestorePolicy;kotlin.Boolean){}[0]
     final fun snapshot(com.vynatix.holdfast.tree/StoreNode = ..., com.vynatix.holdfast/SnapshotScope = ...): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/Root.snapshot|snapshot(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.SnapshotScope){}[0]
     final fun verifyPersistedNames(com.vynatix.holdfast.tree/StoreNode = ...): kotlin.collections/List<com.vynatix.holdfast.tree/NamingIssue> // com.vynatix.holdfast.tree/Root.verifyPersistedNames|verifyPersistedNames(com.vynatix.holdfast.tree.StoreNode){}[0]
     final inline fun <#A1: reified kotlin/Any, #B1: reified com.vynatix.holdfast/Store<#B1>> keyed(com.vynatix.holdfast.tree/Branch? = ..., com.vynatix.holdfast/StateCodec<#A1>? = ...): com.vynatix.holdfast.tree/KeyedDeclaration<#A1, #B1> // com.vynatix.holdfast.tree/Root.keyed|keyed(com.vynatix.holdfast.tree.Branch?;com.vynatix.holdfast.StateCodec<0:0>?){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
     open fun toString(): kotlin/String // com.vynatix.holdfast.tree/Root.toString|toString(){}[0]
+}
+
+abstract class com.vynatix.holdfast.tree/TreeMiddleware { // com.vynatix.holdfast.tree/TreeMiddleware|null[0]
+    constructor <init>() // com.vynatix.holdfast.tree/TreeMiddleware.<init>|<init>(){}[0]
+
+    final fun invokeOnTransactionCompleted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionCompleted|invokeOnTransactionCompleted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    final fun invokeOnTransactionError(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>, kotlin/Throwable) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionError|invokeOnTransactionError(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>;kotlin.Throwable){}[0]
+    final fun invokeOnTransactionStarted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionStarted|invokeOnTransactionStarted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    open fun onTransactionCompleted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionCompleted|onTransactionCompleted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    open fun onTransactionError(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>, kotlin/Throwable) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionError|onTransactionError(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>;kotlin.Throwable){}[0]
+    open fun onTransactionStarted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionStarted|onTransactionStarted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
 }
 
 abstract class com.vynatix.holdfast/SnapshotScope { // com.vynatix.holdfast/SnapshotScope|null[0]

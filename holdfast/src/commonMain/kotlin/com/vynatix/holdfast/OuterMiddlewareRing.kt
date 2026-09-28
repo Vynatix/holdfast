@@ -77,3 +77,17 @@ fun <Self : Store<Self>> Self.internalRemoveMiddleware(middleware: Middleware<Se
     if (isDisposed) return false
     return outerMiddleware.remove(middleware)
 }
+
+/**
+ * [internalSetOuterMiddleware] for a star-projected store — issue #21's
+ * tree ring holds its leaves as `Store<*>`. The ring is typed by the store's
+ * own `Self`; the members passed are adapters written against no store type
+ * at all (`Middleware<Nothing>`), which every chain accepts.
+ *
+ * @throws IllegalStateException if the store is disposed.
+ */
+internal fun Store<*>.setOuterMiddlewareUnchecked(middleware: List<Middleware<Nothing>>) {
+    checkNotDisposed()
+    @Suppress("UNCHECKED_CAST")
+    (outerMiddleware as OuterMiddlewareRing<Nothing>).set(middleware)
+}

@@ -1588,6 +1588,36 @@ described here.
   while a `value` observer is parked, a busy host is never waited for, 1,000
   keyed create/dispose cycles leave no edge, and 10,000 single-state mutates
   under a sixteen-leaf root settle within eight seconds.
+- **The typed state tree, step 5: `TreeMiddleware`, `Root.middlewares`/
+  `removeMiddleware`** (issue #21 plan PR 21-6, decision U12; GUIDE §17.9).
+  `App.middlewares(vararg TreeMiddleware)` installs middleware over the whole
+  tree: every leaf attached now or later, always outermost of the leaf's own
+  `middlewares(...)` (through the PR 21-1 outer ring, which a leaf's
+  `clearMiddleware()` never reaches), the last argument outermost among the
+  installed, one installed again moving to the outermost place. A
+  `TreeMiddleware` has the three store-middleware hooks with the leaf's
+  `StoreNode` and its `MiddlewareContext`: it sees top-level actions,
+  savepoints, a bare `mutate`'s one-shot action, a derived state's recompute
+  on the leaf, every root of an `atomic`/`suspendAtomic` frame (`restore`
+  and `reset` included) with the shared `frameId`, `suspendAction` and a
+  hydrator's seed and adopt — the same trace on both paths — and never an
+  inbound bridge write, a keyed store's transactions before its factory
+  returned, or the root's own `value` settle. Throwing in `started` or
+  `completed` aborts the leaf's transaction (a `completed` throw on a frame's
+  last root rolls every root back and fires the tree error hook for each; on
+  the suspending path a throw is isolated). `middlewares`/`removeMiddleware`
+  refuse to run inside a frame or a transaction of any leaf; an install
+  never waits for, nor applies to, an in-flight action. `removeMiddleware`
+  answers whether it was installed, starts no new observation once it
+  returns, still delivers the terminal hook of an observation it started
+  (a parked action or `suspendAction` included), and answers `false` on a
+  disposed root instead of throwing. A leaf that leaves takes its adapters
+  with it; `Root.dispose()` removes the ring from every leaf. Verified
+  against concurrent create/dispose/install/remove churn (every `started`
+  has its terminal, none after a removal returned, the ring equals installer
+  order on every leaf), 1,000 keyed cycles, a keyed store created inside
+  another leaf's action, a self-dispose during install, and a hook taking a
+  tree snapshot under a leaf lock.
 
 ### Changed
 

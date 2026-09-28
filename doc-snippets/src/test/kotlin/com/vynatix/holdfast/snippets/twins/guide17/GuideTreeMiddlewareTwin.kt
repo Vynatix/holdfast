@@ -1,0 +1,47 @@
+// Twin of GUIDE §17.9 (tree middleware). Shares the `Notes` root the §17.6
+// twin declares; the test drives the block and asserts the output its
+// comments claim.
+@file:OptIn(ExperimentalStoreApi::class)
+
+package com.vynatix.holdfast.snippets.twins.guide17
+
+import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.atomic
+import com.vynatix.holdfast.snippets.capturePrintln
+import com.vynatix.holdfast.tree.StoreNode
+import com.vynatix.holdfast.tree.TreeMiddleware
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+// DOC-SNIPPET holdfast/GUIDE.md#86
+class Audit : TreeMiddleware() {
+    val log = mutableListOf<String>()
+
+    override fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {
+        log += "${node.name} ${if (context.transaction.frameId != null) "in a frame" else "alone"}"
+    }
+}
+
+fun auditTheTree() {
+    val audit = Audit()
+    Notes.middlewares(audit)                                       // every leaf, now and later, outermost
+    val n4 = Notes.byId.create("n4", ::NoteStore)                  // attached after install: covered
+    Notes.prefsStore action { theme mutate "dark" }
+    atomic(Notes.prefsStore, n4) { n4 { body mutate "x" } }.getOrThrow()
+    println(audit.log)                                             // "[prefs alone, prefs in a frame, n4 in a frame]"
+    println(Notes.removeMiddleware(audit))                         // "true": no new observation from here on
+    n4.dispose()
+    Notes.reset()
+}
+// DOC-SNIPPET-END
+
+class GuideTreeMiddlewareTwin {
+    @Test
+    fun auditTheTreePrintsWhatItsCommentsClaim() {
+        val printed = capturePrintln { auditTheTree() }
+        assertEquals(listOf("[prefs alone, prefs in a frame, n4 in a frame]", "true"), printed)
+        assertEquals("light", Notes.prefsStore.theme.value, "the twin leaves the tree reset")
+        assertEquals(emptyMap(), Notes.entries(Notes.byId))
+    }
+}

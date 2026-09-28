@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware
 
 ---
 
@@ -427,10 +427,12 @@ to subsequent actions.
 for cross-middleware communication.
 
 `middlewares`/`clearMiddleware` register and clear only this
-consumer-registered list. Library-installed middleware (issue #21's typed
-tree, reserved) lives in a separate outer ring that is always outermost of
-everything registered here — `clearMiddleware()` never reaches it, and only
-`dispose()` tears it down alongside the list above (§13).
+consumer-registered list. Library-installed middleware lives in a separate
+outer ring that is always outermost of everything registered here —
+`clearMiddleware()` never reaches it, and only `dispose()` tears it down
+alongside the list above (§13). The typed tree's `App.middlewares(...)`
+(§17.9, experimental) installs there: a `TreeMiddleware` sees every leaf's
+transactions with the leaf's node, on every leaf attached now or later.
 
 ### 4.7 `invoke { … }` — Context block
 
@@ -1348,6 +1350,13 @@ open class Middleware<V : Store<V>> {
     protected open fun onTransactionCompleted(context: MiddlewareContext<V>) {}
     protected open fun onTransactionError(context: MiddlewareContext<V>, error: Throwable) {}
 }
+
+// Over a typed tree (§17.9, experimental): the same three hooks with the leaf's node.
+@ExperimentalStoreApi abstract class TreeMiddleware {
+    protected open fun onTransactionStarted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
+    protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
+    protected open fun onTransactionError(node: StoreNode, context: Middleware.MiddlewareContext<*>, error: Throwable) {}
+}
 ```
 
 ### Sealed result and status types
@@ -1584,7 +1593,9 @@ data class StoreProfile(transactionCount, committedCount, rolledBackCount, savep
 Drop-in. Order in `holdfast.middlewares(...)` matters — the LAST argument
 is the outermost middleware (its `onTransactionStarted` runs first; its
 `onTransactionError` runs last). Place logging/audit middleware LAST so
-it sees errors thrown by validation middleware placed earlier.
+it sees errors thrown by validation middleware placed earlier. A
+`TreeMiddleware` installed through a root (§17.9) is outermost of all of
+these on every leaf, whatever the order of registration.
 
 `ProfilingMiddleware` profiles every transaction: monotonic-clock duration
 (body + inner middleware; commit fanout is excluded), outcome, savepoint and
@@ -2251,9 +2262,11 @@ that roll back get `onTransactionError`.
 ### 15.5 Frame observability
 
 Per-store middleware already sees every frame root (correlate the N
-per-store transactions of one frame via `Transaction.frameId`). For
-app-level audit/telemetry that wants the frame as ONE event, register a
-`FrameObserver` (experimental — `@ExperimentalStoreApi`):
+per-store transactions of one frame via `Transaction.frameId`); over a
+typed tree, one `TreeMiddleware` (§17.9) sees every root of a frame with
+its leaf's node and the shared `frameId`. For app-level audit/telemetry
+that wants the frame as ONE event, register a `FrameObserver`
+(experimental — `@ExperimentalStoreApi`):
 
 ```kotlin
 @OptIn(ExperimentalStoreApi::class)
@@ -4038,7 +4051,8 @@ fun watchTheTree() {
   (`bindToScope`, or a getter override, else `Store.defaultScope`) is what
   `App.value.asStateFlow()` defaults to; `App.value.asFlow()` emits one
   tree per settle; `App.value.collectAsState()` (`:holdfast-compose`)
-  recomposes once per settle.
+  recomposes once per settle. The settle's transaction runs on the host,
+  which no tree middleware (§17.9) sees.
 - **Dispose.** A keyed store's `dispose()` or a leaf's `removeState` reach
   the value like a commit (once per entry). `App.dispose()` stops the
   value following the leaves, drops its observers, disposes the host, and
@@ -4050,7 +4064,69 @@ fun watchTheTree() {
   of the tree) and `internalSettleNow()` (run a queued recompute now,
   outside every entry).
 
-### 17.9 API reference
+### 17.9 Tree middleware
+
+`App.middlewares(vararg TreeMiddleware)` installs middleware over the whole
+tree: every leaf attached now or later, always outermost of the leaf's own
+`middlewares(...)`, with the leaf's node in every hook.
+
+```kotlin
+class Audit : TreeMiddleware() {
+    val log = mutableListOf<String>()
+
+    override fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {
+        log += "${node.name} ${if (context.transaction.frameId != null) "in a frame" else "alone"}"
+    }
+}
+
+fun auditTheTree() {
+    val audit = Audit()
+    Notes.middlewares(audit)                                       // every leaf, now and later, outermost
+    val n4 = Notes.byId.create("n4", ::NoteStore)                  // attached after install: covered
+    Notes.prefsStore action { theme mutate "dark" }
+    atomic(Notes.prefsStore, n4) { n4 { body mutate "x" } }.getOrThrow()
+    println(audit.log)                                             // "[prefs alone, prefs in a frame, n4 in a frame]"
+    println(Notes.removeMiddleware(audit))                         // "true": no new observation from here on
+    n4.dispose()
+    Notes.reset()
+}
+```
+
+- **What it sees (T4).** Every transaction of every leaf: top-level
+  actions, savepoints (nested actions), the one-shot action a bare
+  `mutate` synthesizes, a derived state's recompute on the leaf, each root
+  of an `atomic`/`suspendAtomic` frame — `Root.restore`/`reset` included —
+  with the frame's shared `frameId`, and the suspending path
+  (`suspendAction`, a hydrator's seed and adopt) with the same trace as
+  the blocking one. What it never sees: inbound bridge writes (they bypass
+  middleware), a keyed store's transactions before its factory returned
+  (it is not attached yet), and the root's own `value` settles (the host is
+  no member). Each hook receives the leaf's `MiddlewareContext` — the
+  store, the transaction, the per-transaction `metadata` map — so a tree
+  middleware can do what a store middleware does, node by node.
+- **Outermost, in installer order.** On every leaf the tree's ring wraps
+  the leaf's consumer-registered chain, whatever the order of
+  registration, and a leaf's `clearMiddleware()` never reaches it; among
+  the installed tree middleware the last argument is outermost, and one
+  installed again moves to the outermost place. Throwing in `started` or
+  `completed` aborts that leaf's transaction as a store middleware's throw
+  does — a `completed` throw on the last root of a frame rolls every root
+  back, and the tree error hook fires for each — while on the suspending
+  path a hook's throw is isolated, as for store middleware there.
+- **Install and remove from outside.** `middlewares`/`removeMiddleware`
+  throw inside an `atomic` frame or a transaction of any leaf (an action
+  body, a hook, an observer): the chain is snapshotted per transaction, so
+  an install never applies to an in-flight action and never waits for one.
+  `removeMiddleware` returns whether it was installed; no new observation
+  starts once it returns, and an observation it started still gets its
+  terminal hook (a parked action or `suspendAction` included). A leaf that
+  leaves takes its adapters with it — a thousand keyed create/dispose
+  cycles leave nothing behind — and `App.dispose()` removes the ring from
+  every leaf, each keeping its own middleware; `removeMiddleware` on a
+  disposed root answers `false` rather than throwing, so teardown code can
+  unwind a root disposed meanwhile.
+
+### 17.10 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
@@ -4082,6 +4158,13 @@ abstract class Root {
     val value: State<TreeSnapshot>          // one consistent capture, settled once per outermost entry
     open val scope: CoroutineScope; fun bindToScope(scope: CoroutineScope)
     var uncaughtObserverHandler: ((Throwable) -> Unit)?
+    fun middlewares(vararg middleware: TreeMiddleware)      // every leaf, now and later; outermost; last argument outermost
+    fun removeMiddleware(middleware: TreeMiddleware): Boolean
+}
+abstract class TreeMiddleware {
+    protected open fun onTransactionStarted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
+    protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}   // before commit
+    protected open fun onTransactionError(node: StoreNode, context: Middleware.MiddlewareContext<*>, error: Throwable) {}
 }
 @StoreInternalApi val Root.internalSettleCount: Long; val Root.internalCaptureCount: Long; val Root.internalCutRetryCount: Long
 @StoreInternalApi fun Root.internalHost(): Store<*>; fun Root.internalSettleNow(): TreeSnapshot

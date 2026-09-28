@@ -1017,7 +1017,9 @@ public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree
 	public final fun isDisposed ()Z
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public final fun keyedDeclaration (Lkotlin/reflect/KClass;Lkotlin/reflect/KClass;Lcom/vynatix/holdfast/tree/Branch;Lcom/vynatix/holdfast/StateCodec;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
+	public final fun middlewares ([Lcom/vynatix/holdfast/tree/TreeMiddleware;)V
 	public final fun nodeOf (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/LeafNode;
+	public final fun removeMiddleware (Lcom/vynatix/holdfast/tree/TreeMiddleware;)Z
 	public final fun reset (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/TransactionResult;
 	public static synthetic fun reset$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun restore (Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
@@ -1048,6 +1050,16 @@ public abstract interface class com/vynatix/holdfast/tree/StoreNode {
 
 public final class com/vynatix/holdfast/tree/StoreNode$DefaultImpls {
 	public static fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/tree/StoreNode;)Z
+}
+
+public abstract class com/vynatix/holdfast/tree/TreeMiddleware {
+	public fun <init> ()V
+	public final fun invokeOnTransactionCompleted (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
+	public final fun invokeOnTransactionError (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;Ljava/lang/Throwable;)V
+	public final fun invokeOnTransactionStarted (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
+	protected fun onTransactionCompleted (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
+	protected fun onTransactionError (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;Ljava/lang/Throwable;)V
+	protected fun onTransactionStarted (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Middleware$MiddlewareContext;)V
 }
 
 public final class com/vynatix/holdfast/tree/TreeResetReport {

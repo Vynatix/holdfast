@@ -57,6 +57,12 @@ abstract class Root(
 
     internal val registry = TreeRegistry(this)
 
+    /**
+     * The tree middleware ring: a membership listener registered first, so a
+     * joining leaf's ring is set before the value follows it.
+     */
+    internal val treeMiddleware = TreeMiddlewareRing(this).also { registry.addListener(it) }
+
     /** The tree value's machinery: registers its membership listener now, captures nothing until `value` is used. */
     internal val rootValue = RootValue(this)
 
@@ -301,6 +307,39 @@ abstract class Root(
     }
 
     /**
+     * Install [middleware] over the whole tree: every leaf attached now or
+     * later, always outermost of the leaf's own `middlewares(...)` (which
+     * its `clearMiddleware()` clears; this it never reaches); among the
+     * installed, the last argument is outermost. Each hook sees the leaf's
+     * node and its `MiddlewareContext` (§17.9). One installed already moves
+     * to the outermost place.
+     *
+     * @throws IllegalStateException if the root is disposed, or from inside
+     *   an `atomic` frame or a transaction of any leaf (an action body, a
+     *   hook, an observer): the chain is snapshotted per transaction, so
+     *   install from outside.
+     */
+    fun middlewares(vararg middleware: TreeMiddleware) {
+        checkNotDisposed()
+        treeMiddleware.install(middleware.toList())
+    }
+
+    /**
+     * Stop [middleware] on every leaf: no new observation starts once this
+     * returns, and an observation it started still gets its terminal hook.
+     * `false` when it was not installed — including on a disposed root,
+     * whose `dispose()` removed everything (a documented no-check
+     * exception, so teardown code can unwind a root disposed meanwhile).
+     *
+     * @throws IllegalStateException from inside an `atomic` frame or a
+     *   transaction of any leaf, as [middlewares].
+     */
+    fun removeMiddleware(middleware: TreeMiddleware): Boolean {
+        if (isDisposed) return false
+        return treeMiddleware.remove(middleware)
+    }
+
+    /**
      * Bind the scope [scope] resolves to (see [scope]); owned by the root,
      * not by [value]'s host.
      *
@@ -314,7 +353,8 @@ abstract class Root(
     /**
      * Detach every leaf and drop every listener. Disposes no store: the
      * leaves keep working on their own, and disposing one later no longer
-     * reaches this root. [value] stops following the leaves, drops its
+     * reaches this root. Tree middleware is removed from every leaf (each
+     * keeps its own); [value] stops following the leaves, drops its
      * observers and keeps its last tree readable. Idempotent; never blocks
      * on a leaf's transaction lock.
      */
@@ -326,6 +366,7 @@ abstract class Root(
             store.internalDetach(treeMembershipKey)
             leaf.storeRef = null
         }
+        treeMiddleware.close()
         rootValue.dispose()
     }
 
