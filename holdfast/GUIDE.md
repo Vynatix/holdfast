@@ -31,6 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules
 
 ---
 
@@ -1043,6 +1044,8 @@ cd.dispose()
 | `MutableState.value` read | `stateLock` (per state) | yes | Plus optional pending-write peek if owner thread |
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
+| `Root.branch(...)`/`keyed()` declaration, `KeyedBranch.create` promotion, `Root.get`/`entries`/`children`/`nodeOf` | tree registry lock (per root) | yes | A leaf lock: taken after a leaf's `transactionLock` (a store disposing from inside its own action detaches under it) and after an entry's construction lock, and never held while calling into a store — callers copy, release, then touch stores (§17) |
+| `KeyedBranch.create`/`getOrCreate` factory | per-entry construction lock | yes | Held across the factory and the attach fanout; a `getOrCreate` on another thread parks on it, a same-thread re-entry is a cycle error; a detach waits on it briefly so a listener hears Attached before Detached (§17.2) |
 
 ### 10.2 Lock ordering
 
@@ -3568,6 +3571,181 @@ Where the overlay stands decides both directions:
 - **Dispose.** After `dispose()`, `clearOverlay()` throws
   `IllegalStateException` like the other entrypoints, and `overlayKey` keeps
   answering.
+
+## 17. The typed state tree (experimental)
+
+Issue #21 gives an app one typed root over its stores: branches are
+delegate-named properties, keyed stores join through a factory bracket, and
+everything is addressed by node and state identity — strings appear only in
+`encode()` and `render()`. A root is not a `Store`: the leaves keep their own
+actions, middleware and locks; the tree adds membership, and (as the pieces
+land) consistent captures, subtree restore and reset, a per-frame `value`,
+tree middleware and a test fixture over them. Everything in this chapter is
+`@ExperimentalStoreApi`: every root subclass, keyed store class and call
+site opts in (`@OptIn(ExperimentalStoreApi::class)`, or the module-wide
+`-opt-in=com.vynatix.holdfast.ExperimentalStoreApi` compiler flag, which
+the examples below assume).
+
+### 17.1 Declaring a root
+
+```kotlin
+class SettingsStore : Store<SettingsStore>() {
+    val theme by state { "light" }
+}
+
+class SessionStore : Store<SessionStore>() {
+    val user by state { "" }
+}
+
+// The class header takes the branch's token; the store can only be built
+// through `create`/`getOrCreate` on the branch it belongs to.
+class ThreadStore(val id: String) : Store<ThreadStore>(App.threads.at(id)) {
+    val title by state { "thread $id" }
+}
+
+object App : Root("app") {
+    val settings by branch(SettingsStore())
+    val session by branch(SessionStore()).named("session")
+    val threads by keyed<String, ThreadStore>(under = session)   // targets declared above their users
+}
+
+fun useTheTree() {
+    val t1 = App.threads.create("t1", ::ThreadStore)          // live once create returns
+    val again = App.threads.getOrCreate("t1", ::ThreadStore)   // the same store, factory not run
+    println(again === t1)                                       // "true"
+    println(App.nodeOf(t1)?.name)                               // "t1"
+    println(App.children(App.session).size)                     // "2": SessionStore, then t1
+    println(runCatching { ThreadStore("bare") }.isFailure)      // "true": at(id) is valid only inside create
+    t1.dispose()                                                // leaves the tree
+    println(App[App.threads, "t1"])                             // "null"
+}
+```
+
+- **A branch registers at declaration.** `val settings by branch(a, b)`
+  attaches each listed store to the root when the property binds — inside
+  an `object`'s initializer — and runs no leaf code: no state initializer,
+  no capture. A store belongs to one branch of one root: listing it under a
+  second branch, or in a second root, fails fast naming both. So does
+  listing a disposed store.
+- **Nesting is `under`.** `branch(..., under = session)` and
+  `keyed<K, S>(under = session)` declare beneath a branch of the same root
+  (another root's branch is refused). Declare targets textually above their
+  users: a forward reference (`under = later`) does not compile.
+- **Names come from the program, or from pins.** A branch is named by its
+  property, a root by its constructor argument else its class, a branch
+  leaf by its store's class minus `Store` (`SettingsStore` → `Settings`),
+  a keyed leaf by its key's encoding. Pins are literals at the declaration:
+  `Root("app")`, `branch(x).named("prefs")` for the branch,
+  `branch(x, y).named(y, "profile")` for a leaf. Two leaves of one branch
+  with the same class, or a class with no simple name (anonymous, local),
+  need a pin; sibling branch names must be unique. `StoreNode.nameOrigin`
+  records where a name came from — `Property`, `ClassName`, `Key` or
+  `Pinned` — which the persisted-name self-check reads (§17.x, later).
+- **Lookups take nodes and stores, never strings.** `App.children(node)`
+  lists the live stores under a node in tree order (a branch's listed
+  stores, then what is declared under it; a keyed branch's in creation
+  order), `App.nodeOf(store)` finds a store's leaf, `App[branch, key]` and
+  `App.entries(branch)` the keyed ones, `App.nodes` every node in
+  pre-order. None of them runs leaf code.
+
+### 17.2 Keyed stores: `create`, `getOrCreate`, and why a bare `ThreadStore(id)` throws
+
+A keyed store's class header takes `App.threads.at(id)`: a
+`StoreMembership<ThreadStore>` token that only the `:holdfast` module can
+mint, valid only inside the factory of a `create`/`getOrCreate` for that
+branch and key, on the thread running it. Outside one — a bare
+`ThreadStore(id)` anywhere, a factory constructing another key, a factory
+constructing on another thread — `at` throws a teaching error, and nothing
+is left behind. That is the deliberate ergonomics/soundness trade
+(decision U2): the tree never discovers stores by side effect.
+
+- **Liveness is the factory bracket.** The store is *live* — found by
+  `App[branch, key]`, `entries`, `children`, captures, `value`, reset and
+  tree middleware — only once the factory has returned the very instance
+  that took the token and `create` has verified it. Until then it is
+  invisible to every other thread; a racing `create` for the same key fails
+  with "already exists" (use `getOrCreate` to share), a `getOrCreate` on
+  another thread parks until the construction ends, and one from inside
+  the factory constructing that key is a cycle error.
+- **A failing factory leaves nothing.** A throwing constructor or factory,
+  a factory that returns a different instance, one that returns a disposed
+  store, or one that took `at` for another key: the reservation is
+  dropped, the store the factory did construct is disposed, no listener
+  hears of it, and a retry runs the factory again.
+- **Leaf code inside the factory is ordinary store code.** An `init`
+  block may run an `action` on the new store; inside a Strict `atomic`
+  frame it may not (the new store is not enrolled), exactly as outside a
+  tree. A factory may itself `create` another keyed store; the inner one
+  attaches first.
+- **Nothing in the tree opens a transaction.** `create`, `at`, lookups and
+  `dispose` take only the tree's own leaf locks (§10.1), so they work from
+  inside actions, frames and observers.
+
+### 17.3 Dispose and detach
+
+A live keyed store leaves the tree when it is disposed — including from
+inside its own action — and `App[branch, key]`/`nodeOf` answer `null` from
+then on; its `LeafNode` keeps identifying the place in captures and
+timelines taken while it was live. A branch store that is disposed leaves
+the same way (the branch still lists it in `stores`). `Root.dispose()`
+detaches every leaf and drops every listener without disposing a store:
+the leaves keep working on their own, disposing one later no longer
+reaches the root, and every tree entrypoint on the root throws
+`IllegalStateException("root … disposed")`. It is idempotent and never
+waits on a leaf's transaction lock. A thousand create/dispose cycles leave
+no entry, listener bookkeeping, observer or middleware behind.
+
+### 17.4 Declaration rules, `object` roots and test hygiene
+
+- `object App : Root()` is the documented shape: the tree is built on the
+  object's first access, under the platform's class-initialization rules.
+  On the JVM a throwing declaration (a double listing, say) poisons the
+  object for the process, and a leaf `object` whose initializer reads its
+  root's delegate while the root is initializing fails; Kotlin/Native
+  reports such failures differently. Tests use class roots
+  (`class TestRoot : Root()`) with per-instance class stores, one root per
+  test, so nothing leaks between tests.
+- A root subclass, a keyed store class and every call site need the
+  experimental opt-in; prefer the module-wide `-opt-in` flag over
+  per-site annotations.
+- The tree's `@StoreInternalApi` seam is `LeafMembershipListener`
+  (`Root.internalAddMembershipListener`): library machinery hears
+  `onAttached` once per store that joins (a keyed store's after its
+  factory returned, strictly before `App[branch, key]` answers it) and
+  `onDetached` once per store that leaves, never for a store whose
+  construction failed, and never for the root's own `dispose()`. A
+  callback runs under whatever locks the attaching or disposing caller
+  holds and may only mark and schedule — never open an action, frame,
+  `reset` or `restore`.
+
+### 17.5 API reference (PR 21-2 surface)
+
+```kotlin
+sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
+enum class NameOrigin { Property, ClassName, Key, Pinned }
+abstract class Root(name: String? = null) : StoreNode {
+    val isDisposed: Boolean; val nodes: List<StoreNode>
+    protected fun branch(vararg stores: Store<*>, under: Branch? = null): BranchDeclaration
+    protected inline fun <reified K : Any, reified S : Store<S>> keyed(under: Branch? = null, keyCodec: StateCodec<K>? = null): KeyedDeclaration<K, S>
+    fun children(node: StoreNode): List<Store<*>>
+    operator fun <K : Any, S : Store<S>> get(branch: KeyedBranch<K, S>, key: K): S?
+    fun <K : Any, S : Store<S>> entries(branch: KeyedBranch<K, S>): Map<K, S>
+    fun nodeOf(store: Store<*>): LeafNode?
+    fun dispose()
+}
+class Branch : StoreNode { val stores: List<Store<*>>; fun leafName(store: Store<*>): String }
+class KeyedBranch<K : Any, S : Store<S>> : StoreNode {
+    val keyClass: KClass<K>; val storeClass: KClass<S>; val keyCodec: StateCodec<K>?
+    fun at(key: K): StoreMembership<S>
+    fun create(key: K, factory: (K) -> S): S
+    fun getOrCreate(key: K, factory: (K) -> S): S
+}
+class LeafNode : StoreNode { val store: Store<*>?; val key: Any? }
+class BranchDeclaration { fun named(store: Store<*>, name: String): BranchDeclaration; fun named(name: String): BranchDeclaration }
+class KeyedDeclaration<K : Any, S : Store<S>>
+@StoreInternalApi abstract class LeafMembershipListener { open fun onAttached(leaf: LeafNode) {}; open fun onDetached(leaf: LeafNode) {} }
+@StoreInternalApi fun Root.internalAddMembershipListener(listener: LeafMembershipListener): Disposable
+```
 
 ---
 

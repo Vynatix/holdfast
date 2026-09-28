@@ -1446,6 +1446,47 @@ described here.
   `@StoreInternalApi` outer ring (above) is untouched by it and torn down
   only by `dispose()`.
 
+### Added
+
+- **The typed state tree, step 1: `Root`, branches, keyed stores, the
+  registry** (issue #21 plan PR 21-2, decisions U1–U7; package
+  `com.vynatix.holdfast.tree`, all `@ExperimentalStoreApi`; GUIDE §17). A
+  root names its branches through delegated properties —
+  `object App : Root("app") { val settings by branch(SettingsStore());
+  val threads by keyed<String, ThreadStore>(under = session) }` — and is
+  not a `Store`: leaves keep their own actions, middleware and locks.
+  - `branch(vararg stores, under)` attaches each listed store to the root
+    when the property binds (through the PR 10 attachment slot, outside the
+    registry lock) and runs no leaf code; a store listed under two
+    branches or in two roots, or a disposed one, fails fast naming both.
+    Names come from the property, the root's constructor argument else its
+    class, a leaf's class minus `Store`, or a keyed leaf's encoded key,
+    with `NameOrigin` recording which; pins are `Root("app")`,
+    `branch(x).named("prefs")` and `branch(x, y).named(y, "profile")`, and
+    a duplicate or missing class-derived leaf name needs one.
+  - Keyed stores join through a factory bracket: the class header takes
+    `App.threads.at(id)` — the only `StoreMembership` implementation,
+    minted by the branch — and the store is constructed through
+    `KeyedBranch.create(key, factory)` / `getOrCreate(key, factory)`,
+    live (found by `Root.get`/`entries`/`children`/`nodeOf`) only once the
+    factory returned the instance that took the token. `at` outside that
+    factory, for another key or on another thread throws a teaching
+    error; a throwing factory, a foreign or disposed instance leaves
+    nothing (the abandoned store is disposed); a duplicate `create` fails,
+    `getOrCreate` parks on another thread's construction and a same-thread
+    re-entry is a cycle error. A live keyed store leaves the tree on
+    `dispose()`, including from inside its own action.
+  - `Root.dispose()` detaches every leaf and drops every listener without
+    disposing a store; every entrypoint on a disposed root throws. The
+    `@StoreInternalApi` seam is `LeafMembershipListener`
+    (`Root.internalAddMembershipListener`): `onAttached` once per joining
+    store, `onDetached` once per leaving one, never for an abandoned one.
+  - Nothing in the tree opens a transaction; its registry and per-entry
+    construction locks are leaf locks (§10.1). Attach and detach are
+    exercised for 1,000 keyed create/dispose cycles, racing lookups,
+    concurrent `create`/`getOrCreate`, root-dispose racing leaf-dispose,
+    and GC-collectability of disposed and abandoned keyed stores.
+
 ---
 
 ## [0.4.0] — 2026-05-03
