@@ -506,6 +506,62 @@ final class com.vynatix.holdfast.testing/TransactionStarted : com.vynatix.holdfa
     final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TransactionStarted.toString|toString(){}[0]
 }
 
+final class com.vynatix.holdfast.testing/TreeEvent { // com.vynatix.holdfast.testing/TreeEvent|null[0]
+    constructor <init>(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Store<*>, com.vynatix.holdfast.testing/TreeEvent.Phase, com.vynatix.holdfast/Transaction, kotlin/Throwable?, kotlin/Long) // com.vynatix.holdfast.testing/TreeEvent.<init>|<init>(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Store<*>;com.vynatix.holdfast.testing.TreeEvent.Phase;com.vynatix.holdfast.Transaction;kotlin.Throwable?;kotlin.Long){}[0]
+
+    final val cause // com.vynatix.holdfast.testing/TreeEvent.cause|{}cause[0]
+        final fun <get-cause>(): kotlin/Throwable? // com.vynatix.holdfast.testing/TreeEvent.cause.<get-cause>|<get-cause>(){}[0]
+    final val node // com.vynatix.holdfast.testing/TreeEvent.node|{}node[0]
+        final fun <get-node>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.testing/TreeEvent.node.<get-node>|<get-node>(){}[0]
+    final val phase // com.vynatix.holdfast.testing/TreeEvent.phase|{}phase[0]
+        final fun <get-phase>(): com.vynatix.holdfast.testing/TreeEvent.Phase // com.vynatix.holdfast.testing/TreeEvent.phase.<get-phase>|<get-phase>(){}[0]
+    final val store // com.vynatix.holdfast.testing/TreeEvent.store|{}store[0]
+        final fun <get-store>(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast.testing/TreeEvent.store.<get-store>|<get-store>(){}[0]
+    final val timestamp // com.vynatix.holdfast.testing/TreeEvent.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin/Long // com.vynatix.holdfast.testing/TreeEvent.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val transaction // com.vynatix.holdfast.testing/TreeEvent.transaction|{}transaction[0]
+        final fun <get-transaction>(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TreeEvent.transaction.<get-transaction>|<get-transaction>(){}[0]
+
+    final fun component1(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.testing/TreeEvent.component1|component1(){}[0]
+    final fun component2(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast.testing/TreeEvent.component2|component2(){}[0]
+    final fun component3(): com.vynatix.holdfast.testing/TreeEvent.Phase // com.vynatix.holdfast.testing/TreeEvent.component3|component3(){}[0]
+    final fun component4(): com.vynatix.holdfast/Transaction // com.vynatix.holdfast.testing/TreeEvent.component4|component4(){}[0]
+    final fun component5(): kotlin/Throwable? // com.vynatix.holdfast.testing/TreeEvent.component5|component5(){}[0]
+    final fun component6(): kotlin/Long // com.vynatix.holdfast.testing/TreeEvent.component6|component6(){}[0]
+    final fun copy(com.vynatix.holdfast.tree/StoreNode = ..., com.vynatix.holdfast/Store<*> = ..., com.vynatix.holdfast.testing/TreeEvent.Phase = ..., com.vynatix.holdfast/Transaction = ..., kotlin/Throwable? = ..., kotlin/Long = ...): com.vynatix.holdfast.testing/TreeEvent // com.vynatix.holdfast.testing/TreeEvent.copy|copy(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Store<*>;com.vynatix.holdfast.testing.TreeEvent.Phase;com.vynatix.holdfast.Transaction;kotlin.Throwable?;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.testing/TreeEvent.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.testing/TreeEvent.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TreeEvent.toString|toString(){}[0]
+
+    final enum class Phase : kotlin/Enum<com.vynatix.holdfast.testing/TreeEvent.Phase> { // com.vynatix.holdfast.testing/TreeEvent.Phase|null[0]
+        enum entry Completed // com.vynatix.holdfast.testing/TreeEvent.Phase.Completed|null[0]
+        enum entry Errored // com.vynatix.holdfast.testing/TreeEvent.Phase.Errored|null[0]
+        enum entry Started // com.vynatix.holdfast.testing/TreeEvent.Phase.Started|null[0]
+
+        final val entries // com.vynatix.holdfast.testing/TreeEvent.Phase.entries|#static{}entries[0]
+            final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast.testing/TreeEvent.Phase> // com.vynatix.holdfast.testing/TreeEvent.Phase.entries.<get-entries>|<get-entries>#static(){}[0]
+
+        final fun valueOf(kotlin/String): com.vynatix.holdfast.testing/TreeEvent.Phase // com.vynatix.holdfast.testing/TreeEvent.Phase.valueOf|valueOf#static(kotlin.String){}[0]
+        final fun values(): kotlin/Array<com.vynatix.holdfast.testing/TreeEvent.Phase> // com.vynatix.holdfast.testing/TreeEvent.Phase.values|values#static(){}[0]
+    }
+}
+
+final class com.vynatix.holdfast.testing/TreeHandle { // com.vynatix.holdfast.testing/TreeHandle|null[0]
+    final val captureMode // com.vynatix.holdfast.testing/TreeHandle.captureMode|{}captureMode[0]
+        final fun <get-captureMode>(): com.vynatix.holdfast.testing/Capture // com.vynatix.holdfast.testing/TreeHandle.captureMode.<get-captureMode>|<get-captureMode>(){}[0]
+    final val root // com.vynatix.holdfast.testing/TreeHandle.root|{}root[0]
+        final fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.testing/TreeHandle.root.<get-root>|<get-root>(){}[0]
+    final val timeline // com.vynatix.holdfast.testing/TreeHandle.timeline|{}timeline[0]
+        final fun <get-timeline>(): kotlin.collections/List<com.vynatix.holdfast.testing/TreeEvent> // com.vynatix.holdfast.testing/TreeHandle.timeline.<get-timeline>|<get-timeline>(){}[0]
+
+    final fun <#A1: com.vynatix.holdfast/Store<#A1>> handle(#A1): com.vynatix.holdfast.testing/StoreHandle<#A1> // com.vynatix.holdfast.testing/TreeHandle.handle|handle(0:0){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+    final fun committedFrameIds(com.vynatix.holdfast.tree/StoreNode): kotlin.collections/List<kotlin/String> // com.vynatix.holdfast.testing/TreeHandle.committedFrameIds|committedFrameIds(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun consumeAllPendingErrors() // com.vynatix.holdfast.testing/TreeHandle.consumeAllPendingErrors|consumeAllPendingErrors(){}[0]
+    final fun events(com.vynatix.holdfast.tree/StoreNode): kotlin.collections/List<com.vynatix.holdfast.testing/TreeEvent> // com.vynatix.holdfast.testing/TreeHandle.events|events(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun group(com.vynatix.holdfast.tree/StoreNode): com.vynatix.holdfast.testing.matcher/StoreHandleGroup // com.vynatix.holdfast.testing/TreeHandle.group|group(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.testing/TreeHandle.toString|toString(){}[0]
+}
+
 final object com.vynatix.holdfast.testing.internal/PendingErrorRegistry : kotlinx.atomicfu.locks/SynchronizedObject { // com.vynatix.holdfast.testing.internal/PendingErrorRegistry|null[0]
     final fun markConsumed(com.vynatix.holdfast/TransactionResult.Error) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.markConsumed|markConsumed(com.vynatix.holdfast.TransactionResult.Error){}[0]
     final fun register(com.vynatix.holdfast/TransactionResult.Error, com.vynatix.holdfast.testing/StoreHandle<*>) // com.vynatix.holdfast.testing.internal/PendingErrorRegistry.register|register(com.vynatix.holdfast.TransactionResult.Error;com.vynatix.holdfast.testing.StoreHandle<*>){}[0]
@@ -517,6 +573,9 @@ final fun (com.vynatix.holdfast.testing.matcher/StoreHandleGroup).com.vynatix.ho
 final fun (com.vynatix.holdfast.testing/StoreHandle<*>).com.vynatix.holdfast.testing.matcher/and(com.vynatix.holdfast.testing/StoreHandle<*>): com.vynatix.holdfast.testing.matcher/StoreHandleGroup // com.vynatix.holdfast.testing.matcher/and|and@com.vynatix.holdfast.testing.StoreHandle<*>(com.vynatix.holdfast.testing.StoreHandle<*>){}[0]
 final fun (com.vynatix.holdfast.testing/StoreHandle<*>).com.vynatix.holdfast.testing.matcher/committedFrameIds(): kotlin.collections/List<kotlin/String> // com.vynatix.holdfast.testing.matcher/committedFrameIds|committedFrameIds@com.vynatix.holdfast.testing.StoreHandle<*>(){}[0]
 final fun (com.vynatix.holdfast.testing/StoreTestScope).com.vynatix.holdfast.testing.concurrency/barrier(kotlin/Int, kotlin.time/Duration = ...): com.vynatix.holdfast.testing.concurrency/Barrier // com.vynatix.holdfast.testing.concurrency/barrier|barrier@com.vynatix.holdfast.testing.StoreTestScope(kotlin.Int;kotlin.time.Duration){}[0]
+final fun (com.vynatix.holdfast.testing/StoreTestScope).com.vynatix.holdfast.testing/trackTree(com.vynatix.holdfast.tree/Root, com.vynatix.holdfast.testing/Capture = ..., kotlin/Boolean = ...): com.vynatix.holdfast.testing/TreeHandle // com.vynatix.holdfast.testing/trackTree|trackTree@com.vynatix.holdfast.testing.StoreTestScope(com.vynatix.holdfast.tree.Root;com.vynatix.holdfast.testing.Capture;kotlin.Boolean){}[0]
+final fun (com.vynatix.holdfast.testing/TreeHandle).com.vynatix.holdfast.testing.matcher/shouldCommitTogether(com.vynatix.holdfast.tree/StoreNode): kotlin/String // com.vynatix.holdfast.testing.matcher/shouldCommitTogether|shouldCommitTogether@com.vynatix.holdfast.testing.TreeHandle(com.vynatix.holdfast.tree.StoreNode){}[0]
+final fun (com.vynatix.holdfast.testing/TreeHandle).com.vynatix.holdfast.testing.matcher/shouldNotCommitTogether(com.vynatix.holdfast.tree/StoreNode) // com.vynatix.holdfast.testing.matcher/shouldNotCommitTogether|shouldNotCommitTogether@com.vynatix.holdfast.testing.TreeHandle(com.vynatix.holdfast.tree.StoreNode){}[0]
 final fun (com.vynatix.holdfast/TransactionResult<*>).com.vynatix.holdfast.testing.matcher/shouldRollbackWith(kotlin.reflect/KClass<out kotlin/Throwable>) // com.vynatix.holdfast.testing.matcher/shouldRollbackWith|shouldRollbackWith@com.vynatix.holdfast.TransactionResult<*>(kotlin.reflect.KClass<out|kotlin.Throwable>){}[0]
 final fun (kotlin.collections/List<com.vynatix.holdfast.testing/StoreEvent>).com.vynatix.holdfast.testing.matcher/shouldFire(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFire|shouldFire@kotlin.collections.List<com.vynatix.holdfast.testing.StoreEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]
 final fun (kotlin.collections/List<com.vynatix.holdfast.testing/StoreEvent>).com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder(kotlin/Function1<com.vynatix.holdfast.testing.matcher/TimelineMatcher<kotlin/Nothing>, kotlin/Unit>) // com.vynatix.holdfast.testing.matcher/shouldFireInExactOrder|shouldFireInExactOrder@kotlin.collections.List<com.vynatix.holdfast.testing.StoreEvent>(kotlin.Function1<com.vynatix.holdfast.testing.matcher.TimelineMatcher<kotlin.Nothing>,kotlin.Unit>){}[0]

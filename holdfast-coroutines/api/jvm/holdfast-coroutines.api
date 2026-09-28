@@ -1,3 +1,45 @@
+public final class com/vynatix/holdfast/coroutines/HydrateAllKt {
+	public static final fun hydrateAll (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;Lkotlinx/coroutines/CoroutineScope;ZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun hydrateAll$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;Lkotlinx/coroutines/CoroutineScope;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrateAllReport {
+	public final fun getEntries ()Ljava/util/List;
+	public final fun getFailed ()Ljava/util/List;
+	public final fun getSkipped ()Ljava/util/List;
+	public final fun isHealthy ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrateAllReport$Entry {
+	public final fun getNode ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public final fun getOutcome ()Lcom/vynatix/holdfast/coroutines/HydrateAllReport$Outcome;
+	public final fun getStore ()Lcom/vynatix/holdfast/Store;
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract class com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome {
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome$Disposed : com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome {
+	public static final field INSTANCE Lcom/vynatix/holdfast/coroutines/HydrateAllReport$Outcome$Disposed;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome$NoHydrator : com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome {
+	public static final field INSTANCE Lcom/vynatix/holdfast/coroutines/HydrateAllReport$Outcome$NoHydrator;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome$Ran : com/vynatix/holdfast/coroutines/HydrateAllReport$Outcome {
+	public final fun getHydration ()Lcom/vynatix/holdfast/coroutines/Hydration;
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class com/vynatix/holdfast/coroutines/Hydration {
 }
 

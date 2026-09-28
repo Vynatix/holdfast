@@ -83,7 +83,12 @@ class TreeHandle internal constructor(
     }
 
     /** The handles of the live leaves under [node], grouped for the cross-store matchers (`shouldCommitTogether`). */
-    fun group(node: StoreNode): StoreHandleGroup = StoreHandleGroup(root.children(node).map { scope.trackAny(it, captureMode) })
+    fun group(node: StoreNode): StoreHandleGroup = StoreHandleGroup(leafHandles(node))
+
+    private fun leafHandles(node: StoreNode): List<StoreHandle<*>> {
+        val stores = root.children(node)
+        return stores.map { scope.trackAny(it, captureMode) }
+    }
 
     /**
      * The frame ids of every committed frame root under [node], in

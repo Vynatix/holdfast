@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
 
 ---
 
@@ -1677,6 +1677,7 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>
 fun Store<*>.hydratorOrNull(): Hydrator<*>?
 suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
+suspend fun Root.hydrateAll(node: StoreNode = this, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport   // §17.11
 class Hydrator<V : Store<V>> {                       // state / current / hydrate / invalidate / stageInvalidate / awaitSettled
     suspend fun hydrate(scope: CoroutineScope = …)   // defaults to the store's Store.scope
     val overlayKey: String?                          // the persisted overlay's key (§16.8)
@@ -4177,7 +4178,59 @@ fun testTheTree() =
   already failed. The root is never disposed. `trackTree` is idempotent by
   root identity and throws on a disposed root.
 
-### 17.11 API reference
+### 17.11 Hydrating a tree
+
+`:holdfast-coroutines`' `App.hydrateAll(node = App)` (§14.8, §16.7) drives
+every leaf's hydrator under a node and reports how each settled.
+
+```kotlin
+class FeedStore(private val remote: suspend () -> List<String>) : Store<FeedStore>() {
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration = hydrator {
+        base { items mutate listOf("cached") }
+        refresh { remote() } adopt { fetched -> items mutate fetched }
+    }
+}
+
+class SettingsOnlyStore : Store<SettingsOnlyStore>() {
+    val theme by state { "light" }
+}
+
+object Feeds : Root("feeds") {
+    val news = FeedStore { listOf("headline") }
+    val sports = FeedStore { error("offline") }
+    val settings = SettingsOnlyStore()
+    val all by branch(news, sports, settings).named(news, "news").named(sports, "sports").named(settings, "settings")
+}
+
+suspend fun hydrateTheTree() {
+    val report = Feeds.hydrateAll()                                      // every leaf's hydrator, seeds in lock order
+    println(report.entries.map { "${it.node.name}: ${it.outcome}" })   // "[news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]"
+    println(report.isHealthy to report.failed.map { it.node.name })    // "(false, [sports])"
+    println(Feeds.news.items.value)                                    // "[headline]"
+    println(Feeds.sports.items.value)                                  // "[cached]": the seed stood, the refresh failed
+    println(Feeds.hydrateAll(Feeds.all).failed.map { it.node.name })   // "[sports]": idempotent for news, a retry for sports
+}
+```
+
+- **What it drives.** Every live leaf under the node, in `lockOrderKey`
+  order: each hydrator's `hydrate()` (on the given scope, else its store's
+  `Store.scope`) has committed its seed and launched its refresh before the
+  next leaf's turn; then each is awaited in the same order (`awaitSettled =
+  false` reports the phase after the seed instead), so the refreshes run
+  concurrently. A leaf without a hydrator is `NoHydrator`, one disposed
+  meanwhile `Disposed`; a leaf whose seed or refresh failed is
+  `Ran(Failed(cause))` — reported, never thrown, and the other leaves still
+  hydrate. A hydrated leaf's hydrator does nothing, so the call is
+  idempotent; a failed one retries its refresh, as `Hydrator.hydrate` does.
+- **Where it may run.** Outside every entry: inside an action, an `atomic`
+  frame, a `suspendAction` or `suspendAtomic` body of any store it fails
+  before touching a leaf, for the reasons `Hydrator.hydrate` gives (§16.7).
+  A cancellation propagates at once; the refreshes already launched keep
+  running on their scopes. The report names nodes and outcomes, never a
+  value.
+
+### 17.12 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
@@ -4217,6 +4270,18 @@ abstract class TreeMiddleware {
     protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}   // before commit
     protected open fun onTransactionError(node: StoreNode, context: Middleware.MiddlewareContext<*>, error: Throwable) {}
 }
+// :holdfast-coroutines (§17.11)
+suspend fun Root.hydrateAll(node: StoreNode = this, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport
+class HydrateAllReport { val entries: List<Entry>; val failed: List<Entry>; val skipped: List<Entry>; val isHealthy: Boolean
+    class Entry { val node: StoreNode; val store: Store<*>; val outcome: Outcome }
+    sealed class Outcome { class Ran(val hydration: Hydration); object NoHydrator; object Disposed } }
+// :holdfast-testing (§17.10)
+fun StoreTestScope.trackTree(root: Root, capture: Capture = Capture.All, resetAtTeardown: Boolean = true): TreeHandle
+class TreeHandle { val root: Root; val captureMode: Capture; val timeline: List<TreeEvent>; fun events(node: StoreNode): List<TreeEvent>
+    fun <S : Store<S>> handle(store: S): StoreHandle<S>; fun group(node: StoreNode): StoreHandleGroup
+    fun committedFrameIds(node: StoreNode): List<String>; fun consumeAllPendingErrors() }
+data class TreeEvent(val node: StoreNode, val store: Store<*>, val phase: Phase, val transaction: Transaction, val cause: Throwable?, val timestamp: Long) { enum class Phase { Started, Completed, Errored } }
+fun TreeHandle.shouldCommitTogether(node: StoreNode): String; fun TreeHandle.shouldNotCommitTogether(node: StoreNode)
 @StoreInternalApi val Root.internalSettleCount: Long; val Root.internalCaptureCount: Long; val Root.internalCutRetryCount: Long
 @StoreInternalApi fun Root.internalHost(): Store<*>; fun Root.internalSettleNow(): TreeSnapshot
 class TreeSnapshot {
