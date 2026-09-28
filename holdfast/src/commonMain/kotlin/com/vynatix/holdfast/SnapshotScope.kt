@@ -155,12 +155,19 @@ internal class CapturePlan(
     /** The states to read: the declared states in declaration order, then the keyed entries. */
     val states: List<MutableState<*>> = captured.map { it.second }
 
-    /** The snapshot holding [values], the raw values one consistent cut read for [states]. */
-    fun build(values: List<Any>): StoreSnapshot {
+    /**
+     * The snapshot holding [values], the raw values one consistent cut read
+     * for [states] — stamped with [stamp], what that cut read, when a later
+     * cut may reuse it (`captureConsistent`).
+     */
+    fun build(
+        values: List<Any>,
+        stamp: CutStamp? = null,
+    ): StoreSnapshot {
         val content = Capture(scope)
         families.forEach(content::addFamily)
         captured.forEachIndexed { i, (decl, _) -> content.add(decl, values[i]) }
-        return StoreSnapshot(content.build(CaptureOrigin(store.lockOrderKey, store::class), schema))
+        return StoreSnapshot(content.build(CaptureOrigin(store.lockOrderKey, store::class), schema, stamp))
     }
 }
 
@@ -205,12 +212,22 @@ private class Capture(
     fun build(
         origin: CaptureOrigin,
         schema: Int,
+        stamp: CutStamp?,
     ): CapturedContent {
         val captured =
             families.mapValues { (_, captured) ->
                 val (family, entries) = captured
                 CapturedFamily(entries, family.spec.codec, family.spec.keyCodec)
             }
-        return CapturedContent(declared, backings, origin, codecs, schema, CaptureTags(scope, secret, remote), captured)
+        return CapturedContent(
+            declared,
+            backings,
+            origin,
+            codecs,
+            schema,
+            CaptureTags(scope, secret, remote),
+            captured,
+            stamp,
+        )
     }
 }

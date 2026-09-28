@@ -223,8 +223,20 @@ fun <T : Any> State<T>.observableBacking(): MutableState<T>? {
     return when (this) {
         is MutableState<*> -> this as MutableState<T>
         is DerivedStateNode<*> -> backing as MutableState<T>
+        is ObservableBacked<*> -> observableBacking as MutableState<T>?
         else -> null
     }
+}
+
+/**
+ * A [State] that is neither a [MutableState] nor a [DerivedStateNode] but
+ * observes through one — issue #21's `Root.value`, a view over a derived
+ * node it creates on first use. [observableBacking] resolves it, for every
+ * observation path.
+ */
+internal interface ObservableBacked<T : Any> {
+    /** The backing every observation of this state attaches to; `null` when there is none. */
+    val observableBacking: MutableState<T>?
 }
 
 /**
@@ -276,6 +288,15 @@ internal class DerivedStateNode<T : Any>(
      * `false`, changing nothing, when [store] was not followed.
      */
     fun removeSourceStore(store: Store<*>): Boolean = follower.removeSourceStore(store)
+
+    /**
+     * Run the recompute now, on this thread, as a settle would: it commits on
+     * the host, or hands itself to the host's holder when the host is busy
+     * — never waiting — and does nothing when the node is disposed. For a
+     * read that wants the node current before a queued recompute has run
+     * (`Root.value`); call it outside every entry.
+     */
+    fun settleNow() = follower.settleNow()
 
     override fun dispose() {
         follower.dispose()

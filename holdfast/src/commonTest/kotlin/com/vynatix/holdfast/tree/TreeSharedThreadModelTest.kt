@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalStoreApi::class)
+@file:OptIn(ExperimentalStoreApi::class, StoreInternalApi::class)
 
 package com.vynatix.holdfast.tree
 
@@ -6,6 +6,7 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.InitializerGraph
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -37,6 +38,20 @@ private class SharedRoot : Root() {
  * on a genuine one.
  */
 class TreeSharedThreadModelTest {
+    @Test
+    fun aRootValueSettlesUnderTheSharedThreadIdModel() {
+        val graph = InitializerGraph { 0L }
+        val root = SharedRoot()
+        root.left.right = root.right
+        root.left.initializerGraph = graph
+        root.right.initializerGraph = graph
+        assertEquals(11, root.value.value[root.left.x])
+        root.right action { y mutate 20 }
+        assertEquals(20, root.value.value[root.right.y])
+        assertEquals(2, root.internalSettleCount)
+        assertEquals(0, graph.waitingCount)
+    }
+
     @Test
     fun aCaptureUnderTheSharedThreadIdModelMaterializesAcrossStoresWithoutAFalseCycle() {
         val graph = InitializerGraph { 0L }

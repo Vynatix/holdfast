@@ -1554,6 +1554,55 @@ described here.
   member takes a `String` except `decode` and `named`, gated by a test
   over the JVM API dump. `equalsEncodable` now compares children by name,
   as `encode()` orders them.
+- **The typed state tree, step 4: `Root.value`, one consistent capture
+  settled once per outermost entry** (issue #21 plan PR 21-5, decisions
+  T3/T4; GUIDE §17.8, §10.2). `App.value` is a `State<TreeSnapshot>` over
+  the whole tree — a derived state following every leaf store as a whole
+  (the #20 PR 15 store-level edges), hosted on a private store of the root
+  — recomputed as ONE lock-free capture once per outermost `action`,
+  `atomic`, `suspendAction`, `suspendAtomic`, `restore` or `reset` that
+  changes the tree, after every lock that entry took is released, and
+  published only when the tree differs (full value equality). A commit, an
+  eviction, an inbound bridge write, a keyed entry coming to life, a
+  `removeState`/`clearStates`, a leaf joining or leaving all reach it;
+  outside any entry the recompute runs inline. The first read or
+  observation builds the tree (declaring a tree runs no leaf code;
+  registering a branch takes no capture); a read inside a leaf's fanout is
+  the tree before that commit; a read while a leaf has just joined or left,
+  inside an entry, is a fresh uncommitted capture; a read never takes a
+  leaf's lock, never opens a host transaction inside an entry, and a settle
+  that finds the host busy hands off rather than waits. Each settle
+  recaptures only the leaves whose cut stamp moved and shares the other
+  captures by reference (`captureConsistent` gains `previous`/`stats`; a
+  capture's `CutStamp` records the states one cut listed and their write
+  counters). `Root.scope`/`bindToScope` (a getter override beats the
+  binding; the host answers it, so `asStateFlow()` defaults there) and
+  `Root.uncaughtObserverHandler` (a throwing `value` observer or a failing
+  recompute). `Root.dispose()` stops following, drops the value's
+  observers, disposes the host and keeps the last tree readable.
+  `@StoreInternalApi`: `internalSettleCount`, `internalCaptureCount`,
+  `internalCutRetryCount`, `internalHost()`, `internalSettleNow()`.
+  Verified: a two-store `atomic`/`suspendAtomic` frame recomputes once,
+  nested entries settle at the outermost exit, `value` publishes and reads
+  are never a mix against 3,000 concurrent frames, a leaf action proceeds
+  while a `value` observer is parked, a busy host is never waited for, 1,000
+  keyed create/dispose cycles leave no edge, and 10,000 single-state mutates
+  under a sixteen-leaf root settle within eight seconds.
+
+### Changed
+
+- **A keyed `create`/`getOrCreate` and a branch declaration run inside a
+  settle scope** (issue #21 PR 21-5): outside any entry each opens one, so
+  what the attach queues — the root's `value` following the new leaf —
+  runs once after the store is promoted and visible, never inside the
+  factory bracket; inside an action or frame they join its scope, as
+  before. An inbound bridge write and `removeState`/`clearStates` on a leaf
+  now settle an attached root's `value` (they were already changes of the
+  store for store-level edges).
+- **`observableBacking()` resolves one more shape**: a `State` that is
+  neither a `MutableState` nor a `DerivedState` but observes through one
+  (internal `ObservableBacked`, the tree value). Every observation path —
+  `effect`, flows, Compose — accepts `Root.value` unchanged.
 
 ---
 

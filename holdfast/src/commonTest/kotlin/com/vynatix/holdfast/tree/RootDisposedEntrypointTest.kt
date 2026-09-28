@@ -5,7 +5,11 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.internalAttachment
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlin.test.Test
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -56,6 +60,10 @@ class RootDisposedEntrypointTest {
             RootEntrypoint("reset") { it.reset() },
             RootEntrypoint("decode") { it.decode("{}") },
             RootEntrypoint("verifyPersistedNames") { it.verifyPersistedNames() },
+            RootEntrypoint("value.value (never read before)") { it.value.value },
+            RootEntrypoint("value observed (never read before)") { it.value effect { } },
+            RootEntrypoint("bindToScope") { it.bindToScope(CoroutineScope(Dispatchers.Unconfined + Job())) },
+            RootEntrypoint("internalSettleNow (never read before)") { it.internalSettleNow() },
             RootEntrypoint("KeyedBranch.at") { it.keyed.at("k") },
             RootEntrypoint("KeyedBranch.create") { r -> r.keyed.create("k") { DisposedKeyedStore(it, r) } },
             RootEntrypoint("KeyedBranch.getOrCreate") { r -> r.keyed.getOrCreate("k") { DisposedKeyedStore(it, r) } },
@@ -82,6 +90,11 @@ class RootDisposedEntrypointTest {
                 )
             },
             RootEntrypoint("isUnder") { check(it.keyed.isUnder(it)) },
+            RootEntrypoint("value (the handle)") { check(it.value === it.value) },
+            RootEntrypoint("scope / uncaughtObserverHandler") {
+                check(it.scope === Store.defaultScope && it.uncaughtObserverHandler == null)
+            },
+            RootEntrypoint("internalHost") { check(it.internalHost().isDisposed) },
         )
 
     @Test

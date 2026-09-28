@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast.tree
 
+import com.vynatix.holdfast.CaptureStats
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.Store
@@ -21,7 +22,11 @@ import com.vynatix.holdfast.captureConsistent
  * tree lock), excludes keyed entries still under construction, skips a
  * leaf disposed concurrently (the capture is retried without it), and under
  * `SnapshotScope.UserAuthored` prunes leaves and branches with nothing
- * captured — the requested [node] itself is always returned.
+ * captured — the requested [node] itself is always returned. With
+ * [previous], a capture in the same scope, a leaf whose cut stamp has not
+ * moved reuses that capture's `StoreSnapshot` by reference (`CutStamp`:
+ * `Root.value` recaptures only the leaves that changed); [stats] counts
+ * what the cut did.
  *
  * @throws IllegalStateException if the root is disposed, or as `snapshot()`
  *   does (a throwing or cyclic initializer, a schema version below 1).
@@ -31,13 +36,17 @@ internal fun captureTree(
     root: Root,
     node: StoreNode,
     scope: SnapshotScope,
+    previous: TreeSnapshot? = null,
+    stats: CaptureStats? = null,
 ): TreeSnapshot {
     root.checkNotDisposed()
     root.requireOwn(node)
+    val reusable = previous?.takeIf { it.scope === scope }
     while (true) {
         val shape = root.registry.shapeOf(node)
         val stores = shape.stores().filter { !it.isDisposed }
-        val captures = captureOrRetry(stores, scope) ?: continue
+        val known = reusable?.let { last -> stores.map { last.index.byStoreKey[it.lockOrderKey]?.leaf } }
+        val captures = captureOrRetry(stores, scope, known, stats) ?: continue
         val byStoreKey = HashMap<Long, StoreSnapshot>(stores.size)
         for ((i, store) in stores.withIndex()) byStoreKey[store.lockOrderKey] = captures[i]
         val index = TreeIndex()
@@ -49,10 +58,12 @@ internal fun captureTree(
 private fun captureOrRetry(
     stores: List<Store<*>>,
     scope: SnapshotScope,
+    previous: List<StoreSnapshot?>?,
+    stats: CaptureStats?,
 ): List<StoreSnapshot>? {
     if (stores.isEmpty()) return emptyList()
     return try {
-        captureConsistent(stores, scope)
+        captureConsistent(stores, scope, previous, stats)
     } catch (e: IllegalStateException) {
         if (stores.any { it.isDisposed }) null else throw e
     }

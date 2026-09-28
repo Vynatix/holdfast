@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check
+17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value
 
 ---
 
@@ -1082,6 +1082,26 @@ locks. That is why an initializer may only read: the store refuses every
 write, action and frame from inside one, so it never needs a lock to its
 left. Initializers waiting for each other's latches in a cycle — on one
 thread or across threads — are detected and throw instead of deadlocking.
+
+**The tree's host lock** (§17.8). A root's `value` is hosted on a private
+store of its own; that store's `transactionLock` — the host lock — is taken
+only by a settle of the value: a top-level action on the host that runs
+after the entry being settled has released every store lock it took, or
+inline where a change reaches the tree outside any entry. Nothing takes the
+host lock under a leaf's lock: a read of `value` takes no lock at all (it
+reads the value's backing, or takes a fresh lock-free capture when a leaf
+has just joined or left), and inside an open entry it never opens a
+transaction on the host. A settle that finds the host busy hands its
+recompute to the host's holder and returns; it never waits. A `value`
+observer runs under the host lock, so an action it opens on a leaf nests
+host → leaf, the one direction the graph allows — and it is an ordinary
+observer: one that writes to a store another thread is committing carries
+the cross-store hazard every observer does. A bridge attached to a leaf's
+state that replays a value at attach (an inbound write under that state's
+`bridgeLock`) queues the tree's recompute like any inbound write; outside
+an entry the recompute runs inline there, so a bridge whose replay must not
+run tree observers should be attached from inside an action, where the
+recompute waits for the settle.
 
 ### 10.3 Thread confinement of a transaction
 
@@ -3779,7 +3799,8 @@ fun readTheTree() {
   disposed — hold the `State` reference, since the store's own delegate
   is gated after `dispose()`. `tree[node]` is the subtree's capture, or
   `null` outside it; `tree.children`, `tree.node`, `tree.isLeaf` and
-  `tree.scope` walk it.
+  `tree.scope` walk it. `App.value` (§17.8) keeps such a capture current
+  as a `State<TreeSnapshot>`.
 - **Scopes.** `SnapshotScope.Raw` lets `Secret` values read; `UserAuthored`
   captures exactly the tagged states and prunes leaves and branches with
   nothing captured (the requested node itself is always returned);
@@ -3947,7 +3968,89 @@ fun rehydrateTheTree(text: String) {
   declared without a key codec (`KeyedBranchNotEncodable`, empty or not).
   It reads declarations only and runs no initializer.
 
-### 17.8 API reference
+### 17.8 The tree value, settling and consistent cuts
+
+`App.value` is the whole tree as ONE consistent capture, kept current: a
+`State<TreeSnapshot>` recomputed once per outermost entry that changes the
+tree, after every lock that entry took is released, and published only when
+the tree differs. Observe it like any state.
+
+```kotlin
+fun watchTheTree() {
+    var settles = 0
+    val watch = Notes.value effect { settles++ }                       // fires once now, with the current tree
+    val n3 = Notes.byId.create("n3", ::NoteStore)                      // a leaf joined: one settle
+    atomic(Notes.prefsStore, n3) {                                     // one frame over two leaves: one settle
+        Notes.prefsStore { theme mutate "dark" }
+        n3 { body mutate "hi" }
+    }.getOrThrow()
+    println(settles)                                                   // "3": the subscription, the join, the frame
+    val tree = Notes.value.value
+    println(tree[Notes.prefsStore.theme] to tree[n3.body])             // "(dark, hi)": never one without the other
+    println(tree == Notes.snapshot())                                  // "true"
+    watch.dispose()
+    n3.dispose()
+    Notes.reset()
+}
+```
+
+- **Once per outermost entry (T4).** `value` is a derived state over
+  every leaf store as a whole (§16.5's machinery, following stores rather
+  than listed states): a commit that changes a leaf, an eviction, an
+  inbound bridge write, a keyed entry coming to life, a `removeState`, a
+  leaf joining or leaving each queue one recompute into the settle scope
+  of the entry on this thread, and the outermost `action`, `atomic`,
+  `suspendAction`, `suspendAtomic`, `restore` or `reset` runs it once when
+  it has released everything — nested actions and nested same-flavour
+  frames settle with it. The recompute is one lock-free capture
+  (§17.5), so a two-store frame is seen whole; it commits on the root's
+  private host store, whose lock is the host lock of §10.2, and the
+  `distinct` backing publishes only a tree that differs (full value
+  equality, so a `Secret`-only change is a change). Outside any entry — a
+  keyed `create`, a bridge replay, a `removeState` at top level — the
+  recompute runs inline, so the next read is current. A commit that a
+  `distinct` state deduplicated changes nothing and recomputes nothing; a
+  rollback recomputes nothing.
+- **Only the leaves that moved are recaptured.** A settle reuses the
+  previous tree's capture of every leaf whose cut stamp has not moved —
+  the states one cut listed and each one's write counter — so a commit on
+  one leaf of sixteen reads one leaf, and the other fifteen captures are
+  shared by reference; a frame recaptures every participant it wrote; a
+  keyed entry, a dropped state or a bridge write recaptures its leaf. The
+  reads still form one cut: a reused capture is validated under the same
+  window the changed leaves are read in.
+- **When a read is fresh.** The first read or observation builds the
+  tree (never-read initializers run then; declaring a tree runs no leaf
+  code, and registering a branch takes no capture). A read inside a leaf's
+  commit fanout is the tree before that commit — the settle comes after
+  the fanout — while `snapshot()` there is after it. A read while a leaf
+  has just joined or left, inside an action, frame or observer, is a fresh
+  capture that is not committed, so the code that created a keyed store
+  sees it in `value` at once; outside any entry such a read settles first,
+  handing off — never waiting — if the host is busy. A read never opens a
+  transaction on the host inside an entry, and never takes a leaf's lock.
+- **Observers are ordinary observers.** A `value` observer runs in the
+  host's commit fanout, under the host lock and no leaf lock: a leaf's
+  action on another thread proceeds while it runs, and an action it opens
+  on a leaf commits normally and settles the value again afterwards, never
+  re-entrantly; a throwing one reaches `App.uncaughtObserverHandler`
+  (else the platform log), as does a failing recompute. `App.scope`
+  (`bindToScope`, or a getter override, else `Store.defaultScope`) is what
+  `App.value.asStateFlow()` defaults to; `App.value.asFlow()` emits one
+  tree per settle; `App.value.collectAsState()` (`:holdfast-compose`)
+  recomposes once per settle.
+- **Dispose.** A keyed store's `dispose()` or a leaf's `removeState` reach
+  the value like a commit (once per entry). `App.dispose()` stops the
+  value following the leaves, drops its observers, disposes the host, and
+  leaves the last tree readable; a first read after it throws. A thousand
+  keyed create/dispose cycles leave no edge, observer or leaf behind.
+- **For library code** (`@StoreInternalApi`): `internalSettleCount`,
+  `internalCaptureCount` (leaf captures, so reuse shows), and
+  `internalCutRetryCount`; `internalHost()` (the host store, never a member
+  of the tree) and `internalSettleNow()` (run a queued recompute now,
+  outside every entry).
+
+### 17.9 API reference
 
 ```kotlin
 sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
@@ -3976,7 +4079,12 @@ abstract class Root {
     fun reset(node: StoreNode = this): TransactionResult<TreeResetReport>
     fun decode(text: String): TreeSnapshot
     fun verifyPersistedNames(node: StoreNode = this): List<NamingIssue>
+    val value: State<TreeSnapshot>          // one consistent capture, settled once per outermost entry
+    open val scope: CoroutineScope; fun bindToScope(scope: CoroutineScope)
+    var uncaughtObserverHandler: ((Throwable) -> Unit)?
 }
+@StoreInternalApi val Root.internalSettleCount: Long; val Root.internalCaptureCount: Long; val Root.internalCutRetryCount: Long
+@StoreInternalApi fun Root.internalHost(): Store<*>; fun Root.internalSettleNow(): TreeSnapshot
 class TreeSnapshot {
     val node: StoreNode; val children: List<TreeSnapshot>; val scope: SnapshotScope; val isLeaf: Boolean
     val unresolvedPaths: List<List<String>>          // decode diagnostic; empty for a capture

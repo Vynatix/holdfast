@@ -5,12 +5,14 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.RestorePolicy
 import com.vynatix.holdfast.SnapshotScope
+import com.vynatix.holdfast.State
 import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.internalDetach
 import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CoroutineScope
 import kotlin.reflect.KClass
 
 /**
@@ -55,7 +57,53 @@ abstract class Root(
 
     internal val registry = TreeRegistry(this)
 
+    /** The tree value's machinery: registers its membership listener now, captures nothing until `value` is used. */
+    internal val rootValue = RootValue(this)
+
     private val disposedFlag = atomic(false)
+
+    @kotlin.concurrent.Volatile
+    private var boundScope: CoroutineScope? = null
+
+    /**
+     * The whole tree as ONE consistent capture, kept current: a
+     * [TreeSnapshot] over every live leaf, recomputed once per outermost
+     * entry that changes the tree — an `atomic`/`suspendAtomic` frame over
+     * several leaves, an action with nested actions, a `restore` or `reset`
+     * over a subtree, a leaf that joins or leaves — after every lock that
+     * entry took is released (§17.8), and only published when it differs
+     * (full value equality, so a `Secret`-only change is a change). Observe
+     * it like any state (`effect`, `asFlow`, `collectAsState`); a `value`
+     * observer is an ordinary observer, with the cross-store hazards of one.
+     *
+     * The first read or observation builds the tree (never-read initializers
+     * run then; declaring a tree runs no leaf code). A read inside a leaf's
+     * commit fanout is the tree before that commit — the settle comes after
+     * the fanout — while `snapshot()` there is after it; a read while a leaf
+     * has just joined or left, inside an action or observer, is a fresh
+     * capture that is not committed. A read never takes a leaf's lock and
+     * never opens a transaction on the host inside an entry. After
+     * [dispose], the last tree stays readable; a first read then throws.
+     */
+    val value: State<TreeSnapshot> get() = rootValue.state
+
+    /**
+     * The scope `asStateFlow()` on [value] defaults to: [bindToScope]'s
+     * binding, else [Store.Companion.defaultScope]; a subclass getter
+     * override beats both, as for a store.
+     */
+    open val scope: CoroutineScope get() = boundScope ?: Store.defaultScope
+
+    /**
+     * Where a failing observer of [value], or a failing recompute of it, is
+     * reported (as `Store.uncaughtObserverHandler` on the tree's host);
+     * `null` logs through the platform default.
+     */
+    var uncaughtObserverHandler: ((Throwable) -> Unit)?
+        get() = rootValue.host.uncaughtObserverHandler
+        set(handler) {
+            rootValue.host.uncaughtObserverHandler = handler
+        }
 
     /** Whether [dispose] has been called; once `true`, every tree entrypoint throws ("… disposed"). */
     val isDisposed: Boolean get() = disposedFlag.value
@@ -253,10 +301,22 @@ abstract class Root(
     }
 
     /**
+     * Bind the scope [scope] resolves to (see [scope]); owned by the root,
+     * not by [value]'s host.
+     *
+     * @throws IllegalStateException if the root is disposed.
+     */
+    fun bindToScope(scope: CoroutineScope) {
+        checkNotDisposed()
+        boundScope = scope
+    }
+
+    /**
      * Detach every leaf and drop every listener. Disposes no store: the
      * leaves keep working on their own, and disposing one later no longer
-     * reaches this root. Idempotent; never blocks on a leaf's transaction
-     * lock.
+     * reaches this root. [value] stops following the leaves, drops its
+     * observers and keeps its last tree readable. Idempotent; never blocks
+     * on a leaf's transaction lock.
      */
     fun dispose() {
         if (!disposedFlag.compareAndSet(expect = false, update = true)) return
@@ -266,6 +326,7 @@ abstract class Root(
             store.internalDetach(treeMembershipKey)
             leaf.storeRef = null
         }
+        rootValue.dispose()
     }
 
     internal fun checkNotDisposed() {

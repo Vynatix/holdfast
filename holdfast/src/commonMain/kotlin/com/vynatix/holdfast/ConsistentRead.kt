@@ -108,26 +108,72 @@ private fun tryReadCut(
 internal fun captureConsistent(
     stores: List<Store<*>>,
     scope: SnapshotScope = SnapshotScope.All,
+    previous: List<StoreSnapshot?>? = null,
+    stats: CaptureStats? = null,
 ): List<StoreSnapshot> {
     var attempts = 0
     while (true) {
         val schemas = stores.map { it.prepareCapture(scope) }
         val holdBack = ++attempts > HOLD_BACK_AFTER
-        cutOnce(stores, scope, schemas, holdBack)?.let { return it }
+        cutOnce(stores, scope, schemas, holdBack, previous, stats)?.let { return it }
+        stats?.let { it.retries++ }
         threadYield()
     }
 }
 
 /**
+ * What one cut read of a store, kept on its capture so a later cut can
+ * reuse that capture unchanged (issue #21's `Root.value`, which recaptures
+ * only the leaves that moved): the scope and schema, the states the cut
+ * listed, and each one's `writesEnded` counter as the cut read it. Every
+ * assignment of a committed value bumps that counter inside a write
+ * bracket, so a later cut that lists the same states (by identity — a
+ * dropped or re-materialized state, a new or evicted keyed entry lists
+ * differently) and finds every counter unmoved with no bracket open reads
+ * the same values, and reuses the capture instead of reading them.
+ */
+internal class CutStamp(
+    val scope: SnapshotScope,
+    val schema: Int,
+    val states: List<MutableState<*>>,
+    val ended: LongArray,
+) {
+    /** Whether a cut in [scope] of a store at [schema] that listed [states] may reuse the capture this stamps. */
+    fun matches(
+        scope: SnapshotScope,
+        schema: Int,
+        states: List<MutableState<*>>,
+    ): Boolean = this.scope === scope && this.schema == schema && this.states.size == states.size && sameStates(states)
+
+    private fun sameStates(other: List<MutableState<*>>): Boolean = states.indices.all { states[it] === other[it] }
+}
+
+/** Counters a caller of [captureConsistent] can read: how the cuts went. Not thread-safe; one per capture. */
+internal class CaptureStats {
+    /** Listings and cuts that had to run again: a write overlapped, or an entry came to life unlisted. */
+    var retries: Long = 0
+
+    /** Stores whose values a cut read. */
+    var captured: Long = 0
+
+    /** Stores whose previous capture a cut reused unchanged. */
+    var reused: Long = 0
+}
+
+/**
  * One listing and cut of [captureConsistent] — holding entry creation back on
  * [stores] throughout when [holdBack] — or `null` when it can have missed an
- * entry and must run again.
+ * entry and must run again. A store whose [previous] capture's [CutStamp]
+ * still matches is reused rather than read (see [CutStamp]).
  */
+@Suppress("LongParameterList") // The pieces of one cut; every one is needed on every attempt.
 private fun cutOnce(
     stores: List<Store<*>>,
     scope: SnapshotScope,
     schemas: List<Int>,
     holdBack: Boolean,
+    previous: List<StoreSnapshot?>?,
+    stats: CaptureStats?,
 ): List<StoreSnapshot>? {
     var held = 0
     try {
@@ -138,22 +184,120 @@ private fun cutOnce(
             }
         }
         val plans = stores.mapIndexed { i, store -> store.listCapture(scope, schemas[i]) }
-        val values = readConsistent(plans.flatMap { it.states }, ::capturedRaw)
+        val reusable =
+            plans.mapIndexed { i, plan -> previous?.get(i)?.takeIf { it.stampMatches(scope, schemas[i], plan) } }
+        val cut = readCutReusing(plans, reusable)
         // A commit (or an inbound bridge write) of a captured store that the
         // cut includes, made after an unlisted entry came to life,
         // happens-before the cut's reads, so both counts it implies are
         // visible here.
         val committed = plans.any { it.membership.committedSince() }
-        if (!holdBack && committed && plans.any { it.membership.grewSince() }) return null
-        var from = 0
-        return plans.map { plan ->
-            val until = from + plan.states.size
-            plan.build(values.subList(from, until)).also { from = until }
-        }
+        val missedAnEntry = !holdBack && committed && plans.any { it.membership.grewSince() }
+        return if (missedAnEntry) null else assemble(plans, cut, scope, schemas, stats)
     } finally {
         for (i in 0 until held) stores[i].creationHoldBack.release()
     }
 }
+
+/** The snapshots of one cut: each plan's reused capture, or its values built into a freshly stamped one. */
+private fun assemble(
+    plans: List<CapturePlan>,
+    cut: ReusingCut,
+    scope: SnapshotScope,
+    schemas: List<Int>,
+    stats: CaptureStats?,
+): List<StoreSnapshot> =
+    plans.indices.map { i ->
+        val reused = cut.reused[i]
+        if (reused != null) {
+            stats?.let { it.reused++ }
+            reused
+        } else {
+            stats?.let { it.captured++ }
+            plans[i].build(cut.values[i], CutStamp(scope, schemas[i], plans[i].states, cut.ended[i]))
+        }
+    }
+
+/** Whether this capture may stand in for a cut of its store in [scope] at [schema] that listed [plan]'s states. */
+private fun StoreSnapshot.stampMatches(
+    scope: SnapshotScope,
+    schema: Int,
+    plan: CapturePlan,
+): Boolean = (content as? CapturedContent)?.stamp?.matches(scope, schema, plan.states) == true
+
+/** One cut's outcome per plan: the values read, or the capture reused, and the `writesEnded` counters as read. */
+private class ReusingCut(
+    val values: List<List<Any>>,
+    val reused: List<StoreSnapshot?>,
+    val ended: List<LongArray>,
+)
+
+/**
+ * [readConsistent] over every plan's states at once, reading only the plans
+ * with no [reusable] capture — a reusable one is validated instead: its
+ * stamped counters unmoved and no bracket open — under the one validation
+ * window, so the reused captures and the values read form one cut.
+ */
+private fun readCutReusing(
+    plans: List<CapturePlan>,
+    reusable: List<StoreSnapshot?>,
+): ReusingCut {
+    while (true) {
+        tryReadCutReusing(plans, reusable)?.let { return it }
+        threadYield()
+    }
+}
+
+private fun tryReadCutReusing(
+    plans: List<CapturePlan>,
+    reusable: List<StoreSnapshot?>,
+): ReusingCut? {
+    val begun = plans.map { LongArray(it.states.size) }
+    return when (val moved = noteBegun(plans, reusable, begun)) {
+        BRACKET_OPEN -> null
+        // That plan's stamp has moved: read it this time round.
+        in plans.indices -> tryReadCutReusing(plans, reusable.mapIndexed { k, r -> r.takeIf { k != moved } })
+        else -> {
+            val values =
+                plans.mapIndexed { i, plan -> if (reusable[i] != null) emptyList() else plan.states.map(::capturedRaw) }
+            val wroteMeanwhile =
+                plans.indices.any { i ->
+                    plans[i].states.indices.any { j -> plans[i].states[j].writesBegun.value != begun[i][j] }
+                }
+            if (wroteMeanwhile) null else ReusingCut(values, reusable, begun)
+        }
+    }
+}
+
+/**
+ * Note every state's `writesBegun` into [begun]: [BRACKET_OPEN] when a write
+ * is in flight, the index of the first plan whose reusable stamp has moved,
+ * else [CLEAN].
+ */
+private fun noteBegun(
+    plans: List<CapturePlan>,
+    reusable: List<StoreSnapshot?>,
+    begun: List<LongArray>,
+): Int {
+    var result = CLEAN
+    outer@ for ((i, plan) in plans.withIndex()) {
+        val stamp = (reusable[i]?.content as? CapturedContent)?.stamp
+        for ((j, state) in plan.states.withIndex()) {
+            begun[i][j] = state.writesBegun.value
+            result =
+                when {
+                    begun[i][j] != state.writesEnded.value -> BRACKET_OPEN
+                    stamp != null && stamp.ended[j] != begun[i][j] -> i
+                    else -> CLEAN
+                }
+            if (result != CLEAN) break@outer
+        }
+    }
+    return result
+}
+
+private const val BRACKET_OPEN = -2
+private const val CLEAN = -1
 
 /** How many listings and cuts a capture tries before it holds entry creation back. */
 private const val HOLD_BACK_AFTER = 4

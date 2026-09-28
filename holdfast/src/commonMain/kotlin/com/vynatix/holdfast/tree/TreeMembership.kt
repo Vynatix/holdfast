@@ -13,6 +13,7 @@ import com.vynatix.holdfast.internalDetach
 import com.vynatix.holdfast.platform.currentMintLocal
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.setMintLocal
+import com.vynatix.holdfast.settling
 import kotlin.reflect.KClass
 
 // Keyed-store liveness is a factory bracket (issue #21 decision U2): a keyed
@@ -157,7 +158,19 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.getOrCreateKeyed(
     }
 }
 
+/**
+ * Construct inside a settle scope (joining the entry open on this thread, else
+ * one of its own): a recompute the attach queues — the root's `value`
+ * following the new store — runs once this returns, after the store is
+ * promoted and visible, never inside the factory bracket.
+ */
 private fun <K : Any, S : Store<S>> KeyedBranch<K, S>.construct(
+    entry: LeafEntry,
+    key: K,
+    factory: (K) -> S,
+): S = settling { constructUnsettled(entry, key, factory) }
+
+private fun <K : Any, S : Store<S>> KeyedBranch<K, S>.constructUnsettled(
     entry: LeafEntry,
     key: K,
     factory: (K) -> S,

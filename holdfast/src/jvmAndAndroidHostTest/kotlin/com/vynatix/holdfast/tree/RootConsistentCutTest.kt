@@ -1,0 +1,176 @@
+@file:OptIn(ExperimentalStoreApi::class, StoreInternalApi::class)
+
+package com.vynatix.holdfast.tree
+
+import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.atomic
+import com.vynatix.holdfast.completesWithin
+import com.vynatix.holdfast.daemon
+import com.vynatix.holdfast.effect
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+private class RcLeftStore : Store<RcLeftStore>() {
+    val x by state { 0 }
+    val x2 by state { 0 }
+}
+
+private class RcRightStore : Store<RcRightStore>() {
+    val y by state { 0 }
+}
+
+private class RcKeyedStore(
+    id: Int,
+    root: RcRoot,
+) : Store<RcKeyedStore>(root.keyed.at(id)) {
+    val n by state { 0 }
+}
+
+private class RcRoot : Root("rc") {
+    val left = RcLeftStore()
+    val right = RcRightStore()
+    val pair by branch(left, right)
+    val keyed by keyed<Int, RcKeyedStore>()
+}
+
+private const val FRAMES = 3_000
+private const val MIN_READS = 1_000
+
+/**
+ * T4 (never a mix) for the tree value: every tree `value` publishes, and every
+ * read of it, during another thread's two-store frames holds both stores as
+ * they were before some frame or after it; overlapping frames settle at most
+ * once per frame; a leaf's action completes while a `value` observer is
+ * parked; and a capture racing a keyed dispose never throws.
+ */
+class RootConsistentCutTest {
+    @Test
+    fun valuePublishesAndReadsAreNeverAMixDuringAtomicFrames() =
+        completesWithin(120, "value reads during atomic frames") {
+            val root = RcRoot()
+            val mixes = ConcurrentLinkedQueue<String>()
+            root.value effect
+                { if (this[root.left.x] != this[root.right.y]) mixes += "published ${this[root.left.x]}/${this[root.right.y]}" }
+            val done = AtomicBoolean(false)
+            val reads = AtomicInteger()
+            val start = CyclicBarrier(3)
+            val writer =
+                daemon("writer") {
+                    start.await()
+                    repeat(FRAMES) { k ->
+                        atomic(root.left, root.right) {
+                            root.left { x mutate k + 1 }
+                            root.right { y mutate k + 1 }
+                        }.getOrThrow()
+                    }
+                    done.set(true)
+                }
+            val reader =
+                daemon("reader") {
+                    start.await()
+                    while (!done.get()) {
+                        val tree = root.value.value
+                        if (tree[root.left.x] != tree[root.right.y]) mixes += "read ${tree[root.left.x]}/${tree[root.right.y]}"
+                        reads.incrementAndGet()
+                    }
+                }
+            start.await()
+            writer.join()
+            reader.join()
+            assertEquals(emptyList<String>(), mixes.toList(), "a frame is seen whole or not at all")
+            assertTrue(reads.get() >= MIN_READS, "reader progress ${reads.get()}")
+            assertEquals(FRAMES, root.value.value[root.left.x], "the final tree reflects every commit")
+            assertTrue(root.internalSettleCount <= FRAMES + 1L, "at most one settle per frame: ${root.internalSettleCount}")
+        }
+
+    @Test
+    fun aSingleStoreMultiStateCommitIsNeverTorn() =
+        completesWithin(120, "value during two-state commits") {
+            val root = RcRoot()
+            val torn = ConcurrentLinkedQueue<String>()
+            root.value effect { if (this[root.left.x] != this[root.left.x2]) torn += "${this[root.left.x]}/${this[root.left.x2]}" }
+            val done = AtomicBoolean(false)
+            val reader =
+                daemon("reader") {
+                    while (!done.get()) {
+                        val tree = root.value.value
+                        if (tree[root.left.x] != tree[root.left.x2]) torn += "read ${tree[root.left.x]}/${tree[root.left.x2]}"
+                    }
+                }
+            repeat(FRAMES) { k ->
+                root.left action {
+                    x mutate k + 1
+                    x2 mutate k + 1
+                }
+            }
+            done.set(true)
+            reader.join()
+            assertEquals(emptyList<String>(), torn.toList())
+        }
+
+    @Test
+    fun aLeafActionOnAnotherThreadCompletesWhileAValueObserverIsParked() =
+        completesWithin(30, "a leaf action beside a parked value observer") {
+            val root = RcRoot()
+            val parked = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val subscription: Disposable =
+                root.value effect {
+                    if (this[root.left.x] == 1) {
+                        parked.countDown()
+                        release.await()
+                    }
+                }
+            val trigger = daemon("trigger") { root.left action { x mutate 1 } }
+            assertTrue(parked.await(10, TimeUnit.SECONDS))
+            // The settle holds the host lock and no leaf lock: a leaf action on another thread runs.
+            val other = daemon("other") { root.right action { y mutate 7 } }
+            other.join(10_000)
+            assertTrue(!other.isAlive, "the leaf action completed while the observer was parked")
+            assertEquals(7, root.right.y.value)
+            release.countDown()
+            trigger.join()
+            subscription.dispose()
+            assertEquals(7, root.internalSettleNow()[root.right.y])
+        }
+
+    @Test
+    fun aCaptureRacingAKeyedDisposeNeverThrows() =
+        completesWithin(120, "value against keyed churn") {
+            val root = RcRoot()
+            root.value.value
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            val done = AtomicBoolean(false)
+            val reader =
+                daemon("reader") {
+                    while (!done.get()) {
+                        runCatching { root.value.value }.onFailure { failures += it }
+                        runCatching { root.internalSettleNow() }.onFailure { failures += it }
+                    }
+                }
+            repeat(500) { i ->
+                val k = root.keyed.create(i) { RcKeyedStore(it, root) }
+                k action { n mutate i }
+                k.dispose()
+            }
+            done.set(true)
+            reader.join()
+            assertEquals(emptyList<Throwable>(), failures.toList())
+            assertEquals(0, root.entries(root.keyed).size)
+            assertEquals(
+                0,
+                root.value.value[root.keyed]!!
+                    .children.size,
+            )
+        }
+}

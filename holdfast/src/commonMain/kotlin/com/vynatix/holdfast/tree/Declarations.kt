@@ -8,6 +8,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.internalAttachIfAbsent
 import com.vynatix.holdfast.internalDetach
+import com.vynatix.holdfast.settling
 import kotlin.properties.PropertyDelegateProvider
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KClass
@@ -93,7 +94,9 @@ class BranchDeclaration internal constructor(
         } finally {
             if (!registered) for (store in stores) store.internalDetach(treeMembershipKey)
         }
-        for (leaf in branch.leaves) root.onLeafAttached(leaf)
+        // One settle for the whole listing: a `value` following the tree
+        // recomputes once after every leaf is told, not once per leaf.
+        settling { for (leaf in branch.leaves) root.onLeafAttached(leaf) }
         return branch
     }
 

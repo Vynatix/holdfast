@@ -8,6 +8,7 @@ import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.effect
+import androidx.compose.runtime.State as ComposeState
 
 /**
  * Bridges a store [State] into Compose's snapshot system as a `androidx.compose.runtime.State`,
@@ -31,9 +32,18 @@ import com.vynatix.holdfast.effect
  * ```
  */
 @Composable
-fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T> =
-    produceState(initialValue = state.value, state) {
-        val disposable = state effect { value = this }
+fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): ComposeState<T> = state.collectAsState()
+
+/**
+ * [collectAsState] for a [State] read without its store at hand: any
+ * observable state — a declared one, a `derived`, a `derivedState`/`merged`,
+ * or a tree root's `value` (`App.value.collectAsState()`, which recomposes
+ * once per settle of the tree). The subscription's lifecycle is the same.
+ */
+@Composable
+fun <T : Any> State<T>.collectAsState(): ComposeState<T> =
+    produceState(initialValue = value, this) {
+        val disposable = this@collectAsState effect { value = this }
         awaitDispose { disposable.dispose() }
     }
 

@@ -126,6 +126,7 @@ internal fun <V : Store<V>> followSources(
  * A change that finds the host disposed releases every subscription and
  * edge, so a disposed host does not stay referenced by another store's states.
  */
+@Suppress("TooManyFunctions") // One lifecycle: subscribe, arm, follow, queue, settle, dispose.
 internal class SourceFollower<V : Store<V>>(
     private val host: V,
 ) : Disposable {
@@ -224,6 +225,11 @@ internal class SourceFollower<V : Store<V>>(
         if (followed.queuedOn.none { it === store }) recompute?.let { store.withdrawPostCommit(it) }
         onStoreChanged(host)
         return true
+    }
+
+    /** Run the recompute now (see `DerivedStateNode.settleNow`); nothing before [arm] or after [dispose]. */
+    fun settleNow() {
+        if (!released.value) recompute?.invoke()
     }
 
     /** [store], followed as a whole, changed ([StoreEdges.changed]). */
