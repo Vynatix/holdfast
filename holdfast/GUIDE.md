@@ -3567,26 +3567,39 @@ Where the overlay stands decides both directions:
 
 ## Appendix A — One-page cheatsheet
 
+Lines marked `exp.` are `@ExperimentalStoreApi` (§16 has the detail); the rest
+is the stable surface.
+
 ```kotlin
-class V : Store<V>() {
+class V : Store<V>(), SchemaVersioned {                                      // SchemaVersioned: exp.
     val x by state { 0 }
     val s by state(MyTransformer()) { "" }
-    val token by state(EncryptingTransformer(cipher)) { "" }   // 1.1
-    val items by state(distinct = true) { emptyList<Item>() }  // 1.1 dedup
+    val items by state(distinct = true) { emptyList<Item>() }                // dedup: equal values never fire
+    val token by state(EncryptingTransformer(cipher), tags = setOf(StateTag.Secret)) { "" }   // exp.: withheld from every read-out
+    val pinned by state(codec = PinsCodec, tags = setOf(StateTag.UserAuthored)) { emptySet<String>() } // exp.: what the user wrote
+    val feed by state(codec = ItemsCodec, tags = setOf(StateTag.Remote)) { emptyList<Item>() }         // exp.: synced data
+    val drafts by keyedState<String, String>(codec = StringCodec, keyCodec = StringCodec) { "" }        // exp.: one state per key
+
+    override val schemaVersion: Int get() = 2                                // exp.: an older snapshot is migrated first
+    override fun migrate(from: Int, view: EncodedSnapshotView) { if (from < 2) view.rename("pins", "pinned") }
 }
 val v = V()
 
 // Subscribe.
 val sub = v { x effect { println("x=$this") } }       // initial: x=0
 
-// Atomic single-holdfast mutation; body return flows into Success.
-val r = v action { x update { it + 1 }; "$x.value done" }  // 1.1: update + <R>
+// Atomic single-store mutation; body return flows into Success.
+val r = v action { x update { it + 1 }; "${x.value} done" }
 
-// Failed atomic mutation.
-v action { x mutate 99; error("nope") }                // (no fire)
+// Failed atomic mutation: rolled back whole, observers never fire.
+v action { x mutate 99; error("nope") }.onError { … }
 
 // Bare mutation — same outcome as a one-mutate action.
 v { x mutate 2 }                                       // → x=2
+
+// Keyed entries (exp.): created on first get, evicted like a write.
+v action { drafts["a"] mutate "hello"; drafts.evict("b") }
+v.drafts["a"].value; v.drafts.entries.keys; "a" in v.drafts
 
 // Cross-cutting concern. LAST argument is outermost middleware.
 v.middlewares(ValidationMiddleware { … }, LoggingMiddleware("v"))
@@ -3595,25 +3608,48 @@ v.middlewares(ValidationMiddleware { … }, LoggingMiddleware("v"))
 v { s bridge KvBridge(kv, "s", StringCodec) }
 v { s bridge null }
 
-// Inbound-only push (1.1).
+// Inbound-only push.
 val sub2 = v { s observeFrom externalObservable }
 
-// Cross-holdfast atomic (1.1).
+// Cross-store atomic: every participant applies before any fans out.
 atomic(accountA, accountB) {
-    accountA.action { balance update { it - cents } }
-    accountB.action { balance update { it + cents } }
+    accountA { balance update { it - cents } }
+    accountB { balance update { it + cents } }
 }
 
-// Snapshot / restore (1.1).
+// Derived states (exp.): read-only, recomputed once per outermost entry.
+val total by v.derivedState(v.items) { items.value.sumOf { it.amount } }
+val shown by v.merged(v.pinned, v.feed) { pins, feed -> feed.filter { it.id in pins } }
+val (count, d) = v.derived(v.items) { items.value.size }   // stable: recomputes per source commit
+
+// Snapshot / restore: raw values, undo on the same instance.
 val snap = v.snapshot()
 v.restore(snap)
 
-// Push-recomputed derived state (1.1).
-val (total, d) = v.derived(v.items) { items.value.sumOf { it.amount } }
+// Persist (exp.): codecs, scopes, policies. Secret is written as null, Remote left out.
+val text = v.snapshot(SnapshotScope.UserAuthored).encode()
+val report = v.restore(StoreSnapshot.decode(text), RestorePolicy.IgnoreUnknown).getOrThrow()
+v.restore(snap, RestorePolicy.Strict, sterile = true)  // Remote states back to their initializers
 
-// Suspending body (1.1, holdfast-coroutines).
+// Reset (exp.): every declared state and live entry back to its initializer, one action.
+v.reset()
+
+// Time as an input (exp.): store code reads v.clock.now(); a test binds a fixed clock.
+v.bindClock(fixedClock); v.bindClock(null)
+
+// Suspending bodies (holdfast-coroutines).
 val r2 = v.suspendAction { status mutate Loading; val data = api.fetch(); status mutate Loaded; data }
+suspendAtomic(accountA, accountB) { accountA { … }; accountB { … } }
+
+// Hydration (exp., holdfast-coroutines): seed, fetch, adopt into Remote states; persist UserAuthored ones.
+val hydration = v.hydrator {
+    base { restore(bundled) }
+    overlay(kv, "v.overlay")                            // UserAuthored states, written after each commit
+    refresh { api.fetchFeed() } adopt { fetched -> feed mutate fetched }
+}
+hydration.hydrate(scope); hydration.awaitSettled()    // Detached → Seeded → Hydrated
+hydration.invalidate()                                // back to Detached
 
 // Cleanup.
-sub.dispose(); sub2.dispose(); d.dispose()
+sub.dispose(); sub2.dispose(); total.dispose(); shown.dispose(); d.dispose(); v.dispose()
 ```
