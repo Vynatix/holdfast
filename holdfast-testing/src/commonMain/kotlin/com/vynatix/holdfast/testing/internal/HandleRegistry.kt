@@ -48,6 +48,8 @@ internal class HandleRegistry(
         return winner
     }
 
+    private fun entryOf(store: Store<*>): Entry<*>? = entries.firstOrNull { it.store === store }
+
     private fun <V : Store<V>> existing(store: V): StoreHandle<V>? =
         synchronized(this) {
             @Suppress("UNCHECKED_CAST")
@@ -55,7 +57,7 @@ internal class HandleRegistry(
         }
 
     /** The handle of [store], or `null` when it was never tracked. */
-    fun find(store: Store<*>): StoreHandle<*>? = synchronized(this) { entries.firstOrNull { it.store === store }?.handle }
+    fun find(store: Store<*>): StoreHandle<*>? = synchronized(this) { entryOf(store)?.handle }
 
     /**
      * Snapshot of every handle this registry currently owns. Stable to iterate

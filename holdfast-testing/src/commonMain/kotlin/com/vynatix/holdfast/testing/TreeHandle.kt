@@ -67,7 +67,7 @@ class TreeHandle internal constructor(
      * under a branch, keyed branch or the root — a keyed store disposed
      * since still listed under its branch.
      */
-    fun events(node: StoreNode): List<TreeEvent> = timeline.filter { it.node === node || it.node.isUnder(node) }
+    fun events(node: StoreNode): List<TreeEvent> = timeline.filter { it.node.within(node) }
 
     /**
      * The [StoreHandle] of [store], tracked with [captureMode] when it joined
@@ -115,3 +115,6 @@ class TreeHandle internal constructor(
 
     override fun toString(): String = "TreeHandle(${root.name})"
 }
+
+/** Whether this node is [node] or lies under it. */
+private fun StoreNode.within(node: StoreNode): Boolean = this === node || isUnder(node)
