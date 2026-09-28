@@ -27,10 +27,13 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Hydration against transactions of other threads (issue #20, R8), every case
  * watchdogged: a detach committed by a holder the gate's serializer does not
- * keep out is not overtaken by a gate decision that read the phase first — an
- * adoption, a failure record or a retry — `stageInvalidate()` stages only into
- * a transaction this thread writes into, and a stranded refresh releases its
- * waiters only once the gate has released the store.
+ * keep out — a blocking action that read it as not installed yet, holding the
+ * transaction lock alone — is not overtaken by a gate decision (an adoption,
+ * a failure record or a retry): the gate waits that holder out before it
+ * reads the phase, and its transactions read the phase again under the
+ * transaction lock. `stageInvalidate()` stages only into a transaction this
+ * thread writes into, and a stranded refresh releases its waiters only once
+ * the gate has released the store.
  */
 class HydrationCrossThreadTest {
     @Test fun aDetachCommittedUnderTheTransactionLockAloneIsNotOvertakenByTheAdoption() =
@@ -58,8 +61,8 @@ class HydrationCrossThreadTest {
                 entered.await()
                 store.asyncSerializer = serializer
                 remote.release.complete(listOf("late"))
-                // The refresh's settle takes the serializer, past its check of
-                // the phase, and waits for the transaction lock the holder has.
+                // The refresh's settle takes the serializer and, before its
+                // check of the phase, waits out the holder of the transaction lock.
                 awaitLocked(serializer)
                 Thread.sleep(SETTLE_MS)
                 release.countDown()
@@ -80,9 +83,9 @@ class HydrationCrossThreadTest {
                 runBlocking { store.hydration.hydrate(scope) }
                 val holder = LockOnlyDetach(store)
                 remote.release.completeExceptionally(IllegalStateException("down"))
-                // The refresh's settle takes the serializer, past its check of
-                // the phase, and its HydrationFailure record waits for the
-                // transaction lock the holder has.
+                // The refresh's settle takes the serializer and, before its
+                // check of the phase (and its HydrationFailure record), waits
+                // out the holder of the transaction lock.
                 holder.finishOnceTheGateWaits()
                 runBlocking { assertEquals(Hydration.Detached, store.hydration.awaitSettled(), "not Failed") }
                 assertEquals(listOf("seed"), store.items.value)
@@ -108,18 +111,17 @@ class HydrationCrossThreadTest {
                 assertEquals(1, store.baseRuns)
                 assertEquals(1, remote.fetches)
                 val holder = LockOnlyDetach(store)
-                // On Default: the gate's transaction blocks on the transaction lock.
+                // The gate takes the serializer and waits the holder out before
+                // it reads the phase: it decides on the detached store.
                 val retry = scope.launch { store.hydration.hydrate(scope) }
                 holder.finishOnceTheGateWaits()
                 runBlocking { retry.join() }
-                assertEquals(Hydration.Detached, store.hydration.current, "the retry decided nothing")
-                assertEquals(1, store.baseRuns)
-                assertEquals(1, remote.fetches, "no retry fetch")
-                runBlocking {
-                    store.hydration.hydrate(scope)
-                    assertEquals(Hydration.Hydrated, store.hydration.awaitSettled())
-                }
-                assertEquals(2, store.baseRuns, "the detach stood, so the next hydrate seeded")
+                // A retry refreshes only; this call ran base again: the detach
+                // stood, and the call seeded the detached store afresh rather
+                // than retrying the failed refresh over it.
+                assertEquals(2, store.baseRuns, "the detach stood, so the call seeded")
+                runBlocking { assertEquals(Hydration.Hydrated, store.hydration.awaitSettled()) }
+                assertEquals(2, remote.fetches, "one fetch, the new seed's")
             } finally {
                 scope.cancel()
             }
@@ -217,8 +219,8 @@ class HydrationCrossThreadTest {
         }
 
         /**
-         * Once a gate holds the serializer, give it [SETTLE_MS] to reach the
-         * transaction lock, then commit the detach.
+         * Once a gate holds the serializer, give it [SETTLE_MS] to wait for
+         * the transaction lock, then commit the detach.
          */
         fun finishOnceTheGateWaits() {
             awaitLocked(serializer)
@@ -229,7 +231,7 @@ class HydrationCrossThreadTest {
     }
 
     private companion object {
-        /** How long the settle gets to reach the transaction lock once it holds the serializer. */
+        /** How long the gate gets to wait for the transaction lock once it holds the serializer. */
         const val SETTLE_MS = 100L
 
         /** Wait until [serializer]'s mutex is held. */

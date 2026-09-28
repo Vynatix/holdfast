@@ -23,10 +23,13 @@ internal sealed interface TopLevelAttempt {
     /**
      * The store's serializer or transaction lock is held but no transaction
      * is installed yet (or any longer), e.g. a coroutine that was just handed
-     * the serializer and has not resumed. The holder still drains after it
-     * releases — including another [Store.tryTopLevelAction] that took the
-     * serializer or lock and then backed out busy, which drains unless the
-     * store has a holder again by then.
+     * the serializer and has not resumed. It also answers when the serializer
+     * was installed after the attempt read none (`SerializerInstallWindow.kt`),
+     * even if nobody holds it any more; the attempt drains then too. The
+     * holder still drains after it releases — including another
+     * [Store.tryTopLevelAction] that took the serializer or lock and then
+     * backed out busy, which drains unless the store has a holder again by
+     * then.
      */
     data object BusyNoTxn : TopLevelAttempt
 

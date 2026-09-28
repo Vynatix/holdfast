@@ -203,12 +203,14 @@ private suspend fun <R> runSuspendAtomic(
         )
 
     // Stores this frame owes a post-commit drain: those whose root it opened
-    // top-level, and one whose mutex acquire was cancelled after kotlinx may
-    // have handed it the mutex. Drained only once the frame has fully unwound:
-    // a drain at a participant's own unwind step ran derived recomputes (and
-    // their observers) while EARLIER participants still had this frame's roots
-    // installed and their mutexes held, so an observer's write to one of those
-    // stores was staged into a root nobody would commit, or hit a finished one.
+    // top-level, one whose mutex acquire was cancelled after kotlinx may have
+    // handed it the mutex, and one whose wait-out (awaitLockOnlyHolders) was
+    // cancelled while it held the mutex. Drained only once the frame has fully
+    // unwound: a drain at a participant's own unwind step ran derived
+    // recomputes (and their observers) while EARLIER participants still had
+    // this frame's roots installed and their mutexes held, so an observer's
+    // write to one of those stores was staged into a root nobody would
+    // commit, or hit a finished one.
     val drainOnExit = mutableListOf<Store<*>>()
     return try {
         acquireAndRun(
@@ -238,16 +240,18 @@ private suspend fun <R> runSuspendAtomic(
 /**
  * Recursive lock acquisition mirroring sync [com.vynatix.holdfast.atomic]'s
  * `acquireAndRun`. Each step either:
- *  - acquires the next newly-held store's mutex via `mutex.lock(owner)` and
- *    opens a fresh frame root, OR
+ *  - acquires the next newly-held store's mutex via `mutex.lock(owner)`,
+ *    waits out a blocking holder that read it as not installed yet
+ *    ([takeParticipant]) and opens a fresh frame root, OR
  *  - reuses a parent frame's already-held store by opening a SAVEPOINT of the
  *    outer frame's root (no mutex acquire) — the nested frame's commit merges
  *    into the outer, its rollback discards only nested writes.
  *
  * On unwind, newly-acquired locks release in reverse order. Deferred
  * post-commit work (derived recomputes) is not drained here: each store whose
- * root this frame opened top-level, or whose mutex acquire was cancelled after
- * kotlinx may have handed it the mutex, is added to [drainOnExit], and
+ * root this frame opened top-level, whose mutex acquire was cancelled after
+ * kotlinx may have handed it the mutex, or whose wait-out was cancelled while
+ * it held the mutex ([takeParticipant]), is added to [drainOnExit], and
  * [suspendAtomic] drains those once the whole frame has unwound.
  */
 @OptIn(ExperimentalUuidApi::class)
@@ -273,25 +277,7 @@ private suspend fun <R> acquireAndRun(
     val isNewlyHeld = v in newlyHeldSet
 
     return if (isNewlyHeld) {
-        val serializer = ensureSerializer(v)
-        // Mutex.lock(owner) — non-reentrant by kotlinx Mutex contract; the
-        // newlyHeld filter above guarantees we never re-acquire a mutex we
-        // already hold via this frame's owner key.
-        try {
-            serializer.mutex.lock(ownerKey)
-        } catch (ce: CancellationException) {
-            // Mutex.unlock hands the permit straight to the first waiter. If this
-            // waiter is cancelled before it resumes, kotlinx's prompt-cancellation
-            // handler has already released the permit again by the time lock()
-            // throws — but while we held it, a recompute that found the store busy
-            // may have been handed to us (Store.tryTopLevelAction), so we owe the
-            // store a drain like any releasing holder. Not here, though: earlier
-            // participants still have this frame's roots installed, and a drained
-            // recompute's observers could write into them. Harmless when we were
-            // never handed the permit: every queued task is a non-blocking attempt.
-            drainOnExit += v
-            throw ce
-        }
+        val serializer = takeParticipant(v, ownerKey, drainOnExit)
         try {
             frame.heldVaults += v
             val priorActive = v.activeTransaction
@@ -361,6 +347,47 @@ private suspend fun <R> acquireAndRun(
             v.internalSetActiveTransaction(outerRoot)
         }
     }
+}
+
+/**
+ * Take [v]'s serializer for this frame — `Mutex.lock(owner)`, non-reentrant by
+ * the kotlinx Mutex contract; the newlyHeld filter guarantees we never
+ * re-acquire a mutex we already hold via this frame's owner key — then wait
+ * out a blocking holder that read it as not installed yet
+ * ([awaitLockOnlyHolders]), before the caller installs a root. On
+ * cancellation, releases what it took and owes [v] a drain ([drainOnExit]).
+ */
+private suspend fun takeParticipant(
+    v: Store<*>,
+    ownerKey: Any,
+    drainOnExit: MutableList<Store<*>>,
+): MutexSerializer {
+    val serializer = ensureSerializer(v)
+    try {
+        serializer.mutex.lock(ownerKey)
+    } catch (ce: CancellationException) {
+        // Mutex.unlock hands the permit straight to the first waiter. If this
+        // waiter is cancelled before it resumes, kotlinx's prompt-cancellation
+        // handler has already released the permit again by the time lock()
+        // throws — but while we held it, a recompute that found the store busy
+        // may have been handed to us (Store.tryTopLevelAction), so we owe the
+        // store a drain like any releasing holder. Not here, though: earlier
+        // participants still have this frame's roots installed, and a drained
+        // recompute's observers could write into them. Harmless when we were
+        // never handed the permit: every queued task is a non-blocking attempt.
+        drainOnExit += v
+        throw ce
+    }
+    try {
+        v.awaitLockOnlyHolders()
+    } catch (ce: CancellationException) {
+        // We held the serializer while we waited: release it and owe the
+        // store a drain, for the same reason as above.
+        runCatching { serializer.mutex.unlock(ownerKey) }
+        drainOnExit += v
+        throw ce
+    }
+    return serializer
 }
 
 /**

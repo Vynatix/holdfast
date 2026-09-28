@@ -200,7 +200,9 @@ and `com.vynatix.holdfast.crypto`:
   `FrameInteropException` instead of deadlocking.
 - `suspendAction` and blocking `action` are mutually exclusive on the same
   store via a coroutine `Mutex` installed lazily through an internal
-  `AsyncSerializer` hook.
+  `AsyncSerializer` hook — also while it is being installed: the first
+  suspending entry waits out, without holding a thread, a blocking `action`
+  or `atomic` that took the store before it existed.
 - `derived` recomputes never wait on the derived's store: one recompute per
   source commit for same-store sources, and if that store is busy the
   recompute is handed to its current holder and runs when that holder

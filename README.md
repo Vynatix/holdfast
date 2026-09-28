@@ -182,7 +182,9 @@ for when each lands.
   state (including a second
   `suspendAction` queued behind the first), nested `action` on a
   coroutine-touched store, blocking actions from two threads on a
-  coroutine-touched store, and blocking `atomic()` racing a `suspendAction` —
+  coroutine-touched store, blocking `atomic()` racing a `suspendAction`, and
+  a store's first `suspendAction` or `suspendAtomic` racing a blocking
+  `action` or `atomic` that took the store before its mutex was installed —
   are fixed.
 
 - **Hydration (experimental) cannot see every wait for itself.** `hydrate()`
@@ -196,10 +198,8 @@ for when each lands.
   `action`/`atomic` body runs on another thread
   (`runBlocking(Dispatchers.Default) { hydration.hydrate() }`, or a
   `launch(Dispatchers.X)` inside the body's `runBlocking`): on the same store
-  these wait for the body forever — politely behind a store the body holds,
-  but spinning when the body took the store before its first coroutine
-  entry installed the store's mutex — and on another store the seed commits
-  outside the enclosing transaction. *Workaround:* never wait for a
+  these wait for the body forever — politely, holding no thread — and on
+  another store the seed commits outside the enclosing transaction. *Workaround:* never wait for a
   `hydrate()` or `awaitSettled()` from inside a transaction; launch it and
   return, or await it before opening the transaction. Two narrower limits:
   `adopt { }`'s `Remote`-only policy covers the hydrating store — a write to

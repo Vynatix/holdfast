@@ -1620,7 +1620,11 @@ class OverlayException : IllegalStateException       // what the overlay reports
 
 `suspendAction` allows the body to suspend (`delay`, `await`, `withContext`).
 Mutually exclusive with blocking `Store.action` on the same store via an
-internal coroutine `Mutex` installed lazily. Cancellation of the body
+internal coroutine `Mutex` installed lazily — also while it is being
+installed: the first `suspendAction` or `suspendAtomic` on a store waits,
+suspending and holding no thread, for a blocking `action` or `atomic` that
+took the store before the `Mutex` existed, and a blocking one that finds it
+installed once it has the store waits for it. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
 cancels mid-commit, and the call then returns the commit's
@@ -3257,7 +3261,9 @@ What moves the phase, and the transaction middleware sees it in:
   failed hydration refetch once — the in-flight mark commits in the very
   transaction that decides to fetch. The gate takes the store politely: when it is busy, it
   backs off — a yield, then delays doubling from 1 ms to 32 ms, in coroutine
-  time — instead of queueing on the store's mutex, so it never spins, never
+  time — instead of queueing on the store's mutex (and waits the same way,
+  before deciding, for a blocking action that took the store before the
+  store's mutex was installed), so it never spins, never
   holds up the store's other callers, and never reads the store's clock. It
   drains the store's post-commit queue once it releases the store, like every
   holder of the store, and the derived states a decision changes settle once

@@ -339,7 +339,12 @@ abstract class Store<Self : Store<Self>> {
         if (disposedFlag.value) error("store disposed")
     }
 
-    private val transactionLock = StoreLock()
+    /**
+     * Held by every transaction this store runs under it, from its opening to
+     * the end of its commit fanout. `internal` for the serializer's install
+     * window (`SerializerInstallWindow.kt`).
+     */
+    internal val transactionLock = StoreLock()
     private val middlewareLock = StoreLock()
 
     /**
@@ -501,10 +506,11 @@ abstract class Store<Self : Store<Self>> {
 
     /**
      * Hook for an external mutual-exclusion mechanism that needs to coordinate
-     * with this store's blocking [action]. Set at most once, by the
-     * `:holdfast-coroutines` `suspendAction` extension when it first wraps a
-     * suspending body — the serializer's blocking acquire/release brackets every
-     * blocking [action] call so that concurrent suspending callers see a serial
+     * with this store's blocking [action]. Set once, by the first
+     * `:holdfast-coroutines` suspending entry on the store (`suspendAction`,
+     * `suspendAtomic` or a hydration decision). Its blocking acquire/release
+     * brackets every blocking top-level [action], `atomic` and
+     * [tryTopLevelAction] so that concurrent suspending callers see a serial
      * stream of actions.
      *
      * Marked `@StoreInternalApi` because it's an extension point for companion
@@ -515,6 +521,14 @@ abstract class Store<Self : Store<Self>> {
      * at once: each caller holds the serializer exclusively between its own
      * [blockingAcquire] and [blockingRelease], and [blockingRelease] is always
      * called on the thread that acquired.
+     *
+     * Installing one while blocking callers run is safe only with its install
+     * window closed on both sides (`SerializerInstallWindow.kt`): a blocking
+     * top-level caller that read no serializer re-reads it once it holds
+     * `transactionLock`, and takes it first if one appeared; and a holder of
+     * the serializer that installs a transaction without `transactionLock` —
+     * as a suspending caller does — first waits until that lock is free
+     * ([internalTransactionLockFree]), outwaiting a caller that read none.
      */
     interface AsyncSerializer {
         fun blockingAcquire()
@@ -547,8 +561,9 @@ abstract class Store<Self : Store<Self>> {
      * Set while a `suspendAction` body is in flight. While non-null, `mutate`
      * additionally accepts callers on threads that aren't the txn's owner thread,
      * because the suspending body may resume on different threads via coroutine
-     * dispatch. The [AsyncSerializer] guarantees no other action runs concurrently,
-     * so the relaxed ownership check is sound.
+     * dispatch. The [AsyncSerializer], whose holder waited out lock-only holders
+     * before installing (`SerializerInstallWindow.kt`), guarantees no other action
+     * runs concurrently, so the relaxed ownership check is sound.
      */
     @StoreInternalApi
     @kotlin.concurrent.Volatile
@@ -626,7 +641,10 @@ abstract class Store<Self : Store<Self>> {
      * thread's own, since a top-level action cannot nest inside it — or when
      * the serializer or `transactionLock` is taken while one is.
      * [TopLevelAttempt.BusyNoTxn] means one of those is taken with no
-     * transaction installed. Otherwise [onAcquired] runs once the store is
+     * transaction installed, or that the serializer was installed after this
+     * attempt read none (`SerializerInstallWindow.kt`), whether or not anyone
+     * holds it now; the attempt then drains unless the store is held again,
+     * and a retry takes the serializer first. Otherwise [onAcquired] runs once the store is
      * taken — before the middleware chain, so it runs even when a middleware
      * then rejects the action — and the body runs exactly like a top-level
      * [action] (middleware chain, commit, fanout; failures fold into the
@@ -644,7 +662,9 @@ abstract class Store<Self : Store<Self>> {
      * the queue after it releases: blocking [action], `atomic` for a store whose
      * root it opened (a savepoint root defers to the enclosing holder),
      * `suspendAction` in its `finally`, `suspendAtomic` for a root it opened
-     * (and for a mutex acquire cancelled after kotlinx handed it the mutex) —
+     * (and for a mutex acquire cancelled after kotlinx handed it the mutex, or
+     * a wait-out for a lock-only holder cancelled while it held the mutex —
+     * `awaitLockOnlyHolders` in `:holdfast-coroutines`) —
      * both frames once they have fully unwound, deferred to the settle of the
      * outermost entry on their thread ([internalDrainPostCommitTasksWhenSettled]),
      * which runs once that entry has released everything it took — this
@@ -690,7 +710,7 @@ abstract class Store<Self : Store<Self>> {
         if (serializer != null && !serializer.tryBlockingAcquire()) return busyAttempt()
         val underLock =
             try {
-                tryTopLevelUnderLock(id, onAcquired, body)
+                tryTopLevelUnderLock(serializer, id, onAcquired, body)
             } finally {
                 serializer?.blockingRelease()
             }
@@ -706,8 +726,12 @@ abstract class Store<Self : Store<Self>> {
         return attempt
     }
 
-    /** `null` when the lock is taken by someone else, i.e. nothing was held. */
+    /**
+     * `null` when the lock is taken by someone else, i.e. nothing was held.
+     * [held] is the serializer this attempt holds, `null` when it read none.
+     */
     private fun tryTopLevelUnderLock(
+        held: AsyncSerializer?,
         id: String,
         onAcquired: () -> Unit,
         body: Self.() -> Unit,
@@ -718,11 +742,16 @@ abstract class Store<Self : Store<Self>> {
             // after the unlocked read in tryTopLevelAction (e.g. a test harness
             // transaction held open without the lock).
             val active = _activeTransaction
-            if (active != null) {
-                TopLevelAttempt.Busy(active)
-            } else {
-                onAcquired()
-                TopLevelAttempt.Ran(runTransaction(id, body))
+            when {
+                active != null -> TopLevelAttempt.Busy(active)
+                // Read as not installed, and installed since: its holder may be
+                // a suspending one, which installs its transaction without this
+                // lock (SerializerInstallWindow.kt). Busy, like a taken serializer.
+                held == null && asyncSerializer != null -> TopLevelAttempt.BusyNoTxn
+                else -> {
+                    onAcquired()
+                    TopLevelAttempt.Ran(runTransaction(id, body))
+                }
             }
         } finally {
             transactionLock.release()
@@ -864,14 +893,10 @@ abstract class Store<Self : Store<Self>> {
         // serializer is not reentrant, so the inner acquire would wait forever
         // for the outer acquire this very call stack holds.
         val nested = ownsActiveTransaction()
-        val serializer = if (nested) null else asyncSerializer
-        serializer?.blockingAcquire()
+        // Top level: the serializer, if installed, then the lock, re-reading
+        // the serializer under the lock (SerializerInstallWindow.kt).
         val result =
-            try {
-                runBlockingActionUnderLock(body)
-            } finally {
-                serializer?.blockingRelease()
-            }
+            if (nested) runBlockingActionUnderLock(body) else holdSerialized { runTransaction(actionId(body), body) }
         // Deferred work (derived recomputes) opens FRESH top-level actions, so it
         // must run only after this call's serializer bracket is released —
         // inside it, the recompute would find the store busy and hand itself
@@ -1007,6 +1032,7 @@ abstract class Store<Self : Store<Self>> {
             "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
     }
 
+    /** A nested action's savepoint, under the lock its enclosing holder already has. */
     private fun <R> runBlockingActionUnderLock(body: Self.() -> R): TransactionResult<R> =
         transactionLock.withLock {
             // NOTE: post-commit tasks are NOT drained here. The drain runs in
@@ -1546,8 +1572,12 @@ abstract class Store<Self : Store<Self>> {
      * Internal hook for `atomic`, `:holdfast-coroutines` (`suspendAction`,
      * `suspendAtomic`) and `:holdfast-testing`'s open transactions. Sets the
      * active transaction directly without going through the blocking lock —
-     * the caller is responsible for serialization (via [asyncSerializer] or
-     * [runUnderLock]).
+     * the caller is responsible for serialization: either hold the store
+     * through [runUnderLock], or hold its [asyncSerializer] and, before
+     * installing a top-level transaction, wait until
+     * [internalTransactionLockFree] returns `true`. The serializer alone does
+     * not keep out a blocking holder that read no serializer and holds only
+     * the transaction lock (`SerializerInstallWindow.kt`).
      *
      * Installing a top-level transaction makes the caller a post-commit
      * holder: after clearing the slot and releasing, it must call

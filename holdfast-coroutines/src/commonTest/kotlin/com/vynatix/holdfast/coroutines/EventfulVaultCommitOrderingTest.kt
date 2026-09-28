@@ -130,9 +130,11 @@ class EventfulVaultCommitOrderingTest {
         runBlocking {
             val v = OrderingVault()
             val received = mutableListOf<OrderEvent>()
+            val receivedLock = object : kotlinx.atomicfu.locks.SynchronizedObject() {}
+            // The collector appends on a Default worker, the test reads here.
             val collectJob =
                 testScope.launch {
-                    v.events.collect { received += it }
+                    v.events.collect { kotlinx.atomicfu.locks.synchronized(receivedLock) { received += it } }
                 }
             delay(50)
 
@@ -148,7 +150,8 @@ class EventfulVaultCommitOrderingTest {
             delay(100)
             collectJob.cancel()
             assertEquals(0, v.n.value)
-            assertTrue(received.isEmpty(), "rollback must discard events; got $received")
+            val seen = kotlinx.atomicfu.locks.synchronized(receivedLock) { received.toList() }
+            assertTrue(seen.isEmpty(), "rollback must discard events; got $seen")
         }
 
     @Test fun losslessSuspendActionUnderSlowCollector() =
@@ -158,10 +161,15 @@ class EventfulVaultCommitOrderingTest {
             // buffer fits and verify the collector eventually receives all of them.
             val v = SmallBufferVault()
             val received = mutableListOf<Int>()
+            val receivedLock = object : kotlinx.atomicfu.locks.SynchronizedObject() {}
+
+            // The collector appends on a Default worker while the test polls here.
+            fun snapshot() = kotlinx.atomicfu.locks.synchronized(receivedLock) { received.toList() }
+
             val collectJob =
                 testScope.launch {
                     v.events.collect { event ->
-                        received += event.n
+                        kotlinx.atomicfu.locks.synchronized(receivedLock) { received += event.n }
                         // Slow collector to force back-pressure.
                         delay(20)
                     }
@@ -177,10 +185,10 @@ class EventfulVaultCommitOrderingTest {
 
             // Wait for all 5 to land (they CAN'T be dropped; SUSPEND policy).
             withTimeoutOrNull(5_000) {
-                while (received.size < 5) delay(20)
+                while (snapshot().size < 5) delay(20)
             }
             collectJob.cancel()
-            assertEquals(listOf(1, 2, 3, 4, 5), received)
+            assertEquals(listOf(1, 2, 3, 4, 5), snapshot())
         }
 
     private data class SmallEvent(

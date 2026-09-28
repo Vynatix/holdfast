@@ -42,15 +42,31 @@ internal fun settlesWithin(
  * Resume on a fresh thread: under `Dispatchers.Unconfined`, the coroutine then
  * carries on there. A resume that lands before the coroutine has suspended
  * hands `suspendCancellableCoroutine` its result synchronously, so the
- * coroutine carries on where it was: hop again until it has moved.
+ * coroutine carries on where it was. So the fresh thread resumes it only
+ * once the thread it ran on has stopped running — it suspended, and that
+ * thread went back to waiting for work (`runBlocking`'s event loop) — and a
+ * resume that still landed early hops again, until the coroutine has moved.
  */
 internal suspend fun resumeOnAnotherThread() {
     val from = Thread.currentThread()
     repeat(MAX_HOP_ATTEMPTS) {
-        suspendCancellableCoroutine<Unit> { continuation -> thread(isDaemon = true) { continuation.resume(Unit) } }
+        suspendCancellableCoroutine<Unit> { continuation ->
+            thread(isDaemon = true) {
+                awaitStopped(from)
+                continuation.resume(Unit)
+            }
+        }
         if (Thread.currentThread() !== from) return
     }
     fail("the coroutine never resumed on another thread in $MAX_HOP_ATTEMPTS hops; is it under Dispatchers.Unconfined?")
 }
 
+/** Wait, at most [STOP_WAIT_MS], until [thread] is no longer running: parked, waiting for work. */
+private fun awaitStopped(thread: Thread) {
+    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STOP_WAIT_MS)
+    while (thread.state == Thread.State.RUNNABLE && System.nanoTime() < deadline) Thread.yield()
+}
+
 private const val MAX_HOP_ATTEMPTS = 100
+
+private const val STOP_WAIT_MS = 500L

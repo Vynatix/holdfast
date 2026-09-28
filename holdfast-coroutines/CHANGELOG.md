@@ -268,6 +268,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The first `suspendAction`, `suspendAtomic` or hydration decision on a store
+  waits out a blocking action that started before it, instead of spinning
+  forever.** Installing the store's serializer raced a blocking
+  `action`/`atomic` (or a derived recompute) that had read it as not
+  installed yet and held the store under its transaction lock alone: the
+  suspending entry installed its transaction over the blocking one's, the
+  blocking body's writes leaked into it, and the blocking action's exit
+  cleared it — so the suspending body's next `mutate` opened a one-shot
+  action that spun on the serializer its own coroutine held, and a
+  `suspendAtomic` body's failed with a `FrameInteropException`. Every
+  suspending holder of the serializer now waits, suspending and holding no
+  thread, until no thread holds the store's transaction lock before it
+  installs anything (after the first install that is one uncontended probe),
+  and core's blocking `action`/`atomic` re-read the serializer under that
+  lock. The hydration gate waits the same way before it decides, where it
+  used to park its thread on the transaction lock; a `hydrate()` racing a
+  detach committed by such an action therefore now sees the detach and seeds
+  afresh, rather than deciding on the old phase and then deciding nothing.
+
 - **A blocking `action`/`atomic` on a later `suspendAtomic` participant, from
   an earlier one's commit, no longer waits forever** (issue #20, R9). The
   frame still held that participant's serializer and had not committed it

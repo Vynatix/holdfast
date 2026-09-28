@@ -134,6 +134,11 @@ class DisposedEntrypointTest {
             Entrypoint("a sealed state's value") { p, _ -> check(checkNotNull(p.sealed).value == 0) },
             // False once disposed, as its KDoc says: no transaction is active on a disposed store.
             Entrypoint("internalStagesHere (false)") { p, _ -> check(!p.internalStagesHere()) },
+            // Probes the lock only, as its KDoc says: dispose() took it and let it go,
+            // so a suspending entry that waits while racing dispose() stops waiting.
+            Entrypoint("internalTransactionLockFree (true: dispose leaves the lock free)") { p, _ ->
+                check(p.internalTransactionLockFree())
+            },
             Entrypoint("internalRefuseInitializerWrite (no initializer running)") { p, _ ->
                 p.internalRefuseInitializerWrite("probe")
             },

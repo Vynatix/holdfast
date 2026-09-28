@@ -10,6 +10,24 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **A blocking `action` or `atomic` that started before a store's serializer
+  was installed no longer shares the store with the coroutine that installed
+  it.** A blocking `action`/`atomic` — or a `derived`/`derivedState`
+  recompute — that read the store's `AsyncSerializer` as not installed yet
+  ran under the store's transaction lock alone, while the first
+  `suspendAction`/`suspendAtomic` on the store installed the serializer, took
+  it, and installed its transaction without that lock: the blocking body's
+  writes staged into the suspending transaction, the blocking action's exit
+  then cleared it, and the suspending body's next `mutate` spun forever on
+  the serializer its own coroutine held. A blocking top-level `action` or
+  `atomic` now re-reads the serializer once it holds the transaction lock
+  and, if one was installed meanwhile, takes it first; a derived recompute
+  finds the store busy and hands off to its holder, as it does for a taken
+  serializer. The other half, in `:holdfast-coroutines`, makes the suspending
+  side wait out a caller that got the lock first. New `@StoreInternalApi`
+  `Store.internalTransactionLockFree()`, the never-blocking probe a
+  serializer holder waits with.
+
 - **`suspendAction` on a store with a `derived()` state no longer deadlocks.**
   The post-commit drain ran inside `serializer.mutex.withLock`, so the derived
   recompute's blocking `action` spun on a mutex its own call stack held —

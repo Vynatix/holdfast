@@ -179,11 +179,12 @@ internal class HydrationEngine<V : Store<V>, F>(
      * refresh's number; `null` when the transaction found the phase moved.
      *
      * The transaction re-reads the phase once it holds the store's
-     * transaction lock: the gate's serializer keeps out every holder but a
-     * blocking action that read it before its first install, which holds
-     * that lock alone and may have committed a detach since the gate read
-     * the phase. Then it decides nothing — as if this call had decided, and
-     * that detach had cancelled what it launched. (A `:holdfast-testing`
+     * transaction lock, and decides nothing when it moved — as if this call
+     * had decided, and a detach had cancelled what it launched. A backstop:
+     * the gate's serializer keeps out every other holder, and the gate waited
+     * out a blocking action that read it before its first install (holding
+     * that lock alone, it could have committed a detach) before deciding
+     * (see HydrationGate.kt). (A `:holdfast-testing`
      * open transaction, which holds the active-transaction slot without the
      * lock, makes the transaction fail instead: see HydrationGate.kt.)
      *

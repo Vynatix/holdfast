@@ -391,8 +391,13 @@ class SuspendAtomicEventsTest {
             val a = EventingAccountVault(initial = 100)
             val b = EventingAccountVault(initial = 0)
             val received = mutableListOf<TransferEvent>()
-            val collectorA = scope.launch { a.events.collect { received += it } }
-            val collectorB = scope.launch { b.events.collect { received += it } }
+            val receivedLock = object : kotlinx.atomicfu.locks.SynchronizedObject() {}
+
+            // Two collectors, each on its own Default worker: guard the shared list.
+            fun record(event: TransferEvent) = kotlinx.atomicfu.locks.synchronized(receivedLock) { received += event }
+
+            val collectorA = scope.launch { a.events.collect { record(it) } }
+            val collectorB = scope.launch { b.events.collect { record(it) } }
             delay(100)
 
             val r =
@@ -411,7 +416,8 @@ class SuspendAtomicEventsTest {
             delay(100)
             collectorA.cancel()
             collectorB.cancel()
-            assertTrue(received.isEmpty(), "rollback must discard all events; got $received")
+            val seen = kotlinx.atomicfu.locks.synchronized(receivedLock) { received.toList() }
+            assertTrue(seen.isEmpty(), "rollback must discard all events; got $seen")
         }
 }
 

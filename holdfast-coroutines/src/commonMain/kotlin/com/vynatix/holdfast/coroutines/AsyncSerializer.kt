@@ -7,6 +7,7 @@ import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.fanOutApplied
+import com.vynatix.holdfast.internalTransactionLockFree
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -67,6 +68,12 @@ internal class MutexSerializer : Store.AsyncSerializer {
  * hook is installed on first use and persists for the store's lifetime — the
  * coroutine [Mutex] inside it serializes blocking action, [suspendAction], and
  * [suspendAtomic] for any store that participates in any one of them.
+ *
+ * Installing it opens a window in which a blocking action, `atomic` or derived
+ * recompute that read it as not installed yet holds the store under its
+ * transaction lock alone. So every caller that takes the serializer and then
+ * installs a transaction without that lock waits such a holder out first
+ * ([awaitLockOnlyHolders]).
  */
 private val installLock = object : SynchronizedObject() {}
 
@@ -80,6 +87,24 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
         store.asyncSerializer = fresh
         fresh
     }
+}
+
+/**
+ * Wait until no blocking holder that read this store's serializer as not
+ * installed yet still holds the store under its transaction lock alone:
+ * poll [internalTransactionLockFree] politely ([backOffUntil]), never
+ * holding a thread. The serializer's install-window rule for its suspending
+ * side (core `SerializerInstallWindow.kt`, which proves it): a caller that
+ * holds the serializer calls this before it installs a transaction, which it
+ * does without the lock, and drains the store's post-commit queue after it
+ * has released the serializer, on every exit. Returns after one uncontended
+ * probe unless such a holder — or another brief holder of the lock — is there.
+ *
+ * @throws CancellationException when the caller is cancelled while it waits;
+ *   it still holds the serializer then, and must release it.
+ */
+internal suspend fun Store<*>.awaitLockOnlyHolders() {
+    backOffUntil { internalTransactionLockFree() }
 }
 
 /**

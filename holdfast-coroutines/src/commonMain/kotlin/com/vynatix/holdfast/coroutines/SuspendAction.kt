@@ -34,7 +34,9 @@ import kotlin.uuid.Uuid
  *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
  *    blocking `action` will block until the in-flight `suspendAction` completes,
  *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
- *    lazily on first use.
+ *    lazily on first use — also while it is installed: this call waits,
+ *    suspending, for a blocking `action`/`atomic` that took the store before
+ *    the [Mutex] existed.
  *  - **Cancellation**: a `CancellationException` thrown from the body rolls back
  *    the transaction. Cancellation BETWEEN body return and commit is suppressed
  *    via [NonCancellable] on the commit phase — once the body completes, the
@@ -118,6 +120,10 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
     body: suspend V.() -> R,
 ): TransactionResult<R> =
     serializer.mutex.withLock(owner) {
+        // Before anything is installed: a blocking holder that read the
+        // serializer as not installed yet may still hold the store under its
+        // transaction lock alone (awaitLockOnlyHolders).
+        awaitLockOnlyHolders()
         val txn =
             Transaction.createForExternal(
                 id = body::class.simpleName ?: Uuid.random().toString(),

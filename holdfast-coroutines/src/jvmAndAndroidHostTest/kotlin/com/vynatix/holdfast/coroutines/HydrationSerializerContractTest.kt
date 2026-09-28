@@ -1,10 +1,11 @@
-@file:OptIn(ExperimentalStoreApi::class)
+@file:OptIn(ExperimentalStoreApi::class, StoreInternalApi::class)
 
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.derived
@@ -18,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -28,8 +30,11 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * The hydration gate against the store's serializer (issue #20, R8; plan
@@ -63,8 +68,8 @@ class HydrationSerializerContractTest {
         hydrationWatchdog(20, "hydrate() behind a blocking action") {
             val store = FeedStore { listOf("fresh") }
             // Installed first, so the holder takes it: the gate then backs off
-            // politely behind it, holding no thread, rather than spinning on
-            // the transaction lock of an action that predates the install.
+            // politely behind it, holding no thread. (Behind an action that
+            // predates the install: the next case.)
             val serializer = ensureSerializer(store)
             val entered = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -94,6 +99,95 @@ class HydrationSerializerContractTest {
                     assertEquals(Hydration.Hydrated, store.hydration.awaitSettled())
                 }
                 holder.join()
+                assertEquals(setOf("x"), store.pinned.value)
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    /**
+     * No serializer yet: the holder reads it as not installed and holds the
+     * store under its transaction lock alone. The gate installs the
+     * serializer, takes it, and waits that holder out politely before
+     * deciding — it used to park its thread on the transaction lock instead.
+     */
+    @Test fun hydrateWaitsWithoutHoldingAThreadForABlockingActionThatPredatesTheSerializer() =
+        hydrationWatchdog(20, "hydrate() behind a blocking action that predates the serializer") {
+            val store = FeedStore { listOf("fresh") }
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val holder =
+                Thread {
+                    store action {
+                        entered.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                        pinned mutate setOf("x")
+                    }
+                }
+            holder.start()
+            entered.await()
+            assertNull(store.asyncSerializer, "the holder read the serializer as not installed")
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                runBlocking {
+                    val hydrating = launch(Dispatchers.Default) { store.hydration.hydrate(scope) }
+                    repeat(POLLS) {
+                        Thread.sleep(POLL_MS)
+                        assertTrue(hydrating.isActive, "the gate waits for the holder")
+                        assertTrue(noThreadWaitsOnATransactionLock(), "the gate waits without holding a thread")
+                    }
+                    assertEquals(Hydration.Detached, store.hydration.current)
+                    release.countDown()
+                    hydrating.join()
+                    assertEquals(Hydration.Hydrated, store.hydration.awaitSettled())
+                }
+                holder.join()
+                assertEquals(setOf("x"), store.pinned.value)
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    /**
+     * A `hydrate()` cancelled while its gate, holding the serializer, waits
+     * out a blocking action that predates it: the gate lets the store go, the
+     * phase does not move, and the next `hydrate()` seeds.
+     */
+    @Test fun aHydrateCancelledWhileTheGateWaitsOutABlockingActionLeavesTheStoreAndThePhase() =
+        hydrationWatchdog(20, "hydrate() cancelled behind a blocking action that predates the serializer") {
+            val store = FeedStore { listOf("fresh") }
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val holder =
+                Thread {
+                    store action {
+                        entered.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                        pinned mutate setOf("x")
+                    }
+                }
+            holder.start()
+            entered.await()
+            assertNull(store.asyncSerializer, "the holder read the serializer as not installed")
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                runBlocking {
+                    val hydrating = launch(Dispatchers.Default) { store.hydration.hydrate(scope) }
+                    val serializer = awaitSerializerHeld(store)
+                    repeat(POLLS) {
+                        Thread.sleep(POLL_MS)
+                        assertTrue(hydrating.isActive, "the gate waits for the holder")
+                    }
+                    hydrating.cancelAndJoin()
+                    assertFalse(serializer.mutex.isLocked, "the cancelled gate let the store go")
+                    assertEquals(Hydration.Detached, store.hydration.current, "the cancelled gate decided nothing")
+                    assertEquals(0, store.baseRuns)
+                    release.countDown()
+                    holder.join()
+                    store.hydration.hydrate(scope)
+                    assertEquals(Hydration.Hydrated, store.hydration.awaitSettled())
+                }
+                assertEquals(1, store.baseRuns)
                 assertEquals(setOf("x"), store.pinned.value)
             } finally {
                 scope.cancel()
@@ -253,13 +347,9 @@ class HydrationSerializerContractTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val failures = ConcurrentLinkedQueue<Throwable>()
             store.uncaughtObserverHandler = { failures += it }
-            // Install the store's serializer before any blocking action runs:
-            // an action that read it as not installed yet runs under the
-            // transaction lock alone, and a suspendAction starting meanwhile
-            // can lose its transaction slot to it (a pre-existing install
-            // window; the gate's transactions take the transaction lock and
-            // read the phase again under it — HydrationCrossThreadTest).
-            runBlocking { store.suspendAction { } }
+            // No serializer installed up front: the first suspendAction or
+            // hydration decision installs it while blocking actions that read
+            // it as not installed yet may hold the store (SerializerInstallRaceTest).
             try {
                 val blocking =
                     Thread {
@@ -322,6 +412,17 @@ class HydrationSerializerContractTest {
             Thread.getAllStackTraces().values.none { frames ->
                 frames.any { it.className.endsWith("StoreLock") && it.methodName == "acquire" }
             }
+
+        /** Wait until [store]'s serializer is installed and held, and return it. */
+        fun awaitSerializerHeld(store: Store<*>): MutexSerializer {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (true) {
+                val serializer = store.asyncSerializer as? MutexSerializer
+                if (serializer?.mutex?.isLocked == true) return serializer
+                if (System.nanoTime() > deadline) fail("the gate never took the store's serializer")
+                Thread.sleep(1)
+            }
+        }
     }
 }
 

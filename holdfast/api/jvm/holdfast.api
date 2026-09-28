@@ -398,6 +398,10 @@ public final class com/vynatix/holdfast/SealedStatesKt {
 	public static final fun internalTopLevelAction (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
+public final class com/vynatix/holdfast/SerializerInstallWindowKt {
+	public static final fun internalTransactionLockFree (Lcom/vynatix/holdfast/Store;)Z
+}
+
 public final class com/vynatix/holdfast/SettleScope {
 	public final fun isOpen ()Z
 	public final fun settle ()V

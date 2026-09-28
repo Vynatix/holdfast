@@ -11,13 +11,10 @@ import com.vynatix.holdfast.derivedState
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.concurrent.thread
-import kotlin.coroutines.resume
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,11 +28,6 @@ private class RoutedSources : Store<RoutedSources>() {
 
 private class RoutedHost : Store<RoutedHost>() {
     val y by state { 0 }
-}
-
-/** Resume on a fresh thread: under `Dispatchers.Unconfined`, the coroutine then carries on there. */
-private suspend fun hopToAnotherThread() {
-    suspendCancellableCoroutine<Unit> { continuation -> thread { continuation.resume(Unit) } }
 }
 
 /**
@@ -92,7 +84,7 @@ class DerivedStateSourceRoutingTest {
                 withContext(Dispatchers.Unconfined) {
                     sources.suspendAction {
                         a mutate 1
-                        hopToAnotherThread()
+                        resumeOnAnotherThread()
                         b mutate 2
                     }
                 }
@@ -112,7 +104,7 @@ class DerivedStateSourceRoutingTest {
                 withContext(Dispatchers.Unconfined) {
                     suspendAtomic(sources) {
                         sources { a mutate 1 }
-                        hopToAnotherThread()
+                        resumeOnAnotherThread()
                         sources { b mutate 2 }
                     }
                 }

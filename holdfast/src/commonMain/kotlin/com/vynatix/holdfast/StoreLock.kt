@@ -77,6 +77,23 @@ class StoreLock {
         return acquired
     }
 
+    /**
+     * Non-blocking, non-reentrant [acquire]: take the lock only if NO thread
+     * holds it, this one included, and otherwise return `false` at once. A
+     * `true` return must be paired with [release].
+     *
+     * For a caller that needs every other holder gone, not a deeper hold of
+     * its own: a coroutine running inline inside a holder's critical section
+     * on this thread must not count that holder as released. On wasmJs, where
+     * every caller reports thread id `0`, any held lock reads as this
+     * thread's, so the call returns `false` while anyone holds it — which is
+     * what this caller needs there too.
+     */
+    internal fun tryAcquireIfUnheld(): Boolean {
+        if (locked && ownerThreadId == currentThreadId()) return false
+        return tryAcquire()
+    }
+
     fun release() {
         val currentThreadId = currentThreadId()
         check(locked && ownerThreadId == currentThreadId) {
