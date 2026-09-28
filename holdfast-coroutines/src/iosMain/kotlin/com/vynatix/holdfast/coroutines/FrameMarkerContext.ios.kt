@@ -16,7 +16,7 @@ import kotlin.coroutines.CoroutineContext
 internal actual fun frameMarkerContext(
     marker: FrameMarker,
     delegate: ContinuationInterceptor?,
-): CoroutineContext = SlotBracketingInterceptor(delegate, marker, FrameMarkers::install)
+): CoroutineContext = slotBracketingInterceptor(delegate, marker, FrameMarkers::install)
 
 /** iOS: an undispatched child behind the same interceptor. See [withFanoutMarker]. */
 internal actual suspend fun <T> withFanoutMarker(

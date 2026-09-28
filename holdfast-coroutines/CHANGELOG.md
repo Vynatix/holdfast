@@ -268,6 +268,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **On iOS and wasmJs, `delay` and `withTimeout` inside a suspending entry
+  run on the caller's dispatcher clock.** A `suspendAction`/`suspendAtomic`
+  body, a suspending commit's fanout and the hydration gate carry a
+  thread-local slot across resumptions through an interceptor that stands in
+  for the dispatcher on the targets without `ThreadContextElement`; it
+  forwarded the dispatch but not the dispatcher's timer, so every `delay`,
+  `withTimeout` and back-off inside such an entry ran on kotlinx.coroutines'
+  real-time default: under `runTest` the body's waits no longer advanced the
+  virtual clock (the hydration gate's back-off waited real milliseconds while
+  `advanceTimeBy` stood still — `HydrationOverlayTest` on iOS), and under
+  `Dispatchers.Main` a delay resumed from the default timer thread instead of
+  the main run loop's. The interceptor now forwards the dispatcher's timer
+  when it has one (`slotBracketingInterceptor`). `SettleScopeInterceptedTest`
+  (JVM, over the same carrier) and `SuspendEntryVirtualTimeTest` pin it.
+  JVM and Android, which carry the slot in a `ThreadContextElement`, were
+  never affected.
+
 - **A read on the thread a `suspendAction` started on sees every bare
   `mutate` another thread has staged into it.** That thread is the
   transaction's owner, so its reads peek at the pending writes for

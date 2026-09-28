@@ -11,10 +11,15 @@ import com.vynatix.holdfast.derivedState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -98,6 +103,29 @@ class SettleScopeInterceptedTest {
             }
             assertEquals(listOf<SettleScope?>(scope, scope), seen)
             assertNull(SettleScopes.current())
+        }
+
+    /**
+     * The carrier replaces the dispatcher as the context's interceptor, and
+     * `delay` takes its timer from that interceptor: the carrier must forward
+     * the dispatcher's, or a delay inside the entry runs on
+     * kotlinx.coroutines' real-time default — a suspending body's `delay` no
+     * longer advanced a test's virtual clock, and a hydration gate backing off
+     * inside the entry waited real milliseconds while `advanceTimeBy` stood
+     * still (HydrationOverlayTest on iOS).
+     */
+    @Test fun aDelayInsideTheEntryRunsOnTheDispatchersClock() =
+        runTest {
+            carried { delay(1_000) }
+            assertEquals(1_000, currentTime, "the delay advanced the test dispatcher's virtual time")
+        }
+
+    /** `withTimeout` takes its timer the same way. */
+    @Test fun aTimeoutInsideTheEntryRunsOnTheDispatchersClock() =
+        runTest {
+            val outcome = carried { withTimeoutOrNull(1_000) { awaitCancellation() } }
+            assertNull(outcome, "the timeout fired")
+            assertEquals(1_000, currentTime, "the timeout ran on the test dispatcher's virtual time")
         }
 
     @Test fun aNestedEntryJoinsTheCarriedScopeAndLeavesItOpen() =

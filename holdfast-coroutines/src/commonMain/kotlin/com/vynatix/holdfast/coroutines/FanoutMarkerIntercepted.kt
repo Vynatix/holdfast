@@ -29,7 +29,9 @@ internal suspend fun <T> withFanoutMarkerIntercepted(
  * instead, with [context] added: its first segment runs right here, with
  * [value] installed by hand (through [install], which returns the prior
  * value) around it, and every later resumption goes through
- * [SlotBracketingInterceptor], which installs [value] for that resumption.
+ * [SlotBracketingInterceptor], which installs [value] for that resumption —
+ * and keeps the dispatcher's timer for the delays inside
+ * ([slotBracketingInterceptor]).
  */
 internal suspend fun <T, M : Any> withSlotIntercepted(
     value: M,
@@ -38,7 +40,7 @@ internal suspend fun <T, M : Any> withSlotIntercepted(
     block: suspend () -> T,
 ): T =
     coroutineScope {
-        val interceptor = SlotBracketingInterceptor(coroutineContext[ContinuationInterceptor], value, install)
+        val interceptor = slotBracketingInterceptor(coroutineContext[ContinuationInterceptor], value, install)
         val prior = install(value)
         val running =
             try {

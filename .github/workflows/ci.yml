@@ -30,6 +30,12 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list still names the legacy `tools`
+          # package, which the SDK repository no longer carries; sdkmanager then
+          # exits 1 before any build step runs. AGP downloads the platform and
+          # build-tools it needs itself once the licences are accepted.
+          packages: platform-tools
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -57,7 +63,18 @@ jobs:
             :holdfast-testing:jvmTest :holdfast-testing:testAndroidHostTest \
             :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
             :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
-            --stacktrace
+            --continue --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-jvm-android
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            !hallmark-dep/**
+          if-no-files-found: ignore
 
       - name: API check and Dokka
         run: |
@@ -123,4 +140,17 @@ jobs:
             :holdfast-testing:iosSimulatorArm64Test :holdfast-testing:jvmTest \
             :holdfast-hallmark:iosSimulatorArm64Test :holdfast-hallmark:jvmTest \
             :holdfast-hallmark-coroutines:iosSimulatorArm64Test :holdfast-hallmark-coroutines:jvmTest \
-            --stacktrace
+            --continue --stacktrace
+
+      # A Kotlin/Native test failure reaches the console as "AssertionError at
+      # null:-1"; the message is only in the XML report.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-ios-jvm
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            !hallmark-dep/**
+          if-no-files-found: ignore
