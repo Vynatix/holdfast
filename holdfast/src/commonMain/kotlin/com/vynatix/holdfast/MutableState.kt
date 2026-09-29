@@ -6,6 +6,12 @@ import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.atomicfu.atomic
 
 /**
+ * Process-monotonic counter behind [MutableState.cutIdentity]: unique in the
+ * process, so no two states ever share a token (as `Store.lockOrderKey`).
+ */
+private val cutIdentityGen = atomic(0L)
+
+/**
  * The concrete implementation of [State] used by [Store]. Carries:
  *  - the stored value
  *  - the observer set
@@ -88,6 +94,14 @@ class MutableState<T : Any>(
 
     /** See [writesBegun]. */
     internal val writesEnded = atomic(0L)
+
+    /**
+     * A token unique to this instance in the process (ConsistentRead.kt):
+     * what a capture's cut stamp records to tell a later listing of this very
+     * state from a re-materialized or new one, without holding the state —
+     * and, through [owningStore], its store.
+     */
+    internal val cutIdentity: Long = cutIdentityGen.incrementAndGet()
 
     /**
      * How many derived-state computes, on any thread, are reading this state

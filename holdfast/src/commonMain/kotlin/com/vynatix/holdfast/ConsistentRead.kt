@@ -102,6 +102,11 @@ private fun tryReadCut(
  * blocks a writer; a thread creating an entry waits only for such a held-back
  * listing and cut.
  *
+ * With [previous] — a capture of each store, or `null` for one — a store
+ * whose capture's [CutStamp] still matches is reused by reference rather
+ * than read; [stats] counts what the cut did, including every listing or
+ * cut it had to run again.
+ *
  * @throws IllegalStateException if a store is disposed, or as [snapshot] (a
  *   throwing initializer).
  */
@@ -125,32 +130,52 @@ internal fun captureConsistent(
  * What one cut read of a store, kept on its capture so a later cut can
  * reuse that capture unchanged (issue #21's `Root.value`, which recaptures
  * only the leaves that moved): the scope and schema, the states the cut
- * listed, and each one's `writesEnded` counter as the cut read it. Every
- * assignment of a committed value bumps that counter inside a write
- * bracket, so a later cut that lists the same states (by identity — a
- * dropped or re-materialized state, a new or evicted keyed entry lists
- * differently) and finds every counter unmoved with no bracket open reads
- * the same values, and reuses the capture instead of reading them.
+ * listed with each one's `writesEnded` counter as the cut read it, and the
+ * keyed state families it listed. Every assignment of a committed value
+ * bumps that counter inside a write bracket, so a later cut that lists the
+ * same states (by identity — a dropped or re-materialized state, a new or
+ * evicted keyed entry lists differently) and the same families (one declared
+ * since, even with no entry yet, lists differently) and finds every counter
+ * unmoved with no bracket open reads the same values, and reuses the capture
+ * instead of reading them.
+ *
+ * A stamp holds no state and no store: a state is recorded by its
+ * [MutableState.cutIdentity], a token, and a family by its name (a family
+ * lives as long as its store, under a name no other state or family of the
+ * store has), so a snapshot references no store instance and keeps neither a
+ * disposed store nor an evicted entry reachable.
  */
 internal class CutStamp(
     val scope: SnapshotScope,
     val schema: Int,
-    val states: List<MutableState<*>>,
+    /** [MutableState.cutIdentity] of each state the cut listed, in order. */
+    val states: LongArray,
+    /** Each listed state's `writesEnded` counter as the cut read it, in the same order. */
     val ended: LongArray,
+    /** The name of each keyed state family the cut listed, in declaration order. */
+    val families: List<String>,
 ) {
-    /** Whether a cut in [scope] of a store at [schema] that listed [states] may reuse the capture this stamps. */
+    /** Whether a cut in [scope] of a store at [schema] that listed [plan] may reuse the capture this stamps. */
     fun matches(
         scope: SnapshotScope,
         schema: Int,
-        states: List<MutableState<*>>,
-    ): Boolean = this.scope === scope && this.schema == schema && this.states.size == states.size && sameStates(states)
+        plan: CapturePlan,
+    ): Boolean {
+        val sameFrame = this.scope === scope && this.schema == schema
+        return sameFrame && sameStates(plan.states) && families == plan.familyNames
+    }
 
-    private fun sameStates(other: List<MutableState<*>>): Boolean = states.indices.all { states[it] === other[it] }
+    private fun sameStates(other: List<MutableState<*>>): Boolean =
+        states.size == other.size && states.indices.all { states[it] == other[it].cutIdentity }
 }
 
 /** Counters a caller of [captureConsistent] can read: how the cuts went. Not thread-safe; one per capture. */
 internal class CaptureStats {
-    /** Listings and cuts that had to run again: a write overlapped, or an entry came to life unlisted. */
+    /**
+     * Listings and cuts that had to run again: a write overlapped (a bracket
+     * open when the cut read, or opened before it validated), or an entry
+     * came to life unlisted.
+     */
     var retries: Long = 0
 
     /** Stores whose values a cut read. */
@@ -186,14 +211,14 @@ private fun cutOnce(
         val plans = stores.mapIndexed { i, store -> store.listCapture(scope, schemas[i]) }
         val reusable =
             plans.mapIndexed { i, plan -> previous?.get(i)?.takeIf { it.stampMatches(scope, schemas[i], plan) } }
-        val cut = readCutReusing(plans, reusable)
+        val cut = readCutReusing(plans, reusable, stats)
         // A commit (or an inbound bridge write) of a captured store that the
         // cut includes, made after an unlisted entry came to life,
         // happens-before the cut's reads, so both counts it implies are
         // visible here.
         val committed = plans.any { it.membership.committedSince() }
         val missedAnEntry = !holdBack && committed && plans.any { it.membership.grewSince() }
-        return if (missedAnEntry) null else assemble(plans, cut, scope, schemas, stats)
+        return if (missedAnEntry) null else assemble(plans, cut, stats)
     } finally {
         for (i in 0 until held) stores[i].creationHoldBack.release()
     }
@@ -203,8 +228,6 @@ private fun cutOnce(
 private fun assemble(
     plans: List<CapturePlan>,
     cut: ReusingCut,
-    scope: SnapshotScope,
-    schemas: List<Int>,
     stats: CaptureStats?,
 ): List<StoreSnapshot> =
     plans.indices.map { i ->
@@ -214,7 +237,7 @@ private fun assemble(
             reused
         } else {
             stats?.let { it.captured++ }
-            plans[i].build(cut.values[i], CutStamp(scope, schemas[i], plans[i].states, cut.ended[i]))
+            plans[i].build(cut.values[i], cut.ended[i])
         }
     }
 
@@ -223,7 +246,7 @@ private fun StoreSnapshot.stampMatches(
     scope: SnapshotScope,
     schema: Int,
     plan: CapturePlan,
-): Boolean = (content as? CapturedContent)?.stamp?.matches(scope, schema, plan.states) == true
+): Boolean = (content as? CapturedContent)?.stamp?.matches(scope, schema, plan) == true
 
 /** One cut's outcome per plan: the values read, or the capture reused, and the `writesEnded` counters as read. */
 private class ReusingCut(
@@ -236,14 +259,17 @@ private class ReusingCut(
  * [readConsistent] over every plan's states at once, reading only the plans
  * with no [reusable] capture — a reusable one is validated instead: its
  * stamped counters unmoved and no bracket open — under the one validation
- * window, so the reused captures and the values read form one cut.
+ * window, so the reused captures and the values read form one cut. Every
+ * attempt that a write overlapped counts as a retry in [stats].
  */
 private fun readCutReusing(
     plans: List<CapturePlan>,
     reusable: List<StoreSnapshot?>,
+    stats: CaptureStats?,
 ): ReusingCut {
     while (true) {
         tryReadCutReusing(plans, reusable)?.let { return it }
+        stats?.let { it.retries++ }
         threadYield()
     }
 }
