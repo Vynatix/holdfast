@@ -11,10 +11,11 @@ import kotlinx.atomicfu.atomic
 /**
  * One keyed store's slot under a [KeyedBranch], from its reservation by
  * `create`/`getOrCreate` to its detachment. [constructionLock] is held by
- * the thread running the factory, so a `getOrCreate` on another thread
- * parks on it instead of spinning, and a detach waits for the attach fanout
- * to finish before it notifies, so a listener hears Attached strictly before
- * Detached.
+ * the reserving thread from the reservation itself ([TreeRegistry.reserveOrExisting]
+ * takes it) through the factory and the attach fanout, so a `getOrCreate` on
+ * another thread parks on it instead of spinning — even in the window before
+ * the factory starts — and a detach waits for the attach fanout to finish
+ * before it notifies, so a listener hears Attached strictly before Detached.
  */
 internal class LeafEntry(
     val branch: KeyedBranch<*, *>,
@@ -138,7 +139,10 @@ internal class TreeRegistry(
     /**
      * Reserve [key] under [branch] for the calling `create`, or answer the
      * entry already there so `getOrCreate` can join or wait for it. The
-     * second value is `true` when this call reserved it.
+     * second value is `true` when this call reserved it — and then the
+     * calling thread holds the new entry's construction lock, which
+     * `constructReserved` releases once the factory has been promoted or
+     * abandoned.
      */
     fun reserveOrExisting(
         branch: KeyedBranch<*, *>,
@@ -151,6 +155,22 @@ internal class TreeRegistry(
                 checkNotNull(keyed[branch]) { "keyed branch '${branch.name}' is not declared on root '${root.name}'" }
             entries[key]?.let { return@withLock it to false }
             val entry = LeafEntry(branch, key, LeafNode(root, branch, leafName, NameOrigin.Key, key))
+            // Taken under the registry lock, against the documented
+            // "construction lock before registry lock" order — only
+            // nominally: the entry is created here and published only by the
+            // line below, so no other thread can hold or wait on this lock
+            // and the take never blocks (a `tryAcquire`, so a break of that
+            // reasoning fails here instead of waiting under this lock). Every
+            // later take of the registry lock by a construction-lock holder
+            // (promote, abandon) keeps the documented order, and no path
+            // holds the registry lock while waiting on a published entry's
+            // construction lock. Holding it from the reservation on closes
+            // the window before the factory starts, in which a `getOrCreate`
+            // on another thread would find a Reserved entry with a free lock
+            // and spin through this lock until the creator ran.
+            check(entry.constructionLock.tryAcquire()) {
+                "root '${root.name}': a fresh keyed entry's construction lock was already held"
+            }
             entries[key] = entry
             entry to true
         }

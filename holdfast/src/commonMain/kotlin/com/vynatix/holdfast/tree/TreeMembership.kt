@@ -8,6 +8,7 @@ import com.vynatix.holdfast.StoreAttachment
 import com.vynatix.holdfast.StoreAttachmentKey
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreMembership
+import com.vynatix.holdfast.describeClass
 import com.vynatix.holdfast.internalAttachIfAbsent
 import com.vynatix.holdfast.internalDetach
 import com.vynatix.holdfast.platform.currentMintLocal
@@ -126,12 +127,13 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.createKeyed(
     factory: (K) -> S,
 ): S {
     root.checkNotDisposed()
-    val (entry, reserved) = root.registry.reserveOrExisting(this, key, leafNameFor(key))
+    val leafName = leafNameOrRefuse(key)
+    val (entry, reserved) = root.registry.reserveOrExisting(this, key, leafName)
     check(reserved) {
         "root '${root.name}': $name.create($key) — a store for this key already exists (or is being created); " +
             "use getOrCreate(key) { } to share it"
     }
-    return construct(entry, key, factory)
+    return constructReserved(entry, key, factory)
 }
 
 /** [KeyedBranch.getOrCreate]: the live store for [key], else construct it; parks on another thread's construction. */
@@ -139,10 +141,15 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.getOrCreateKeyed(
     key: K,
     factory: (K) -> S,
 ): S {
+    root.checkNotDisposed()
+    // Named once, before any lock: the codec is user code, and the name is
+    // only ever used by a reservation — never re-run on a wake-up, nor on a
+    // hit, where the registry discards it.
+    val leafName = leafNameOrRefuse(key)
     while (true) {
         root.checkNotDisposed()
-        val (entry, reserved) = root.registry.reserveOrExisting(this, key, leafNameFor(key))
-        if (reserved) return construct(entry, key, factory)
+        val (entry, reserved) = root.registry.reserveOrExisting(this, key, leafName)
+        if (reserved) return constructReserved(entry, key, factory)
         val phase = entry.phase
         if (phase is LeafEntry.Phase.Live) {
             @Suppress("UNCHECKED_CAST")
@@ -152,19 +159,52 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.getOrCreateKeyed(
             "root '${root.name}': $name.getOrCreate($key) called from inside the factory constructing " +
                 "that very key — a cycle"
         }
-        // Another thread is constructing it: park on its construction lock,
-        // then read the registry again (it is Live, or gone after a failure).
+        // Another thread reserved it and holds its construction lock from the
+        // reservation on (`TreeRegistry.reserveOrExisting`), through its
+        // factory and attach fanout: park there — never spin, not even before
+        // its factory starts — then read the registry again (it is Live, or
+        // gone after a failure).
         entry.constructionLock.withLock { }
     }
 }
+
+/**
+ * The leaf name for [key] through the branch's key codec (`toString()`
+ * without one), computed once per `create`/`getOrCreate`. A refusal is
+ * rethrown with the branch context every other tree error carries — the root
+ * and branch names only, never the key or the codec's own message, which may
+ * quote it (so the codec's exception is not attached either).
+ */
+private fun <K : Any> KeyedBranch<K, *>.leafNameOrRefuse(key: K): String =
+    try {
+        leafNameFor(key)
+    } catch (failure: IllegalArgumentException) {
+        keyNamingError(failure)
+    } catch (failure: IllegalStateException) {
+        keyNamingError(failure)
+    } catch (failure: UnsupportedOperationException) {
+        keyNamingError(failure)
+    }
+
+private fun KeyedBranch<*, *>.keyNamingError(failure: Throwable): Nothing =
+    error(
+        "root '${root.name}': $name.create/getOrCreate could not name the key: naming it threw " +
+            "${failure.describeClass()} (from the branch's key codec, or the key's toString() on a branch " +
+            "without one); the key and that message are withheld",
+    )
 
 /**
  * Construct inside a settle scope (joining the entry open on this thread, else
  * one of its own): a recompute the attach queues — the root's `value`
  * following the new store — runs once this returns, after the store is
  * promoted and visible, never inside the factory bracket.
+ *
+ * [entry] is one this thread just reserved through
+ * `TreeRegistry.reserveOrExisting`, whose construction lock it therefore
+ * holds; this releases that hold once the store is promoted or the
+ * reservation abandoned.
  */
-private fun <K : Any, S : Store<S>> KeyedBranch<K, S>.construct(
+internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.constructReserved(
     entry: LeafEntry,
     key: K,
     factory: (K) -> S,
@@ -175,7 +215,9 @@ private fun <K : Any, S : Store<S>> KeyedBranch<K, S>.constructUnsettled(
     key: K,
     factory: (K) -> S,
 ): S {
-    entry.constructionLock.acquire()
+    // The construction lock arrived held by this thread (taken at the
+    // reservation), so a `getOrCreate` on another thread has been parked on
+    // it since before this factory started.
     entry.constructingThreadId = currentThreadId()
     val mint = Mint(this, key, entry, currentMint())
     setMintLocal(mint)
