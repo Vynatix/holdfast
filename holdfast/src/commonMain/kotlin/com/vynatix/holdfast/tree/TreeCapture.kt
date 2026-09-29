@@ -78,7 +78,12 @@ private fun buildTree(
 ): TreeSnapshot? {
     val prune = scope === SnapshotScope.UserAuthored
     val node = shape.node
-    if (node is LeafNode) return leafCapture(node, shape.leaves.singleOrNull()?.second, scope, byStoreKey, index, prune)
+    if (node is LeafNode) {
+        val capture = leafCapture(node, shape.leaves.singleOrNull()?.second, scope, byStoreKey, index, prune)
+        // The requested node is always returned: a leaf whose store is gone,
+        // or that captured nothing in this scope, comes back empty.
+        return capture ?: if (top) emptyLeaf(node, scope, index) else null
+    }
     val children = ArrayList<TreeSnapshot>()
     for ((leaf, store) in shape.leaves) {
         leafCapture(leaf, store, scope, byStoreKey, index, prune)?.let(children::add)
@@ -103,3 +108,10 @@ private fun leafCapture(
     if (pruned) return null
     return TreeSnapshot(leaf, emptyList(), scope, capture, checkNotNull(store).lockOrderKey, index)
 }
+
+/** The capture of a requested leaf that holds no `StoreSnapshot`; its states read `Absent`. */
+private fun emptyLeaf(
+    node: LeafNode,
+    scope: SnapshotScope,
+    index: TreeIndex,
+): TreeSnapshot = TreeSnapshot(node, emptyList(), scope, leaf = null, storeKey = node.storeKey, index = index)

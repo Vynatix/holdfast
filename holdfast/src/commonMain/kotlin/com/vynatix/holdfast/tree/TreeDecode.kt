@@ -19,8 +19,11 @@ import com.vynatix.holdfast.snapshotFormatError
 // Decoding the `holdfast.tree` v1 wire text (`Root.decode`): the envelope is
 // read once, the nodes resolved against the root's declarations as they are
 // now — a path the root does not declare is listed, never fatal; a keyed
-// entry with no live store becomes a pending key — and every leaf body is
-// retained verbatim, decoded lazily by the reading store's codecs.
+// segment of `path` and a keyed entry go through the branch's key codec,
+// and a key with no live store becomes a pending key — and every leaf body
+// is retained verbatim, decoded lazily by the reading store's codecs. A key
+// codec's failure, and two entries that decode to one key, are format
+// failures naming the branch, never the key text.
 
 /** The parsed shape of one node, before it is resolved against the root. */
 private sealed class DecodedNode {
@@ -33,8 +36,9 @@ private sealed class DecodedNode {
         val entries: Map<String, StoreBody>,
     ) : DecodedNode()
 
+    /** [body] is `null` for a leaf written with nothing captured in its scope (an empty leaf capture). */
     class Leaf(
-        val body: StoreBody,
+        val body: StoreBody?,
     ) : DecodedNode()
 }
 
@@ -52,14 +56,14 @@ internal fun decodeTree(
     val envelope = readEnvelope(SnapshotJsonReader(text))
     val index = TreeIndex()
     val unresolved = ArrayList<List<String>>()
-    val top = resolvePath(root, envelope.path)
+    val top = resolvePath(root, envelope.path, index)
     if (top == null) {
         unresolved += envelope.path
-        return TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, index, unresolved)
+        return TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(), unresolved)
     }
     val built = Resolver(root, envelope.scope, index, unresolved).build(top, envelope.tree, envelope.path)
     return if (built == null) {
-        TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, index, unresolved)
+        TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(), unresolved)
     } else {
         TreeSnapshot(built.node, built.children, built.scope, built.leaf, built.storeKey, index, unresolved)
     }
@@ -125,7 +129,7 @@ private fun SnapshotJsonReader.readNode(): DecodedNode {
     }
     endContainer()
     return when (kind) {
-        "leaf" -> DecodedNode.Leaf(store ?: snapshotFormatError("a leaf without a store body", start))
+        "leaf" -> DecodedNode.Leaf(store)
         "keyed" -> DecodedNode.Keyed(entries ?: emptyMap())
         "root", "branch" -> DecodedNode.Container(kind, children ?: emptyMap())
         else -> snapshotFormatError("unknown node kind", start)
@@ -155,18 +159,91 @@ private fun SnapshotJsonReader.readEntries(): Map<String, StoreBody> {
     return out
 }
 
-/** Walk [path] down from [root] through declared children; `null` when a name is not declared there. */
+/**
+ * Walk [path] down from [root]: through declared children and a branch's
+ * leaves by name, and through a keyed branch by decoding the segment with
+ * its key codec — the live store's leaf, else a pending leaf minted for the
+ * key (recorded in [index]). `null` when a name is not declared there, or
+ * the keyed branch has no key codec to decode the segment with.
+ */
 private fun resolvePath(
     root: Root,
     path: List<String>,
+    index: TreeIndex,
 ): StoreNode? {
+    val keyed = KeyedLeaves(root, index)
     var current: StoreNode = root
     for (name in path) {
-        current = root.registry.childNodes(current).firstOrNull { it.name == name }
-            ?: (current as? Branch)?.leaves?.firstOrNull { it.name == name }
-            ?: return null
+        val next: StoreNode? =
+            when (val at = current) {
+                is KeyedBranch<*, *> ->
+                    at.keyCodec?.let { codec -> keyed.leafFor(at, keyed.decode(at, codec, name), name) }
+                is LeafNode -> null
+                is Root, is Branch ->
+                    root.registry.childNodes(at).firstOrNull { it.name == name }
+                        ?: (at as? Branch)?.leaves?.firstOrNull { it.name == name }
+            }
+        current = next ?: return null
     }
     return current
+}
+
+/**
+ * Keyed segments and entries: a key decoded through its branch's codec, and
+ * the leaf that sits under it now. A codec's failure and a duplicate decoded
+ * key are format failures naming the branch, never the key text.
+ */
+private class KeyedLeaves(
+    private val root: Root,
+    private val index: TreeIndex,
+) {
+    fun decode(
+        branch: KeyedBranch<*, *>,
+        keyCodec: StateCodec<*>,
+        encodedKey: String,
+    ): Any =
+        try {
+            keyCodec.decode(encodedKey)
+        } catch (
+            @Suppress("TooGenericExceptionCaught") failure: Exception, // Whatever a codec throws is a format failure.
+        ) {
+            formatError(branch, failure)
+        }
+
+    /**
+     * The leaf under [branch] for [key]: the live entry's, else one minted for
+     * the key with no store — told apart by [LeafNode.storeKey], which no
+     * store ever has as `0` — and recorded as pending in [index].
+     */
+    fun leafFor(
+        branch: KeyedBranch<*, *>,
+        key: Any,
+        encodedKey: String,
+    ): LeafNode {
+        val live = root.registry.liveStore(branch, key)
+        val existing = live?.let { root.registry.leafOf(it) }
+        if (existing != null) return existing
+        index.addPendingKey(branch, key)
+        return LeafNode(root, branch, encodedKey, NameOrigin.Key, key)
+    }
+
+    /** Names the branch and the exception's class only: the exception is not chained, its message may quote the key. */
+    private fun formatError(
+        branch: KeyedBranch<*, *>,
+        failure: Throwable,
+    ): Nothing =
+        snapshotFormatError(
+            "a key of keyed branch '${branch.name}' could not be decoded: " +
+                "its key codec threw ${failure.describeClass()}",
+            0,
+        )
+
+    fun duplicateError(branch: KeyedBranch<*, *>): Nothing =
+        snapshotFormatError(
+            "keyed branch '${branch.name}' holds two entries that decode to one key " +
+                "(its key codec is not canonical, so the sorted entries do not name distinct keys)",
+            0,
+        )
 }
 
 /** Resolves parsed nodes against the root's declarations, building the decoded [TreeSnapshot] bottom-up. */
@@ -176,6 +253,8 @@ private class Resolver(
     private val index: TreeIndex,
     private val unresolved: MutableList<List<String>>,
 ) {
+    private val keyed = KeyedLeaves(root, index)
+
     fun build(
         node: StoreNode,
         decoded: DecodedNode,
@@ -193,14 +272,14 @@ private class Resolver(
 
     private fun leaf(
         node: LeafNode,
-        body: StoreBody,
-    ): TreeSnapshot = leafCapture(node, body, node.store?.lockOrderKey ?: 0L)
+        body: StoreBody?,
+    ): TreeSnapshot = leafCapture(node, body?.let { StoreSnapshot(DecodedContent(it)) }, node.storeKey)
 
     private fun leafCapture(
         node: LeafNode,
-        body: StoreBody,
+        capture: StoreSnapshot?,
         storeKey: Long,
-    ): TreeSnapshot = TreeSnapshot(node, emptyList(), scope, StoreSnapshot(DecodedContent(body)), storeKey, index)
+    ): TreeSnapshot = TreeSnapshot(node, emptyList(), scope, capture, storeKey, index)
 
     private fun container(
         node: StoreNode,
@@ -233,46 +312,31 @@ private class Resolver(
         path: List<String>,
     ): TreeSnapshot? {
         val keyCodec = branch.keyCodec
-        if (keyCodec == null) {
-            unresolved += path
-            return null
+        return when {
+            keyCodec != null -> TreeSnapshot(branch, entries(branch, keyCodec, decoded), scope, null, 0L, index)
+            // This root's `encode()` writes such a branch empty and lists it as
+            // skipped; entries under it are text this root cannot decode.
+            decoded.entries.isEmpty() -> TreeSnapshot(branch, emptyList(), scope, null, 0L, index)
+            else -> {
+                unresolved += path
+                null
+            }
         }
-        val children = ArrayList<TreeSnapshot>()
-        val pending = LinkedHashSet<Any>()
-        for ((encodedKey, body) in decoded.entries) {
-            val key = decodeKey(branch, keyCodec, encodedKey)
-            val live = root.registry.liveStore(branch, key)
-            val existing = live?.let { root.registry.leafOf(it) }
-            val leafNode = existing ?: LeafNode(root, branch, encodedKey, NameOrigin.Key, key)
-            if (live == null) pending += key
-            children += leafCapture(leafNode, body, live?.lockOrderKey ?: 0L)
-        }
-        if (pending.isNotEmpty()) index.pendingKeys[branch] = pending
-        return TreeSnapshot(branch, children, scope, null, 0L, index)
     }
 
-    private fun decodeKey(
+    private fun entries(
         branch: KeyedBranch<*, *>,
         keyCodec: StateCodec<*>,
-        encodedKey: String,
-    ): Any =
-        try {
-            keyCodec.decode(encodedKey)
-        } catch (failure: IllegalArgumentException) {
-            keyFormatError(branch, failure)
-        } catch (failure: IllegalStateException) {
-            keyFormatError(branch, failure)
-        } catch (failure: NumberFormatException) {
-            keyFormatError(branch, failure)
+        decoded: DecodedNode.Keyed,
+    ): List<TreeSnapshot> {
+        val children = ArrayList<TreeSnapshot>()
+        val seen = HashSet<Any>()
+        for ((encodedKey, body) in decoded.entries) {
+            val key = keyed.decode(branch, keyCodec, encodedKey)
+            if (!seen.add(key)) keyed.duplicateError(branch)
+            val leafNode = keyed.leafFor(branch, key, encodedKey)
+            children += leafCapture(leafNode, StoreSnapshot(DecodedContent(body)), leafNode.storeKey)
         }
-
-    private fun keyFormatError(
-        branch: KeyedBranch<*, *>,
-        failure: Throwable,
-    ): Nothing =
-        snapshotFormatError(
-            "a key of keyed branch '${branch.name}' could not be decoded: " +
-                "its key codec threw ${failure.describeClass()}",
-            0,
-        )
+        return children
+    }
 }

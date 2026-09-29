@@ -29,7 +29,9 @@ import com.vynatix.holdfast.observableBacking
  * `SnapshotScope.Raw`), for a store still in the tree, or one since
  * disposed, whose capture this tree holds. A state of a store outside the
  * captured subtree reads `null` (`Absent`); one of a store that never
- * belonged to this root, or that no store declared, throws.
+ * belonged to this root, or that no store declared, throws. A subtree
+ * taken with [get] is scoped the same way: it reads only what lies under
+ * its own node, even though the whole capture it came from holds more.
  *
  * Equality is full value equality — names, structure, scope and every
  * leaf's [StoreSnapshot] value equality, `Secret`, `Remote` and codec-less
@@ -62,8 +64,8 @@ class TreeSnapshot internal constructor(
     /** Whether [node] is a [LeafNode], so this capture holds one store's [StoreSnapshot]. */
     val isLeaf: Boolean get() = node is LeafNode
 
-    /** The capture of the subtree at [node], or `null` when [node] is not inside this capture. */
-    operator fun get(node: StoreNode): TreeSnapshot? = index.byNode[node]
+    /** The capture of the subtree at [node], or `null` when [node] does not lie under this capture's own node. */
+    operator fun get(node: StoreNode): TreeSnapshot? = index.byNode[node]?.takeIf { node.isUnder(this.node) }
 
     /**
      * [state]'s captured value: `Present` as the leaf's [StoreSnapshot.entry]
@@ -83,9 +85,14 @@ class TreeSnapshot internal constructor(
         }
         val store: Store<*> = declaration.store
         val leafCapture = index.byStoreKey[store.lockOrderKey]
-        if (leafCapture != null) return checkNotNull(leafCapture.leaf).entry(state)
-        val registry = node.root.registry
-        require(registry.disposed || registry.leafOf(store) != null) {
+        if (leafCapture != null) {
+            // The store was a member when the capture was taken: its leaf reads
+            // inside this subtree (disposed since or not), and is Absent outside it.
+            val capture = leafCapture.leaf?.takeIf { leafCapture.node.isUnder(node) }
+            return capture?.entry(state) ?: SnapshotEntry.Absent
+        }
+        // One read under the registry lock: a root disposing meanwhile answers Absent, never a throw.
+        require(node.root.registry.isMemberOrClosed(store)) {
             "${declaration.qualifiedName} belongs to a store that is not a member of root '${node.root.name}'"
         }
         return SnapshotEntry.Absent
@@ -97,9 +104,11 @@ class TreeSnapshot internal constructor(
     /**
      * The keys a decoded text holds bodies for under [branch] with no live
      * store at decode time: create those stores, then restore. Empty for a
-     * capture.
+     * capture, and for a branch outside this subtree (a decoded keyed leaf
+     * answers its own branch's).
      */
     fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K> {
+        if (!branch.isUnder(node) && !node.isUnder(branch)) return emptySet()
         @Suppress("UNCHECKED_CAST")
         return (index.pendingKeys[branch] ?: emptySet()) as Set<K>
     }
@@ -115,11 +124,13 @@ class TreeSnapshot internal constructor(
      * one unless [includeRemote] are left out). A keyed branch without a
      * key codec is left out and listed under `skipped`. Under
      * `SnapshotScope.UserAuthored` a leaf named by its class refuses (T6:
-     * that name would change with the class; pin it). Runs the leaves'
-     * codecs, no other user code.
+     * that name would change with the class; pin it), and a capture under a
+     * keyed branch without a key codec refuses (its path would have to
+     * spell the key). Runs the leaves' codecs, no other user code.
      *
      * @throws IllegalStateException for a class-named leaf under
-     *   `SnapshotScope.UserAuthored`, or two children of one node sharing a name.
+     *   `SnapshotScope.UserAuthored`, a capture under a keyed branch without
+     *   a key codec, or two children of one node sharing a name.
      */
     fun encode(includeRemote: Boolean = false): String = encodeTree(this, includeRemote)
 

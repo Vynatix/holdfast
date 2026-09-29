@@ -318,4 +318,16 @@ internal class TreeRegistry(
             structuralGeneration.incrementAndGet()
             leaves
         }
+
+    /**
+     * Whether [store] sits at a leaf of this tree, or the tree is closed
+     * (its membership can no longer be told): ONE read under [lock], so a
+     * `Root.dispose()` racing the read makes it `true`, never a throw.
+     * `TreeSnapshot.entry` uses it to tell a member outside the capture
+     * (`Absent`) from a store that never belonged (throw).
+     */
+    fun isMemberOrClosed(store: Store<*>): Boolean {
+        val key = store.lockOrderKey
+        return lock.withLock { disposed || leafByStoreKey.containsKey(key) }
+    }
 }

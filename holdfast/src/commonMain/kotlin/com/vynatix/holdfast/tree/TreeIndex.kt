@@ -23,6 +23,14 @@ internal class TreeIndex {
         byNode[snapshot.node] = snapshot
         if (snapshot.storeKey != 0L) byStoreKey[snapshot.storeKey] = snapshot
     }
+
+    /** Record [key] as pending under [branch]: a decoded body with no live store under its key at decode time. */
+    fun addPendingKey(
+        branch: KeyedBranch<*, *>,
+        key: Any,
+    ) {
+        pendingKeys[branch] = (pendingKeys[branch] ?: emptySet()) + key
+    }
 }
 
 /**

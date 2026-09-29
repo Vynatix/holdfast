@@ -36,10 +36,8 @@ internal fun treeEqualsEncodable(
     b: TreeSnapshot,
     includeRemote: Boolean,
 ): Boolean {
-    // By name, as `encode()` writes them: a capture lists children in
-    // declaration order, a decoded text in the sorted order it was written in.
-    val childrenA = a.children.filter { it.isEncodable() }.sortedWith(encodedChildOrder)
-    val childrenB = b.children.filter { it.isEncodable() }.sortedWith(encodedChildOrder)
+    val childrenA = a.encodableChildren()
+    val childrenB = b.encodableChildren()
     return sameNode(a.node, b.node) &&
         sameLeafBody(a, b, includeRemote) &&
         childrenA.size == childrenB.size &&
@@ -47,6 +45,17 @@ internal fun treeEqualsEncodable(
 }
 
 private val encodedChildOrder = compareBy<TreeSnapshot>({ it.node.name }, { kindOf(it.node) })
+
+/**
+ * The children `encode()` writes, by name as it writes them (a capture lists
+ * children in declaration order, a decoded text in the sorted order it was
+ * written in): none under a keyed branch without a key codec, which is
+ * written empty when it is the captured node, and never as a child.
+ */
+private fun TreeSnapshot.encodableChildren(): List<TreeSnapshot> {
+    if (!isEncodable()) return emptyList()
+    return children.filter { it.isEncodable() }.sortedWith(encodedChildOrder)
+}
 
 /** Both leaves absent, or both present with equal encodable projections (runs the codecs). */
 private fun sameLeafBody(
