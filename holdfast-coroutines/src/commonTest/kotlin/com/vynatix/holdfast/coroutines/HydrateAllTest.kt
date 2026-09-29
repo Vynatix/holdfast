@@ -8,8 +8,13 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.effect
+import com.vynatix.holdfast.tree.LeafNode
 import com.vynatix.holdfast.tree.Root
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -19,6 +24,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private class HaFeedStore(
@@ -63,6 +70,50 @@ private class HaRoot(
     val feeds by branch(a, b).named(a, "a").named(b, "b")
     val other by branch(plain)
     val keyed by keyed<String, HaKeyedStore>(under = feeds)
+}
+
+/** A feed with a persisted overlay, whose seed reads [kv] before it takes the store. */
+private class HaOverlayStore(
+    kv: SuspendingKvStore,
+) : Store<HaOverlayStore>() {
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            overlay(kv, "ha-overlay")
+            base { items mutate listOf("seed") }
+            refresh { listOf("o") } adopt { fetched -> items mutate fetched }
+        }
+}
+
+/**
+ * A key-value store whose `get` disposes [victim] before answering: the
+ * store is gone between `hydrateAll`'s check of it and the transaction its
+ * `hydrate()` opens.
+ */
+private class DisposingKvStore : SuspendingKvStore {
+    lateinit var victim: Store<*>
+
+    override suspend fun get(key: String): String? {
+        victim.dispose()
+        return null
+    }
+
+    override suspend fun put(
+        key: String,
+        value: String,
+    ) = Unit
+
+    override suspend fun remove(key: String) = Unit
+
+    override suspend fun snapshot(): Map<String, String> = emptyMap()
+}
+
+private class HaOverlayRoot(
+    kv: SuspendingKvStore,
+) : Root("hao") {
+    val o = HaOverlayStore(kv)
+    val a = HaFeedStore { listOf("a") }
+    val leaves by branch(o, a).named(o, "o").named(a, "a")
 }
 
 /** `Root.hydrateAll`: every hydrator under a node driven, failures aggregated, entries refused. */
@@ -224,5 +275,80 @@ class HydrateAllTest {
             val text = report.toString()
             assertContains(text, "Entry(a: Ran(Hydrated))")
             assertFalse("seed" in text || "[a]" in text)
+        }
+
+    @Test
+    fun aLeafDisposedWhileAwaitedIsReportedDisposedAndNothingThrows() =
+        runBlocking {
+            val root = HaRoot()
+            // a's refresh adopts first (a lower key, launched first); its
+            // observer disposes b after b's hydrate() ran, before b's awaitSettled().
+            root.a.hydration.state effect { if (this == Hydration.Hydrated) root.b.dispose() }
+            val report = root.hydrateAll(scope = this)
+            assertTrue(root.b.isDisposed)
+            val a = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === root.a }.outcome)
+            assertEquals(Hydration.Hydrated, a.hydration)
+            val b = report.entries.first { it.store === root.b }
+            assertIs<HydrateAllReport.Outcome.Disposed>(b.outcome)
+            assertEquals("b", b.node.name, "the entry keeps the node the leaf sat at")
+            assertEquals(listOf(root.b, root.plain), report.skipped.map { it.store })
+            assertTrue(report.isHealthy, "a leaf gone meanwhile is not a failure")
+            assertEquals(emptyList<HydrateAllReport.Entry>(), report.failed)
+        }
+
+    @Test
+    fun aLeafDisposedAsItsHydrateBeginsIsReportedDisposedNotFailed() =
+        runBlocking {
+            val kv = DisposingKvStore()
+            val root = HaOverlayRoot(kv)
+            kv.victim = root.o
+            val report = root.hydrateAll()
+            assertTrue(root.o.isDisposed)
+            assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === root.o }.outcome)
+            assertEquals(emptyList<HydrateAllReport.Entry>(), report.failed)
+            assertTrue(report.isHealthy)
+            assertEquals(listOf("a"), root.a.items.value, "the rest hydrated regardless")
+        }
+
+    @Test
+    fun withoutAwaitingALeafDisposedAfterItsSeedIsReportedDisposed() =
+        runBlocking {
+            // Unconfined: each refresh runs inline as it is launched, so b's
+            // refresh disposes b inside b's own hydrate(), which returns normally.
+            lateinit var root: HaRoot
+            root =
+                HaRoot(remoteB = {
+                    root.b.dispose()
+                    listOf("b")
+                })
+            val inline = CoroutineScope(Dispatchers.Unconfined + Job())
+            try {
+                val report = root.hydrateAll(scope = inline, awaitSettled = false)
+                assertTrue(root.b.isDisposed)
+                assertEquals(Hydration.Seeded, root.b.hydration.current, "the phase keeps answering")
+                assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === root.b }.outcome)
+                val a = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === root.a }.outcome)
+                assertEquals(Hydration.Hydrated, a.hydration)
+                assertTrue(report.isHealthy)
+            } finally {
+                inline.cancel()
+            }
+        }
+
+    @Test
+    fun aDisposedLeafsEntryKeepsItsOwnNode() =
+        runBlocking {
+            val root = HaRoot()
+            val late = root.keyed.create("late") { HaKeyedStore(it, root) { listOf("l") } }
+            root.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
+            val report = root.hydrateAll()
+            val entry = report.entries.first { it.store === late }
+            assertIs<HydrateAllReport.Outcome.Disposed>(entry.outcome)
+            assertNull(root.nodeOf(late), "the registry dropped the leaf on detach")
+            val leaf = assertIs<LeafNode>(entry.node)
+            assertEquals("late", leaf.name)
+            assertEquals("late", leaf.key)
+            assertSame(root.keyed, leaf.parent)
+            assertEquals("Entry(late: Disposed)", entry.toString())
         }
 }

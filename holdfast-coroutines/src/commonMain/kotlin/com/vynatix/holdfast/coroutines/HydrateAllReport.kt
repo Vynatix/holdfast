@@ -8,18 +8,23 @@ import com.vynatix.holdfast.tree.StoreNode
 
 /**
  * What `Root.hydrateAll(node)` did, leaf by leaf, in the order it drove
- * them: an [Entry] per live leaf of the subtree with its [Entry.outcome] —
- * the [Hydration] its hydrator settled to (or, without waiting, is in),
- * [Outcome.NoHydrator] for a leaf that declared none, [Outcome.Disposed]
- * for one disposed meanwhile. [failed] lists the leaves whose hydration
- * ended [Hydration.Failed]; [skipped] those without a hydrator or gone;
- * [isHealthy] says no leaf failed. Never a state value.
+ * them: an [Entry] per leaf live in the subtree when it listed them, with
+ * its [Entry.outcome] — the [Hydration] its hydrator settled to (or,
+ * without waiting, is in), [Outcome.NoHydrator] for a leaf that declared
+ * none, [Outcome.Disposed] for one disposed meanwhile. [failed] lists the
+ * leaves whose hydration ended [Hydration.Failed]; [skipped] those without
+ * a hydrator or gone; [isHealthy] says no leaf failed. Never a state value.
  */
 @ExperimentalStoreApi
 class HydrateAllReport internal constructor(
     val entries: List<Entry>,
 ) {
-    /** One leaf: its node, its store, and how its hydration went. */
+    /**
+     * One leaf: its store, how its hydration went, and its [node] — the
+     * `LeafNode` it sat at when `hydrateAll` listed it, kept for a leaf
+     * [disposed][Outcome.Disposed] meanwhile too (its root no longer knows
+     * that leaf: `Root.nodeOf` answers `null`).
+     */
     @ExperimentalStoreApi
     class Entry internal constructor(
         val node: StoreNode,
@@ -44,7 +49,12 @@ class HydrateAllReport internal constructor(
         /** The leaf declared no hydrator: nothing to drive. */
         data object NoHydrator : Outcome()
 
-        /** The leaf's store was disposed between the listing and its turn. */
+        /**
+         * The leaf's store was disposed meanwhile: between the listing and
+         * its turn, as its hydrator ran, or while its hydration was awaited
+         * (or, without waiting, before its phase was read). Not a failure:
+         * [isHealthy] ignores it.
+         */
         data object Disposed : Outcome()
     }
 
