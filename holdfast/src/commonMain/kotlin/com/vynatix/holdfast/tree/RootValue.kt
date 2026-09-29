@@ -176,10 +176,13 @@ internal class RootValue(
      * never waits for a busy host), or, when one is, a fresh capture that is
      * not committed, so a read inside an action or observer sees the leaf
      * that just joined or left without opening a transaction on the host.
+     * Once the root is disposed it is the last settled tree whatever was
+     * pending: nothing settles any more, and a fresh capture would throw.
      */
     fun read(): TreeSnapshot {
         val node = node()
-        if (structuralPending.value && NoWriteRegion.current() == null) {
+        val stale = !root.isDisposed && structuralPending.value && NoWriteRegion.current() == null
+        if (stale) {
             if (SettleScopes.current() == null) node.settleNow()
             if (structuralPending.value) return captureTree(root, root, SnapshotScope.All, lastTree.value, null)
         }
@@ -193,12 +196,21 @@ internal class RootValue(
         return node.value
     }
 
-    /** `Root.dispose()`: stop following, drop the value's observers, dispose the host. The last tree stays readable. */
+    /**
+     * `Root.dispose()`: stop following, drop the value's observers, dispose
+     * the host, and hold no leaf store — the registry told no `onDetached`
+     * for them, and one disposed later is never heard of here. The last
+     * tree stays readable (its leaf captures keep what their reuse needs).
+     */
     fun dispose() {
         val node = nodeRef.value
         node?.dispose()
         node?.backing?.shutdownSilently()
         host.dispose()
+        synchronized(edgeLock) {
+            leafStores.clear()
+            pendingEdges = null
+        }
     }
 }
 

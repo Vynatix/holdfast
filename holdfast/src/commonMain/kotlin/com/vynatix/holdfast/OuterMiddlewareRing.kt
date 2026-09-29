@@ -97,3 +97,16 @@ internal fun Store<*>.setOuterMiddlewareUnchecked(middleware: List<Middleware<No
     @Suppress("UNCHECKED_CAST")
     (outerMiddleware as OuterMiddlewareRing<Nothing>).set(middleware)
 }
+
+/**
+ * [internalRemoveMiddleware]'s outer-ring half for a star-projected store:
+ * issue #21's tree ring unwinds its own adapters by identity when its root
+ * disposes, so a member another root's ring put there meanwhile is left in
+ * place. `false` on a disposed store (its ring is already cleared), without
+ * throwing, as [internalRemoveMiddleware].
+ */
+internal fun Store<*>.removeOuterMiddlewareUnchecked(middleware: Middleware<Nothing>): Boolean {
+    if (isDisposed) return false
+    @Suppress("UNCHECKED_CAST")
+    return (outerMiddleware as OuterMiddlewareRing<Nothing>).remove(middleware)
+}

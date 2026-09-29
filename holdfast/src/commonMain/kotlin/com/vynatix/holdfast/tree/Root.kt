@@ -283,8 +283,13 @@ abstract class Root(
      * decoded lazily by the reading store's codecs, at [restore] or a typed
      * read; no store code runs here.
      *
-     * @throws IllegalStateException if the root is disposed, or the text is
-     *   not a well-formed `holdfast.tree` v1 envelope.
+     * @throws IllegalStateException if the root is disposed.
+     * @throws com.vynatix.holdfast.SnapshotFormatException (an
+     *   `IllegalArgumentException`) if the text is not a well-formed
+     *   `holdfast.tree` v1 envelope — including one nested deeper than the
+     *   64 container levels the snapshot reader and writer allow: two per
+     *   branch level plus a leaf's body, so a tree about 28 branch levels
+     *   deep can be neither decoded here nor encoded by [TreeSnapshot.encode].
      */
     fun decode(text: String): TreeSnapshot = decodeTree(this, text)
 
@@ -316,8 +321,10 @@ abstract class Root(
      *
      * @throws IllegalStateException if the root is disposed, or from inside
      *   an `atomic` frame or a transaction of any leaf (an action body, a
-     *   hook, an observer): the chain is snapshotted per transaction, so
-     *   install from outside.
+     *   `suspendAction`/`suspendAtomic` body, a hook, an observer): the
+     *   chain is snapshotted per transaction, so install from outside. A
+     *   parked suspending body on another coroutine is no such transaction:
+     *   installing beside it is allowed and does not reach it.
      */
     fun middlewares(vararg middleware: TreeMiddleware) {
         checkNotDisposed()
@@ -361,12 +368,15 @@ abstract class Root(
     fun dispose() {
         if (!disposedFlag.compareAndSet(expect = false, update = true)) return
         val leaves = registry.close()
+        // The ring closes while every membership is still held: a leaf
+        // released below can be listed by another root at once, and its
+        // ring is that root's from then on.
+        treeMiddleware.close()
         for (leaf in leaves) {
             val store = leaf.storeRef ?: continue
             store.internalDetach(treeMembershipKey)
             leaf.storeRef = null
         }
-        treeMiddleware.close()
         rootValue.dispose()
     }
 
@@ -388,20 +398,39 @@ abstract class Root(
         registry.promote(entry, store)
     }
 
-    /** A branch store registered under the lock; tell the listeners after release. */
+    /**
+     * A branch store registered under the lock, owed its announcement
+     * (`LeafNode.attachPhase`): tell the listeners after release, then any
+     * detach a dispose deferred meanwhile, so every listener heard Attached
+     * first.
+     */
     internal fun onLeafAttached(leaf: LeafNode) {
-        if (leaf.storeRef != null) notifyAttached(leaf)
+        if (leaf.attachPhase.value != ATTACH_ANNOUNCING) return
+        try {
+            notifyAttached(leaf)
+        } finally {
+            if (!leaf.attachPhase.compareAndSet(ATTACH_ANNOUNCING, ATTACH_ANNOUNCED)) onLeafDetached(leaf)
+        }
     }
 
-    /** [TreeLeafAttachment.onStoreDisposed]: the tree drops the leaf, then tells the listeners once. */
+    /**
+     * [TreeLeafAttachment.onStoreDisposed]: the tree drops the leaf, then
+     * tells the listeners once, after its attach.
+     */
     internal fun leafDisposed(
         leaf: LeafNode,
         entry: LeafEntry?,
     ) {
         if (!registry.detachLeaf(leaf)) return
-        // Wait out the attach fanout of a keyed entry promoted a moment ago,
-        // so a listener hears Attached strictly before Detached.
-        entry?.constructionLock?.withLock { }
+        if (entry != null) {
+            // Wait out the attach fanout of a keyed entry promoted a moment ago,
+            // so a listener hears Attached strictly before Detached.
+            entry.constructionLock.withLock { }
+        } else if (!leaf.claimDetach()) {
+            // A branch leaf not announced yet: never announced at all, or its
+            // announcer delivers the detach once every listener heard Attached.
+            return
+        }
         onLeafDetached(leaf)
     }
 

@@ -89,13 +89,19 @@ class BranchDeclaration internal constructor(
         attachAll(branch)
         var registered = false
         try {
+            // Indexes each leaf still holding its store and owes it its
+            // announcement; a store disposed since its attach (from another
+            // thread) is neither indexed nor announced, so no listener hears
+            // `onDetached` for a leaf it never heard `onAttached` for.
             root.registry.registerBranch(branch, parent)
             registered = true
         } finally {
             if (!registered) for (store in stores) store.internalDetach(treeMembershipKey)
         }
         // One settle for the whole listing: a `value` following the tree
-        // recomputes once after every leaf is told, not once per leaf.
+        // recomputes once after every leaf is told, not once per leaf. A
+        // store that disposes while it is being announced is detached right
+        // after its announcement, by this thread (`Root.onLeafAttached`).
         settling { for (leaf in branch.leaves) root.onLeafAttached(leaf) }
         return branch
     }

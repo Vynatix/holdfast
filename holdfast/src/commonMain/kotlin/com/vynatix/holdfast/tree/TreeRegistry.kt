@@ -91,14 +91,24 @@ internal class TreeRegistry(
         check(!disposed) { "root '${root.name}' disposed" }
     }
 
-    /** Register [branch] (its leaves already carry their stores) under [parent]. */
+    /**
+     * Register [branch] (its leaves already carry their stores) under
+     * [parent]: each leaf still holding its store is indexed and owed its
+     * announcement (`LeafNode.attachPhase`); one whose store disposed since
+     * its attach (`detachLeaf` cleared it under this lock) was never a
+     * member and is never announced.
+     */
     fun registerBranch(
         branch: Branch,
         parent: StoreNode,
     ) = lock.withLock {
         checkOpen()
         registerChild(branch, parent)
-        for (leaf in branch.leaves) leafByStoreKey[leaf.storeKey] = leaf
+        for (leaf in branch.leaves) {
+            if (leaf.storeRef == null) continue
+            leafByStoreKey[leaf.storeKey] = leaf
+            leaf.attachPhase.value = ATTACH_ANNOUNCING
+        }
         structuralGeneration.incrementAndGet()
     }
 
