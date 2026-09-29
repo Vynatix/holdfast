@@ -9,8 +9,10 @@ import com.vynatix.holdfast.completesWithin
 import com.vynatix.holdfast.daemon
 import com.vynatix.holdfast.derived
 import com.vynatix.holdfast.effect
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,10 +21,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
+/**
+ * A keyed store whose constructor parks on [gate] (when given) and then runs
+ * [tail] (when given) before its last field, [complete], is assigned: a
+ * lookup that returns this store with `complete == false` observed it
+ * half-constructed.
+ */
 private class VisSlowStore(
     val id: Int,
     root: VisRoot,
     gate: CountDownLatch?,
+    tail: (() -> Unit)? = null,
 ) : Store<VisSlowStore>(root.slow.at(id)) {
     val n by state { 0 }
     val doubled = derived(n) { n.value * 2 }
@@ -33,6 +42,7 @@ private class VisSlowStore(
         n effect { }
         middlewares()
         gate?.await()
+        tail?.invoke()
         complete = true
     }
 }
@@ -42,7 +52,14 @@ private class VisRoot : Root() {
 }
 
 private const val WORKERS = 8
-private const val LOOKUPS = 2_000
+
+/**
+ * The least number of lookups that must have overlapped the window under
+ * test (the constructor's tail, or a built-but-abandoned store) before the
+ * factory is allowed to finish: the factory waits for them, so the overlap
+ * is a fact of the run, not of the scheduler.
+ */
+private const val MIN_OVERLAP = 500
 
 /** T3 under races: a keyed store is never visible half-constructed, and one key admits one store. */
 class KeyedConstructionVisibilityTest {
@@ -51,16 +68,46 @@ class KeyedConstructionVisibilityTest {
         completesWithin(20, "racing lookups against a slow factory") {
             val root = VisRoot()
             val gate = CountDownLatch(1)
-            val creator = daemon("creator") { root.slow.create(1) { VisSlowStore(it, root, gate) } }
-            val failures = ArrayList<Throwable>()
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            // Set by the constructor once past the gate, while it is still running.
+            val inTail = AtomicBoolean(false)
+            // Lookups that began while the constructor was in its tail.
+            val tailLookups = AtomicInteger()
+            val creatorDone = AtomicBoolean(false)
+            val seenLive = AtomicInteger()
+            val creator =
+                daemon("creator", failures) {
+                    try {
+                        root.slow.create(1) {
+                            VisSlowStore(it, root, gate) {
+                                // Hold the constructor open until the lookers have overlapped it.
+                                inTail.set(true)
+                                while (tailLookups.get() < MIN_OVERLAP && failures.isEmpty()) Thread.onSpinWait()
+                            }
+                        }
+                    } finally {
+                        creatorDone.set(true)
+                    }
+                }
             val lookers =
                 List(WORKERS) { w ->
                     daemon("looker-$w", failures) {
-                        repeat(LOOKUPS) {
+                        var sawLive = false
+                        // Run until the creator has returned AND this looker saw the live store, so the
+                        // lookups span the constructor's tail, the promotion and the first live reads.
+                        while ((!creatorDone.get() || !sawLive) && failures.isEmpty()) {
+                            val tail = inTail.get()
                             val found = root[root.slow, 1]
-                            if (found != null) check(found.complete) { "lookup returned a store still inside its constructor" }
+                            if (found != null) {
+                                check(found.complete) { "lookup returned a store still inside its constructor" }
+                                if (!sawLive) {
+                                    sawLive = true
+                                    seenLive.incrementAndGet()
+                                }
+                            }
                             root.entries(root.slow).values.forEach { check(it.complete) }
                             root.children(root).forEach { check((it as VisSlowStore).complete) }
+                            if (tail) tailLookups.incrementAndGet()
                         }
                     }
                 }
@@ -70,6 +117,8 @@ class KeyedConstructionVisibilityTest {
             creator.join()
             lookers.forEach { it.join() }
             assertTrue(failures.isEmpty(), failures.joinToString())
+            assertTrue(tailLookups.get() >= MIN_OVERLAP, "lookups overlapping the constructor's tail: ${tailLookups.get()}")
+            assertEquals(WORKERS, seenLive.get(), "every looker saw the store once it was live")
             assertTrue(root[root.slow, 1]!!.complete)
         }
 
@@ -77,22 +126,44 @@ class KeyedConstructionVisibilityTest {
     fun aThrowingFactoryIsVisibleToNoThread() =
         completesWithin(20, "a throwing factory racing lookups") {
             val root = VisRoot()
-            val gate = CountDownLatch(1)
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            // Set by the factory once the store is fully constructed and bound, before it throws.
+            val constructed = AtomicBoolean(false)
+            // Lookups that began while the built store was waiting to be abandoned.
+            val overlapping = AtomicInteger()
+            val creatorDone = AtomicBoolean(false)
             val seen = AtomicInteger()
-            val looker = daemon("looker") { repeat(LOOKUPS) { if (root[root.slow, 2] != null) seen.incrementAndGet() } }
-            val creator =
-                daemon("creator") {
-                    runCatching {
-                        root.slow.create(2) { id ->
-                            VisSlowStore(id, root, gate)
-                            error("after construction")
-                        }
+            val looker =
+                daemon("looker", failures) {
+                    while (!creatorDone.get()) {
+                        val built = constructed.get()
+                        if (root[root.slow, 2] != null) seen.incrementAndGet()
+                        if (built) overlapping.incrementAndGet()
                     }
                 }
-            gate.countDown()
+            val creator =
+                daemon("creator", failures) {
+                    try {
+                        val thrown =
+                            assertFailsWith<IllegalStateException> {
+                                root.slow.create(2) { id ->
+                                    VisSlowStore(id, root, null)
+                                    constructed.set(true)
+                                    // Hold the built store unpromoted until the looker has overlapped it.
+                                    while (overlapping.get() < MIN_OVERLAP && failures.isEmpty()) Thread.onSpinWait()
+                                    error("after construction")
+                                }
+                            }
+                        check(thrown.message == "after construction") { "create must propagate the factory's own throw: $thrown" }
+                    } finally {
+                        creatorDone.set(true)
+                    }
+                }
             creator.join()
             looker.join()
-            assertEquals(0, seen.get())
+            assertTrue(failures.isEmpty(), failures.joinToString())
+            assertTrue(overlapping.get() >= MIN_OVERLAP, "lookups overlapping the built, unpromoted store: ${overlapping.get()}")
+            assertEquals(0, seen.get(), "a store its factory abandoned was visible to a lookup")
             assertNull(root[root.slow, 2])
         }
 

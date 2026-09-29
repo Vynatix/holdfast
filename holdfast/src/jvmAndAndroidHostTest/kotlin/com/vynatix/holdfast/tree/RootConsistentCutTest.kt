@@ -44,6 +44,7 @@ private class RcRoot : Root("rc") {
 }
 
 private const val FRAMES = 3_000
+private const val MIN_CHURN = 500
 private const val MIN_READS = 1_000
 
 /**
@@ -52,6 +53,11 @@ private const val MIN_READS = 1_000
  * they were before some frame or after it; overlapping frames settle at most
  * once per frame; a leaf's action completes while a `value` observer is
  * parked; and a capture racing a keyed dispose never throws.
+ *
+ * Every racing reader has a progress minimum ([MIN_READS]): the writer keeps
+ * committing until the reader has taken that many reads, so a fast machine
+ * cannot finish the writes before the reader has raced any of them, and a
+ * regression that tears a commit has reads to show up in.
  */
 class RootConsistentCutTest {
     @Test
@@ -98,24 +104,33 @@ class RootConsistentCutTest {
         completesWithin(120, "value during two-state commits") {
             val root = RcRoot()
             val torn = ConcurrentLinkedQueue<String>()
+            val failures = ConcurrentLinkedQueue<Throwable>()
             root.value effect { if (this[root.left.x] != this[root.left.x2]) torn += "${this[root.left.x]}/${this[root.left.x2]}" }
             val done = AtomicBoolean(false)
+            val reads = AtomicInteger()
             val reader =
-                daemon("reader") {
+                daemon("reader", failures) {
                     while (!done.get()) {
                         val tree = root.value.value
                         if (tree[root.left.x] != tree[root.left.x2]) torn += "read ${tree[root.left.x]}/${tree[root.left.x2]}"
+                        reads.incrementAndGet()
                     }
                 }
-            repeat(FRAMES) { k ->
+            // At least FRAMES commits, and as many more as it takes for the reader to race MIN_READS of them.
+            var committed = 0
+            while (committed < FRAMES || (reads.get() < MIN_READS && reader.isAlive)) {
+                val k = ++committed
                 root.left action {
-                    x mutate k + 1
-                    x2 mutate k + 1
+                    x mutate k
+                    x2 mutate k
                 }
             }
             done.set(true)
             reader.join()
+            assertTrue(failures.isEmpty(), failures.joinToString())
             assertEquals(emptyList<String>(), torn.toList())
+            assertTrue(reads.get() >= MIN_READS, "reader progress ${reads.get()}")
+            assertEquals(committed, root.value.value[root.left.x], "the final tree reflects every commit")
         }
 
     @Test
@@ -151,14 +166,20 @@ class RootConsistentCutTest {
             root.value.value
             val failures = ConcurrentLinkedQueue<Throwable>()
             val done = AtomicBoolean(false)
+            val reads = AtomicInteger()
             val reader =
                 daemon("reader") {
                     while (!done.get()) {
                         runCatching { root.value.value }.onFailure { failures += it }
                         runCatching { root.internalSettleNow() }.onFailure { failures += it }
+                        reads.incrementAndGet()
                     }
                 }
-            repeat(500) { i ->
+            // At least MIN_CHURN create/commit/dispose rounds, and as many more as it takes for the
+            // reader to race MIN_READS of them.
+            var churned = 0
+            while (churned < MIN_CHURN || reads.get() < MIN_READS) {
+                val i = churned++
                 val k = root.keyed.create(i) { RcKeyedStore(it, root) }
                 k action { n mutate i }
                 k.dispose()
@@ -166,6 +187,7 @@ class RootConsistentCutTest {
             done.set(true)
             reader.join()
             assertEquals(emptyList<Throwable>(), failures.toList())
+            assertTrue(reads.get() >= MIN_READS, "reader progress ${reads.get()}")
             assertEquals(0, root.entries(root.keyed).size)
             assertEquals(
                 0,

@@ -4,9 +4,11 @@ package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.awaitCollected
 import java.lang.ref.WeakReference
 import kotlin.test.Test
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private class GcThreadStore(
     id: Int,
@@ -19,15 +21,17 @@ private class GcRoot : Root() {
     val threads by keyed<Int, GcThreadStore>()
 }
 
-private const val GC_ATTEMPTS = 20
-
-/** T3: a keyed store that left the tree — disposed, or abandoned by a failing factory — is collectable. */
+/**
+ * T3: a keyed store that left the tree — disposed, or abandoned by a failing
+ * factory — is collectable. The wait is `awaitCollected` (`GcSupport.kt`):
+ * a bounded poll under allocation pressure, never `System.runFinalization()`.
+ */
 class KeyedStoreGcTest {
     @Test
     fun aDisposedKeyedStoreIsCollectable() {
         val root = GcRoot()
         val ref = createDisposeAndForget(root)
-        awaitCollected(ref)
+        assertTrue(awaitCollected(ref), "a disposed keyed store was not collected within the budget")
         assertNull(ref.get(), "the root must not keep a disposed keyed store reachable")
     }
 
@@ -42,6 +46,13 @@ class KeyedStoreGcTest {
     @Test
     fun anAbandonedKeyedStoreIsCollectable() {
         val root = GcRoot()
+        val ref = createAbandonAndForget(root)
+        assertTrue(awaitCollected(ref), "an abandoned keyed store was not collected within the budget")
+        assertNull(ref.get(), "the root must not keep an abandoned keyed store reachable")
+    }
+
+    /** A frame of its own, like [createDisposeAndForget]: the factory's store leaves only through the weak reference. */
+    private fun createAbandonAndForget(root: GcRoot): WeakReference<GcThreadStore> {
         var ref: WeakReference<GcThreadStore>? = null
         runCatching {
             root.threads.create(2) { id ->
@@ -50,16 +61,6 @@ class KeyedStoreGcTest {
                 error("abandon")
             }
         }
-        awaitCollected(ref!!)
-        assertNull(ref!!.get(), "the root must not keep an abandoned keyed store reachable")
-    }
-
-    private fun awaitCollected(ref: WeakReference<*>) {
-        repeat(GC_ATTEMPTS) {
-            if (ref.get() == null) return
-            System.gc()
-            System.runFinalization()
-            Thread.sleep(20)
-        }
+        return checkNotNull(ref) { "the factory ran" }
     }
 }

@@ -3628,9 +3628,9 @@ Issue #21 gives an app one typed root over its stores: branches are
 delegate-named properties, keyed stores join through a factory bracket, and
 everything is addressed by node and state identity — strings appear only in
 `encode()` and `render()`. A root is not a `Store`: the leaves keep their own
-actions, middleware and locks; the tree adds membership, and (as the pieces
-land) consistent captures, subtree restore and reset, a per-frame `value`,
-tree middleware and a test fixture over them. Everything in this chapter is
+actions, middleware and locks; the tree adds membership, consistent captures,
+subtree restore and reset, a per-frame `value`, tree middleware, a test
+fixture and hydration over them. Everything in this chapter is
 `@ExperimentalStoreApi`: every root subclass, keyed store class and call
 site opts in (`@OptIn(ExperimentalStoreApi::class)`, or the module-wide
 `-opt-in=com.vynatix.holdfast.ExperimentalStoreApi` compiler flag, which

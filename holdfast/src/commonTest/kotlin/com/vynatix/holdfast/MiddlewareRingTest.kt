@@ -1,10 +1,12 @@
-@file:OptIn(StoreInternalApi::class)
+@file:OptIn(StoreInternalApi::class, DelicateCoroutinesApi::class)
 
 package com.vynatix.holdfast
 
-import kotlinx.coroutines.Dispatchers
+import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.newFixedThreadPoolContext
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,7 +21,7 @@ import kotlin.test.assertTrue
  * `:holdfast-coroutines`' `SuspendAction`/`SuspendAtomic` route through the
  * same [Store.snapshotMiddleware], so this store-level coverage is the one
  * place the ordering contract needs proving; the coroutines module pins that
- * it reaches the ring too (`RingOutermostOnSuspendActionTest`).
+ * it reaches the ring too (`OuterMiddlewareRingSuspendTest`).
  */
 private class RingTestVault : Store<RingTestVault>() {
     val n by state { 0 }
@@ -44,6 +46,62 @@ private class RingRecordingMiddleware(
         events.add("$tag:error")
     }
 }
+
+/** The ids of the transactions a middleware started and completed; guarded, since the racing workers' actions write it. */
+private class RingTransactionLog {
+    private val lock = StoreLock()
+    private val started = HashSet<String>()
+    private val completed = HashSet<String>()
+
+    fun started(id: String) {
+        lock.withLock { started += id }
+    }
+
+    fun completed(id: String) {
+        lock.withLock { completed += id }
+    }
+
+    /** Whether the middleware observed transaction [id] from `started` through `completed`. */
+    fun observed(id: String): Boolean = lock.withLock { id in started && id in completed }
+}
+
+/** A consumer-list member (`middlewares(...)`): the chain lists every one of these before any ring member. */
+private open class RingConsumerMember(
+    val log: RingTransactionLog = RingTransactionLog(),
+) : Middleware<RingTestVault>() {
+    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction.id)
+
+    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction.id)
+}
+
+/** One member of a whole-set ring install: every ring member one snapshot lists shares a [generation]. */
+private class RingMember(
+    val generation: Int,
+) : Middleware<RingTestVault>()
+
+/** The ring member every whole-set install keeps, so it must observe every transaction of the run. */
+private class RingSentinelMember(
+    val log: RingTransactionLog = RingTransactionLog(),
+) : Middleware<RingTestVault>() {
+    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction.id)
+
+    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction.id)
+}
+
+/** A guarded list the racing workers append to: the invariant violations they found, the transaction ids they ran. */
+private class RingGuardedList {
+    private val lock = StoreLock()
+    private val items = ArrayList<String>()
+
+    operator fun plusAssign(item: String) {
+        lock.withLock { items += item }
+    }
+
+    fun toList(): List<String> = lock.withLock { items.toList() }
+}
+
+private const val RING_SIZE = 3
+private const val OPS_PER_WORKER = 200
 
 class MiddlewareRingTest {
     @Test
@@ -148,31 +206,120 @@ class MiddlewareRingTest {
         assertEquals(listOf(consumer, ring), v.snapshotMiddleware())
     }
 
+    /**
+     * Whole-set ring installs, consumer installs, `clearMiddleware()`,
+     * identity removals and actions race on one store, and every
+     * [Store.snapshotMiddleware] taken meanwhile — by an observer, by the
+     * mutating workers after each step, and from inside every action — must
+     * be a consistent chain: the consumer list first, then the ring; the ring
+     * either empty or exactly one whole install (its sentinel plus
+     * [RING_SIZE] members of one generation), never a partial set or two
+     * generations mixed. Installed middleware is seen by actions: the
+     * sentinel every install keeps observes every transaction of the run,
+     * a consumer member still installed after an action observed it, and a
+     * removed member is gone from the chain as soon as the removal returns.
+     */
     @Test
-    fun concurrentSetRemoveAndClearDuringInFlightActionsNeverCorruptEitherList() =
+    fun concurrentSetRemoveAndClearDuringInFlightActionsKeepEverySnapshotConsistent() =
         runBlocking {
             val v = RingTestVault()
-            val workers = 8
-            val opsPerWorker = 50
+            val sentinel = RingSentinelMember()
+            val generations = atomic(0)
 
-            val jobs =
-                List(workers) { workerId ->
-                    async(Dispatchers.Default) {
-                        repeat(opsPerWorker) {
-                            when (workerId % 5) {
-                                0 -> v.internalSetOuterMiddleware(listOf(RingRecordingMiddleware("w$workerId-$it", mutableListOf())))
-                                1 -> v.internalRemoveMiddleware(RingRecordingMiddleware("never-here", mutableListOf()))
-                                2 -> v.middlewares(RingRecordingMiddleware("c$workerId-$it", mutableListOf()))
-                                3 -> v.clearMiddleware()
-                                4 -> v action { n mutate it }
-                            }
+            fun wholeInstall(): List<Middleware<RingTestVault>> {
+                val generation = generations.incrementAndGet()
+                return listOf(sentinel) + List(RING_SIZE) { RingMember(generation) }
+            }
+            v.internalSetOuterMiddleware(wholeInstall())
+            val violations = RingGuardedList()
+            val transactions = RingGuardedList()
+
+            fun verify(where: String) {
+                val chain = v.snapshotMiddleware()
+                val firstRing = chain.indexOfFirst { it !is RingConsumerMember }.let { if (it < 0) chain.size else it }
+                val consumers = chain.subList(0, firstRing)
+                val ring = chain.subList(firstRing, chain.size)
+                if (ring.any { it is RingConsumerMember }) {
+                    violations += "$where: a consumer middleware after a ring member in $chain"
+                }
+                if (consumers.any { it !is RingConsumerMember }) {
+                    violations += "$where: a ring member among the consumer list in $chain"
+                }
+                val ringGenerations = ring.filterIsInstance<RingMember>().map { it.generation }.toSet()
+                val isWholeInstall =
+                    ring.firstOrNull() === sentinel && ring.size == RING_SIZE + 1 && ringGenerations.size == 1
+                if (!isWholeInstall) {
+                    violations += "$where: ring is not one whole install (sentinel + $RING_SIZE members of one generation): $ring"
+                }
+            }
+
+            val ringSetter: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER) {
+                    v.internalSetOuterMiddleware(wholeInstall())
+                    verify("setter $w after set")
+                }
+            }
+            val consumerAdder: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER) {
+                    v.middlewares(RingConsumerMember())
+                    verify("adder $w after middlewares")
+                }
+            }
+            val clearer: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER) {
+                    v.clearMiddleware()
+                    verify("clearer $w after clearMiddleware")
+                }
+            }
+            val remover: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER) {
+                    val member = RingConsumerMember()
+                    v.middlewares(member)
+                    // `true` unless a racing clearMiddleware() wiped it first; either way it is gone afterwards.
+                    v.internalRemoveMiddleware(member)
+                    if (v.snapshotMiddleware().any { it === member }) violations += "remover $w: a removed member is still in the chain"
+                    verify("remover $w after remove")
+                }
+            }
+            val actor: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER) { i ->
+                    val member = RingConsumerMember()
+                    v.middlewares(member)
+                    val result =
+                        v action {
+                            verify("actor $w inside action $i")
+                            n mutate i
                         }
+                    val txn = (result as TransactionResult.Success).transaction
+                    transactions += txn.id
+                    val stillInstalled = v.snapshotMiddleware().any { it === member }
+                    if (stillInstalled && !member.log.observed(txn.id)) {
+                        violations += "actor $w: a consumer member installed throughout action $i did not observe it"
                     }
                 }
-            jobs.awaitAll()
+            }
+            val observer: suspend (Int) -> Unit = { w ->
+                repeat(OPS_PER_WORKER * 4) { verify("observer $w") }
+            }
 
-            // The store is still usable: both lists are internally consistent lists
-            // (no crash, no torn read), and a fresh action still runs to completion.
+            val roles = listOf(actor, ringSetter, observer, clearer, actor, ringSetter, consumerAdder, remover)
+            // One thread per role, so every role overlaps every other whatever the host's core count.
+            val pool = newFixedThreadPoolContext(roles.size, "ring-race")
+            try {
+                roles
+                    .mapIndexed { w, role -> async(pool) { role(w) } }
+                    .awaitAll()
+            } finally {
+                pool.close()
+            }
+
+            assertEquals(emptyList(), violations.toList().take(5))
+            val ran = transactions.toList()
+            assertEquals(2 * OPS_PER_WORKER, ran.size, "every action ran")
+            val unseen = ran.filterNot { sentinel.log.observed(it) }
+            assertEquals(emptyList(), unseen.take(5), "the sentinel ring member observes every transaction of the run")
+
+            // The store is still usable afterwards: a fresh chain runs an action to completion.
             v.clearMiddleware()
             v.internalSetOuterMiddleware(emptyList())
             val finalEvents = mutableListOf<String>()

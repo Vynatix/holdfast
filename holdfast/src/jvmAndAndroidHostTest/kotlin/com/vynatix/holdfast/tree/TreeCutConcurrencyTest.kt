@@ -46,6 +46,7 @@ private class CutRoot : Root("cut") {
 
 private const val FRAMES = 3_000
 private const val MIN_CUTS = 1_000
+private const val MIN_CAPTURES_BEFORE_DISPOSE = 20
 
 /**
  * T4 (never a mix): a tree capture during another thread's two-store
@@ -54,6 +55,10 @@ private const val MIN_CUTS = 1_000
  * participant's new value with the other's old one; a single-store,
  * two-state commit is never captured half-applied; and captures keep
  * flowing while a `suspendAction` body is parked holding the serializer.
+ *
+ * Every racing reader has a progress minimum ([MIN_CUTS]): the writer keeps
+ * committing until the reader has taken that many cuts, so a fast machine
+ * cannot finish the writes before the reader has raced any of them.
  */
 class TreeCutConcurrencyTest {
     @Test
@@ -94,34 +99,42 @@ class TreeCutConcurrencyTest {
         completesWithin(120, "captures during two-state commits") {
             val root = CutRoot()
             val mixes = ConcurrentLinkedQueue<String>()
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            val cuts = AtomicInteger()
+            val committed = AtomicInteger()
             val done = AtomicBoolean(false)
             val start = CyclicBarrier(3)
-            val writer =
-                daemon("writer") {
-                    start.await()
-                    repeat(FRAMES) { k ->
-                        root.left action {
-                            x mutate k + 1
-                            x2 mutate k + 1
-                        }
-                    }
-                }
             val reader =
-                daemon("reader") {
+                daemon("reader", failures) {
                     start.await()
                     while (!done.get()) {
                         val tree = root.snapshot(root.nodeOf(root.left)!!)
                         val a = tree[root.left.x]
                         val b = tree[root.left.x2]
                         if (a != b) mixes += "x=$a x2=$b"
+                        cuts.incrementAndGet()
+                    }
+                }
+            val writer =
+                daemon("writer", failures) {
+                    start.await()
+                    // At least FRAMES commits, and as many more as it takes for the reader to race MIN_CUTS of them.
+                    while (committed.get() < FRAMES || (cuts.get() < MIN_CUTS && reader.isAlive)) {
+                        val k = committed.incrementAndGet()
+                        root.left action {
+                            x mutate k
+                            x2 mutate k
+                        }
                     }
                 }
             start.await()
             writer.join(100_000)
             done.set(true)
             reader.join(10_000)
+            assertTrue(failures.isEmpty(), failures.joinToString())
             assertEquals(emptyList(), mixes.toList().take(5))
-            assertEquals(FRAMES, root.left.x.value)
+            assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
+            assertEquals(committed.get(), root.left.x.value)
         }
 
     @Test
@@ -180,23 +193,38 @@ class TreeCutConcurrencyTest {
         }
 
     @Test
-    fun rootDisposeDuringACaptureDoesNotDeadlock() =
+    fun rootDisposeDuringACaptureDoesNotDeadlockAndFailsOnlyAsDisposed() =
         completesWithin(30, "root dispose racing captures") {
             val root = CutRoot()
             val start = CyclicBarrier(2)
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            val succeeded = AtomicInteger()
             val reader =
-                daemon("reader") {
+                daemon("reader", failures) {
                     start.await()
-                    repeat(200) { runCatching { root.snapshot() } }
+                    // Captures until the first one that finds the root disposed: every capture before
+                    // it returned, and that one — and nothing else — threw the documented exception.
+                    while (true) {
+                        try {
+                            root.snapshot()
+                            succeeded.incrementAndGet()
+                        } catch (e: IllegalStateException) {
+                            check("disposed" in e.message.orEmpty()) { "a capture racing dispose threw $e" }
+                            break
+                        }
+                    }
                 }
             val disposer =
-                daemon("disposer") {
+                daemon("disposer", failures) {
                     start.await()
-                    Thread.sleep(2)
+                    // Dispose only once the reader has been capturing, so the race is against live captures.
+                    while (succeeded.get() < MIN_CAPTURES_BEFORE_DISPOSE && reader.isAlive) Thread.onSpinWait()
                     root.dispose()
                 }
             reader.join()
             disposer.join()
+            assertTrue(failures.isEmpty(), failures.joinToString())
+            assertTrue(succeeded.get() >= MIN_CAPTURES_BEFORE_DISPOSE, "captures before dispose: ${succeeded.get()}")
             assertTrue(root.isDisposed)
         }
 

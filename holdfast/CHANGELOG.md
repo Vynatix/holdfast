@@ -11,13 +11,12 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 ### Added
 
 - **Kernel seams for issue #21's typed tree** (issue #21 plan PR 21-1,
-  decisions U3/U12). No production consumer yet — #21's `tree` package is
-  the first:
+  decisions U3/U12), consumed by #21's `tree` package (below):
   - `Store` and `EventfulStore` each gain a protected, experimental
     secondary constructor taking a `StoreMembership<Self>` token —
     `@ExperimentalStoreApi abstract class StoreMembership<S : Store<S>>
     internal constructor()`, mintable only inside the `:holdfast` module (a
-    leaf's `KeyedBranch.at(key)` will mint the only implementation). The
+    leaf's `KeyedBranch.at(key)` mints the only implementation). The
     token's `bind(store)` runs once, after every `Store` field — and, for
     `EventfulStore`, its own `events` — has initialized, and before any
     subclass property initializer or delegated state runs. The frozen no-arg
@@ -25,8 +24,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     onBufferOverflow)`) are byte-identical to before this PR.
   - `@StoreInternalApi internalSetOuterMiddleware`/`internalRemoveMiddleware`:
     a library-owned outer middleware ring, always outermost of the
-    consumer-registered `middlewares(...)` chain (for #21's future
-    `Root.middlewares`). `internalRemoveMiddleware` is not gated on
+    consumer-registered `middlewares(...)` chain (#21's `Root.middlewares`).
+    `internalRemoveMiddleware` is not gated on
     `checkNotDisposed()` — see the exception list next to
     `snapshotMiddleware()` in CLAUDE.md — so a caller unwinding a store that
     disposed mid-teardown can tell "already gone" apart from "removed"

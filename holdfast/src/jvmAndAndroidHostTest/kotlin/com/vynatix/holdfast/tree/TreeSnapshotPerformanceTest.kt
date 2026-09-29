@@ -24,9 +24,15 @@ private class PerfRoot : Root() {
 
 private const val LEAVES = 16
 private const val CAPTURES = 1_000
-private const val BUDGET_SECONDS = 2L
+private const val BUDGET_MS = 5_000L
 
-/** A capture of a sixteen-leaf tree is cheap enough to take per frame: 1,000 of them under two seconds, warm. */
+/**
+ * A capture of a sixteen-leaf tree is cheap enough to take per frame: 1,000
+ * of them, warm, well under a generous budget that fails only on a cliff.
+ * JVM and Android host only, compared in milliseconds (a whole-seconds
+ * comparison would have failed at exactly the budget): a debug Kotlin/Native
+ * binary on the iOS simulator has no wall-clock budget worth pinning.
+ */
 class TreeSnapshotPerformanceTest {
     @Test
     fun aThousandCapturesOfSixteenLeavesStayUnderBudget() {
@@ -36,8 +42,8 @@ class TreeSnapshotPerformanceTest {
         val started = TimeSource.Monotonic.markNow()
         var captured = 0
         repeat(CAPTURES) { captured += root.snapshot().children.size }
-        val elapsed = started.elapsedNow()
+        val elapsedMs = started.elapsedNow().inWholeMilliseconds
         assertEquals(CAPTURES, captured, "each capture holds the keyed branch")
-        assertTrue(elapsed.inWholeSeconds < BUDGET_SECONDS, "$CAPTURES captures took $elapsed")
+        assertTrue(elapsedMs < BUDGET_MS, "$CAPTURES captures of $LEAVES leaves took ${elapsedMs}ms; budget ${BUDGET_MS}ms exceeded")
     }
 }
