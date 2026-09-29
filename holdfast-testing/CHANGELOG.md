@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #21 review (PR #24).** `trackTree`'s teardown reset is skipped,
+  not failed, when a live leaf is still held by an entry teardown cannot
+  wait out (a `suspendAction`/`suspendAtomic` body parked in un-joined
+  work, a thread inside an action, or a holder of the leaf's serializer);
+  it previously spun forever on the test thread. `trackTree` from inside a
+  leaf's action or an `atomic` frame is refused and leaves nothing behind
+  (no tracked leaf, no membership listener, no tree middleware). Teardown
+  reports unconsumed `TransactionResult.Error`s and a failed tree reset in
+  one `AssertionError`, the unconsumed errors first. A handle that loses
+  the track registration race hands its bridge wrappers to the winner (or
+  unwraps them when the winner is `Capture.None`) instead of feeding a
+  disposed recorder.
+
 ### BREAKING (behavior)
 
 - **Teardown keeps the middleware a test installed.** `storeTest`'s

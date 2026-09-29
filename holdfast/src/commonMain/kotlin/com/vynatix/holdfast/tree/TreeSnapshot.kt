@@ -126,7 +126,10 @@ class TreeSnapshot internal constructor(
      * `SnapshotScope.UserAuthored` a leaf named by its class refuses (T6:
      * that name would change with the class; pin it), and a capture under a
      * keyed branch without a key codec refuses (its path would have to
-     * spell the key). Runs the leaves' codecs, no other user code.
+     * spell the key). The text nests at most 64 container levels — two per
+     * branch level plus a leaf's body, about 28 branch levels — the cap the
+     * snapshot writer and reader share with [Root.decode]. Runs the leaves'
+     * codecs, no other user code.
      *
      * @throws IllegalStateException for a class-named leaf under
      *   `SnapshotScope.UserAuthored`, a capture under a keyed branch without

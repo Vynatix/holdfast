@@ -3933,7 +3933,17 @@ is written by node name, and every leaf carries its store's own
 readable, and a `Secret` state is `null`, a codec-less state absent, a
 `Remote` one absent unless included. A keyed branch's entries are written
 under their keys through the branch's `keyCodec` (defaulted for `String`
-keys); a keyed branch without one is left out and listed under `skipped`.
+keys); a keyed branch without one is left out and listed under `skipped` —
+also when that branch is the node captured (written with no entries), while a
+capture *under* such a branch refuses to encode, since its path would have to
+spell the key. A capture of one keyed leaf round-trips: its path ends in the
+encoded key, which `decode` resolves through the branch's `keyCodec` to the
+live store, or to a pending leaf (`pendingKeys`) when none is live; a key codec
+that throws, or two entries decoding to one key, fail `decode` with a
+`SnapshotFormatException` naming the branch, never the key. An empty leaf
+capture — a leaf with nothing tagged under `UserAuthored`, or a disposed store
+— is written `{"kind":"leaf"}` with no body and reads back as `Absent`. The
+text nests at most 64 container levels, about 28 branch levels.
 
 ```kotlin
 fun persistTheTree(): String {

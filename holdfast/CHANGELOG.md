@@ -8,6 +8,51 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #21 review (PR #24) — captures never pin a store.** A captured
+  `StoreSnapshot` no longer references any state or store instance: its cut
+  stamp records identity tokens, write counters and keyed family names, so
+  a snapshot taken before `dispose()` no longer keeps the disposed store
+  reachable and an undo stack no longer keeps evicted keyed entries alive;
+  `Root.value` recaptures a leaf on which a keyed family was declared since
+  the last settle even before it has an entry, and `internalCutRetryCount`
+  counts the cut attempts retried on an open write bracket too.
+- **Issue #21 review — root lifecycle.** Reading `Root.value` after
+  `Root.dispose()` answers the last settled tree even when a leaf's join or
+  leave was still pending (it no longer throws "root disposed"); a disposed
+  root no longer keeps its former leaves reachable through the value's edge
+  bookkeeping; `Root.dispose()` unwinds the tree middleware ring before any
+  membership is released and by adapter identity, so a leaf another root
+  adopts in that window keeps the new root's middleware; a listed store
+  disposed on another thread while its branch is declared is never indexed
+  as a member and listeners never hear `onDetached` without `onAttached`;
+  `Root.middlewares`/`removeMiddleware` are refused from inside a
+  `suspendAction`/`suspendAtomic` body of any leaf, as from a blocking
+  action (beside a parked suspending holder stays allowed).
+- **Issue #21 review — tree snapshots, encode and decode.** A capture of a
+  single keyed leaf round-trips through `encode`/`decode` and restores (a
+  key with no live store becomes a pending leaf listed by `pendingKeys`);
+  any exception a key codec throws on decode, and two entries decoding to
+  one key, are `SnapshotFormatException`s naming the branch and never the
+  key; a codec-less keyed branch captured as the node itself is written
+  with no entries and listed under `skipped` (now root-relative, like
+  `path`) instead of each key's `toString()`, a capture under such a branch
+  refuses to encode, and `equalsEncodable` matches; `Root.snapshot(leafNode)`
+  returns an empty leaf capture (written `{"kind":"leaf"}`, reading as
+  `Absent`, restoring as a no-op) instead of throwing when the leaf captured
+  nothing or its store is disposed; a subtree from `tree[node]` answers
+  `null`/`Absent`/empty for anything outside it; and a read racing
+  `Root.dispose()` answers `Absent` instead of throwing. `Root.decode`
+  documents `SnapshotFormatException` and the 64-level nesting cap.
+- **Issue #21 review — keyed construction.** A `getOrCreate` racing another
+  thread's construction of the same key parks from the moment the key is
+  reserved (the construction lock is held from `reserveOrExisting` on)
+  instead of spinning on the registry before the factory starts; the key
+  is named through the branch's key codec once per call, and a throwing
+  codec fails with an `IllegalStateException` naming the root and branch
+  only.
+
 ### Added
 
 - **Kernel seams for issue #21's typed tree** (issue #21 plan PR 21-1,

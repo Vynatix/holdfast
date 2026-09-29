@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #21 review (PR #24).** `Root.hydrateAll` no longer throws when a
+  leaf is disposed after its `hydrate()` — before or while its
+  `awaitSettled()` runs, or before its phase is read when not awaiting —
+  nor reports a leaf disposed during its own `hydrate()` as
+  `Ran(Failed(IllegalStateException))`: every such leaf is
+  `Outcome.Disposed`, which `isHealthy` ignores; cancellation still
+  propagates. `HydrateAllReport.Entry.node` of a disposed leaf is the
+  `LeafNode` it sat at when listed, no longer the queried root or branch.
+
 ### Added
 
 - **`Root.hydrateAll(node, scope, awaitSettled)`** (experimental, issue #21
