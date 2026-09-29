@@ -170,11 +170,15 @@ class StoreTestScope internal constructor(
      * removes every tracked handle's entries from the global
      * [PendingErrorRegistry], restores each tracked store's clock binding
      * (`Store.bindClock`) to what it was when the store was first tracked,
-     * and clears the handle registry. When
-     * [bodyAlreadyFailed] is `false`, also aggregates any unconsumed
-     * [TransactionResult.Error] values across all handles and throws an
-     * [AssertionError] listing them — forcing tests to actively assert on (or
-     * explicitly discard) every error they observe. When the body already
+     * unwinds each tracked tree (`trackTree`: its membership listener
+     * disposed, the tree reset as one frame with the tree recorder still
+     * installed — skipped when opted out, the root is disposed, or a leaf is
+     * still held by un-joined work — then that recorder removed), and clears
+     * the handle registry. When [bodyAlreadyFailed] is `false`, also
+     * aggregates any unconsumed [TransactionResult.Error] values across all
+     * handles and any tree whose reset failed into one [AssertionError], the
+     * unconsumed errors listed first — forcing tests to actively assert on
+     * (or explicitly discard) every error they observe. When the body already
      * threw, the original failure propagates and the unconsumed-error check is
      * suppressed so the user sees the root-cause exception rather than a
      * teardown-time message.
@@ -192,7 +196,9 @@ class StoreTestScope internal constructor(
      * is cleared; then each tracked store's clock binding is restored (after
      * the rollbacks, whose post-commit drain may still read `clock`), so a
      * clock bound after the store was tracked does not leak into the next
-     * test through a long-lived store. The same restore runs again when the
+     * test through a long-lived store; then the tracked trees are unwound,
+     * after every leaf recorder is gone (see
+     * [com.vynatix.holdfast.testing.internal.TreeFixtures]). The same restore runs again when the
      * test's job completes (see [registry]), which covers bindings made by
      * un-joined child coroutines that `runTest` runs after this method; work
      * in `backgroundScope` or on scopes outside the test is not waited for,
@@ -221,40 +227,43 @@ class StoreTestScope internal constructor(
         val treeFailures = treeFixtures.tearDown()
         registry.clear()
 
-        if (!bodyAlreadyFailed && treeFailures.isNotEmpty()) {
-            throw AssertionError(
-                "storeTest teardown could not reset ${treeFailures.size} tracked tree(s):\n" +
-                    treeFailures.joinToString("\n") { " - $it" },
-            )
-        }
-        if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
-            val msg =
-                buildString {
-                    appendLine(
-                        "storeTest body finished with ${unconsumed.size} unconsumed " +
-                            "TransactionResult.Error value(s):",
-                    )
-                    unconsumed.forEachIndexed { index, (handle, err) ->
-                        val type = err.exception::class.simpleName ?: "Throwable"
-                        val message = err.exception.message.orEmpty()
-                        val handleTag = handleLabel(handle)
-                        val txnId = err.transaction.id
-                        appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
-                    }
-                    appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
-                    append("or use handle.consumeAllPendingErrors() to opt out.")
-                }
-            throw AssertionError(msg)
-        }
-    }
-
-    private fun handleLabel(handle: StoreHandle<*>): String {
-        val cls = handle.store::class.simpleName ?: "Store"
-        // Identity tag so two handles to the same store class are distinguishable.
-        return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
-    }
-
-    private companion object {
-        private const val HEX_RADIX = 16
+        if (bodyAlreadyFailed) return
+        // One report for both, the unconsumed errors first: a test that leaves
+        // an error unconsumed and has a leaf veto the teardown reset learns of both.
+        val sections = mutableListOf<String>()
+        if (unconsumed.isNotEmpty()) sections += unconsumedErrorsReport(unconsumed)
+        if (treeFailures.isNotEmpty()) sections += treeResetReport(treeFailures)
+        if (sections.isNotEmpty()) throw AssertionError(sections.joinToString("\n\n"))
     }
 }
+
+/** [StoreTestScope.tearDown]'s report of the [TransactionResult.Error]s no matcher consumed, one line each. */
+private fun unconsumedErrorsReport(unconsumed: List<Pair<StoreHandle<*>, TransactionResult.Error>>): String =
+    buildString {
+        appendLine(
+            "storeTest body finished with ${unconsumed.size} unconsumed " +
+                "TransactionResult.Error value(s):",
+        )
+        unconsumed.forEachIndexed { index, (handle, err) ->
+            val type = err.exception::class.simpleName ?: "Throwable"
+            val message = err.exception.message.orEmpty()
+            val handleTag = handleLabel(handle)
+            val txnId = err.transaction.id
+            appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
+        }
+        appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
+        append("or use handle.consumeAllPendingErrors() to opt out.")
+    }
+
+/** [StoreTestScope.tearDown]'s report of the tracked trees whose reset failed, one line each. */
+private fun treeResetReport(failures: List<String>): String =
+    "storeTest teardown could not reset ${failures.size} tracked tree(s):\n" +
+        failures.joinToString("\n") { " - $it" }
+
+private fun handleLabel(handle: StoreHandle<*>): String {
+    val cls = handle.store::class.simpleName ?: "Store"
+    // Identity tag so two handles to the same store class are distinguishable.
+    return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
+}
+
+private const val HEX_RADIX = 16

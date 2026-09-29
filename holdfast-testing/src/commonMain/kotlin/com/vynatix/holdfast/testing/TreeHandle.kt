@@ -21,13 +21,19 @@ import kotlinx.atomicfu.locks.synchronized
  * records every leaf transaction with its node into one [timeline] of
  * [TreeEvent]s, in observation order across the tree.
  *
- * Teardown (see [StoreTestScope]) removes that middleware from the root and
- * the per-store recorders from the leaves — every middleware the test
- * installed stays — then, unless `resetAtTeardown = false`, resets the tree
- * as one frame so the next test finds the initial values (a leaf disposed
- * in the body is skipped; a vetoed reset fails the test naming the leaf and
- * the veto, unless the body already failed). The root itself is never
- * disposed.
+ * Teardown (see [StoreTestScope]) removes the per-store recorders from the
+ * leaves, then, unless `resetAtTeardown = false`, resets the tree as one
+ * frame so the next test finds the initial values — with the tree
+ * middleware still installed, so a vetoed reset fails the test naming the
+ * leaf and the veto (unless the body already failed); a leaf disposed in
+ * the body is skipped — and only then removes the tree middleware from the
+ * root. Every middleware the test installed stays. A leaf still held when
+ * teardown runs (a `suspendAction`/`suspendAtomic` body parked in un-joined
+ * work, a thread inside an action) skips the whole tree's reset without
+ * failing the test: the reset is one frame over every leaf, un-joined work
+ * is not waited for, and waiting would hang the test thread — the only one
+ * that could resume the body. Join such work before the body ends, or reset
+ * by hand. The root itself is never disposed.
  */
 @ExperimentalStoreApi
 class TreeHandle internal constructor(
@@ -45,11 +51,22 @@ class TreeHandle internal constructor(
     internal val listener: Disposable
 
     init {
-        // Hear of later joins first, then adopt the current members: a store
-        // attaching in between is adopted twice, harmlessly (track is idempotent).
-        listener = PrivilegedHooks.addMembershipListener(root) { leaf -> leaf.store?.let(::adopt) }
-        root.children(root).forEach(::adopt)
+        // The tree middleware first: its ring refuses an install from inside
+        // a leaf's transaction or an atomic frame, and a refused trackTree
+        // must leave nothing behind. Then hear of later joins, then adopt the
+        // current members: a store attaching in between is adopted twice,
+        // harmlessly (track is idempotent). A later step that throws unwinds
+        // the earlier ones.
         root.middlewares(recorder)
+        listener =
+            runCatching { PrivilegedHooks.addMembershipListener(root) { leaf -> leaf.store?.let(::adopt) } }
+                .onFailure { runCatching { root.removeMiddleware(recorder) } }
+                .getOrThrow()
+        runCatching { root.children(root).forEach(::adopt) }
+            .onFailure {
+                runCatching { listener.dispose() }
+                runCatching { root.removeMiddleware(recorder) }
+            }.getOrThrow()
     }
 
     private fun adopt(store: Store<*>) {
@@ -67,7 +84,7 @@ class TreeHandle internal constructor(
      * under a branch, keyed branch or the root — a keyed store disposed
      * since still listed under its branch.
      */
-    fun events(node: StoreNode): List<TreeEvent> = timeline.filter { it.node.within(node) }
+    fun events(node: StoreNode): List<TreeEvent> = timeline.filter { it.node.isUnder(node) }
 
     /**
      * The [StoreHandle] of [store], tracked with [captureMode] when it joined
@@ -120,6 +137,3 @@ class TreeHandle internal constructor(
 
     override fun toString(): String = "TreeHandle(${root.name})"
 }
-
-/** Whether this node is [node] or lies under it. */
-private fun StoreNode.within(node: StoreNode): Boolean = this === node || isUnder(node)

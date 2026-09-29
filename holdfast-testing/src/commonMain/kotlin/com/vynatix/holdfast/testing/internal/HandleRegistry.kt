@@ -16,7 +16,10 @@ import kotlinx.atomicfu.locks.synchronized
  *
  * Thread-safe: [getOrCreate] is atomic, so `parallel { }` workers tracking the
  * same store, or a tree fixture tracking a keyed store from the thread that
- * created it, get exactly one handle per store.
+ * created it, get exactly one handle per store. Two handles built at once
+ * both re-attach the store's bridges, and whichever wrapped a state first
+ * owns its wrapper; the handle that loses the registration hands its
+ * wrappers to the winner before it is dropped ([register]).
  *
  * [onCreate] runs once for each handle this registry creates, right after it is
  * registered (under the registry's lock — keep it cheap);
@@ -35,16 +38,25 @@ internal class HandleRegistry(
         existing(store)?.let { return it }
         // Built outside the lock: a handle's construction installs the
         // recorder and re-attaches the store's bridges, which may run user code.
-        val fresh = StoreHandle(store, capture)
+        return register(StoreHandle(store, capture))
+    }
+
+    /**
+     * Register [fresh] as its store's handle, unless another thread
+     * registered one meanwhile: then that one is answered and [fresh] is
+     * unwound — its bridge wrappers handed to the winner
+     * ([StoreHandle.yieldToInternal]), its recorder dropped. [getOrCreate]'s
+     * second half, on its own so a lost race can be staged in order.
+     */
+    fun <V : Store<V>> register(fresh: StoreHandle<V>): StoreHandle<V> {
         val winner =
             synchronized(this) {
-                existing(store) ?: fresh.also {
-                    entries.add(Entry(store, it))
+                existing(fresh.store) ?: fresh.also {
+                    entries.add(Entry(fresh.store, it))
                     onCreate(it)
                 }
             }
-        // Lost the race: another thread tracked the store meanwhile; keep its handle, drop ours.
-        if (winner !== fresh) fresh.disposeRecorderInternal()
+        if (winner !== fresh) fresh.yieldToInternal(winner)
         return winner
     }
 

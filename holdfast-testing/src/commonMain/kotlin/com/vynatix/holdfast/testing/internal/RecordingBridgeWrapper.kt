@@ -2,6 +2,7 @@ package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.testing.BridgeObserved
 import com.vynatix.holdfast.testing.BridgePublished
@@ -33,6 +34,11 @@ import kotlin.time.Clock
  *    re-attach can produce one synthetic-looking observed value. Tests that
  *    need to ignore that should attach the bridge before tracking, or check
  *    `published.size > N` rather than exact equality.
+ *  - Two handles built at once for one store both re-attach; whichever wrapped
+ *    a state first owns its wrapper. When that handle then loses the
+ *    registration ([com.vynatix.holdfast.testing.StoreHandle.yieldToInternal])
+ *    the wrapper is [redirectTo] the winner's recorder, or [unwrap]ped when the
+ *    winner records nothing.
  *  - At handle dispose ([com.vynatix.holdfast.testing.StoreHandle.disposeRecorderInternal])
  *    the wrapper remains attached to the store but no further events are
  *    pushed because the recorder's buffer has been cleared. The wrapper
@@ -58,11 +64,15 @@ import kotlin.time.Clock
 internal class RecordingBridgeWrapper<T : Any>(
     private val state: State<*>,
     private val delegate: Bridge<T>,
-    private val recorder: Recorder<*>,
+    recorder: Recorder<*>,
 ) : Bridge<T> {
     private val lock = SynchronizedObject()
     private val publishedList: MutableList<Any> = mutableListOf()
     private var capturedObserver: ((T) -> Unit)? = null
+
+    /** Where the events go: the installing handle's recorder, or a race winner's after [redirectTo]. */
+    @kotlin.concurrent.Volatile
+    private var recorder: Recorder<*> = recorder
 
     /**
      * Snapshot of every published value, in call order. Defensive copy. For a
@@ -105,6 +115,28 @@ internal class RecordingBridgeWrapper<T : Any>(
         val observer = synchronized(lock) { capturedObserver }
         observer?.invoke(value)
     }
+
+    /** Whether this wrapper is still [state]'s bridge (a later attach, or a racing wrapper, may have replaced it). */
+    fun isAttached(): Boolean = mutableState()?.bridge === this
+
+    /** Send every later event to [recorder]: the wrapper's owner after a lost track race. */
+    fun redirectTo(recorder: Recorder<*>) {
+        this.recorder = recorder
+    }
+
+    /**
+     * Put [delegate] back as [state]'s bridge, if this wrapper still is it. A
+     * re-attach like the wrap was: the delegate's `observe` runs again, a
+     * load-on-attach replay included. Never throws (a state that refuses a
+     * bridge now keeps the wrapper, which forwards as before).
+     */
+    fun unwrap() {
+        val mutable = mutableState() ?: return
+        if (mutable.bridge === this) runCatching { mutable.bridge = delegate }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mutableState(): MutableState<T>? = state as? MutableState<T>
 
     private fun nowMillis(): Long = Clock.System.now().toEpochMilliseconds()
 

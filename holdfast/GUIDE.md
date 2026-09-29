@@ -4170,13 +4170,19 @@ fun testTheTree() =
   `shouldCommitTogether(node)`/`shouldNotCommitTogether(node)` judge a
   subtree's frames from those events. A `Secret` never reaches a tree
   event.
-- **Teardown.** The fixture's middleware and recorders come off — every
-  middleware the test installed on a leaf or the root stays — and, unless
+- **Teardown.** The leaf recorders come off, then, unless
   `resetAtTeardown = false`, the tree is reset as one frame so the next
-  test finds the initial values: a leaf disposed in the body is skipped; a
-  vetoed reset fails the test naming the leaf and the veto, unless the body
-  already failed. The root is never disposed. `trackTree` is idempotent by
-  root identity and throws on a disposed root.
+  test finds the initial values — with the tree middleware still installed,
+  so a vetoed reset fails the test naming the leaf and the veto (unless the
+  body already failed); a leaf disposed in the body is skipped — and then
+  that middleware comes off. Every middleware the test installed on a leaf
+  or the root stays. A leaf still held when teardown runs (a
+  `suspendAction` body parked in un-joined work) skips the whole tree's
+  reset without failing the test: un-joined work is not waited for, and
+  waiting would hang the test. The root is never disposed. `trackTree` is
+  idempotent by root identity and throws on a disposed root, or from inside
+  a leaf's action or an `atomic` frame (a refused call leaves nothing
+  behind).
 
 ### 17.11 Hydrating a tree
 

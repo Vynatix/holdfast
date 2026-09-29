@@ -12,12 +12,17 @@ import com.vynatix.holdfast.tree.Root
  * and a tree middleware records every leaf transaction with its node into
  * the returned [TreeHandle]'s timeline. Idempotent by root identity (a
  * second call answers the same handle, ignoring its arguments). At teardown
- * the fixture's middleware and recorders come off — every middleware the
- * test installed stays — and, with [resetAtTeardown], the tree is reset as
- * one frame so the next test finds the initial values; the root is never
- * disposed.
+ * the leaf recorders come off, then, with [resetAtTeardown], the tree is
+ * reset as one frame — with the tree middleware still installed, so a
+ * vetoed reset names its leaf — and then that middleware comes off; every
+ * middleware the test installed stays, and the root is never disposed. A
+ * leaf still held by un-joined work when teardown runs skips the reset
+ * without failing the test (see [TreeHandle]).
  *
- * @throws IllegalStateException if [root] is disposed.
+ * @throws IllegalStateException if [root] is disposed, or from inside a
+ *   transaction of a leaf or an `atomic` frame (the tree middleware is
+ *   installed from outside every entry; a refused call leaves nothing
+ *   behind).
  */
 @ExperimentalStoreApi
 fun StoreTestScope.trackTree(

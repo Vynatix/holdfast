@@ -15,6 +15,7 @@ import com.vynatix.holdfast.displayValue
 import com.vynatix.holdfast.internalKeyedFamily
 import com.vynatix.holdfast.internalRemoveMiddleware
 import com.vynatix.holdfast.internalSettling
+import com.vynatix.holdfast.internalTransactionLockFree
 import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
@@ -359,4 +360,42 @@ internal object PrivilegedHooks {
                 override fun onAttached(leaf: LeafNode) = onAttached(leaf)
             },
         )
+
+    /**
+     * Whether [store] is held by an entry teardown could not wait out: a
+     * suspending body (`suspendAction`/`suspendAtomic`, parked or running
+     * elsewhere — [Store.suspendingOwner]), a thread inside a blocking entry
+     * (the transaction lock is taken), or a holder of the store's serializer
+     * that has installed nothing yet (a suspending entry waiting out
+     * lock-only holders, a hydration decision). The tree fixture's teardown
+     * asks before its reset — one `atomic` frame over every leaf, which
+     * would spin on the test thread, the only one able to resume a parked
+     * body.
+     *
+     * Never waits: the lock and the serializer are probed with their
+     * non-blocking acquires and released at once, and, as every holder must
+     * after releasing (`Store.tryTopLevelAction`), the store's post-commit
+     * queue is drained. A disposed store is held by nothing. Best effort — a
+     * decision, not a lock: an entry may take the store right after this
+     * answers `false`.
+     */
+    fun isHeldByAnEntry(store: Store<*>): Boolean =
+        when {
+            store.isDisposed -> false
+            store.suspendingOwner != null -> true
+            // A thread inside a blocking entry; the probe took nothing.
+            !store.internalTransactionLockFree() -> true
+            else -> serializerTaken(store)
+        }
+
+    /** [isHeldByAnEntry]'s last probe, after the lock probe held the lock for an instant. */
+    private fun serializerTaken(store: Store<*>): Boolean {
+        val serializer = store.asyncSerializer
+        val taken = serializer != null && !serializer.tryBlockingAcquire()
+        if (!taken) serializer?.blockingRelease()
+        // The probes held the lock, and the serializer, for an instant each: a
+        // task handed to them meanwhile is theirs to run.
+        internalSettling { store.internalDrainPostCommitTasks() }
+        return taken
+    }
 }
