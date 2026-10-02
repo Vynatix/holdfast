@@ -27,8 +27,10 @@ import com.vynatix.holdfast.observableBacking
  * [get]/[entry] with a state give that state's value as the leaf's
  * [StoreSnapshot] would (`null`/`Redacted` for a `Secret` state outside
  * `SnapshotScope.Raw`), for a store still in the tree, or one since
- * disposed, whose capture this tree holds. A state of a store outside the
- * captured subtree reads `null` (`Absent`); one of a store that never
+ * disposed, whose capture this tree holds. Membership is decided when the
+ * capture is taken: a state of a store outside the captured subtree reads
+ * `null` (`Absent`) — a member of the root then, disposed since or not, or
+ * one that joined since and is a member now; one of a store that never
  * belonged to this root, or that no store declared, throws. A subtree
  * taken with [get] is scoped the same way: it reads only what lies under
  * its own node, even though the whole capture it came from holds more.
@@ -71,11 +73,12 @@ class TreeSnapshot internal constructor(
      * [state]'s captured value: `Present` as the leaf's [StoreSnapshot.entry]
      * reads it, `Redacted` for a `Secret` state outside `SnapshotScope.Raw`,
      * `Absent` for a state this capture holds no value for — including one
-     * of a store outside the captured subtree.
+     * of a store outside the captured subtree: a member of the root when the
+     * capture was taken (disposed since or not), or one that is a member now.
      *
      * @throws IllegalArgumentException for a state no store declared (a
-     *   `computed { }`, a `derivedState`), or one of a store that never
-     *   belonged to this root.
+     *   `computed { }`, a `derivedState`), or one of a store that was not a
+     *   member of this root when the capture was taken and is not one now.
      */
     fun <T : Any> entry(state: State<T>): SnapshotEntry<T> {
         val declaration = state.observableBacking()?.declaration
@@ -84,18 +87,29 @@ class TreeSnapshot internal constructor(
                 "(a computed { } or a derivedState/merged; read its sources instead)"
         }
         val store: Store<*> = declaration.store
-        val leafCapture = index.byStoreKey[store.lockOrderKey]
-        if (leafCapture != null) {
-            // The store was a member when the capture was taken: its leaf reads
-            // inside this subtree (disposed since or not), and is Absent outside it.
-            val capture = leafCapture.leaf?.takeIf { leafCapture.node.isUnder(node) }
-            return capture?.entry(state) ?: SnapshotEntry.Absent
+        val storeKey = store.lockOrderKey
+        val leafCapture = index.byStoreKey[storeKey]
+        return when {
+            // The store sits at a leaf of this capture: it reads inside this
+            // subtree (disposed since or not), and is Absent outside it.
+            leafCapture != null -> {
+                val capture = leafCapture.leaf?.takeIf { leafCapture.node.isUnder(node) }
+                capture?.entry(state) ?: SnapshotEntry.Absent
+            }
+            // A member of the root when the capture was taken, outside the
+            // captured subtree: Absent, whether or not it has disposed since
+            // (the registry no longer knows a disposed one; the capture does).
+            storeKey in index.memberKeys -> SnapshotEntry.Absent
+            // A store the capture never listed: one read under the registry
+            // lock — a member now (joined since), or a root disposing
+            // meanwhile, answers Absent, never a throw.
+            else -> {
+                require(node.root.registry.isMemberOrClosed(store)) {
+                    "${declaration.qualifiedName} belongs to a store that is not a member of root '${node.root.name}'"
+                }
+                SnapshotEntry.Absent
+            }
         }
-        // One read under the registry lock: a root disposing meanwhile answers Absent, never a throw.
-        require(node.root.registry.isMemberOrClosed(store)) {
-            "${declaration.qualifiedName} belongs to a store that is not a member of root '${node.root.name}'"
-        }
-        return SnapshotEntry.Absent
     }
 
     /** [entry]'s value, or `null` when it is `Absent` or `Redacted`. */
@@ -103,9 +117,11 @@ class TreeSnapshot internal constructor(
 
     /**
      * The keys a decoded text holds bodies for under [branch] with no live
-     * store at decode time: create those stores, then restore. Empty for a
-     * capture, and for a branch outside this subtree (a decoded keyed leaf
-     * answers its own branch's).
+     * store at decode time: create those stores, then restore. A keyed leaf
+     * written without a body (an empty leaf capture, `{"kind":"leaf"}`)
+     * holds nothing to restore: it decodes as an empty leaf and is never
+     * pending. Empty for a capture, and for a branch outside this subtree
+     * (a decoded keyed leaf answers its own branch's).
      */
     fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K> {
         if (!branch.isUnder(node) && !node.isUnder(branch)) return emptySet()

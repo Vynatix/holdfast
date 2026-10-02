@@ -20,10 +20,14 @@ import com.vynatix.holdfast.snapshotFormatError
 // read once, the nodes resolved against the root's declarations as they are
 // now — a path the root does not declare is listed, never fatal; a keyed
 // segment of `path` and a keyed entry go through the branch's key codec,
-// and a key with no live store becomes a pending key — and every leaf body
-// is retained verbatim, decoded lazily by the reading store's codecs. A key
-// codec's failure, and two entries that decode to one key, are format
-// failures naming the branch, never the key text.
+// and a key with no live store becomes a pending key when the text holds a
+// body for it (a keyed leaf written without one, an empty leaf capture,
+// decodes as an empty leaf: nothing to restore, nothing pending) — and
+// every leaf body is retained verbatim, decoded lazily by the reading
+// store's codecs. A key codec's failure, and two entries that decode to one
+// key, are format failures naming the branch, never the key text. The
+// root's membership is recorded as of the decode, as a capture records it
+// when taken (`TreeIndex.memberKeys`).
 
 /** The parsed shape of one node, before it is resolved against the root. */
 private sealed class DecodedNode {
@@ -54,16 +58,20 @@ internal fun decodeTree(
 ): TreeSnapshot {
     root.checkNotDisposed()
     val envelope = readEnvelope(SnapshotJsonReader(text))
-    val index = TreeIndex()
+    val members = root.registry.memberStoreKeys()
+    val index = TreeIndex(members)
     val unresolved = ArrayList<List<String>>()
-    val top = resolvePath(root, envelope.path, index)
+    // A keyed segment can only end the path (a leaf has no children): the
+    // key is pending only when the text holds a body at that leaf.
+    val topHoldsBody = (envelope.tree as? DecodedNode.Leaf)?.body != null
+    val top = resolvePath(root, envelope.path, index, topHoldsBody)
     if (top == null) {
         unresolved += envelope.path
-        return TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(), unresolved)
+        return TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(members), unresolved)
     }
     val built = Resolver(root, envelope.scope, index, unresolved).build(top, envelope.tree, envelope.path)
     return if (built == null) {
-        TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(), unresolved)
+        TreeSnapshot(root, emptyList(), envelope.scope, null, 0L, TreeIndex(members), unresolved)
     } else {
         TreeSnapshot(built.node, built.children, built.scope, built.leaf, built.storeKey, index, unresolved)
     }
@@ -162,14 +170,16 @@ private fun SnapshotJsonReader.readEntries(): Map<String, StoreBody> {
 /**
  * Walk [path] down from [root]: through declared children and a branch's
  * leaves by name, and through a keyed branch by decoding the segment with
- * its key codec — the live store's leaf, else a pending leaf minted for the
- * key (recorded in [index]). `null` when a name is not declared there, or
- * the keyed branch has no key codec to decode the segment with.
+ * its key codec — the live store's leaf, else a leaf minted for the key,
+ * recorded in [index] as pending when the text holds a body for it
+ * ([holdsBody]). `null` when a name is not declared there, or the keyed
+ * branch has no key codec to decode the segment with.
  */
 private fun resolvePath(
     root: Root,
     path: List<String>,
     index: TreeIndex,
+    holdsBody: Boolean,
 ): StoreNode? {
     val keyed = KeyedLeaves(root, index)
     var current: StoreNode = root
@@ -177,7 +187,7 @@ private fun resolvePath(
         val next: StoreNode? =
             when (val at = current) {
                 is KeyedBranch<*, *> ->
-                    at.keyCodec?.let { codec -> keyed.leafFor(at, keyed.decode(at, codec, name), name) }
+                    at.keyCodec?.let { codec -> keyed.leafFor(at, keyed.decode(at, codec, name), name, holdsBody) }
                 is LeafNode -> null
                 is Root, is Branch ->
                     root.registry.childNodes(at).firstOrNull { it.name == name }
@@ -213,17 +223,21 @@ private class KeyedLeaves(
     /**
      * The leaf under [branch] for [key]: the live entry's, else one minted for
      * the key with no store — told apart by [LeafNode.storeKey], which no
-     * store ever has as `0` — and recorded as pending in [index].
+     * store ever has as `0` — recorded as pending in [index] only when the
+     * text holds a body for it ([holdsBody]): a keyed entry always does; a
+     * leaf text written without one (an empty leaf capture) holds nothing to
+     * restore, so it decodes as an empty leaf that `pendingKeys` never lists.
      */
     fun leafFor(
         branch: KeyedBranch<*, *>,
         key: Any,
         encodedKey: String,
+        holdsBody: Boolean,
     ): LeafNode {
         val live = root.registry.liveStore(branch, key)
         val existing = live?.let { root.registry.leafOf(it) }
         if (existing != null) return existing
-        index.addPendingKey(branch, key)
+        if (holdsBody) index.addPendingKey(branch, key)
         return LeafNode(root, branch, encodedKey, NameOrigin.Key, key)
     }
 
@@ -334,7 +348,7 @@ private class Resolver(
         for ((encodedKey, body) in decoded.entries) {
             val key = keyed.decode(branch, keyCodec, encodedKey)
             if (!seen.add(key)) keyed.duplicateError(branch)
-            val leafNode = keyed.leafFor(branch, key, encodedKey)
+            val leafNode = keyed.leafFor(branch, key, encodedKey, holdsBody = true)
             children += leafCapture(leafNode, StoreSnapshot(DecodedContent(body)), leafNode.storeKey)
         }
         return children

@@ -350,4 +350,25 @@ internal class TreeRegistry(
         val key = store.lockOrderKey
         return lock.withLock { disposed || leafByStoreKey.containsKey(key) }
     }
+
+    /**
+     * The `lockOrderKey` of every store sitting at a leaf of the whole tree
+     * now — a branch leaf still holding its store, a promoted keyed entry —
+     * copied under ONE take of [lock]; keys only, no store. A capture or a
+     * decode records it as its membership (`TreeIndex.memberKeys`), so a
+     * read of a member outside the captured subtree answers `Absent` after
+     * that store disposed, when this registry no longer knows it.
+     */
+    fun memberStoreKeys(): Set<Long> =
+        lock.withLock {
+            checkOpen()
+            leafByStoreKey.keys.toHashSet()
+        }
+
+    /** [shapeOf] and [memberStoreKeys] as of ONE take of [lock], so a capture's shape and its membership agree. */
+    fun listingOf(node: StoreNode): TreeListing =
+        lock.withLock {
+            checkOpen()
+            TreeListing(shapeUnlocked(node), leafByStoreKey.keys.toHashSet())
+        }
 }

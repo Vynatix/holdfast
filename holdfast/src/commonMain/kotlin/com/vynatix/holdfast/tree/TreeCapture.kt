@@ -11,10 +11,13 @@ import com.vynatix.holdfast.StoreSnapshot
 import com.vynatix.holdfast.captureConsistent
 
 // `Root.snapshot(node, scope)` (issue #21 decision U10): copy the subtree's
-// membership under the registry lock, release, then take ONE consistent cut
-// over every live leaf through `captureConsistent` — never `atomic(*leaves)`,
-// which holds serializers and transaction locks, fails nested lock order,
-// deadlocks from observers and spins from inside a `suspendAction` body.
+// shape and the whole tree's membership under ONE take of the registry lock,
+// release, then take ONE consistent cut over every live leaf through
+// `captureConsistent` — never `atomic(*leaves)`, which holds serializers and
+// transaction locks, fails nested lock order, deadlocks from observers and
+// spins from inside a `suspendAction` body. Membership is decided by that
+// listing (`TreeIndex.memberKeys`): a member outside the captured subtree,
+// or one the cut then missed because it disposed meanwhile, reads `Absent`.
 
 /**
  * Capture the subtree at [node] in [scope]. Materializes every never-read
@@ -43,14 +46,14 @@ internal fun captureTree(
     root.requireOwn(node)
     val reusable = previous?.takeIf { it.scope === scope }
     while (true) {
-        val shape = root.registry.shapeOf(node)
-        val stores = shape.stores().filter { !it.isDisposed }
+        val listing = root.registry.listingOf(node)
+        val stores = listing.shape.stores().filter { !it.isDisposed }
         val known = reusable?.let { last -> stores.map { last.index.byStoreKey[it.lockOrderKey]?.leaf } }
         val captures = captureOrRetry(stores, scope, known, stats) ?: continue
         val byStoreKey = HashMap<Long, StoreSnapshot>(stores.size)
         for ((i, store) in stores.withIndex()) byStoreKey[store.lockOrderKey] = captures[i]
-        val index = TreeIndex()
-        return checkNotNull(buildTree(shape, scope, byStoreKey, index, top = true))
+        val index = TreeIndex(listing.memberKeys)
+        return checkNotNull(buildTree(listing.shape, scope, byStoreKey, index, top = true))
     }
 }
 
