@@ -10,6 +10,33 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
+  by `Root.dispose()` during its attach fanout no longer leaves its
+  abandoned store retained by the root's value (the value refuses
+  membership bookkeeping once disposed, decided under its edge lock in the
+  step that clears it); `KeyedBranch.create`/`getOrCreate` wrap EVERY
+  exception the key codec, or a codec-less key's `toString()`, throws while
+  naming the key (a lookup table's `NoSuchElementException`, a
+  `ClassCastException`, a `NullPointerException`) in the same
+  `IllegalStateException` naming the root and branch only; a tree capture
+  records the key of every store that was a member of the root when it was
+  taken, so a state of a member outside the captured subtree reads `Absent`
+  even after that store disposed, instead of throwing "not a member";
+  `Root.decode` reads a keyed-leaf text written without a body
+  (`{"kind":"leaf"}` at a keyed path, what a `UserAuthored` capture of an
+  untagged or disposed keyed leaf encodes) with no live store as an empty
+  leaf (readable as `Absent`, restoring as a no-op under every policy) and
+  no longer lists it in `pendingKeys`; a keyed leaf with a body and no live
+  store stays pending. The refusal message of `Root.middlewares`/
+  `removeMiddleware` while a leaf is held by a suspending body now states
+  what the guard knows (an entry is open on this thread and which leaf is
+  held) instead of claiming the caller is inside that body; the refusal
+  stays conservative and is not guaranteed on iOS/wasmJs inside a nested
+  `withContext` on another dispatcher, which replaces the settle-scope
+  carrier.
+
+### Fixed
+
 - **Issue #21 review (PR #24) — captures never pin a store.** A captured
   `StoreSnapshot` no longer references any state or store instance: its cut
   stamp records identity tokens, write counters and keyed family names, so
