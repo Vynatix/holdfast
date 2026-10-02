@@ -1255,12 +1255,15 @@ teardown so the next test finds the initial values.
 
 ### `Store<Self>`
 
+The self-typed base every store extends (`class CounterStore : Store<CounterStore>()`; `EventfulStore<Self, E>` adds `events`/`emit`). Every store is also a `Stateful` *(experimental)* — the marker interface whose one member, `owningStore`, is the store itself — and `NodeStore` *(experimental)* is the non-recursive base for an anonymous inline child (`object : NodeStore(), Draft { override val text by state { "" } }`), since `object : Store<X>()` cannot be written without a name; a consumer interface extending `Stateful` then reaches the store through `draft.owningStore action { draft.text mutate "x" }`.
+
 | Member | Signature | Description |
 |---|---|---|
 | `state` | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `initialize` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
 | `state` (with a codec or tags) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, tags: Set<StateTag> = emptySet(), initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with (§16.2) and `StateTag`s the library enforces — `Secret`, `UserAuthored`, `Remote` (§16.4); a call that passes neither resolves to the stable overload and needs no opt-in; throws on a disposed store, and a refused tag combination fails the declaration with `IllegalArgumentException` |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
+| `owningStore` | `val owningStore: Self` *(experimental; `Stateful` declares it as `Store<*>`)* | The store itself; lets code holding only a `Stateful` (a consumer interface over an inline `NodeStore` child) open an action on the store that owns its states. Works after `dispose()`, like `isDisposed`. Not named `store` because a member property plus `invoke` would shadow the top-level `store { }` declaration function the dynamic store tree adds in a later PR (not the existing `store { }` plain-invoke idiom above). The same notion as `MutableState.owningStore`, applied to the object rather than to one state |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |

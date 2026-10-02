@@ -280,6 +280,10 @@ public final class com/vynatix/holdfast/NoWriteRegionKt {
 	public static final fun internalRefuseInitializerWrite (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)V
 }
 
+public class com/vynatix/holdfast/NodeStore : com/vynatix/holdfast/Store {
+	public fun <init> ()V
+}
+
 public abstract interface class com/vynatix/holdfast/Observable {
 	public abstract fun observe (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Disposable;
 }
@@ -519,7 +523,11 @@ public final class com/vynatix/holdfast/StateTagsKt {
 	public static final fun taggedStates (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/StateTag;)Ljava/util/List;
 }
 
-public abstract class com/vynatix/holdfast/Store {
+public abstract interface class com/vynatix/holdfast/Stateful {
+	public abstract fun getOwningStore ()Lcom/vynatix/holdfast/Store;
+}
+
+public abstract class com/vynatix/holdfast/Store : com/vynatix/holdfast/Stateful {
 	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
 	public fun <init> ()V
 	protected fun <init> (Lcom/vynatix/holdfast/StoreMembership;)V
@@ -535,6 +543,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public fun getClock ()Lkotlin/time/Clock;
 	public final fun getInternalBoundClock ()Lkotlin/time/Clock;
 	public final fun getLockOrderKey ()J
+	public final fun getOwningStore ()Lcom/vynatix/holdfast/Store;
 	public final fun getProperties ()Ljava/util/Map;
 	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;
 	public final fun getSelfForExternal ()Lcom/vynatix/holdfast/Store;

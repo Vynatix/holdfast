@@ -119,6 +119,8 @@ class DisposedEntrypointTest {
             Entrypoint("clock") { p, _ -> p.clock },
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
+            // The store itself, read from nothing dispose() tears down.
+            Entrypoint("owningStore") { p, _ -> check(p.owningStore === p) },
             // Lock-free reads of the attachment slot, which dispose() empties.
             Entrypoint("internalAttachment (null)") { p, _ -> check(p.internalAttachment(probeAttachmentKey) == null) },
             Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },

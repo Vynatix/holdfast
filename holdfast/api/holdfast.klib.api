@@ -136,6 +136,11 @@ abstract interface com.vynatix.holdfast/SchemaVersioned { // com.vynatix.holdfas
     abstract fun migrate(kotlin/Int, com.vynatix.holdfast/EncodedSnapshotView) // com.vynatix.holdfast/SchemaVersioned.migrate|migrate(kotlin.Int;com.vynatix.holdfast.EncodedSnapshotView){}[0]
 }
 
+abstract interface com.vynatix.holdfast/Stateful { // com.vynatix.holdfast/Stateful|null[0]
+    abstract val owningStore // com.vynatix.holdfast/Stateful.owningStore|{}owningStore[0]
+        abstract fun <get-owningStore>(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast/Stateful.owningStore.<get-owningStore>|<get-owningStore>(){}[0]
+}
+
 abstract interface com.vynatix.holdfast/StoreAttachment { // com.vynatix.holdfast/StoreAttachment|null[0]
     open val persistenceKeys // com.vynatix.holdfast/StoreAttachment.persistenceKeys|{}persistenceKeys[0]
         open fun <get-persistenceKeys>(): kotlin.collections/Set<kotlin/String> // com.vynatix.holdfast/StoreAttachment.persistenceKeys.<get-persistenceKeys>|<get-persistenceKeys>(){}[0]
@@ -244,7 +249,7 @@ abstract class <#A: com.vynatix.holdfast/EventfulStore<#A, #B>, #B: kotlin/Any> 
     open fun onDispose() // com.vynatix.holdfast/EventfulStore.onDispose|onDispose(){}[0]
 }
 
-abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store { // com.vynatix.holdfast/Store|null[0]
+abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store : com.vynatix.holdfast/Stateful { // com.vynatix.holdfast/Store|null[0]
     constructor <init>() // com.vynatix.holdfast/Store.<init>|<init>(){}[0]
     constructor <init>(com.vynatix.holdfast/StoreMembership<#A>) // com.vynatix.holdfast/Store.<init>|<init>(com.vynatix.holdfast.StoreMembership<1:0>){}[0]
 
@@ -256,6 +261,8 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
         final fun <get-isDisposed>(): kotlin/Boolean // com.vynatix.holdfast/Store.isDisposed.<get-isDisposed>|<get-isDisposed>(){}[0]
     final val lockOrderKey // com.vynatix.holdfast/Store.lockOrderKey|{}lockOrderKey[0]
         final fun <get-lockOrderKey>(): kotlin/Long // com.vynatix.holdfast/Store.lockOrderKey.<get-lockOrderKey>|<get-lockOrderKey>(){}[0]
+    final val owningStore // com.vynatix.holdfast/Store.owningStore|{}owningStore[0]
+        final fun <get-owningStore>(): #A // com.vynatix.holdfast/Store.owningStore.<get-owningStore>|<get-owningStore>(){}[0]
     final val properties // com.vynatix.holdfast/Store.properties|{}properties[0]
         final fun <get-properties>(): kotlin.collections/Map<kotlin/String, com.vynatix.holdfast/State<*>> // com.vynatix.holdfast/Store.properties.<get-properties>|<get-properties>(){}[0]
     final val selfForExternal // com.vynatix.holdfast/Store.selfForExternal|{}selfForExternal[0]
@@ -938,6 +945,10 @@ open class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Middleware 
 
 open class com.vynatix.holdfast/FrameContractException : kotlin/IllegalStateException { // com.vynatix.holdfast/FrameContractException|null[0]
     constructor <init>(kotlin/String) // com.vynatix.holdfast/FrameContractException.<init>|<init>(kotlin.String){}[0]
+}
+
+open class com.vynatix.holdfast/NodeStore : com.vynatix.holdfast/Store<com.vynatix.holdfast/NodeStore> { // com.vynatix.holdfast/NodeStore|null[0]
+    constructor <init>() // com.vynatix.holdfast/NodeStore.<init>|<init>(){}[0]
 }
 
 sealed class com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue|null[0]

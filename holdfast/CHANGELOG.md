@@ -82,6 +82,11 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
+- **`Stateful`, `NodeStore`, `Store.owningStore`** (experimental; dynamic
+  store tree, PR M-1): every `Store` is a `Stateful` whose `owningStore` is
+  itself, and `NodeStore` is the non-recursive base for an anonymous inline
+  child (`object : NodeStore(), Draft { … }`) a consumer interface reaches
+  through `draft.owningStore action { … }`.
 - **Kernel seams for issue #21's typed tree** (issue #21 plan PR 21-1,
   decisions U3/U12), consumed by #21's `tree` package (below):
   - `Store` and `EventfulStore` each gain a protected, experimental
