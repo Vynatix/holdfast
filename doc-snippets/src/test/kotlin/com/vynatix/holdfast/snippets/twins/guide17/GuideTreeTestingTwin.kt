@@ -1,4 +1,4 @@
-// Twin of GUIDE §17.10 (testing a tree). Shares the `Notes` root the §17.6
+// Twin of GUIDE §17.10 (testing a tree). Shares the `Notes` store the §17.6
 // twin declares; the test drives the block and asserts the output its
 // comments claim.
 @file:OptIn(ExperimentalStoreApi::class)
@@ -10,24 +10,26 @@ import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.snippets.capturePrintln
 import com.vynatix.holdfast.testing.matcher.shouldCommitTogether
 import com.vynatix.holdfast.testing.storeTest
-import com.vynatix.holdfast.testing.trackTree
+import com.vynatix.holdfast.testing.track
+import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 // DOC-SNIPPET holdfast/GUIDE.md#87
 fun testTheTree() =
     storeTest {
-        val tree = trackTree(Notes)                                   // every leaf, now and later; reset at teardown
-        val n5 = Notes.byId.create("n5", ::NoteStore)                 // tracked as it joins
-        atomic(Notes.prefsStore, n5) {
-            Notes.prefsStore { theme mutate "dark" }
+        val tree = track(Notes.tree)                                  // Notes and every store under it; reset at teardown
+        val n5 = Notes.byId.create("n5")                              // tracked as it joins
+        atomic(Notes, Notes.prefs, n5) {                              // the parent's own state in the same frame
+            Notes { folder mutate "archive" }
+            Notes.prefs { theme mutate "dark" }
             n5 { body mutate "hi" }
         }.getOrThrow()
-        println(tree.timeline.map { "${it.phase} ${it.node.name}" }) // "[Started prefs, Started n5, Completed prefs, Completed n5]"
-        println(tree.shouldCommitTogether(Notes) == tree.committedFrameIds(Notes).single())   // "true": one frame over both
-        println(tree.handle(n5).transactions.size)                    // "2": the leaf's own timeline, started and committed
+        println(tree.timeline.map { "${it.phase} ${it.node.name}" }) // "[Started Notes, Started prefs, Started n5, Completed Notes, Completed prefs, Completed n5]"
+        println(tree.shouldCommitTogether(Notes.tree.node) == tree.committedFrameIds(Notes.tree.node).single())   // "true": one frame over all three
+        println(tree.handle(n5).transactions.size)                    // "2": the store's own timeline, started and committed
         n5.dispose()
-        println(tree.events(Notes.byId).size)                         // "2": a disposed leaf's events stay under its branch
+        println(tree.events(Notes.byId).size)                         // "2": a disposed store's events stay under its branch
     }
 // DOC-SNIPPET-END
 
@@ -36,10 +38,16 @@ class GuideTreeTestingTwin {
     fun testTheTreePrintsWhatItsCommentsClaim() {
         val printed = capturePrintln { testTheTree() }
         assertEquals(
-            listOf("[Started prefs, Started n5, Completed prefs, Completed n5]", "true", "2", "2"),
+            listOf(
+                "[Started Notes, Started prefs, Started n5, Completed Notes, Completed prefs, Completed n5]",
+                "true",
+                "2",
+                "2",
+            ),
             printed,
         )
-        assertEquals("light", Notes.prefsStore.theme.value, "teardown reset the tree")
-        assertEquals(emptyMap(), Notes.entries(Notes.byId))
+        assertEquals("light", Notes.prefs.theme.value, "teardown reset the tree")
+        assertEquals("inbox", Notes.folder.value, "teardown reset the parent's own state too")
+        assertEquals(emptyMap(), Notes.byId.entries)
     }
 }

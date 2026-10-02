@@ -83,7 +83,7 @@ private class CutFrameLog<V : Store<V>> : Middleware<V>() {
 
 /**
  * The multi-store cut, both ways (issue #20 plan PR 15, D21; issue #21's
- * `Root.snapshot`/`Root.restore`): `captureConsistent(stores)` reads one cut
+ * `tree.snapshot`/`tree.restore`): `captureConsistent(stores)` reads one cut
  * across several stores, and `restoreInOneFrame(snapshots)` puts one back in
  * ONE outermost `atomic` frame — all of it or none of it, staged raw.
  */

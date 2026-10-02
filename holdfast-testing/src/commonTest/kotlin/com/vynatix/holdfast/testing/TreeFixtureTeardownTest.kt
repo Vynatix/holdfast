@@ -7,7 +7,8 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.suspendAction
 import com.vynatix.holdfast.testing.internal.TEARDOWN_HELD_LEAF_BUDGET
-import com.vynatix.holdfast.tree.Root
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,10 +36,18 @@ private class TdLeafStore : Store<TdLeafStore>() {
     val n by state { 0 }
 }
 
-private class TdRoot : Root("td") {
-    val a = TdLeafStore()
-    val b = TdLeafStore()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
+private class TdParent : Store<TdParent>() {
+    val own by state { 0 }
+    val a by store { TdLeafStore() }
+    val b by store { TdLeafStore() }
+
+    /** Only a property to hand `provideDelegate` for [declareFailingChild]: its name is the late child's. */
+    val late: Int = 0
+
+    /** Declare, after construction, a child whose lambda throws — so nothing materializes it until teardown. */
+    fun declareFailingChild() {
+        store<TdLeafStore> { error("the late child cannot be built") }.provideDelegate(this, TdParent::late)
+    }
 }
 
 /** Vetoes every `completed` while [armed], with a message that quotes no value. */
@@ -82,10 +91,11 @@ private fun runOnItsOwnThread(test: () -> Unit): Run? =
 /** The tree fixture's teardown: what the reset does with a held leaf, and how failures are reported. */
 class TreeFixtureTeardownTest {
     /**
-     * The teardown reset is one frame over every leaf, taken through each
-     * leaf's serializer. A leaf a parked `suspendAction` still holds (un-joined
-     * work is not waited for) is re-probed for a bounded time, then the reset
-     * is skipped and the test FAILS naming the tree and the leaf: a silent
+     * The teardown reset is one frame over the receiver and every store of
+     * its subtree, taken through each store's serializer. A store a parked
+     * `suspendAction` still holds (un-joined work is not waited for) is
+     * re-probed for a bounded time, then the reset is skipped and the test
+     * FAILS naming the tree and the store: a silent
      * skip would leak the body's values into the next test. Waiting longer
      * would spin on the test thread — the only thread that could resume the
      * body and release the leaf — so the body runs on its own thread here and
@@ -94,22 +104,24 @@ class TreeFixtureTeardownTest {
      */
     @Test
     fun teardownFailsNamingTheLeafAParkedSuspendActionStillHolds() {
-        val root = TdRoot()
+        val parent = TdParent()
+        val a = parent.a
+        val b = parent.b
         val gate = CompletableDeferred<Unit>()
         val run =
             runOnItsOwnThread {
                 storeTest {
-                    val tree = trackTree(root)
-                    tree.handle(root.b).action { error("left unconsumed") }
-                    root.a action { n mutate 5 }
-                    backgroundScope.launch { root.a.suspendAction { gate.await() } }
+                    val tree = track(parent.tree)
+                    tree.handle(b).action { error("left unconsumed") }
+                    a action { n mutate 5 }
+                    backgroundScope.launch { a.suspendAction { gate.await() } }
                     yield() // the body parks inside the leaf and still holds it when teardown runs
                 }
             }
         assertNotNull(run, "teardown hung: the tree reset waited for a leaf a parked suspendAction holds")
         val failure = assertIs<AssertionError>(run.failure, "a leaf still held after the budget fails the test")
         val message = failure.message!!
-        assertContains(message, "tree 'td'")
+        assertContains(message, "tree 'TdParent'")
         assertContains(message, "leaf 'a'")
         assertContains(message, "resetAtTeardown = false")
         assertContains(message, "1 unconsumed TransactionResult.Error")
@@ -121,8 +133,62 @@ class TreeFixtureTeardownTest {
             run.elapsed >= TEARDOWN_HELD_LEAF_BUDGET,
             "teardown re-probes the held leaf for the whole budget before giving up (took ${run.elapsed})",
         )
-        assertEquals(5, root.a.n.value, "the reset was skipped, so the held leaf keeps the body's value")
+        assertEquals(5, a.n.value, "the reset was skipped, so the held leaf keeps the body's value")
         gate.complete(Unit)
+    }
+
+    /**
+     * The receiver is a member of its own tree: a parked `suspendAction` on
+     * the PARENT holds it like one on a child, and teardown reports it
+     * under the receiver's name.
+     */
+    @Test
+    fun teardownFailsNamingTheReceiverWhenAParkedSuspendActionHoldsTheParent() {
+        val parent = TdParent()
+        val a = parent.a
+        val gate = CompletableDeferred<Unit>()
+        val run =
+            runOnItsOwnThread {
+                storeTest {
+                    track(parent.tree)
+                    parent action { own mutate 4 }
+                    a action { n mutate 5 }
+                    backgroundScope.launch { parent.suspendAction { gate.await() } }
+                    yield() // the body parks inside the parent and still holds it when teardown runs
+                }
+            }
+        assertNotNull(run, "teardown hung: the tree reset waited for a parent a parked suspendAction holds")
+        val failure = assertIs<AssertionError>(run.failure, "a held receiver fails the test like a held child")
+        val message = failure.message!!
+        assertContains(message, "tree 'TdParent'")
+        assertContains(message, "leaf 'TdParent' still held")
+        assertContains(message, "resetAtTeardown = false")
+        assertEquals(4, parent.own.value, "the reset was skipped: the receiver keeps the body's value")
+        assertEquals(5, a.n.value, "and so does every child: the reset is one frame or nothing")
+        gate.complete(Unit)
+    }
+
+    /**
+     * Listing the subtree at teardown materializes the declared children
+     * not read yet; a child lambda that throws there is recorded as a reset
+     * failure naming the tree, never a silent skip of the reset.
+     */
+    @Test
+    fun aChildLambdaThrowingAtTeardownIsRecordedAsAResetFailure() {
+        val parent = TdParent()
+        val failure =
+            assertFailsWith<AssertionError> {
+                storeTest {
+                    track(parent.tree)
+                    parent.a action { n mutate 5 }
+                    parent.declareFailingChild()
+                }
+            }
+        val message = failure.message!!
+        assertContains(message, "could not reset")
+        assertContains(message, "tree 'TdParent': reset skipped — listing the subtree threw IllegalStateException")
+        assertContains(message, "the late child cannot be built")
+        assertEquals(5, parent.a.n.value, "no reset ran")
     }
 
     /**
@@ -130,23 +196,24 @@ class TreeFixtureTeardownTest {
      * released within the budget — a transient holder, like an in-flight
      * `suspendDerived` recompute on `Store.scope` that no test can join — is
      * waited out: the reset runs and the test passes. The hold begins after
-     * `trackTree` (the tree middleware is installed from outside every
+     * `track(tree)` (the tree middleware is installed from outside every
      * entry) and lets go only once the body has ended, so teardown's first
      * probe finds the leaf held and a later one finds it free.
      */
     @Test
     fun aLeafHeldBrieflyOnAnotherThreadIsWaitedOutAndReset() {
-        val root = TdRoot()
+        val parent = TdParent()
+        val a = parent.a
         val entered = CompletableDeferred<Unit>()
         val leaving = CompletableDeferred<Unit>()
         val holder = CompletableDeferred<Job>()
         val run =
             runOnItsOwnThread {
                 storeTest {
-                    trackTree(root)
+                    track(parent.tree)
                     holder.complete(
                         CoroutineScope(Dispatchers.Default).launch {
-                            root.a action {
+                            a action {
                                 n mutate 7
                                 entered.complete(Unit)
                                 runBlocking {
@@ -163,7 +230,7 @@ class TreeFixtureTeardownTest {
         assertNotNull(run, "teardown hung: the tree reset waited for a leaf another thread's action holds")
         assertNull(run.failure, "a leaf released within the budget does not fail the test")
         runBlocking { holder.await().join() }
-        assertEquals(0, root.a.n.value, "teardown waited the brief holder out, then reset the tree")
+        assertEquals(0, a.n.value, "teardown waited the brief holder out, then reset the tree")
     }
 
     /**
@@ -172,33 +239,36 @@ class TreeFixtureTeardownTest {
      */
     @Test
     fun resetAtTeardownFalseWithAParkedHolderNeitherHangsNorFails() {
-        val root = TdRoot()
+        val parent = TdParent()
+        val a = parent.a
         val gate = CompletableDeferred<Unit>()
         val run =
             runOnItsOwnThread {
                 storeTest {
-                    trackTree(root, resetAtTeardown = false)
-                    root.a action { n mutate 5 }
-                    backgroundScope.launch { root.a.suspendAction { gate.await() } }
+                    track(parent.tree, resetAtTeardown = false)
+                    a action { n mutate 5 }
+                    backgroundScope.launch { a.suspendAction { gate.await() } }
                     yield() // the body parks inside the leaf and still holds it when teardown runs
                 }
             }
         assertNotNull(run, "teardown hung: the opted-out tree must not be reset or probed")
         assertNull(run.failure, "the opt-out skips the reset without failing the test")
-        assertEquals(5, root.a.n.value, "no reset: the held leaf keeps the body's value")
+        assertEquals(5, a.n.value, "no reset: the held leaf keeps the body's value")
         gate.complete(Unit)
     }
 
     @Test
     fun aVetoedResetAndAnUnconsumedErrorAreReportedTogether() {
-        val root = TdRoot()
-        val veto = TdVeto<TdLeafStore>().also { root.b.middlewares(it) }
+        val parent = TdParent()
+        val a = parent.a
+        val b = parent.b
+        val veto = TdVeto<TdLeafStore>().also { b.middlewares(it) }
         val failure =
             assertFailsWith<AssertionError> {
                 storeTest {
-                    val tree = trackTree(root)
-                    tree.handle(root.a).action { error("left unconsumed") }
-                    root.b action { n mutate 1 }
+                    val tree = track(parent.tree)
+                    tree.handle(a).action { error("left unconsumed") }
+                    b action { n mutate 1 }
                     veto.armed = true
                 }
             }

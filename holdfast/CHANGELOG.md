@@ -11,25 +11,25 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 ### Fixed
 
 - **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
-  by `Root.dispose()` during its attach fanout no longer leaves its
-  abandoned store retained by the root's value (the value refuses
+  by its declaring store's `dispose()` during its attach no longer leaves
+  the store retained by that store's tree value (the value refuses
   membership bookkeeping once disposed, decided under its edge lock in the
   step that clears it); `KeyedBranch.create`/`getOrCreate` wrap EVERY
   exception the key codec, or a codec-less key's `toString()`, throws while
   naming the key (a lookup table's `NoSuchElementException`, a
   `ClassCastException`, a `NullPointerException`) in the same
-  `IllegalStateException` naming the root and branch only; a tree capture
-  records the key of every store that was a member of the root when it was
-  taken, so a state of a member outside the captured subtree reads `Absent`
-  even after that store disposed, instead of throwing "not a member";
-  `Root.decode` reads a keyed-leaf text written without a body
+  `IllegalStateException` naming the declaring store and branch only; a
+  tree capture records the key of every store that was under the receiver
+  when it was taken, so a state of such a store outside the captured node
+  reads `Absent` even after that store disposed, instead of throwing;
+  `tree.decode` reads a keyed-leaf text written without a body
   (`{"kind":"leaf"}` at a keyed path, what a `UserAuthored` capture of an
-  untagged or disposed keyed leaf encodes) with no live store as an empty
+  untagged or disposed keyed store encodes) with no live store as an empty
   leaf (readable as `Absent`, restoring as a no-op under every policy) and
-  no longer lists it in `pendingKeys`; a keyed leaf with a body and no live
-  store stays pending. The refusal message of `Root.middlewares`/
-  `removeMiddleware` while a leaf is held by a suspending body now states
-  what the guard knows (an entry is open on this thread and which leaf is
+  does not list it in `pendingKeys`; a keyed leaf with a body and no live
+  store stays pending. The refusal message of `tree.middlewares`/
+  `removeMiddleware` while a member is held by a suspending body states
+  what the guard knows (an entry is open on this thread and which store is
   held) instead of claiming the caller is inside that body; the refusal
   stays conservative and is not guaranteed on iOS/wasmJs inside a nested
   `withContext` on another dispatcher, which replaces the settle-scope
@@ -42,74 +42,67 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   stamp records identity tokens, write counters and keyed family names, so
   a snapshot taken before `dispose()` no longer keeps the disposed store
   reachable and an undo stack no longer keeps evicted keyed entries alive;
-  `Root.value` recaptures a leaf on which a keyed family was declared since
-  the last settle even before it has an entry, and `internalCutRetryCount`
-  counts the cut attempts retried on an open write bracket too.
-- **Issue #21 review — root lifecycle.** Reading `Root.value` after
-  `Root.dispose()` answers the last settled tree even when a leaf's join or
-  leave was still pending (it no longer throws "root disposed"); a disposed
-  root no longer keeps its former leaves reachable through the value's edge
-  bookkeeping; `Root.dispose()` unwinds the tree middleware ring before any
-  membership is released and by adapter identity, so a leaf another root
-  adopts in that window keeps the new root's middleware; a listed store
-  disposed on another thread while its branch is declared is never indexed
-  as a member and listeners never hear `onDetached` without `onAttached`;
-  `Root.middlewares`/`removeMiddleware` are refused from inside a
-  `suspendAction`/`suspendAtomic` body of any leaf, as from a blocking
-  action (beside a parked suspending holder stays allowed).
+  a tree's value recaptures a store on which a keyed family was declared
+  since the last settle even before it has an entry, and
+  `internalCutRetryCount` counts the cut attempts retried on an open write
+  bracket too.
+- **Issue #21 review — tree lifecycle.** Reading a tree's value through a
+  handle taken before the store's `dispose()` answers the last settled tree
+  even when a join or leave was still pending (it does not throw); a
+  disposed store's value no longer keeps its former subtree reachable
+  through its edge bookkeeping; a dispose takes what the store installed
+  through `tree.middlewares` off its subtree by adapter identity, so a
+  child another parent adopts in that window keeps the new parent's
+  middleware; a group member disposed on another thread while its group
+  materializes is never registered, and listeners never hear `onDetached`
+  without `onAttached`; `tree.middlewares`/`removeMiddleware` are refused
+  from inside a `suspendAction`/`suspendAtomic` body of any member, as from
+  a blocking action (beside a parked suspending holder stays allowed).
 - **Issue #21 review — tree snapshots, encode and decode.** A capture of a
-  single keyed leaf round-trips through `encode`/`decode` and restores (a
+  single keyed store round-trips through `encode`/`decode` and restores (a
   key with no live store becomes a pending leaf listed by `pendingKeys`);
   any exception a key codec throws on decode, and two entries decoding to
   one key, are `SnapshotFormatException`s naming the branch and never the
   key; a codec-less keyed branch captured as the node itself is written
-  with no entries and listed under `skipped` (now root-relative, like
-  `path`) instead of each key's `toString()`, a capture under such a branch
-  refuses to encode, and `equalsEncodable` matches; `Root.snapshot(leafNode)`
-  returns an empty leaf capture (written `{"kind":"leaf"}`, reading as
-  `Absent`, restoring as a no-op) instead of throwing when the leaf captured
-  nothing or its store is disposed; a subtree from `tree[node]` answers
-  `null`/`Absent`/empty for anything outside it; and a read racing
-  `Root.dispose()` answers `Absent` instead of throwing. `Root.decode`
-  documents `SnapshotFormatException` and the 64-level nesting cap.
+  with no entries and listed under `skipped` (relative to the receiver,
+  like `path`) instead of each key's `toString()`, a capture under such a
+  branch refuses to encode, and `equalsEncodable` matches;
+  `tree.snapshot(node)` returns an empty capture (written `{"kind":"leaf"}`,
+  reading as `Absent`, restoring as a no-op) instead of throwing when the
+  store at the node captured nothing or is disposed; a subtree from
+  `tree[node]` answers `null`/`Absent`/empty for anything outside it; and a
+  read racing the receiver's `dispose()` answers `Absent` instead of
+  throwing. `tree.decode` documents `SnapshotFormatException` and the
+  64-level nesting cap.
 - **Issue #21 review — keyed construction.** A `getOrCreate` racing another
   thread's construction of the same key parks from the moment the key is
   reserved (the construction lock is held from `reserveOrExisting` on)
   instead of spinning on the registry before the factory starts; the key
   is named through the branch's key codec once per call, and a throwing
-  codec fails with an `IllegalStateException` naming the root and branch
-  only.
+  codec fails with an `IllegalStateException` naming the declaring store
+  and branch only.
 
 ### Added
 
-- **`Stateful`, `NodeStore`, `Store.owningStore`** (experimental; dynamic
-  store tree, PR M-1): every `Store` is a `Stateful` whose `owningStore` is
-  itself, and `NodeStore` is the non-recursive base for an anonymous inline
-  child (`object : NodeStore(), Draft { … }`) a consumer interface reaches
-  through `draft.owningStore action { … }`.
-- **Kernel seams for issue #21's typed tree** (issue #21 plan PR 21-1,
-  decisions U3/U12), consumed by #21's `tree` package (below):
-  - `Store` and `EventfulStore` each gain a protected, experimental
-    secondary constructor taking a `StoreMembership<Self>` token —
-    `@ExperimentalStoreApi abstract class StoreMembership<S : Store<S>>
-    internal constructor()`, mintable only inside the `:holdfast` module (a
-    leaf's `KeyedBranch.at(key)` mints the only implementation). The
-    token's `bind(store)` runs once, after every `Store` field — and, for
-    `EventfulStore`, its own `events` — has initialized, and before any
-    subclass property initializer or delegated state runs. The frozen no-arg
-    constructors (`Store()`'s `<init>()V`, `EventfulStore(extraBufferCapacity,
-    onBufferOverflow)`) are byte-identical to before this PR.
+- **`Stateful`, `NodeStore`, `Store.owningStore`** (experimental; issue
+  #21): every `Store` is a `Stateful` whose `owningStore` is itself, and
+  `NodeStore` is the non-recursive base for an anonymous inline child
+  (`object : NodeStore(), Draft { … }`) a consumer interface reaches
+  through `draft.owningStore action { … }` — what `store<Draft> { … }`
+  attaches as a child of the store tree (below).
+- **Kernel seams for issue #21's store tree** (issue #21 plan PR 21-1,
+  decision U12), consumed by the `tree` package (below):
   - `@StoreInternalApi internalSetOuterMiddleware`/`internalRemoveMiddleware`:
     a library-owned outer middleware ring, always outermost of the
-    consumer-registered `middlewares(...)` chain (#21's `Root.middlewares`).
-    `internalRemoveMiddleware` is not gated on
+    consumer-registered `middlewares(...)` chain (the tree's
+    `tree.middlewares`). `internalRemoveMiddleware` is not gated on
     `checkNotDisposed()` — see the exception list next to
     `snapshotMiddleware()` in CLAUDE.md — so a caller unwinding a store that
     disposed mid-teardown can tell "already gone" apart from "removed"
     without catching.
   - `@StoreInternalApi internalDetach`: releases one attachment by
     `StoreAttachmentKey` before the store itself disposes (the #20 PR 10
-    amendment for #21), returning `null` on a closed slot or an absent key.
+    amendment), returning `null` on a closed slot or an absent key.
 
 ### Changed
 
@@ -120,197 +113,251 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
-- **The typed state tree, step 1: `Root`, branches, keyed stores, the
-  registry** (issue #21 plan PR 21-2, decisions U1–U7; package
+- **The store tree, step 1: child declarations, keyed branches,
+  materialization and dispose** (issue #21, decisions U1–U7; package
   `com.vynatix.holdfast.tree`, all `@ExperimentalStoreApi`; GUIDE §17). A
-  root names its branches through delegated properties —
-  `object App : Root("app") { val settings by branch(SettingsStore());
-  val threads by keyed<String, ThreadStore>(under = session) }` — and is
-  not a `Store`: leaves keep their own actions, middleware and locks.
-  - `branch(vararg stores, under)` attaches each listed store to the root
-    when the property binds (through the PR 10 attachment slot, outside the
-    registry lock) and runs no leaf code; a store listed under two
-    branches or in two roots, or a disposed one, fails fast naming both.
-    Names come from the property, the root's constructor argument else its
-    class, a leaf's class minus `Store`, or a keyed leaf's encoded key,
-    with `NameOrigin` recording which; pins are `Root("app")`,
-    `branch(x).named("prefs")` and `branch(x, y).named(y, "profile")`, and
-    a duplicate or missing class-derived leaf name needs one.
-  - Keyed stores join through a factory bracket: the class header takes
-    `App.threads.at(id)` — the only `StoreMembership` implementation,
-    minted by the branch — and the store is constructed through
-    `KeyedBranch.create(key, factory)` / `getOrCreate(key, factory)`,
-    live (found by `Root.get`/`entries`/`children`/`nodeOf`) only once the
-    factory returned the instance that took the token. `at` outside that
-    factory, for another key or on another thread throws a teaching
-    error; a throwing factory, a foreign or disposed instance leaves
-    nothing (the abandoned store is disposed); a duplicate `create` fails,
-    `getOrCreate` parks on another thread's construction and a same-thread
-    re-entry is a cycle error. A live keyed store leaves the tree on
-    `dispose()`, including from inside its own action.
-  - `Root.dispose()` detaches every leaf and drops every listener without
-    disposing a store; every entrypoint on a disposed root throws. The
+  store declares other stores as its children next to its states, and a
+  parent is an ordinary store — states, actions, middleware and hydrator
+  of its own; every child keeps its own actions, middleware and locks:
+  `object App : Store<App>() { val settings by store { SettingsStore() };
+  val session by stores { listOf(SignInStore(), ProfileStore()) };
+  val threads by stores<String, ThreadStore> { id -> ThreadStore(id) } }`.
+  - `store(named) { … }` declares one child: any `Stateful`, attached by
+    its `owningStore`, so an inline `store<Draft> { object : NodeStore(),
+    Draft { … } }` works (the type argument is required). `stores(names)
+    { … }` declares a group (`Branch`) of listed stores, and
+    `stores<K, S>(keyCodec) { key -> … }` a keyed branch (`KeyedBranch`)
+    whose factory is declared once. A declaration registers when the
+    property binds and runs no child code; the lambda runs once, on the
+    property's first read or when a tree operation needs the subtree
+    (concurrent first reads share one run; a throwing lambda leaves the
+    child unbuilt and the next read retries). Child declarations share the
+    latch graph of state initializers: a cycle through child lambdas and
+    initializers, on one thread or across threads, throws ("Materialization
+    cycle: …", naming each in order; an all-initializer cycle keeps its
+    "State initializer cycle" message) instead of deadlocking.
+  - A store has one parent: a second declaration of it fails when it
+    materializes, naming both parents, and a declaration that would make a
+    store its own ancestor fails naming the path; a lambda returning a
+    disposed store and a group listing a store twice or a disposed one fail
+    too, leaving nothing attached. Names come from the property, a pin
+    (`store(named = …)`, `stores(names = mapOf(Store::class to …))` by exact
+    class), a group leaf's class minus `Store`, or a keyed store's encoded
+    key, with `NameOrigin` recording which; a store with no parent is named
+    by its class. Sibling names are unique.
+  - `Store<*>.tree: StoreTree` (a sealed interface: the library's handle is
+    the only implementation) is a store's view of its subtree: `node`,
+    `parent`, `children` (declaration order), `stores(node)` (tree order),
+    `nodeOf(store)`, each materializing declared children first; a node
+    outside the receiver's subtree is refused. A keyed store is created by
+    `KeyedBranch.create(key)`/`getOrCreate(key)` through the declared
+    factory — an ordinary store class, no token — and is live (`get`,
+    `entries`, `tree.stores`, captures, the value, reset, tree middleware)
+    once the factory returned it and it attached (`get`, `entries` and
+    `getOrCreate` on another thread answer it only once the attach has also
+    synced its tree middleware and told the listeners, parking until then);
+    a duplicate `create` fails, `getOrCreate` parks on another thread's
+    construction, a
+    same-thread re-entry is a cycle error, and a factory that throws or
+    returns a store of another class, a disposed one or one with a parent
+    leaves no entry (the tree disposes nothing).
+  - Disposing a store detaches it from its parent and releases its
+    children as subtree roots (class-named again, every store and state
+    kept); it disposes none of them, and a released child can be declared
+    under another parent. The detach is one settle-scoped entry: observers
+    of an ancestor's tree value run once it has finished (the released
+    children are subtree roots with re-synced middleware), wherever
+    `dispose()` was called from. A keyed `create` that the parent's dispose
+    overtakes after the attach returns a live detached store. `store.tree`
+    throws on a disposed store; a handle taken before keeps `node`,
+    `parent`, `removeMiddleware` (`false`) and a value read before. The
     `@StoreInternalApi` seam is `LeafMembershipListener`
-    (`Root.internalAddMembershipListener`): `onAttached` once per joining
-    store, `onDetached` once per leaving one, never for an abandoned one.
-  - Nothing in the tree opens a transaction; its registry and per-entry
-    construction locks are leaf locks (§10.1). Attach and detach are
-    exercised for 1,000 keyed create/dispose cycles, racing lookups,
-    concurrent `create`/`getOrCreate`, root-dispose racing leaf-dispose,
-    and GC-collectability of disposed and abandoned keyed stores.
-- **The typed state tree, step 2: `TreeSnapshot` and a consistent
-  `Root.snapshot(node, scope)`** (issue #21 plan PR 21-3, decisions U8,
-  U10; GUIDE §17.5). A capture of a subtree is ONE lock-free cut across
-  its live leaves (`captureConsistent`, the R9 primitive): a commit or an
+    (`Store<*>.internalAddMembershipListener`): `onAttached` for every store
+    joining the subtree, at any depth, `onDetached` for every store leaving
+    it (idempotent: a deep descendant may hear it twice when two disposes
+    race), never for a store whose construction failed.
+  - Nothing in the tree opens a transaction; its per-store child registry
+    locks, the process-wide structure lock and the per-entry construction
+    locks are taken under no store call (GUIDE §10.1). Attach and detach
+    are exercised for 1,000 keyed create/dispose cycles, racing lookups,
+    concurrent `create`/`getOrCreate`, a parent disposing while a child
+    disposes or attaches, and GC-collectability of disposed and released
+    stores.
+- **The store tree, step 2: `TreeSnapshot` and a consistent
+  `tree.snapshot(node, scope)`** (issue #21 plan PR 21-3, decisions U8,
+  U10; GUIDE §17.5). A capture of a subtree — the parent's own states with
+  its children's — is ONE lock-free cut across its live stores
+  (`captureConsistent`, the R9 primitive): a commit or an
   `atomic`/`suspendAtomic` frame applying meanwhile is seen whole or not
-  at all, never a mix, never a single store half-applied; no leaf's
+  at all, never a mix, never a single store half-applied; no store's
   transaction lock is taken and no writer blocked, so a capture returns
   from inside observers, middleware hooks, frames holding higher keys, and
   while a `suspendAction` body is parked; on a committing thread it reads
-  committed values. Never-read declared states are materialized first; a
-  leaf disposed meanwhile is left out; a keyed store still inside its
-  factory is never included. Reads are by identity: `tree[state]` is typed
-  by the state (`null` for `Absent` or `Redacted`, `tree.entry(state)`
-  tells them apart; a state outside the captured subtree is `Absent`; one
-  of a store never in the root, or no store declared, throws), keeps
-  reading after the store is disposed, and `tree[node]` is the subtree's
-  capture. `SnapshotScope.Raw` reads `Secret` values, `UserAuthored`
-  captures exactly the tagged states and prunes empty leaves and branches;
+  committed values. The subtree's shape is listed one registry lock at a
+  time and retried while a store attaches or detaches under the receiver.
+  Never-read declared states are materialized first; a store disposed
+  meanwhile is left out; a keyed store still inside its factory is never
+  included. Reads are by identity: `tree[state]` is typed by the state
+  (`null` for `Absent` or `Redacted`, `tree.entry(state)` tells them
+  apart; a state of a store under the receiver but outside the captured
+  node is `Absent`; one of a store outside the receiver's subtree, or no
+  store declared, throws), keeps reading after the store is disposed, and
+  `tree[node]` is the subtree's capture. A kept capture reads, encodes and
+  reports the structure as captured (`TreeSnapshot.name`, `hasStore`;
+  `isLeaf` means no children) whatever disposed since.
+  `SnapshotScope.Raw` reads `Secret` values, `UserAuthored` captures
+  exactly the tagged states and prunes empty stores and groups;
   `render()`/`toString()` never show a `Secret`. `equals`/`hashCode` are
-  full value equality (names, structure, scope, every leaf's values,
+  full value equality (names, structure, scope, every store's values,
   `Secret`/`Remote`/codec-less included); `equalsEncodable(other,
   includeRemote)` is the round-trip projection. Verified against 3,000
   two-store `atomic`, `suspendAtomic` and nested frames with at least 1,000
-  reader cuts (never a mix), keyed churn, root dispose during capture, the
-  wasmJs shared-thread-id model, and 1,000 sixteen-leaf captures under two
-  seconds.
-- **The typed state tree, step 3: `Root.restore`/`Root.reset(node)` as one
-  frame, `TreeSnapshot.encode()`/`Root.decode(text)`, and the persisted-name
+  reader cuts (never a mix), keyed churn, a receiver disposed during
+  capture, the wasmJs shared-thread-id model, and 1,000 sixteen-store
+  captures under two seconds.
+- **The store tree, step 3: `tree.restore`/`tree.reset(node)` as one
+  frame, `TreeSnapshot.encode()`/`tree.decode(text)`, and the persisted-name
   self-check** (issue #21 plan PR 21-4, decisions U10/T5/T6; GUIDE
   §17.6–17.7). `restore(tree, policy, sterile)` puts a capture back into
-  the stores at its nodes NOW — a keyed leaf's into whichever store lives
-  under its key today, reported `rebound` when it is not the captured
-  instance, skipped when none is — and `reset(node)` re-runs the
-  initializers of every live leaf under a node; each plans or materializes
-  every leaf outside every lock (schema check and `migrate`, codecs, the
-  policy, never-read initializers), then stages each leaf raw into its
-  root of ONE outermost `atomic`, so the leaves apply in one write bracket
-  and observers see the subtree whole (never `Transformer.set`: an
-  encrypted leaf round-trips as its ciphertext). One transaction per leaf,
-  one shared frame id; a failing plan, initializer or refused write rolls
-  every leaf back; `RestorePolicy.Strict` fails before any leaf is touched
-  on a skipped leaf or an unresolved decoded path; an empty subtree is a
-  `Success` carrying a synthetic committed transaction; both refuse to nest
-  inside an action, frame, `suspendAction`/`suspendAtomic` body, fanout or
-  recompute, and wait out a foreign suspending holder from outside.
-  `TreeRestoreReport` (per-leaf `RestoreReport`s, `skipped`, `rebound`,
+  the stores at its nodes NOW — the receiver's own capture into the
+  receiver, a keyed store's into whichever store lives under its key
+  today, reported `rebound` when it is not the captured instance, skipped
+  when none is — and `reset(node)` re-runs the initializers of every live
+  store of the subtree at a node, the receiver's own included; each plans
+  or materializes every store outside every lock (schema check and
+  `migrate`, codecs, the policy, never-read initializers), then stages
+  each store raw into its root of ONE outermost `atomic`, so the stores
+  apply in one write bracket and observers see the subtree whole (never
+  `Transformer.set`: an encrypted state round-trips as its ciphertext). One
+  transaction per store, one shared frame id; a failing plan, initializer
+  or refused write rolls every store back; `RestorePolicy.Strict` fails
+  before any store is touched on a skipped store or an unresolved decoded
+  path, naming paths relative to the receiver as captured; an empty
+  subtree is a `Success` carrying a synthetic committed transaction; both
+  refuse to nest inside an action, frame, `suspendAction`/`suspendAtomic`
+  body, fanout or recompute, and wait out a foreign suspending holder from
+  outside. A capture whose node is not in the receiver's subtree is refused
+  ("restore it through the store it was captured from").
+  `TreeRestoreReport` (per-store `RestoreReport`s, `skipped`, `rebound`,
   `unresolvedPaths`, flattened `issues`) and `TreeResetReport` (`reset`,
   `skipped`) come back in the frame's `TransactionResult`. `encode()`
-  writes the `holdfast.tree` v1 text: the subtree's path, the structure by
-  node name (children sorted), and at every leaf the store's own
-  `holdfast.store` v1 body verbatim — a `Secret` is `null`, a codec-less
-  state absent, `Remote` absent unless `includeRemote` — keyed entries
-  under their keys through the branch's `keyCodec`, a codec-less keyed
-  branch left out and listed under `skipped`; under
-  `SnapshotScope.UserAuthored` a class-named leaf refuses (T6). `decode`
-  resolves paths against the root as declared now (an undeclared path
-  lands in `unresolvedPaths`, the tree's one string diagnostic; a keyed
-  entry with no live store becomes a typed `pendingKeys(branch)` for the
-  process-death idiom: create, then restore) and retains leaf bodies as
-  name-keyed text until the restore, so `migrate` runs per leaf then; a
-  bad envelope or an undecodable key throws `SnapshotFormatException`
-  quoting no value. `verifyPersistedNames(node)` lists every persisted
-  store (a `UserAuthored` state or family, `SchemaVersioned`, or an
-  attachment reporting `persistenceKeys`) at a class-named leaf and every
-  keyed branch without a key codec, reading declarations only. No tree
-  member takes a `String` except `decode` and `named`, gated by a test
-  over the JVM API dump. `equalsEncodable` now compares children by name,
-  as `encode()` orders them.
-- **The typed state tree, step 4: `Root.value`, one consistent capture
+  writes the `holdfast.tree` v1 text: the captured node's path from the
+  receiver (whose own name is never written), uniform nodes — a store's
+  `leaf` with its own `holdfast.store` v1 body verbatim and its
+  `children`, a group's `branch`, a keyed branch's `keyed` node with
+  `entries` under their encoded keys (children and entries sorted) — a
+  `Secret` written `null`, a codec-less state absent, `Remote` absent
+  unless `includeRemote`, a codec-less keyed branch left out and listed
+  under `skipped`; under `SnapshotScope.UserAuthored` a class-named group
+  leaf refuses (T6). `decode` resolves paths against the receiver's
+  subtree as declared now (an undeclared path lands in `unresolvedPaths`,
+  the tree's one string diagnostic; a keyed entry with a body and no live
+  store becomes a typed `pendingKeys(branch)` for the process-death idiom:
+  create, then restore) and retains bodies as name-keyed text until the
+  restore, so `migrate` runs per store then; a bad envelope or an
+  undecodable key throws `SnapshotFormatException` quoting no value.
+  `verifyPersistedNames(node)` lists every persisted store (a
+  `UserAuthored` state or family, `SchemaVersioned`, or an attachment
+  reporting `persistenceKeys`) at a class-named leaf — never the receiver —
+  and every keyed branch without a key codec, reading declarations only.
+  No tree member takes a `String` except `decode` and `store(named)`,
+  gated by a test over the JVM API dump.
+- **The store tree, step 4: the tree's value, one consistent capture
   settled once per outermost entry** (issue #21 plan PR 21-5, decisions
-  T3/T4; GUIDE §17.8, §10.2). `App.value` is a `State<TreeSnapshot>` over
-  the whole tree — a derived state following every leaf store as a whole
-  (the #20 PR 15 store-level edges), hosted on a private store of the root
-  — recomputed as ONE lock-free capture once per outermost `action`,
+  T3/T4; GUIDE §17.8, §10.2). `StoreTree` is itself a
+  `State<TreeSnapshot>` over the receiver's subtree — a derived state
+  following the receiver and every live store under it as wholes (the
+  #20 PR 15 store-level edges), hosted on a private store created with the
+  handle — recomputed as ONE lock-free capture once per outermost `action`,
   `atomic`, `suspendAction`, `suspendAtomic`, `restore` or `reset` that
-  changes the tree, after every lock that entry took is released, and
+  changes the subtree, after every lock that entry took is released, and
   published only when the tree differs (full value equality). A commit, an
   eviction, an inbound bridge write, a keyed entry coming to life, a
-  `removeState`/`clearStates`, a leaf joining or leaving all reach it;
-  outside any entry the recompute runs inline. The first read or
-  observation builds the tree (declaring a tree runs no leaf code;
-  registering a branch takes no capture); a read inside a leaf's fanout is
-  the tree before that commit; a read while a leaf has just joined or left,
-  inside an entry, is a fresh uncommitted capture; a read never takes a
-  leaf's lock, never opens a host transaction inside an entry, and a settle
-  that finds the host busy hands off rather than waits. Each settle
-  recaptures only the leaves whose cut stamp moved and shares the other
-  captures by reference (`captureConsistent` gains `previous`/`stats`; a
-  capture's `CutStamp` records the states one cut listed and their write
-  counters). `Root.scope`/`bindToScope` (a getter override beats the
-  binding; the host answers it, so `asStateFlow()` defaults there) and
-  `Root.uncaughtObserverHandler` (a throwing `value` observer or a failing
-  recompute). `Root.dispose()` stops following, drops the value's
-  observers, disposes the host and keeps the last tree readable.
-  `@StoreInternalApi`: `internalSettleCount`, `internalCaptureCount`,
+  `removeState`/`clearStates`, a store joining or leaving at any depth all
+  reach it; outside any entry the recompute runs inline. The first read or
+  observation builds it (declaring children runs no child code; attaching
+  one takes no capture); a read inside a store's fanout is the tree before
+  that commit; a read while a store has just joined or left, inside an
+  entry, is a fresh uncommitted capture; a read never takes a store's
+  lock, never opens a host transaction inside an entry, and a settle that
+  finds the host busy hands off rather than waits. Each settle recaptures
+  only the stores whose cut stamp moved and shares the other captures by
+  reference (`captureConsistent` gains `previous`/`stats`; a capture's
+  `CutStamp` records the states one cut listed and their write counters);
+  every store's `tree` is a value of its own, so a store under D read
+  values is recaptured D times per commit. The value's flows default to
+  the receiver's `scope`, and a throwing observer or failing recompute
+  reaches the receiver's `uncaughtObserverHandler`. Disposing the receiver
+  stops following, drops the value's observers, keeps the last tree
+  readable through a handle taken before, and disposes the host past every
+  lock of the receiver's (when the enclosing entry settles, or after the
+  action holding the receiver's lock releases it). `@StoreInternalApi`, on
+  the handle: `internalSettleCount`, `internalCaptureCount`,
   `internalCutRetryCount`, `internalHost()`, `internalSettleNow()`.
   Verified: a two-store `atomic`/`suspendAtomic` frame recomputes once,
-  nested entries settle at the outermost exit, `value` publishes and reads
-  are never a mix against 3,000 concurrent frames, a leaf action proceeds
-  while a `value` observer is parked, a busy host is never waited for, 1,000
-  keyed create/dispose cycles leave no edge, and 10,000 single-state mutates
-  under a sixteen-leaf root settle within eight seconds.
-- **The typed state tree, step 5: `TreeMiddleware`, `Root.middlewares`/
+  nested entries settle at the outermost exit, a grandchild's commit
+  settles a child's and a parent's value once each, value publishes and
+  reads are never a mix against 3,000 concurrent frames, an action
+  proceeds while a value observer is parked, a busy host is never waited
+  for, 1,000 keyed create/dispose cycles leave no edge, and 10,000
+  single-state mutates under a sixteen-store parent settle within eight
+  seconds.
+- **The store tree, step 5: `TreeMiddleware`, `tree.middlewares`/
   `removeMiddleware`** (issue #21 plan PR 21-6, decision U12; GUIDE §17.9).
-  `App.middlewares(vararg TreeMiddleware)` installs middleware over the whole
-  tree: every leaf attached now or later, always outermost of the leaf's own
-  `middlewares(...)` (through the PR 21-1 outer ring, which a leaf's
-  `clearMiddleware()` never reaches), the last argument outermost among the
-  installed, one installed again moving to the outermost place. A
-  `TreeMiddleware` has the three store-middleware hooks with the leaf's
-  `StoreNode` and its `MiddlewareContext`: it sees top-level actions,
-  savepoints, a bare `mutate`'s one-shot action, a derived state's recompute
-  on the leaf, every root of an `atomic`/`suspendAtomic` frame (`restore`
-  and `reset` included) with the shared `frameId`, `suspendAction` and a
-  hydrator's seed and adopt — the same trace on both paths — and never an
-  inbound bridge write, a keyed store's transactions before its factory
-  returned, or the root's own `value` settle. Throwing in `started` or
-  `completed` aborts the leaf's transaction (a `completed` throw on a frame's
-  last root rolls every root back and fires the tree error hook for each; on
-  the suspending path a throw is isolated). `middlewares`/`removeMiddleware`
-  refuse to run inside a frame or a transaction of any leaf; an install
+  `App.tree.middlewares(vararg TreeMiddleware)` installs middleware over
+  the receiver and every store of its subtree, attached now or later,
+  always outermost of each store's own `middlewares(...)` (through the
+  PR 21-1 outer ring, which a store's `clearMiddleware()` never reaches).
+  A store's ring is what it and each ancestor installed — its own
+  innermost, the top-most ancestor's outermost — with the last argument
+  outermost among one store's installs, one installed again moving to the
+  outermost place, and a middleware installed on a child and on its parent
+  firing once, at the parent's place. A `TreeMiddleware` has the three
+  store-middleware hooks with the store's `StoreNode` and its
+  `MiddlewareContext`: it sees top-level actions, savepoints, a bare
+  `mutate`'s one-shot action, a derived state's recompute on the store,
+  every root of an `atomic`/`suspendAtomic` frame (`restore` and `reset`
+  included) with the shared `frameId`, `suspendAction` and a hydrator's
+  seed and adopt — the same trace on both paths — and never an inbound
+  bridge write, a keyed store's transactions before its factory returned,
+  or a value's settle. Throwing in `started` or `completed` aborts the
+  store's transaction (a `completed` throw on a frame's last root rolls
+  every root back and fires the tree error hook for each; on the
+  suspending path a throw is isolated). `middlewares`/`removeMiddleware`
+  refuse to run inside a frame or a transaction of any member; an install
   never waits for, nor applies to, an in-flight action. `removeMiddleware`
-  answers whether it was installed, starts no new observation once it
-  returns, still delivers the terminal hook of an observation it started
-  (a parked action or `suspendAction` included), and answers `false` on a
-  disposed root instead of throwing. A leaf that leaves takes its adapters
-  with it; `Root.dispose()` removes the ring from every leaf. Verified
-  against concurrent create/dispose/install/remove churn (every `started`
-  has its terminal, none after a removal returned, the ring equals installer
-  order on every leaf), 1,000 keyed cycles, a keyed store created inside
-  another leaf's action, a self-dispose during install, and a hook taking a
-  tree snapshot under a leaf lock.
+  answers whether it was installed through this receiver, starts no new
+  observation once it returns, still delivers the terminal hook of an
+  observation it started (a parked action or `suspendAction` included),
+  and answers `false` on a disposed store instead of throwing. A store
+  that leaves takes its adapters with it; a child released by its parent's
+  dispose keeps only what it and its remaining ancestors installed.
+  Verified against concurrent create/dispose/install/remove churn (every
+  `started` has its terminal, none after a removal returned, each ring
+  matches its ancestry), 1,000 keyed cycles, a keyed store created inside
+  another store's action, a self-dispose during install, and a hook taking
+  a tree snapshot under a store lock.
 
 ### Changed
 
-- **A keyed `create`/`getOrCreate` and a branch declaration run inside a
-  settle scope** (issue #21 PR 21-5): outside any entry each opens one, so
-  what the attach queues — the root's `value` following the new leaf —
-  runs once after the store is promoted and visible, never inside the
-  factory bracket; inside an action or frame they join its scope, as
-  before. An inbound bridge write and `removeState`/`clearStates` on a leaf
-  now settle an attached root's `value` (they were already changes of the
-  store for store-level edges).
+- **A keyed `create`/`getOrCreate` and a child's materialization run
+  inside a settle scope** (issue #21 PR 21-5): outside any entry each opens
+  one, so what the attach queues — an ancestor's value following the new
+  store — runs once after the store is attached and visible, never inside
+  the factory or the child lambda; inside an action or frame they join its
+  scope, as before. An inbound bridge write and `removeState`/
+  `clearStates` on a store now settle the values that follow it (they were
+  already changes of the store for store-level edges).
 - **`@StoreInternalApi internalRemoveMiddleware` removes one middleware by
   identity from either list** (issue #21 PR 21-7): the consumer-registered
   list or the outer ring, wherever it sits — the single-entry uninstall that
   `clearMiddleware()` is not. `:holdfast-testing`'s teardown uses it to
   detach the recorder alone; see that module's new CHANGELOG for the
-  behavior change and the tree fixture (`trackTree`).
+  behavior change and the tree fixture (`track(tree)`).
 - **`observableBacking()` resolves one more shape**: a `State` that is
   neither a `MutableState` nor a `DerivedState` but observes through one
-  (internal `ObservableBacked`, the tree value). Every observation path —
-  `effect`, flows, Compose — accepts `Root.value` unchanged.
+  (internal `ObservableBacked`, the store tree's handle). Every observation
+  path — `effect`, flows, Compose — accepts `store.tree` unchanged.
 
 ### Fixed
 
@@ -867,7 +914,7 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Added
 
-- **Internal primitives for issue #21's `Root`: a one-frame restore and
+- **Internal primitives for issue #21's store tree: a one-frame restore and
   store-level derivation edges** (issue #20 plan PR 15, decision D21). No
   public or `@StoreInternalApi` surface — the API dumps are unchanged; #21
   builds its public API on these:
@@ -898,8 +945,8 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   - Store-level derivation edges: a derived state can follow whole stores,
     added and removed at runtime (`DerivedStateNode.addSourceStore(store)` /
     `removeSourceStore(store)`, and `derivedStateOverStores(name, stores)` for
-    a node with no state source — what #21's `Root.value` recomputes on over
-    keyed branches; it also takes state `sources`, which a compute reading
+    a node with no state source — what the store tree's value recomputes on
+    over its subtree; it also takes state `sources`, which a compute reading
     a followed store's derived state must list — a derived state's own
     commit is no change of its store, and an edge orders nothing in a
     settle). A followed store's change — a commit that changes a state a
@@ -1126,7 +1173,7 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 - **Settle scopes and frame commit hooks** (`@StoreInternalApi`, issue #20
   plan PR 11; `:holdfast-coroutines` and `:holdfast-testing` drive them, and
-  issue #21's `Root` builds on them):
+  issue #21's store tree builds on them):
   - `SettleScope` — the derived-state recomputes and frame post-commit
     drains one outermost entry queued: `settle()` runs them all (store drains
     first, then recomputes lowest rank first, work queued meanwhile

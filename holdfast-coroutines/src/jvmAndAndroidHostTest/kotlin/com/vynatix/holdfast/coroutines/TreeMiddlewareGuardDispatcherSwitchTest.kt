@@ -6,9 +6,10 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
-import com.vynatix.holdfast.tree.Root
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -21,10 +22,9 @@ private class GdsLeafStore : Store<GdsLeafStore>() {
     val n by state { 0 }
 }
 
-private class GdsRoot : Root("gds") {
-    val a = GdsLeafStore()
-    val b = GdsLeafStore()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
+private class GdsParent : Store<GdsParent>() {
+    val a by store { GdsLeafStore() }
+    val b by store { GdsLeafStore() }
 }
 
 private class GdsTrace : TreeMiddleware() {
@@ -39,7 +39,7 @@ private class GdsTrace : TreeMiddleware() {
 }
 
 /**
- * `Root.middlewares` after a dispatcher switch inside a `suspendAction` body
+ * `tree.middlewares` after a dispatcher switch inside a `suspendAction` body
  * is refused on JVM/Android only: there the entry's settle scope — the
  * guard's probe — rides a `ThreadContextElement` that survives the nested
  * `withContext(Dispatchers.Default)` (`SettleAmbientContext.jvm.kt`). On iOS
@@ -53,18 +53,20 @@ class TreeMiddlewareGuardDispatcherSwitchTest {
     @Test
     fun middlewaresAfterADispatcherSwitchInsideTheBodyIsRefused() =
         runBlocking {
-            val root = GdsRoot()
+            val parent = GdsParent()
+            val tree = parent.tree
+            val a = parent.a
             val trace = GdsTrace()
             var refused: Throwable? = null
-            root.a
+            a
                 .suspendAction {
                     withContext(Dispatchers.Default) {
-                        refused = runCatching { root.middlewares(trace) }.exceptionOrNull()
+                        refused = runCatching { tree.middlewares(trace) }.exceptionOrNull()
                     }
                 }.getOrThrow()
             val failure = assertIs<IllegalStateException>(refused, "the body's entry is carried across dispatch")
-            assertContains(failure.message!!, "leaf 'a' is held by a suspendAction or suspendAtomic body")
-            root.a action { }
+            assertContains(failure.message!!, "member 'a' is held by a suspendAction or suspendAtomic body")
+            a action { }
             assertEquals(emptyList<String>(), trace.events, "nothing was installed")
         }
 }

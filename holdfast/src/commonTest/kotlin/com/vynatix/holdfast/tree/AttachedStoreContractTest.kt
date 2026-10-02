@@ -9,6 +9,7 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.effect
+import com.vynatix.holdfast.internalAttachment
 import com.vynatix.holdfast.internalAttachments
 import com.vynatix.holdfast.observerCount
 import com.vynatix.holdfast.restore
@@ -16,6 +17,7 @@ import com.vynatix.holdfast.snapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 internal class ContractStore : Store<ContractStore>() {
@@ -23,10 +25,10 @@ internal class ContractStore : Store<ContractStore>() {
     val label by state { "init" }
 }
 
-private class ContractRoot(
-    val store: ContractStore,
-) : Root() {
-    val leaf by branch(store)
+private class ContractParent(
+    child: ContractStore,
+) : Store<ContractParent>() {
+    val leaf by store { child }
 }
 
 private class OrderMiddleware(
@@ -50,14 +52,15 @@ private class VetoMiddleware : Middleware<ContractStore>() {
 
 /**
  * T2: a store attached to a tree behaves exactly like an unattached one. The
- * same case set runs against a plain store and one listed in a class root.
+ * same case set runs against a plain store and one declared as a child of a
+ * parent store (`store { }`), materialized.
  */
 internal abstract class AttachedStoreContractCases {
     protected abstract fun newStore(): ContractStoreHandle
 
     class ContractStoreHandle(
         val store: ContractStore,
-        val root: Root?,
+        val parent: Store<*>?,
     )
 
     @Test
@@ -164,28 +167,34 @@ internal abstract class AttachedStoreContractCases {
         val s = handle.store
         assertEquals(0, s.n.observerCount)
         assertTrue(s.snapshotMiddleware().isEmpty())
-        val expectedAttachments = if (handle.root == null) 0 else 1
+        // The tree keeps one attachment on a child for the child's whole life: its node, never an observer.
+        val expectedAttachments = if (handle.parent == null) 0 else 1
         assertEquals(expectedAttachments, s.internalAttachments().size)
     }
 
     @Test
-    fun aDisposedRootLeavesItsStoresUsable() {
+    fun aDisposedParentLeavesItsChildUsable() {
         val handle = newStore()
-        handle.root?.dispose()
+        handle.parent?.dispose()
         val s = handle.store
         s action { n mutate 5 }
         assertEquals(5, s.n.value)
-        assertTrue(s.internalAttachments().isEmpty())
+        assertTrue(!s.isDisposed)
+        assertNull(s.internalAttachment(treeMembershipKey)?.parentEdge?.value, "released: it has no parent")
+        val expectedAttachments = if (handle.parent == null) 0 else 1
+        assertEquals(expectedAttachments, s.internalAttachments().size)
     }
 }
 
 internal class UnattachedStoreContractTest : AttachedStoreContractCases() {
-    override fun newStore() = ContractStoreHandle(ContractStore(), root = null)
+    override fun newStore() = ContractStoreHandle(ContractStore(), parent = null)
 }
 
 internal class AttachedStoreContractTest : AttachedStoreContractCases() {
     override fun newStore(): ContractStoreHandle {
-        val store = ContractStore()
-        return ContractStoreHandle(store, ContractRoot(store))
+        val child = ContractStore()
+        val parent = ContractParent(child)
+        check(parent.leaf === child)
+        return ContractStoreHandle(child, parent)
     }
 }

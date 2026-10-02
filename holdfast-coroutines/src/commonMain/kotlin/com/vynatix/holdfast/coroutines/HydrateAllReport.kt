@@ -7,8 +7,10 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.tree.StoreNode
 
 /**
- * What `Root.hydrateAll(node)` did, leaf by leaf, in the order it drove
- * them: an [Entry] per leaf live in the subtree when it listed them, with
+ * What `StoreTree.hydrateAll(node)` did, store by store, in the order it
+ * drove them: an [Entry] per store live in the subtree when it listed them
+ * (the tree's own store included when [node][StoreTree.hydrateAll] is its
+ * node), with
  * its [Entry.outcome] — the [Hydration] its hydrator settled to (or,
  * without waiting, is in), [Outcome.NoHydrator] for a leaf that declared
  * none, [Outcome.Disposed] for one disposed meanwhile. [failed] lists the
@@ -22,8 +24,8 @@ class HydrateAllReport internal constructor(
     /**
      * One leaf: its store, how its hydration went, and its [node] — the
      * `LeafNode` it sat at when `hydrateAll` listed it, kept for a leaf
-     * [disposed][Outcome.Disposed] meanwhile too (its root no longer knows
-     * that leaf: `Root.nodeOf` answers `null`).
+     * [disposed][Outcome.Disposed] meanwhile too (the tree no longer knows
+     * that store: `StoreTree.nodeOf` answers `null`).
      */
     @ExperimentalStoreApi
     class Entry internal constructor(

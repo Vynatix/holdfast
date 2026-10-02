@@ -218,14 +218,21 @@ internal class SourceFollower<V : Store<V>>(
      * Stop following [store] as a whole, and queue a recompute, so the value
      * stops covering it. `false`, changing nothing, when it was not followed.
      */
-    fun removeSourceStore(store: Store<*>): Boolean {
+    fun removeSourceStore(
+        store: Store<*>,
+        recomputeNow: Boolean = true,
+    ): Boolean {
         if (!followed.removeWithEdge(store, this)) return false
         // A recompute a commit of the store queued behind it, which nothing
-        // would withdraw any more: the one queued below covers that commit.
+        // would withdraw any more: the one queued below (or by the caller,
+        // through [recomputeForSourceStores]) covers that commit.
         if (followed.queuedOn.none { it === store }) recompute?.let { store.withdrawPostCommit(it) }
-        onStoreChanged(host)
+        if (recomputeNow) onStoreChanged(host)
         return true
     }
+
+    /** Queue the recompute an [addSourceStore]/[removeSourceStore] without one owes. */
+    fun recomputeForSourceStores() = onStoreChanged(host)
 
     /** Run the recompute now (see `DerivedStateNode.settleNow`); nothing before [arm] or after [dispose]. */
     fun settleNow() {

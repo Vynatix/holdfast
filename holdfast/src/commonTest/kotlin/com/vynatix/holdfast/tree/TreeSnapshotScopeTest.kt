@@ -22,95 +22,100 @@ private class ScopePrefsStore : Store<ScopePrefsStore>() {
     val cache by state { "derived-from-network" }
 }
 
+/** A group leaf with children of its own: the keyed notes hang under this store. */
 private class ScopeSyncStore : Store<ScopeSyncStore>() {
     val etag by state(tags = setOf(StateTag.Remote)) { "" }
+    val notes by stores<String, ScopeNoteStore> { ScopeNoteStore(it) }
 }
 
 private class ScopeNoteStore(
     id: String,
-    root: ScopeRoot,
-) : Store<ScopeNoteStore>(root.notes.at(id)) {
+) : Store<ScopeNoteStore>() {
     val body by state(tags = setOf(StateTag.UserAuthored)) { "note $id" }
 }
 
-private class ScopeRoot : Root("app") {
+private class ScopeApp : Store<ScopeApp>() {
     val prefsStore = ScopePrefsStore()
     val syncStore = ScopeSyncStore()
-    val prefs by branch(prefsStore).named(prefsStore, "prefs")
-    val sync by branch(syncStore)
-    val notes by keyed<String, ScopeNoteStore>(under = sync)
+    val prefs by stores(names = mapOf(ScopePrefsStore::class to "prefs")) { listOf(prefsStore) }
+    val sync by stores { listOf(syncStore) }
+    val notes: KeyedBranch<String, ScopeNoteStore> get() = syncStore.notes
 }
 
 /** T5: scopes redact and prune the tree the way they do a single store's snapshot. */
 class TreeSnapshotScopeTest {
     @Test
     fun aSecretReadsRedactedUnderAllAndItsValueUnderRaw() {
-        val root = ScopeRoot()
-        assertSame(Redacted, root.snapshot().entry(root.prefsStore.password))
-        assertEquals(SECRET_VALUE, root.snapshot(scope = SnapshotScope.Raw)[root.prefsStore.password])
-        assertEquals(SnapshotScope.Raw, root.snapshot(scope = SnapshotScope.Raw).scope)
+        val root = ScopeApp()
+        assertSame(Redacted, root.tree.snapshot().entry(root.prefsStore.password))
+        assertEquals(SECRET_VALUE, root.tree.snapshot(scope = SnapshotScope.Raw)[root.prefsStore.password])
+        assertEquals(SnapshotScope.Raw, root.tree.snapshot(scope = SnapshotScope.Raw).scope)
     }
 
     @Test
     fun userAuthoredContainsExactlyTheTaggedStatesAndPrunesEmptyLeavesAndBranches() {
-        val root = ScopeRoot()
-        val note = root.notes.create("n1") { ScopeNoteStore(it, root) }
-        val user = root.snapshot(scope = SnapshotScope.UserAuthored)
+        val root = ScopeApp()
+        val note = root.notes.create("n1")
+        val user = root.tree.snapshot(scope = SnapshotScope.UserAuthored)
 
-        val prefsLeaf = user[root.nodeOf(root.prefsStore)!!]!!
+        val prefsLeaf = user[root.tree.nodeOf(root.prefsStore)!!]!!
         assertEquals(setOf("font"), prefsLeaf.leaf!!.stateNames)
         assertEquals("mono", user[root.prefsStore.font])
         assertNull(user[root.prefsStore.cache])
         assertNull(user[root.prefsStore.password])
 
-        // The sync store has no UserAuthored state: its leaf is pruned, but the
-        // branch stays because a keyed note under it has one.
-        assertNull(user[root.nodeOf(root.syncStore)!!])
-        assertEquals(listOf("notes"), user[root.sync]!!.children.map { it.node.name })
+        // The sync store has no UserAuthored state: it captures nothing, but its
+        // node and the group above it stay because a keyed note under it has one.
+        val syncLeaf = user[root.tree.nodeOf(root.syncStore)!!]!!
+        assertNull(syncLeaf.leaf)
+        assertFalse(syncLeaf.hasStore)
+        assertEquals(listOf("notes"), syncLeaf.children.map { it.name })
+        assertEquals(listOf("ScopeSync"), user[root.sync]!!.children.map { it.name })
         assertEquals("note n1", user[note.body])
 
         note.dispose()
-        val pruned = root.snapshot(scope = SnapshotScope.UserAuthored)
+        val pruned = root.tree.snapshot(scope = SnapshotScope.UserAuthored)
         assertNull(pruned[root.sync], "a branch with nothing captured under it is pruned")
-        assertEquals(listOf("prefs"), pruned.children.map { it.node.name })
+        assertNull(pruned[root.tree.nodeOf(root.syncStore)!!], "so is a store node with nothing captured at or under it")
+        assertEquals(listOf("prefs"), pruned.children.map { it.name })
     }
 
     @Test
     fun theRequestedNodeIsNeverPrunedEvenWhenEmpty() {
-        val root = ScopeRoot()
-        val empty = root.snapshot(root.sync, SnapshotScope.UserAuthored)
+        val root = ScopeApp()
+        val empty = root.tree.snapshot(root.sync, SnapshotScope.UserAuthored)
         assertSame(root.sync, empty.node)
         assertTrue(empty.children.isEmpty())
     }
 
     @Test
     fun renderAndToStringNeverContainASecretValueInAnyScope() {
-        val root = ScopeRoot()
+        val root = ScopeApp()
         for (scope in listOf(SnapshotScope.All, SnapshotScope.Raw, SnapshotScope.UserAuthored)) {
-            val tree = root.snapshot(scope = scope)
+            val tree = root.tree.snapshot(scope = scope)
             assertFalse(SECRET_VALUE in tree.render(), "render under $scope leaked the secret")
             assertFalse(SECRET_VALUE in tree.toString(), "toString under $scope leaked the secret")
         }
-        assertTrue("<redacted>" in root.snapshot().render())
-        assertEquals("TreeSnapshot(app: prefs, sync)", root.snapshot().toString())
+        assertTrue("<redacted>" in root.tree.snapshot().render())
+        assertEquals("TreeSnapshot(ScopeApp: prefs, sync)", root.tree.snapshot().toString())
     }
 
     @Test
     fun aGoldenRenderShowsNamesKindsOriginsAndRedactedSecrets() {
-        val root = ScopeRoot()
-        root.notes.create("n1") { ScopeNoteStore(it, root) }
-        val rendered = root.snapshot().render()
+        val root = ScopeApp()
+        root.notes.create("n1")
+        val rendered = root.tree.snapshot().render()
         val lines = rendered.lines()
         assertEquals("TreeSnapshot (scope All)", lines[0])
-        assertEquals("app (root, pinned)", lines[1])
+        assertEquals("ScopeApp (leaf, class name)", lines[1], "the receiver, named by its class; it has no states")
         assertEquals("  prefs (branch, property name)", lines[2])
         assertEquals("    prefs (leaf, pinned)", lines[3])
         assertTrue(lines.any { it == "      password = <redacted>" }, rendered)
         assertTrue(lines.any { it == "      font = mono" }, rendered)
         assertTrue(lines.any { it == "  sync (branch, property name)" }, rendered)
         assertTrue(lines.any { it == "    ScopeSync (leaf, class name)" }, rendered)
-        assertTrue(lines.any { it == "    notes (keyed, property name)" }, rendered)
-        assertTrue(lines.any { it == "      n1 (leaf, key)" }, rendered)
-        assertTrue(lines.any { it == "        body = note n1" }, rendered)
+        assertTrue(lines.any { it == "      notes (keyed, property name)" }, rendered)
+        assertTrue(lines.any { it == "        n1 (leaf, key)" }, rendered)
+        assertTrue(lines.any { it == "          body = note n1" }, rendered)
     }
 }

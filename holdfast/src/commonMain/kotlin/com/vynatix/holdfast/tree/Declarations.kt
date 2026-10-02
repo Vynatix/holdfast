@@ -4,24 +4,24 @@ package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StateCodec
+import com.vynatix.holdfast.Stateful
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
-import com.vynatix.holdfast.internalAttachIfAbsent
-import com.vynatix.holdfast.internalDetach
-import com.vynatix.holdfast.settling
+import com.vynatix.holdfast.displayName
 import kotlin.properties.PropertyDelegateProvider
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
 
-// The delegate providers `Root.branch(...)` and `Root.keyed<K, S>()` return
-// (issue #21 decisions U4, U7): a branch registers its stores at
-// declaration — attaching each through the PR 10 slot, outside the registry
-// lock, then registering under it, then fanning out `onAttached` after
-// release — and runs no leaf code (it runs inside `object App`'s
-// initializer). Names come from the property, or from pins.
+// The delegate providers `store { }`, `stores { }` and `stores<K, S> { }`
+// return (TreeDeclaring.kt). A declaration registers a `ChildEntry` on the
+// declaring store when the property binds — named by the property or a pin,
+// checked unique among the store's children — and runs nothing: a
+// `store`/`stores` lambda runs on the delegate's first read or when a tree
+// operation needs the subtree (TreeMaterialize.kt); a keyed branch exists
+// from the declaration on, its factory running per key.
 
-/** The key codec a `keyed<String, S>()` declaration gets by default: the key is its own text. */
+/** The key codec a `stores<String, S> { }` declaration gets by default: the key is its own text. */
 internal object StringKeyCodec : StateCodec<String> {
     override fun encode(value: String): String = value
 
@@ -29,180 +29,129 @@ internal object StringKeyCodec : StateCodec<String> {
 }
 
 /**
- * What `val settings by branch(SettingsStore(), ...)` delegates to. Pin
- * names before the delegate binds: [named] with a store pins that store's
- * leaf name (else its class name minus `Store`), [named] with a name alone
- * pins the branch's own name (else the property's).
+ * What `val settings by store { SettingsStore }` delegates to: one child of
+ * the declaring store, named by the property or by `store(named = …)`.
+ * Reading the property materializes the child on first read (the lambda
+ * runs once; concurrent first reads get the same instance) and answers it.
  */
 @ExperimentalStoreApi
-class BranchDeclaration internal constructor(
-    private val root: Root,
-    private val stores: List<Store<*>>,
-    private val under: Branch?,
-) : PropertyDelegateProvider<Root, ReadOnlyProperty<Root, Branch>> {
-    private val leafPins = HashMap<Long, String>()
-    private var branchPin: String? = null
-
-    /** Pin the leaf name of [store], one of this declaration's stores, to [name] (`NameOrigin.Pinned`). */
-    fun named(
-        store: Store<*>,
-        name: String,
-    ): BranchDeclaration {
-        require(stores.any { it === store }) {
-            "named(store, \"$name\"): ${store::class.simpleName ?: "the store"} is not listed in this branch(...)"
-        }
-        require(name.isNotEmpty()) { "a pinned leaf name must not be empty" }
-        leafPins[store.lockOrderKey] = name
-        return this
-    }
-
-    /** Pin this branch's own name to [name] instead of its property's (`NameOrigin.Pinned`). */
-    fun named(name: String): BranchDeclaration {
-        require(name.isNotEmpty()) { "a pinned branch name must not be empty" }
-        branchPin = name
-        return this
-    }
-
+class StoreDeclaration<S : Stateful> internal constructor(
+    private val declaring: Store<*>,
+    private val named: String?,
+    private val child: () -> S,
+) : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, S>> {
     override fun provideDelegate(
-        thisRef: Root,
+        thisRef: Store<*>,
         property: KProperty<*>,
-    ): ReadOnlyProperty<Root, Branch> {
-        val branch = declare(thisRef, property)
-        return ReadOnlyProperty { _, _ -> branch }
-    }
-
-    private fun declare(
-        thisRef: Root,
-        property: KProperty<*>,
-    ): Branch {
-        require(thisRef === root) {
-            "root '${thisRef.name}': the branch for '${property.name}' was created by " +
-                "root '${root.name}'.branch(...); declare a root's branches through its own branch(...)"
-        }
-        root.checkNotDisposed()
-        val parent = parentFor(under, root, property.name)
-        validateListing(property.name)
-        val branchName = branchPin ?: property.name
-        val origin = if (branchPin != null) NameOrigin.Pinned else NameOrigin.Property
-        val branch = Branch(root, parent, branchName, origin, stores)
-        branch.leaves = leavesFor(branch)
-        attachAll(branch)
-        var registered = false
-        try {
-            // Indexes each leaf still holding its store and owes it its
-            // announcement; a store disposed since its attach (from another
-            // thread) is neither indexed nor announced, so no listener hears
-            // `onDetached` for a leaf it never heard `onAttached` for.
-            root.registry.registerBranch(branch, parent)
-            registered = true
-        } finally {
-            if (!registered) for (store in stores) store.internalDetach(treeMembershipKey)
-        }
-        // One settle for the whole listing: a `value` following the tree
-        // recomputes once after every leaf is told, not once per leaf. A
-        // store that disposes while it is being announced is detached right
-        // after its announcement, by this thread (`Root.onLeafAttached`).
-        settling { for (leaf in branch.leaves) root.onLeafAttached(leaf) }
-        return branch
-    }
-
-    private fun validateListing(propertyName: String) {
-        for ((index, store) in stores.withIndex()) {
-            require(stores.indexOfFirst { it === store } == index) {
-                "root '${root.name}': branch '$propertyName' lists ${store::class.simpleName ?: "a store"} twice"
+    ): ReadOnlyProperty<Store<*>, S> {
+        val origin = if (named != null) NameOrigin.Pinned else NameOrigin.Property
+        val entry =
+            declareChild(declaring, thisRef, property) { attachment ->
+                ChildEntry(attachment, named ?: property.name, origin, ChildEntry.Kind.Store, child, null)
             }
-            require(!store.isDisposed) {
-                "root '${root.name}': branch '$propertyName' lists a disposed ${store::class.simpleName ?: "store"}"
-            }
+        return ReadOnlyProperty { _, _ ->
+            thisRef.checkNotDisposed()
+            @Suppress("UNCHECKED_CAST")
+            (entry.produced ?: materializeChild(entry)) as S
         }
     }
-
-    private fun leavesFor(branch: Branch): List<LeafNode> {
-        val taken = HashSet<String>()
-        return stores.map { store ->
-            val pin = leafPins[store.lockOrderKey]
-            val name =
-                pin ?: checkNotNull(defaultLeafName(store::class.simpleName)) {
-                    "root '${root.name}': branch '${branch.name}' lists a store whose class has no simple name " +
-                        "(anonymous or local); pin its leaf with named(store, \"...\")"
-                }
-            check(taken.add(name)) {
-                "root '${root.name}': branch '${branch.name}' has two leaves named '$name'; " +
-                    "pin one with named(store, \"...\")"
-            }
-            val origin = if (pin != null) NameOrigin.Pinned else NameOrigin.ClassName
-            LeafNode(root, branch, name, origin, key = null).also {
-                it.storeRef = store
-                it.storeKey = store.lockOrderKey
-            }
-        }
-    }
-
-    /** Attach every store outside the registry lock; on failure detach the ones this declaration attached. */
-    private fun attachAll(branch: Branch) {
-        val attached = ArrayList<Store<*>>()
-        var complete = false
-        try {
-            for (leaf in branch.leaves) {
-                val store = checkNotNull(leaf.storeRef)
-                val attachment =
-                    store.internalAttachIfAbsent(treeMembershipKey) { TreeLeafAttachment(root, leaf, entry = null) }
-                check(attachment.leaf === leaf) { doubleListingMessage(store, attachment, branch) }
-                attached.add(store)
-            }
-            complete = true
-        } finally {
-            if (!complete) for (store in attached) store.internalDetach(treeMembershipKey)
-        }
-    }
-
-    private fun doubleListingMessage(
-        store: Store<*>,
-        existing: TreeLeafAttachment,
-        branch: Branch,
-    ): String =
-        "${store::class.simpleName ?: "A store"} is listed under branch '${branch.name}' of root '${root.name}' " +
-            "but already belongs to root '${existing.root.name}' under '${existing.leaf.parent.name}'; " +
-            "a store belongs to one branch of one root"
 }
 
 /**
- * What `val threads by keyed<String, ThreadStore>()` delegates to: registers
- * a [KeyedBranch] named by the property, under [under] or the root.
+ * What `val session by stores { listOf(SignInStore(), ProfileStore()) }`
+ * delegates to: a group of the declaring store's children, named by the
+ * property, each listed store at its own leaf (named by a `names` pin, else
+ * its class name minus `Store`). Reading the property materializes the
+ * group on first read and answers its [Branch].
  */
 @ExperimentalStoreApi
-class KeyedDeclaration<K : Any, S : Store<S>> internal constructor(
-    private val root: Root,
-    private val keyClass: KClass<K>,
-    private val storeClass: KClass<S>,
-    private val under: Branch?,
-    private val keyCodec: StateCodec<K>?,
-) : PropertyDelegateProvider<Root, ReadOnlyProperty<Root, KeyedBranch<K, S>>> {
+class GroupDeclaration internal constructor(
+    private val declaring: Store<*>,
+    private val names: Map<KClass<out Store<*>>, String>,
+    private val group: () -> List<Store<*>>,
+) : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, Branch>> {
     override fun provideDelegate(
-        thisRef: Root,
+        thisRef: Store<*>,
         property: KProperty<*>,
-    ): ReadOnlyProperty<Root, KeyedBranch<K, S>> {
-        require(thisRef === root) {
-            "root '${thisRef.name}': the keyed branch for '${property.name}' was created by " +
-                "root '${root.name}'.keyed(); declare a root's branches through its own keyed()"
+    ): ReadOnlyProperty<Store<*>, Branch> {
+        val entry =
+            declareChild(declaring, thisRef, property) { attachment ->
+                ChildEntry(attachment, property.name, NameOrigin.Property, ChildEntry.Kind.Group, group, names)
+            }
+        return ReadOnlyProperty { _, _ ->
+            thisRef.checkNotDisposed()
+            (entry.produced ?: materializeChild(entry)) as Branch
         }
-        root.checkNotDisposed()
-        val parent = parentFor(under, root, property.name)
-        val branch = KeyedBranch(root, parent, property.name, keyClass, storeClass, keyCodec)
-        root.registry.registerKeyed(branch, parent)
-        return ReadOnlyProperty { _, _ -> branch }
     }
 }
 
-private fun parentFor(
-    under: Branch?,
-    root: Root,
-    propertyName: String,
-): StoreNode {
-    if (under == null) return root
-    require(under.root === root) {
-        "root '${root.name}': '$propertyName' is declared under branch '${under.name}' of root '${under.root.name}'; " +
-            "a branch nests only under a branch of its own root"
+/**
+ * What `val threads by stores<String, ThreadStore> { id -> ThreadStore(id) }`
+ * delegates to: a [KeyedBranch] of the declaring store, named by the
+ * property, created when the property binds (no store code runs) and live
+ * from then on; its stores are created per key through the declared
+ * factory ([KeyedBranch.create]/[KeyedBranch.getOrCreate]).
+ */
+@ExperimentalStoreApi
+class KeyedDeclaration<K : Any, S : Store<S>> internal constructor(
+    private val declaring: Store<*>,
+    private val keyClass: KClass<K>,
+    private val storeClass: KClass<S>,
+    private val keyCodec: StateCodec<K>?,
+    private val factory: (K) -> S,
+) : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, KeyedBranch<K, S>>> {
+    override fun provideDelegate(
+        thisRef: Store<*>,
+        property: KProperty<*>,
+    ): ReadOnlyProperty<Store<*>, KeyedBranch<K, S>> {
+        var branch: KeyedBranch<K, S>? = null
+        declareChild(declaring, thisRef, property) { attachment ->
+            val keyed =
+                KeyedBranch(
+                    attachment.node,
+                    property.name,
+                    keyClass,
+                    storeClass,
+                    keyCodec,
+                    factory,
+                    thisRef,
+                    attachment.registry,
+                )
+            branch = keyed
+            ChildEntry(attachment, property.name, NameOrigin.Property, ChildEntry.Kind.Keyed, factory, null).also {
+                it.node = keyed
+                it.produced = keyed
+                it.phase = ChildEntry.Phase.Live
+            }
+        }
+        val declared = checkNotNull(branch)
+        return ReadOnlyProperty { _, _ ->
+            thisRef.checkNotDisposed()
+            declared
+        }
     }
-    return under
+}
+
+/**
+ * Register the entry [entry] builds on [thisRef], the store declaring the
+ * property — which must be the store the `store`/`stores` call was made
+ * on ([declaring]).
+ *
+ * @throws IllegalArgumentException if [thisRef] is not [declaring].
+ * @throws IllegalStateException if [thisRef] is disposed, or already has a
+ *   child of that name.
+ */
+private fun declareChild(
+    declaring: Store<*>,
+    thisRef: Store<*>,
+    property: KProperty<*>,
+    entry: (TreeLeafAttachment) -> ChildEntry,
+): ChildEntry {
+    require(thisRef === declaring) {
+        "'${property.name}' on ${thisRef.displayName} was declared through ${declaring.displayName}.store/stores; " +
+            "declare a store's children through its own store { }/stores { }"
+    }
+    thisRef.checkNotDisposed()
+    val attachment = thisRef.treeAttachment()
+    return entry(attachment).also { attachment.registry.declare(it) }
 }

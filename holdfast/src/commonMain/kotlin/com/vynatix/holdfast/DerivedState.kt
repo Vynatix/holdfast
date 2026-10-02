@@ -16,7 +16,7 @@ import kotlin.reflect.KProperty
 // encode or `properties` sees it. The legacy `derived` Pair API stays as it
 // is (recomputing once per source commit) until the 0.7.0 triage. Internally
 // a derived state can also follow whole stores, added and removed at runtime
-// (store-level edges, StoreEdges.kt) — the primitive issue #21's `Root.value`
+// (store-level edges, StoreEdges.kt) — the primitive issue #21's store-tree value
 // builds on.
 
 /**
@@ -230,7 +230,7 @@ fun <T : Any> State<T>.observableBacking(): MutableState<T>? {
 
 /**
  * A [State] that is neither a [MutableState] nor a [DerivedStateNode] but
- * observes through one — issue #21's `Root.value`, a view over a derived
+ * observes through one — issue #21's store-tree value, a view over a derived
  * node it creates on first use. [observableBacking] resolves it, for every
  * observation path.
  */
@@ -246,7 +246,7 @@ internal interface ObservableBacked<T : Any> {
  * follows its sources; disposing the node releases it and the recompute.
  *
  * It can also follow whole stores — store-level edges (StoreEdges.kt), for
- * issue #21's `Root.value` over branches that attach and detach at runtime:
+ * issue #21's store-tree value over branches that attach and detach at runtime:
  * [addSourceStore] and [removeSourceStore], from any thread.
  */
 internal class DerivedStateNode<T : Any>(
@@ -290,11 +290,27 @@ internal class DerivedStateNode<T : Any>(
     fun removeSourceStore(store: Store<*>): Boolean = follower.removeSourceStore(store)
 
     /**
+     * [addSourceStore] / [removeSourceStore] without the recompute, for a
+     * caller that must change the edge in one step with bookkeeping under a
+     * lock of its own (a recompute may run inline and must not run under
+     * it): it calls [recomputeForSourceStores] once it released that lock.
+     * Takes the followed store's attachment slot (an add) and the edge
+     * locks, and runs no other code.
+     */
+    fun addSourceStoreQuietly(store: Store<*>): Boolean = follower.addSourceStore(store, catchUp = false)
+
+    /** See [addSourceStoreQuietly]. */
+    fun removeSourceStoreQuietly(store: Store<*>): Boolean = follower.removeSourceStore(store, recomputeNow = false)
+
+    /** The recompute [addSourceStoreQuietly] and [removeSourceStoreQuietly] left to the caller. */
+    fun recomputeForSourceStores() = follower.recomputeForSourceStores()
+
+    /**
      * Run the recompute now, on this thread, as a settle would: it commits on
      * the host, or hands itself to the host's holder when the host is busy
      * — never waiting — and does nothing when the node is disposed. For a
      * read that wants the node current before a queued recompute has run
-     * (`Root.value`); call it outside every entry.
+     * (the store-tree value); call it outside every entry.
      */
     fun settleNow() = follower.settleNow()
 
@@ -324,7 +340,7 @@ internal class DerivedStateNode<T : Any>(
  * that store's next change. A branch attached at runtime, whose derived
  * states cannot be listed up front, is read through the states under them.
  *
- * For issue #21's `Root.value`, whose branches attach and detach at runtime.
+ * For issue #21's store-tree value, whose branches attach and detach at runtime.
  *
  * @throws IllegalStateException if this store, one of [sourceStores] or the
  *   store of one of [sources] is disposed.

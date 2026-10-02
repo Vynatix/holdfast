@@ -5,7 +5,7 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 
 /**
- * What `Root.reset(node)` did: the leaves it reset — every live leaf of the
+ * What `tree.reset(node)` did: the leaves it reset — every live leaf of the
  * subtree, each in its own transaction of the one frame — and the leaves it
  * skipped because their store was disposed after the reset began. A subtree
  * with no live leaf resets nothing and reports nothing.

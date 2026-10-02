@@ -41,19 +41,32 @@ private class RtOtherStore : Store<RtOtherStore>() {
 
 private class RtKeyedStore(
     id: String,
-    root: RtResetRoot,
-) : Store<RtKeyedStore>(root.keyed.at(id)) {
+) : Store<RtKeyedStore>() {
     val title by state { "thread $id" }
 }
 
-private class RtResetRoot : Root("reset") {
-    val panel = RtPanelStore()
-    val other = RtOtherStore()
-    val panels by branch(panel)
-    val others by branch(other)
-    val keyed by keyed<String, RtKeyedStore>(under = panels)
-    val emptyKeyed by keyed<String, RtKeyedStore>(under = others)
+/** A mid-tree store with no states of its own: a leaf child and a keyed branch under it. */
+private class RtPanelsStore : Store<RtPanelsStore>() {
+    val panel by store { RtPanelStore() }
+    val keyed by stores<String, RtKeyedStore> { RtKeyedStore(it) }
 }
+
+private class RtOthersStore : Store<RtOthersStore>() {
+    val other by store { RtOtherStore() }
+    val emptyKeyed by stores<String, RtKeyedStore> { RtKeyedStore(it) }
+}
+
+private class RtResetApp : Store<RtResetApp>() {
+    val panels by store { RtPanelsStore() }
+    val others by store { RtOthersStore() }
+    val panel: RtPanelStore get() = panels.panel
+    val other: RtOtherStore get() = others.other
+    val keyed: KeyedBranch<String, RtKeyedStore> get() = panels.keyed
+    val emptyKeyed: KeyedBranch<String, RtKeyedStore> get() = others.emptyKeyed
+}
+
+/** The node of the `panels` child. */
+private val RtResetApp.panelsNode: LeafNode get() = tree.nodeOf(panels)!!
 
 private class RtFrameLog<V : Store<V>> : Middleware<V>() {
     val completed = mutableListOf<Pair<String, String?>>()
@@ -92,38 +105,42 @@ private fun recordFires(vararg states: Pair<String, State<*>>): Pair<Map<String,
     return fires to Disposable { subs.forEach { it.dispose() } }
 }
 
-/** T4 reset: `Root.reset(node)` resets exactly the subtree, as one frame. */
+/** T4 reset: `tree.reset(node)` resets exactly the subtree — its stores' own states included — as one frame. */
 class TreeResetTest {
-    private fun dirtied(): RtResetRoot {
-        val root = RtResetRoot()
+    private fun dirtied(): RtResetApp {
+        val root = RtResetApp()
         root.panel action {
             count mutate 5
             label mutate "busy"
         }
         root.other action { n mutate 9 }
-        root.keyed.create("k1") { RtKeyedStore(it, root) } action { title mutate "changed" }
+        root.keyed.create("k1") action { title mutate "changed" }
         return root
     }
 
     @Test
     fun resetOfANodeTouchesOnlyThatSubtree() {
         val root = dirtied()
-        val report = root.reset(root.panels).getOrThrow()
+        val report = root.tree.reset(root.panelsNode).getOrThrow()
         assertEquals(0, root.panel.count.value)
         assertEquals("idle", root.panel.label.value)
-        assertEquals("thread k1", root[root.keyed, "k1"]!!.title.value, "declared under the panels branch")
+        assertEquals("thread k1", root.keyed["k1"]!!.title.value, "declared under the panels store")
         assertEquals(9, root.other.n.value, "outside the subtree: untouched")
-        assertEquals(listOf(root.nodeOf(root.panel)!!, root.nodeOf(root[root.keyed, "k1"]!!)!!), report.reset)
+        assertEquals(
+            listOf(root.panelsNode, root.tree.nodeOf(root.panel)!!, root.tree.nodeOf(root.keyed["k1"]!!)!!),
+            report.reset,
+            "the subtree's top store is reset with its children",
+        )
         assertEquals(emptyList<StoreNode>(), report.skipped)
     }
 
     @Test
     fun aResetTreeEqualsAFreshTreesCapture() {
         val root = dirtied()
-        root.reset().getOrThrow()
-        val fresh = RtResetRoot()
-        fresh.keyed.create("k1") { RtKeyedStore(it, fresh) }
-        assertEquals(fresh.snapshot().render(), root.snapshot().render())
+        root.tree.reset().getOrThrow()
+        val fresh = RtResetApp()
+        fresh.keyed.create("k1")
+        assertEquals(fresh.tree.snapshot().render(), root.tree.snapshot().render())
         assertEquals(fresh.panel.snapshot(), root.panel.snapshot())
         assertEquals(fresh.other.snapshot(), root.other.snapshot())
     }
@@ -133,8 +150,8 @@ class TreeResetTest {
         val root = dirtied()
         val panelLog = RtFrameLog<RtPanelStore>().also { root.panel.middlewares(it) }
         val otherLog = RtFrameLog<RtOtherStore>().also { root.other.middlewares(it) }
-        val keyedLog = RtFrameLog<RtKeyedStore>().also { root[root.keyed, "k1"]!!.middlewares(it) }
-        val result = root.reset()
+        val keyedLog = RtFrameLog<RtKeyedStore>().also { root.keyed["k1"]!!.middlewares(it) }
+        val result = root.tree.reset()
         assertIs<TransactionResult.Success<TreeResetReport>>(result)
         val (id, frame) = panelLog.completed.single()
         assertNotNull(frame)
@@ -150,7 +167,7 @@ class TreeResetTest {
         root.panel action { label mutate "idle" }
         val (fires, subs) = recordFires("count" to root.panel.count, "label" to root.panel.label, "n" to root.other.n)
         try {
-            root.reset().getOrThrow()
+            root.tree.reset().getOrThrow()
             assertEquals(listOf<Any>(0), fires.getValue("count"))
             assertEquals(emptyList<Any>(), fires.getValue("label"), "already at its reset value: silent, even with distinct = false")
             assertEquals(listOf<Any>(0), fires.getValue("n"))
@@ -163,10 +180,11 @@ class TreeResetTest {
     fun nestingIsRefused() {
         val root = dirtied()
         var fromAction: Throwable? = null
-        root.other.action { fromAction = runCatching { root.reset(root.panels) }.exceptionOrNull() }.getOrThrow()
-        assertContains(assertIs<IllegalStateException>(fromAction).message!!, "reset the subtree at 'panels' of root 'reset'")
+        val panelsNode = root.panelsNode
+        root.other.action { fromAction = runCatching { root.tree.reset(panelsNode) }.exceptionOrNull() }.getOrThrow()
+        assertContains(assertIs<IllegalStateException>(fromAction).message!!, "reset the subtree at 'panels' under 'RtResetApp'")
         var fromFrame: Throwable? = null
-        atomic(root.panel) { fromFrame = runCatching { root.reset() }.exceptionOrNull() }.getOrThrow()
+        atomic(root.panel) { fromFrame = runCatching { root.tree.reset() }.exceptionOrNull() }.getOrThrow()
         assertIs<IllegalStateException>(fromFrame)
         assertEquals(5, root.panel.count.value, "nothing reset")
     }
@@ -174,7 +192,7 @@ class TreeResetTest {
     @Test
     fun anEmptyKeyedBranchIsANoOpSuccess() {
         val root = dirtied()
-        val result = root.reset(root.emptyKeyed)
+        val result = root.tree.reset(root.emptyKeyed)
         val success = assertIs<TransactionResult.Success<TreeResetReport>>(result)
         assertEquals(TransactionStatus.Committed, success.transaction.status)
         assertEquals("tree-reset", success.transaction.id)
@@ -184,9 +202,9 @@ class TreeResetTest {
 
     @Test
     fun neverReadStatesAreMaterializedBeforeTheFrameThenReRunInsideIt() {
-        val root = RtResetRoot()
+        val root = RtResetApp()
         assertEquals(emptyList<Boolean>(), root.panel.initializerRuns)
-        root.reset().getOrThrow()
+        root.tree.reset().getOrThrow()
         assertEquals(
             listOf(false, true),
             root.panel.initializerRuns,
@@ -200,18 +218,18 @@ class TreeResetTest {
         val root = dirtied()
         val hook = root.panel.internalAttachIfAbsent(rtHookKey) { RtResetHook() }
         val otherHook = root.other.internalAttachIfAbsent(rtHookKey) { RtResetHook() }
-        root.reset(root.panels).getOrThrow()
+        root.tree.reset(root.panelsNode).getOrThrow()
         assertEquals(1, hook.resets)
         assertEquals(0, otherHook.resets, "outside the subtree")
     }
 
     @Test
     fun aThrowingInitializerFailsTheWholeFrameBeforeAnyLeafIsWritten() {
-        val root = RtFragileRoot()
+        val root = RtFragileApp()
         root.fragile.action { count mutate 1 }.getOrThrow()
         root.sibling action { n mutate 3 }
         root.fragile.shouldThrow = true
-        val result = root.reset()
+        val result = root.tree.reset()
         assertIs<TransactionResult.Error>(result)
         assertEquals(1, root.fragile.count.value)
         assertEquals(3, root.sibling.n.value, "the sibling leaf rolled back with the frame")
@@ -222,13 +240,13 @@ class TreeResetTest {
         val root = dirtied()
         assertTrue(root.panel.lockOrderKey < root.other.lockOrderKey)
         root.other.middlewares(RtDisposingMiddleware(root.panel))
-        val panelLeaf = root.nodeOf(root.panel)!!
-        val report = root.reset().getOrThrow()
+        val panelLeaf = root.tree.nodeOf(root.panel)!!
+        val report = root.tree.reset().getOrThrow()
         assertTrue(root.panel.isDisposed)
         assertEquals(listOf(panelLeaf), report.skipped)
         assertTrue(panelLeaf !in report.reset)
         assertEquals(0, root.other.n.value, "the rest of the frame committed")
-        assertNull(root.nodeOf(root.panel))
+        assertNull(root.tree.nodeOf(root.panel))
     }
 }
 
@@ -241,8 +259,8 @@ private class RtFragileStore : Store<RtFragileStore>() {
     }
 }
 
-private class RtFragileRoot : Root("fragile") {
+private class RtFragileApp : Store<RtFragileApp>() {
     val fragile = RtFragileStore()
     val sibling = RtOtherStore()
-    val leaves by branch(fragile, sibling)
+    val leaves by stores { listOf(fragile, sibling) }
 }

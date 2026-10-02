@@ -15,10 +15,11 @@ import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.settling
 
 // The one flat frame a subtree operation runs in (issue #21 decision U10):
-// `Root.restore` and `Root.reset(node)` prepare every leaf outside the
-// locks, then stage each leaf into its root of ONE outermost `atomic` over
-// the subtree's live leaves — all-or-nothing, applied in one write bracket,
-// the write half of `Root.snapshot`'s cut. It refuses to nest inside any
+// `tree.restore` and `tree.reset(node)` prepare every store of the subtree
+// outside the locks, then stage each into its root of ONE outermost `atomic`
+// over the subtree's live stores — all-or-nothing, applied in one write
+// bracket, the write half of `tree.snapshot`'s cut. The receiver's own store
+// is a target like any other. It refuses to nest inside any
 // entry on this thread, exactly as `restoreInOneFrame` does: a nested frame
 // is not one frame (stores the enclosing entry holds join as savepoints and
 // apply with it; the rest commit at the nested exit), so only an outermost
@@ -33,14 +34,14 @@ import com.vynatix.holdfast.settling
  * not opened and [finish] receives a synthetic, already committed
  * transaction of id [id] (no store or middleware ever sees it).
  *
- * @throws IllegalStateException if the root is disposed, or from inside an
+ * @throws IllegalStateException if [owner] is disposed, or from inside an
  *   action, an `atomic` frame, a `suspendAction`/`suspendAtomic` body, a
  *   commit's fanout or a derived state's recompute ([attempt] names the
  *   operation in the message).
  */
 @Suppress("SpreadOperator") // `atomic` takes a vararg; the subtree's stores are only known at runtime.
 internal fun <P, R> treeFrame(
-    root: Root,
+    owner: Store<*>,
     id: String,
     attempt: String,
     targets: List<Pair<LeafNode, Store<*>>>,
@@ -48,7 +49,7 @@ internal fun <P, R> treeFrame(
     stage: (Store<*>, Transaction, P) -> Unit,
     finish: (worked: List<TreeFrameTarget<P>>, skipped: List<LeafNode>) -> R,
 ): TransactionResult<R> {
-    root.checkNotDisposed()
+    owner.checkNotDisposed()
     val live = targets.filter { (_, store) -> !store.isDisposed }
     refuseEnclosingEntry(attempt, live.map { it.second })
     val skipped = ArrayList<LeafNode>(targets.filter { (_, store) -> store.isDisposed }.map { it.first })

@@ -7,9 +7,9 @@ import com.vynatix.holdfast.testing.TreeHandle
 import com.vynatix.holdfast.tree.StoreNode
 
 /**
- * Assert that every live leaf under [node] committed a root of the SAME
- * frame — one `atomic`/`suspendAtomic`, `Root.restore` or `Root.reset`
- * enrolled them all and committed — judged from the tree's own timeline
+ * Assert that every live store of the subtree at [node] committed a root of
+ * the SAME frame — one `atomic`/`suspendAtomic`, `StoreTree.restore` or
+ * `StoreTree.reset` enrolled them all and committed — judged from the tree's own timeline
  * (`TreeEvent`s, so a keyed store's frames count too). Returns the shared
  * frame id (the most recent one, when several frames spanned the whole
  * subtree). A frame vetoed on its last participant committed nowhere, so
@@ -31,7 +31,7 @@ fun TreeHandle.shouldCommitTogether(node: StoreNode): String {
                 "  ${leaf.name}: ${if (ids.isEmpty()) "(no committed frames)" else ids.joinToString()}"
             }
         throw AssertionError(
-            "Expected every leaf under '${node.name}' of root '${root.name}' to commit inside one frame, " +
+            "Expected every leaf under '${node.name}' of tree '${tree.node.name}' to commit inside one frame, " +
                 "but no frame id is shared by every leaf's events:\n$detail",
         )
     }
