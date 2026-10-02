@@ -87,6 +87,7 @@ class DisposedEntrypointTest {
             Entrypoint("clearStates") { p, _ -> p.clearStates() },
             Entrypoint("middlewares") { p, _ -> p.middlewares() },
             Entrypoint("clearMiddleware") { p, _ -> p.clearMiddleware() },
+            Entrypoint("internalSetOuterMiddleware") { p, _ -> p.internalSetOuterMiddleware(emptyList()) },
             Entrypoint("bindClock") { p, _ -> p.bindClock(Clock.System) },
             Entrypoint("internalAttachIfAbsent") { p, _ ->
                 p.internalAttachIfAbsent(probeAttachmentKey) { error("created after dispose") }
@@ -121,6 +122,15 @@ class DisposedEntrypointTest {
             // Lock-free reads of the attachment slot, which dispose() empties.
             Entrypoint("internalAttachment (null)") { p, _ -> check(p.internalAttachment(probeAttachmentKey) == null) },
             Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },
+            // dispose() already emptied the slot; nothing to detach.
+            Entrypoint("internalDetach (null)") { p, _ -> check(p.internalDetach(probeAttachmentKey) == null) },
+            // Documented no-check exception next to snapshotMiddleware(): a
+            // caller unwinding a store that disposed mid-teardown (issue
+            // #21's Root.removeMiddleware) must tell "already gone" apart
+            // from "removed" without catching.
+            Entrypoint("internalRemoveMiddleware (false)") { p, _ ->
+                check(!p.internalRemoveMiddleware(object : Middleware<DisposedProbe>() {}))
+            },
             // A State extension, not a Store entrypoint: it reads the state's declaration.
             Entrypoint("State.tags") { _, s -> s.tags },
             // Reads the state's declaration only, like State.tags.

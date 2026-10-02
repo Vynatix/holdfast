@@ -11,12 +11,17 @@ depend on from any UI module that uses Compose.
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
+fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
+
+@Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
 ```
 
 `collectAsState` accepts any observable state: a declared state
-(`val x by state { … }`), a `derived` state, or core's experimental
-`derivedState`/`merged` states. A commit that recomputes a merged value
+(`val x by state { … }`), a `derived` state, core's experimental
+`derivedState`/`merged` states, or a tree root's `App.value`
+(`App.value.collectAsState()`, experimental: one recomposition per settle
+of the tree, so a two-store frame recomposes once). A commit that recomputes a merged value
 recomposes its readers once, and one that leaves the value as it was does
 not recompose them. A `computed { }` state has no commits to observe, so
 `collectAsState` throws on it: read its `.value` in composition, or use

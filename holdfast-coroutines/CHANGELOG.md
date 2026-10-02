@@ -6,8 +6,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Issue #21 review (PR #24).** `Root.hydrateAll` no longer throws when a
+  leaf is disposed after its `hydrate()` — before or while its
+  `awaitSettled()` runs, or before its phase is read when not awaiting —
+  nor reports a leaf disposed during its own `hydrate()` as
+  `Ran(Failed(IllegalStateException))`: every such leaf is
+  `Outcome.Disposed`, which `isHealthy` ignores; cancellation still
+  propagates. `HydrateAllReport.Entry.node` of a disposed leaf is the
+  `LeafNode` it sat at when listed, no longer the queried root or branch.
+
 ### Added
 
+- **`Root.hydrateAll(node, scope, awaitSettled)`** (experimental, issue #21
+  plan PR 21-8): hydrate every live leaf of a typed tree's subtree in
+  `lockOrderKey` order — each hydrator `hydrate`d on `scope` (else its
+  store's `Store.scope`), every seed committed and every refresh launched
+  before the next leaf's turn, then each `awaitSettled` in the same order so
+  the refreshes run concurrently — and report per leaf in a
+  `HydrateAllReport` (`Entry(node, store, outcome)`; `Outcome.Ran(hydration)`,
+  `NoHydrator`, `Disposed`; `failed`, `skipped`, `isHealthy`). A leaf's
+  failure — a throwing `base { }`, a rejecting middleware, a failed refresh
+  — is reported as `Hydration.Failed`, never thrown; a hydrated leaf's
+  hydrator does nothing, so the call is idempotent. Refused before any leaf
+  is touched from inside an action, `atomic` frame, `suspendAction` or
+  `suspendAtomic` body of any store, as `Hydrator.hydrate` is; a
+  cancellation propagates at once while the refreshes already launched keep
+  running. Throws on a disposed root or a node of another root.
 - **Persisted `UserAuthored` overlay** (experimental, issue #20, R8 and R3;
   plan PR 14): `overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int =
   8192)` in a hydrator's spec persists what the user authored — the store's

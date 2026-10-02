@@ -1,12 +1,20 @@
+@file:OptIn(ExperimentalStoreApi::class)
+
 package com.vynatix.holdfast.compose
 
 import androidx.compose.runtime.Composable
+import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.tree.Root
 import kotlin.test.Test
 
 private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
     val n by state { 0 }
     val s by state { "init" }
+}
+
+private object ComposeBindingsRoot : Root("compose") {
+    val leaf by branch(ComposeBindingsVault())
 }
 
 /**
@@ -31,9 +39,11 @@ class ComposeBindingsCompileTest {
             val v = ComposeBindingsVault()
             val n = v.collectAsState(v.n)
             val s = v.collectAsState(v.s)
+            val tree = ComposeBindingsRoot.value.collectAsState()
             // Avoid unused warnings.
             n.value
             s.value
+            tree.value
             rememberDisposable {
                 com.vynatix.holdfast.Disposable { /* no-op */ }
             }

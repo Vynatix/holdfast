@@ -19,6 +19,19 @@ open annotation class com.vynatix.holdfast/StoreInternalApi : kotlin/Annotation 
     constructor <init>() // com.vynatix.holdfast/StoreInternalApi.<init>|<init>(){}[0]
 }
 
+final enum class com.vynatix.holdfast.tree/NameOrigin : kotlin/Enum<com.vynatix.holdfast.tree/NameOrigin> { // com.vynatix.holdfast.tree/NameOrigin|null[0]
+    enum entry ClassName // com.vynatix.holdfast.tree/NameOrigin.ClassName|null[0]
+    enum entry Key // com.vynatix.holdfast.tree/NameOrigin.Key|null[0]
+    enum entry Pinned // com.vynatix.holdfast.tree/NameOrigin.Pinned|null[0]
+    enum entry Property // com.vynatix.holdfast.tree/NameOrigin.Property|null[0]
+
+    final val entries // com.vynatix.holdfast.tree/NameOrigin.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast.tree/NameOrigin> // com.vynatix.holdfast.tree/NameOrigin.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/NameOrigin.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<com.vynatix.holdfast.tree/NameOrigin> // com.vynatix.holdfast.tree/NameOrigin.values|values#static(){}[0]
+}
+
 final enum class com.vynatix.holdfast/RestorePolicy : kotlin/Enum<com.vynatix.holdfast/RestorePolicy> { // com.vynatix.holdfast/RestorePolicy|null[0]
     enum entry BestEffort // com.vynatix.holdfast/RestorePolicy.BestEffort|null[0]
     enum entry IgnoreUnknown // com.vynatix.holdfast/RestorePolicy.IgnoreUnknown|null[0]
@@ -207,7 +220,21 @@ sealed interface <#A: out kotlin/Any?> com.vynatix.holdfast/TransactionResult { 
     }
 }
 
+sealed interface com.vynatix.holdfast.tree/StoreNode { // com.vynatix.holdfast.tree/StoreNode|null[0]
+    abstract val name // com.vynatix.holdfast.tree/StoreNode.name|{}name[0]
+        abstract fun <get-name>(): kotlin/String // com.vynatix.holdfast.tree/StoreNode.name.<get-name>|<get-name>(){}[0]
+    abstract val nameOrigin // com.vynatix.holdfast.tree/StoreNode.nameOrigin|{}nameOrigin[0]
+        abstract fun <get-nameOrigin>(): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/StoreNode.nameOrigin.<get-nameOrigin>|<get-nameOrigin>(){}[0]
+    abstract val parent // com.vynatix.holdfast.tree/StoreNode.parent|{}parent[0]
+        abstract fun <get-parent>(): com.vynatix.holdfast.tree/StoreNode? // com.vynatix.holdfast.tree/StoreNode.parent.<get-parent>|<get-parent>(){}[0]
+    abstract val root // com.vynatix.holdfast.tree/StoreNode.root|{}root[0]
+        abstract fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.tree/StoreNode.root.<get-root>|<get-root>(){}[0]
+
+    open fun isUnder(com.vynatix.holdfast.tree/StoreNode): kotlin/Boolean // com.vynatix.holdfast.tree/StoreNode.isUnder|isUnder(com.vynatix.holdfast.tree.StoreNode){}[0]
+}
+
 abstract class <#A: com.vynatix.holdfast/EventfulStore<#A, #B>, #B: kotlin/Any> com.vynatix.holdfast/EventfulStore : com.vynatix.holdfast/Eventful<#B>, com.vynatix.holdfast/Store<#A> { // com.vynatix.holdfast/EventfulStore|null[0]
+    constructor <init>(com.vynatix.holdfast/StoreMembership<#A>, kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.holdfast/EventfulStore.<init>|<init>(com.vynatix.holdfast.StoreMembership<1:0>;kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
     constructor <init>(kotlin/Int = ..., kotlinx.coroutines.channels/BufferOverflow = ...) // com.vynatix.holdfast/EventfulStore.<init>|<init>(kotlin.Int;kotlinx.coroutines.channels.BufferOverflow){}[0]
 
     final val events // com.vynatix.holdfast/EventfulStore.events|{}events[0]
@@ -219,6 +246,7 @@ abstract class <#A: com.vynatix.holdfast/EventfulStore<#A, #B>, #B: kotlin/Any> 
 
 abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store { // com.vynatix.holdfast/Store|null[0]
     constructor <init>() // com.vynatix.holdfast/Store.<init>|<init>(){}[0]
+    constructor <init>(com.vynatix.holdfast/StoreMembership<#A>) // com.vynatix.holdfast/Store.<init>|<init>(com.vynatix.holdfast.StoreMembership<1:0>){}[0]
 
     final val activeTransaction // com.vynatix.holdfast/Store.activeTransaction|{}activeTransaction[0]
         final fun <get-activeTransaction>(): com.vynatix.holdfast/Transaction? // com.vynatix.holdfast/Store.activeTransaction.<get-activeTransaction>|<get-activeTransaction>(){}[0]
@@ -289,6 +317,69 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     }
 }
 
+abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/StoreMembership // com.vynatix.holdfast/StoreMembership|null[0]
+
+abstract class com.vynatix.holdfast.tree/LeafMembershipListener { // com.vynatix.holdfast.tree/LeafMembershipListener|null[0]
+    constructor <init>() // com.vynatix.holdfast.tree/LeafMembershipListener.<init>|<init>(){}[0]
+
+    open fun onAttached(com.vynatix.holdfast.tree/LeafNode) // com.vynatix.holdfast.tree/LeafMembershipListener.onAttached|onAttached(com.vynatix.holdfast.tree.LeafNode){}[0]
+    open fun onDetached(com.vynatix.holdfast.tree/LeafNode) // com.vynatix.holdfast.tree/LeafMembershipListener.onDetached|onDetached(com.vynatix.holdfast.tree.LeafNode){}[0]
+}
+
+abstract class com.vynatix.holdfast.tree/Root : com.vynatix.holdfast.tree/StoreNode { // com.vynatix.holdfast.tree/Root|null[0]
+    constructor <init>(kotlin/String? = ...) // com.vynatix.holdfast.tree/Root.<init>|<init>(kotlin.String?){}[0]
+
+    final val isDisposed // com.vynatix.holdfast.tree/Root.isDisposed|{}isDisposed[0]
+        final fun <get-isDisposed>(): kotlin/Boolean // com.vynatix.holdfast.tree/Root.isDisposed.<get-isDisposed>|<get-isDisposed>(){}[0]
+    final val name // com.vynatix.holdfast.tree/Root.name|{}name[0]
+        final fun <get-name>(): kotlin/String // com.vynatix.holdfast.tree/Root.name.<get-name>|<get-name>(){}[0]
+    final val nameOrigin // com.vynatix.holdfast.tree/Root.nameOrigin|{}nameOrigin[0]
+        final fun <get-nameOrigin>(): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/Root.nameOrigin.<get-nameOrigin>|<get-nameOrigin>(){}[0]
+    final val nodes // com.vynatix.holdfast.tree/Root.nodes|{}nodes[0]
+        final fun <get-nodes>(): kotlin.collections/List<com.vynatix.holdfast.tree/StoreNode> // com.vynatix.holdfast.tree/Root.nodes.<get-nodes>|<get-nodes>(){}[0]
+    final val parent // com.vynatix.holdfast.tree/Root.parent|{}parent[0]
+        final fun <get-parent>(): com.vynatix.holdfast.tree/StoreNode? // com.vynatix.holdfast.tree/Root.parent.<get-parent>|<get-parent>(){}[0]
+    final val root // com.vynatix.holdfast.tree/Root.root|{}root[0]
+        final fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.tree/Root.root.<get-root>|<get-root>(){}[0]
+    final val value // com.vynatix.holdfast.tree/Root.value|{}value[0]
+        final fun <get-value>(): com.vynatix.holdfast/State<com.vynatix.holdfast.tree/TreeSnapshot> // com.vynatix.holdfast.tree/Root.value.<get-value>|<get-value>(){}[0]
+    open val scope // com.vynatix.holdfast.tree/Root.scope|{}scope[0]
+        open fun <get-scope>(): kotlinx.coroutines/CoroutineScope // com.vynatix.holdfast.tree/Root.scope.<get-scope>|<get-scope>(){}[0]
+
+    final var uncaughtObserverHandler // com.vynatix.holdfast.tree/Root.uncaughtObserverHandler|{}uncaughtObserverHandler[0]
+        final fun <get-uncaughtObserverHandler>(): kotlin/Function1<kotlin/Throwable, kotlin/Unit>? // com.vynatix.holdfast.tree/Root.uncaughtObserverHandler.<get-uncaughtObserverHandler>|<get-uncaughtObserverHandler>(){}[0]
+        final fun <set-uncaughtObserverHandler>(kotlin/Function1<kotlin/Throwable, kotlin/Unit>?) // com.vynatix.holdfast.tree/Root.uncaughtObserverHandler.<set-uncaughtObserverHandler>|<set-uncaughtObserverHandler>(kotlin.Function1<kotlin.Throwable,kotlin.Unit>?){}[0]
+
+    final fun <#A1: kotlin/Any, #B1: com.vynatix.holdfast/Store<#B1>> entries(com.vynatix.holdfast.tree/KeyedBranch<#A1, #B1>): kotlin.collections/Map<#A1, #B1> // com.vynatix.holdfast.tree/Root.entries|entries(com.vynatix.holdfast.tree.KeyedBranch<0:0,0:1>){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    final fun <#A1: kotlin/Any, #B1: com.vynatix.holdfast/Store<#B1>> get(com.vynatix.holdfast.tree/KeyedBranch<#A1, #B1>, #A1): #B1? // com.vynatix.holdfast.tree/Root.get|get(com.vynatix.holdfast.tree.KeyedBranch<0:0,0:1>;0:0){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    final fun <#A1: kotlin/Any, #B1: com.vynatix.holdfast/Store<#B1>> keyedDeclaration(kotlin.reflect/KClass<#A1>, kotlin.reflect/KClass<#B1>, com.vynatix.holdfast.tree/Branch?, com.vynatix.holdfast/StateCodec<#A1>?): com.vynatix.holdfast.tree/KeyedDeclaration<#A1, #B1> // com.vynatix.holdfast.tree/Root.keyedDeclaration|keyedDeclaration(kotlin.reflect.KClass<0:0>;kotlin.reflect.KClass<0:1>;com.vynatix.holdfast.tree.Branch?;com.vynatix.holdfast.StateCodec<0:0>?){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    final fun bindToScope(kotlinx.coroutines/CoroutineScope) // com.vynatix.holdfast.tree/Root.bindToScope|bindToScope(kotlinx.coroutines.CoroutineScope){}[0]
+    final fun branch(kotlin/Array<out com.vynatix.holdfast/Store<*>>..., com.vynatix.holdfast.tree/Branch? = ...): com.vynatix.holdfast.tree/BranchDeclaration // com.vynatix.holdfast.tree/Root.branch|branch(kotlin.Array<out|com.vynatix.holdfast.Store<*>>...;com.vynatix.holdfast.tree.Branch?){}[0]
+    final fun children(com.vynatix.holdfast.tree/StoreNode): kotlin.collections/List<com.vynatix.holdfast/Store<*>> // com.vynatix.holdfast.tree/Root.children|children(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun decode(kotlin/String): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/Root.decode|decode(kotlin.String){}[0]
+    final fun dispose() // com.vynatix.holdfast.tree/Root.dispose|dispose(){}[0]
+    final fun middlewares(kotlin/Array<out com.vynatix.holdfast.tree/TreeMiddleware>...) // com.vynatix.holdfast.tree/Root.middlewares|middlewares(kotlin.Array<out|com.vynatix.holdfast.tree.TreeMiddleware>...){}[0]
+    final fun nodeOf(com.vynatix.holdfast/Store<*>): com.vynatix.holdfast.tree/LeafNode? // com.vynatix.holdfast.tree/Root.nodeOf|nodeOf(com.vynatix.holdfast.Store<*>){}[0]
+    final fun removeMiddleware(com.vynatix.holdfast.tree/TreeMiddleware): kotlin/Boolean // com.vynatix.holdfast.tree/Root.removeMiddleware|removeMiddleware(com.vynatix.holdfast.tree.TreeMiddleware){}[0]
+    final fun reset(com.vynatix.holdfast.tree/StoreNode = ...): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast.tree/TreeResetReport> // com.vynatix.holdfast.tree/Root.reset|reset(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun restore(com.vynatix.holdfast.tree/TreeSnapshot, com.vynatix.holdfast/RestorePolicy = ..., kotlin/Boolean = ...): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast.tree/TreeRestoreReport> // com.vynatix.holdfast.tree/Root.restore|restore(com.vynatix.holdfast.tree.TreeSnapshot;com.vynatix.holdfast.RestorePolicy;kotlin.Boolean){}[0]
+    final fun snapshot(com.vynatix.holdfast.tree/StoreNode = ..., com.vynatix.holdfast/SnapshotScope = ...): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/Root.snapshot|snapshot(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.SnapshotScope){}[0]
+    final fun verifyPersistedNames(com.vynatix.holdfast.tree/StoreNode = ...): kotlin.collections/List<com.vynatix.holdfast.tree/NamingIssue> // com.vynatix.holdfast.tree/Root.verifyPersistedNames|verifyPersistedNames(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final inline fun <#A1: reified kotlin/Any, #B1: reified com.vynatix.holdfast/Store<#B1>> keyed(com.vynatix.holdfast.tree/Branch? = ..., com.vynatix.holdfast/StateCodec<#A1>? = ...): com.vynatix.holdfast.tree/KeyedDeclaration<#A1, #B1> // com.vynatix.holdfast.tree/Root.keyed|keyed(com.vynatix.holdfast.tree.Branch?;com.vynatix.holdfast.StateCodec<0:0>?){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    open fun toString(): kotlin/String // com.vynatix.holdfast.tree/Root.toString|toString(){}[0]
+}
+
+abstract class com.vynatix.holdfast.tree/TreeMiddleware { // com.vynatix.holdfast.tree/TreeMiddleware|null[0]
+    constructor <init>() // com.vynatix.holdfast.tree/TreeMiddleware.<init>|<init>(){}[0]
+
+    final fun invokeOnTransactionCompleted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionCompleted|invokeOnTransactionCompleted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    final fun invokeOnTransactionError(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>, kotlin/Throwable) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionError|invokeOnTransactionError(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>;kotlin.Throwable){}[0]
+    final fun invokeOnTransactionStarted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.invokeOnTransactionStarted|invokeOnTransactionStarted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    open fun onTransactionCompleted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionCompleted|onTransactionCompleted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+    open fun onTransactionError(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>, kotlin/Throwable) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionError|onTransactionError(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>;kotlin.Throwable){}[0]
+    open fun onTransactionStarted(com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/Middleware.MiddlewareContext<*>) // com.vynatix.holdfast.tree/TreeMiddleware.onTransactionStarted|onTransactionStarted(com.vynatix.holdfast.tree.StoreNode;com.vynatix.holdfast.Middleware.MiddlewareContext<*>){}[0]
+}
+
 abstract class com.vynatix.holdfast/SnapshotScope { // com.vynatix.holdfast/SnapshotScope|null[0]
     final fun toString(): kotlin/String // com.vynatix.holdfast/SnapshotScope.toString|toString(){}[0]
 
@@ -335,6 +426,32 @@ final class <#A: com.vynatix.holdfast/StoreAttachment> com.vynatix.holdfast/Stor
         final fun <get-name>(): kotlin/String // com.vynatix.holdfast/StoreAttachmentKey.name.<get-name>|<get-name>(){}[0]
 
     final fun toString(): kotlin/String // com.vynatix.holdfast/StoreAttachmentKey.toString|toString(){}[0]
+}
+
+final class <#A: kotlin/Any, #B: com.vynatix.holdfast/Store<#B>> com.vynatix.holdfast.tree/KeyedBranch : com.vynatix.holdfast.tree/StoreNode { // com.vynatix.holdfast.tree/KeyedBranch|null[0]
+    final val keyClass // com.vynatix.holdfast.tree/KeyedBranch.keyClass|{}keyClass[0]
+        final fun <get-keyClass>(): kotlin.reflect/KClass<#A> // com.vynatix.holdfast.tree/KeyedBranch.keyClass.<get-keyClass>|<get-keyClass>(){}[0]
+    final val keyCodec // com.vynatix.holdfast.tree/KeyedBranch.keyCodec|{}keyCodec[0]
+        final fun <get-keyCodec>(): com.vynatix.holdfast/StateCodec<#A>? // com.vynatix.holdfast.tree/KeyedBranch.keyCodec.<get-keyCodec>|<get-keyCodec>(){}[0]
+    final val name // com.vynatix.holdfast.tree/KeyedBranch.name|{}name[0]
+        final fun <get-name>(): kotlin/String // com.vynatix.holdfast.tree/KeyedBranch.name.<get-name>|<get-name>(){}[0]
+    final val nameOrigin // com.vynatix.holdfast.tree/KeyedBranch.nameOrigin|{}nameOrigin[0]
+        final fun <get-nameOrigin>(): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/KeyedBranch.nameOrigin.<get-nameOrigin>|<get-nameOrigin>(){}[0]
+    final val parent // com.vynatix.holdfast.tree/KeyedBranch.parent|{}parent[0]
+        final fun <get-parent>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/KeyedBranch.parent.<get-parent>|<get-parent>(){}[0]
+    final val root // com.vynatix.holdfast.tree/KeyedBranch.root|{}root[0]
+        final fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.tree/KeyedBranch.root.<get-root>|<get-root>(){}[0]
+    final val storeClass // com.vynatix.holdfast.tree/KeyedBranch.storeClass|{}storeClass[0]
+        final fun <get-storeClass>(): kotlin.reflect/KClass<#B> // com.vynatix.holdfast.tree/KeyedBranch.storeClass.<get-storeClass>|<get-storeClass>(){}[0]
+
+    final fun at(#A): com.vynatix.holdfast/StoreMembership<#B> // com.vynatix.holdfast.tree/KeyedBranch.at|at(1:0){}[0]
+    final fun create(#A, kotlin/Function1<#A, #B>): #B // com.vynatix.holdfast.tree/KeyedBranch.create|create(1:0;kotlin.Function1<1:0,1:1>){}[0]
+    final fun getOrCreate(#A, kotlin/Function1<#A, #B>): #B // com.vynatix.holdfast.tree/KeyedBranch.getOrCreate|getOrCreate(1:0;kotlin.Function1<1:0,1:1>){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/KeyedBranch.toString|toString(){}[0]
+}
+
+final class <#A: kotlin/Any, #B: com.vynatix.holdfast/Store<#B>> com.vynatix.holdfast.tree/KeyedDeclaration : kotlin.properties/PropertyDelegateProvider<com.vynatix.holdfast.tree/Root, kotlin.properties/ReadOnlyProperty<com.vynatix.holdfast.tree/Root, com.vynatix.holdfast.tree/KeyedBranch<#A, #B>>> { // com.vynatix.holdfast.tree/KeyedDeclaration|null[0]
+    final fun provideDelegate(com.vynatix.holdfast.tree/Root, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<com.vynatix.holdfast.tree/Root, com.vynatix.holdfast.tree/KeyedBranch<#A, #B>> // com.vynatix.holdfast.tree/KeyedDeclaration.provideDelegate|provideDelegate(com.vynatix.holdfast.tree.Root;kotlin.reflect.KProperty<*>){}[0]
 }
 
 final class <#A: kotlin/Any, #B: kotlin/Any> com.vynatix.holdfast/KeyedStateProvider { // com.vynatix.holdfast/KeyedStateProvider|null[0]
@@ -475,6 +592,115 @@ final class com.vynatix.holdfast.middleware/TransactionSample { // com.vynatix.h
     final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.middleware/TransactionSample.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // com.vynatix.holdfast.middleware/TransactionSample.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // com.vynatix.holdfast.middleware/TransactionSample.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/Branch : com.vynatix.holdfast.tree/StoreNode { // com.vynatix.holdfast.tree/Branch|null[0]
+    final val name // com.vynatix.holdfast.tree/Branch.name|{}name[0]
+        final fun <get-name>(): kotlin/String // com.vynatix.holdfast.tree/Branch.name.<get-name>|<get-name>(){}[0]
+    final val nameOrigin // com.vynatix.holdfast.tree/Branch.nameOrigin|{}nameOrigin[0]
+        final fun <get-nameOrigin>(): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/Branch.nameOrigin.<get-nameOrigin>|<get-nameOrigin>(){}[0]
+    final val parent // com.vynatix.holdfast.tree/Branch.parent|{}parent[0]
+        final fun <get-parent>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/Branch.parent.<get-parent>|<get-parent>(){}[0]
+    final val root // com.vynatix.holdfast.tree/Branch.root|{}root[0]
+        final fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.tree/Branch.root.<get-root>|<get-root>(){}[0]
+    final val stores // com.vynatix.holdfast.tree/Branch.stores|{}stores[0]
+        final fun <get-stores>(): kotlin.collections/List<com.vynatix.holdfast/Store<*>> // com.vynatix.holdfast.tree/Branch.stores.<get-stores>|<get-stores>(){}[0]
+
+    final fun leafName(com.vynatix.holdfast/Store<*>): kotlin/String // com.vynatix.holdfast.tree/Branch.leafName|leafName(com.vynatix.holdfast.Store<*>){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/Branch.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/BranchDeclaration : kotlin.properties/PropertyDelegateProvider<com.vynatix.holdfast.tree/Root, kotlin.properties/ReadOnlyProperty<com.vynatix.holdfast.tree/Root, com.vynatix.holdfast.tree/Branch>> { // com.vynatix.holdfast.tree/BranchDeclaration|null[0]
+    final fun named(com.vynatix.holdfast/Store<*>, kotlin/String): com.vynatix.holdfast.tree/BranchDeclaration // com.vynatix.holdfast.tree/BranchDeclaration.named|named(com.vynatix.holdfast.Store<*>;kotlin.String){}[0]
+    final fun named(kotlin/String): com.vynatix.holdfast.tree/BranchDeclaration // com.vynatix.holdfast.tree/BranchDeclaration.named|named(kotlin.String){}[0]
+    final fun provideDelegate(com.vynatix.holdfast.tree/Root, kotlin.reflect/KProperty<*>): kotlin.properties/ReadOnlyProperty<com.vynatix.holdfast.tree/Root, com.vynatix.holdfast.tree/Branch> // com.vynatix.holdfast.tree/BranchDeclaration.provideDelegate|provideDelegate(com.vynatix.holdfast.tree.Root;kotlin.reflect.KProperty<*>){}[0]
+}
+
+final class com.vynatix.holdfast.tree/LeafNode : com.vynatix.holdfast.tree/StoreNode { // com.vynatix.holdfast.tree/LeafNode|null[0]
+    final val key // com.vynatix.holdfast.tree/LeafNode.key|{}key[0]
+        final fun <get-key>(): kotlin/Any? // com.vynatix.holdfast.tree/LeafNode.key.<get-key>|<get-key>(){}[0]
+    final val name // com.vynatix.holdfast.tree/LeafNode.name|{}name[0]
+        final fun <get-name>(): kotlin/String // com.vynatix.holdfast.tree/LeafNode.name.<get-name>|<get-name>(){}[0]
+    final val nameOrigin // com.vynatix.holdfast.tree/LeafNode.nameOrigin|{}nameOrigin[0]
+        final fun <get-nameOrigin>(): com.vynatix.holdfast.tree/NameOrigin // com.vynatix.holdfast.tree/LeafNode.nameOrigin.<get-nameOrigin>|<get-nameOrigin>(){}[0]
+    final val parent // com.vynatix.holdfast.tree/LeafNode.parent|{}parent[0]
+        final fun <get-parent>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/LeafNode.parent.<get-parent>|<get-parent>(){}[0]
+    final val root // com.vynatix.holdfast.tree/LeafNode.root|{}root[0]
+        final fun <get-root>(): com.vynatix.holdfast.tree/Root // com.vynatix.holdfast.tree/LeafNode.root.<get-root>|<get-root>(){}[0]
+    final val store // com.vynatix.holdfast.tree/LeafNode.store|{}store[0]
+        final fun <get-store>(): com.vynatix.holdfast/Store<*>? // com.vynatix.holdfast.tree/LeafNode.store.<get-store>|<get-store>(){}[0]
+
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/LeafNode.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/NamingIssue { // com.vynatix.holdfast.tree/NamingIssue|null[0]
+    final val kind // com.vynatix.holdfast.tree/NamingIssue.kind|{}kind[0]
+        final fun <get-kind>(): com.vynatix.holdfast.tree/NamingIssue.Kind // com.vynatix.holdfast.tree/NamingIssue.kind.<get-kind>|<get-kind>(){}[0]
+    final val message // com.vynatix.holdfast.tree/NamingIssue.message|{}message[0]
+        final fun <get-message>(): kotlin/String // com.vynatix.holdfast.tree/NamingIssue.message.<get-message>|<get-message>(){}[0]
+    final val node // com.vynatix.holdfast.tree/NamingIssue.node|{}node[0]
+        final fun <get-node>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/NamingIssue.node.<get-node>|<get-node>(){}[0]
+
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/NamingIssue.toString|toString(){}[0]
+
+    final enum class Kind : kotlin/Enum<com.vynatix.holdfast.tree/NamingIssue.Kind> { // com.vynatix.holdfast.tree/NamingIssue.Kind|null[0]
+        enum entry ClassDerivedNameOnPersistedStore // com.vynatix.holdfast.tree/NamingIssue.Kind.ClassDerivedNameOnPersistedStore|null[0]
+        enum entry KeyedBranchNotEncodable // com.vynatix.holdfast.tree/NamingIssue.Kind.KeyedBranchNotEncodable|null[0]
+
+        final val entries // com.vynatix.holdfast.tree/NamingIssue.Kind.entries|#static{}entries[0]
+            final fun <get-entries>(): kotlin.enums/EnumEntries<com.vynatix.holdfast.tree/NamingIssue.Kind> // com.vynatix.holdfast.tree/NamingIssue.Kind.entries.<get-entries>|<get-entries>#static(){}[0]
+
+        final fun valueOf(kotlin/String): com.vynatix.holdfast.tree/NamingIssue.Kind // com.vynatix.holdfast.tree/NamingIssue.Kind.valueOf|valueOf#static(kotlin.String){}[0]
+        final fun values(): kotlin/Array<com.vynatix.holdfast.tree/NamingIssue.Kind> // com.vynatix.holdfast.tree/NamingIssue.Kind.values|values#static(){}[0]
+    }
+}
+
+final class com.vynatix.holdfast.tree/TreeResetReport { // com.vynatix.holdfast.tree/TreeResetReport|null[0]
+    final val reset // com.vynatix.holdfast.tree/TreeResetReport.reset|{}reset[0]
+        final fun <get-reset>(): kotlin.collections/List<com.vynatix.holdfast.tree/StoreNode> // com.vynatix.holdfast.tree/TreeResetReport.reset.<get-reset>|<get-reset>(){}[0]
+    final val skipped // com.vynatix.holdfast.tree/TreeResetReport.skipped|{}skipped[0]
+        final fun <get-skipped>(): kotlin.collections/List<com.vynatix.holdfast.tree/StoreNode> // com.vynatix.holdfast.tree/TreeResetReport.skipped.<get-skipped>|<get-skipped>(){}[0]
+
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/TreeResetReport.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/TreeRestoreReport { // com.vynatix.holdfast.tree/TreeRestoreReport|null[0]
+    final val issues // com.vynatix.holdfast.tree/TreeRestoreReport.issues|{}issues[0]
+        final fun <get-issues>(): kotlin.collections/List<com.vynatix.holdfast/RestoreIssue> // com.vynatix.holdfast.tree/TreeRestoreReport.issues.<get-issues>|<get-issues>(){}[0]
+    final val perNode // com.vynatix.holdfast.tree/TreeRestoreReport.perNode|{}perNode[0]
+        final fun <get-perNode>(): kotlin.collections/Map<com.vynatix.holdfast.tree/StoreNode, com.vynatix.holdfast/RestoreReport> // com.vynatix.holdfast.tree/TreeRestoreReport.perNode.<get-perNode>|<get-perNode>(){}[0]
+    final val rebound // com.vynatix.holdfast.tree/TreeRestoreReport.rebound|{}rebound[0]
+        final fun <get-rebound>(): kotlin.collections/List<com.vynatix.holdfast.tree/StoreNode> // com.vynatix.holdfast.tree/TreeRestoreReport.rebound.<get-rebound>|<get-rebound>(){}[0]
+    final val skipped // com.vynatix.holdfast.tree/TreeRestoreReport.skipped|{}skipped[0]
+        final fun <get-skipped>(): kotlin.collections/List<com.vynatix.holdfast.tree/StoreNode> // com.vynatix.holdfast.tree/TreeRestoreReport.skipped.<get-skipped>|<get-skipped>(){}[0]
+    final val unresolvedPaths // com.vynatix.holdfast.tree/TreeRestoreReport.unresolvedPaths|{}unresolvedPaths[0]
+        final fun <get-unresolvedPaths>(): kotlin.collections/List<kotlin.collections/List<kotlin/String>> // com.vynatix.holdfast.tree/TreeRestoreReport.unresolvedPaths.<get-unresolvedPaths>|<get-unresolvedPaths>(){}[0]
+
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/TreeRestoreReport.toString|toString(){}[0]
+}
+
+final class com.vynatix.holdfast.tree/TreeSnapshot { // com.vynatix.holdfast.tree/TreeSnapshot|null[0]
+    final val children // com.vynatix.holdfast.tree/TreeSnapshot.children|{}children[0]
+        final fun <get-children>(): kotlin.collections/List<com.vynatix.holdfast.tree/TreeSnapshot> // com.vynatix.holdfast.tree/TreeSnapshot.children.<get-children>|<get-children>(){}[0]
+    final val isLeaf // com.vynatix.holdfast.tree/TreeSnapshot.isLeaf|{}isLeaf[0]
+        final fun <get-isLeaf>(): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.isLeaf.<get-isLeaf>|<get-isLeaf>(){}[0]
+    final val node // com.vynatix.holdfast.tree/TreeSnapshot.node|{}node[0]
+        final fun <get-node>(): com.vynatix.holdfast.tree/StoreNode // com.vynatix.holdfast.tree/TreeSnapshot.node.<get-node>|<get-node>(){}[0]
+    final val scope // com.vynatix.holdfast.tree/TreeSnapshot.scope|{}scope[0]
+        final fun <get-scope>(): com.vynatix.holdfast/SnapshotScope // com.vynatix.holdfast.tree/TreeSnapshot.scope.<get-scope>|<get-scope>(){}[0]
+    final val unresolvedPaths // com.vynatix.holdfast.tree/TreeSnapshot.unresolvedPaths|{}unresolvedPaths[0]
+        final fun <get-unresolvedPaths>(): kotlin.collections/List<kotlin.collections/List<kotlin/String>> // com.vynatix.holdfast.tree/TreeSnapshot.unresolvedPaths.<get-unresolvedPaths>|<get-unresolvedPaths>(){}[0]
+
+    final fun <#A1: kotlin/Any, #B1: com.vynatix.holdfast/Store<#B1>> pendingKeys(com.vynatix.holdfast.tree/KeyedBranch<#A1, #B1>): kotlin.collections/Set<#A1> // com.vynatix.holdfast.tree/TreeSnapshot.pendingKeys|pendingKeys(com.vynatix.holdfast.tree.KeyedBranch<0:0,0:1>){0§<kotlin.Any>;1§<com.vynatix.holdfast.Store<0:1>>}[0]
+    final fun <#A1: kotlin/Any> entry(com.vynatix.holdfast/State<#A1>): com.vynatix.holdfast/SnapshotEntry<#A1> // com.vynatix.holdfast.tree/TreeSnapshot.entry|entry(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun <#A1: kotlin/Any> get(com.vynatix.holdfast/State<#A1>): #A1? // com.vynatix.holdfast.tree/TreeSnapshot.get|get(com.vynatix.holdfast.State<0:0>){0§<kotlin.Any>}[0]
+    final fun encode(kotlin/Boolean = ...): kotlin/String // com.vynatix.holdfast.tree/TreeSnapshot.encode|encode(kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.equals|equals(kotlin.Any?){}[0]
+    final fun equalsEncodable(com.vynatix.holdfast.tree/TreeSnapshot, kotlin/Boolean = ...): kotlin/Boolean // com.vynatix.holdfast.tree/TreeSnapshot.equalsEncodable|equalsEncodable(com.vynatix.holdfast.tree.TreeSnapshot;kotlin.Boolean){}[0]
+    final fun get(com.vynatix.holdfast.tree/StoreNode): com.vynatix.holdfast.tree/TreeSnapshot? // com.vynatix.holdfast.tree/TreeSnapshot.get|get(com.vynatix.holdfast.tree.StoreNode){}[0]
+    final fun hashCode(): kotlin/Int // com.vynatix.holdfast.tree/TreeSnapshot.hashCode|hashCode(){}[0]
+    final fun render(): kotlin/String // com.vynatix.holdfast.tree/TreeSnapshot.render|render(){}[0]
+    final fun toString(): kotlin/String // com.vynatix.holdfast.tree/TreeSnapshot.toString|toString(){}[0]
 }
 
 final class com.vynatix.holdfast/EncodedSnapshotView { // com.vynatix.holdfast/EncodedSnapshotView|null[0]
@@ -837,6 +1063,12 @@ final object com.vynatix.holdfast/SettleScopes { // com.vynatix.holdfast/SettleS
     final fun open(): com.vynatix.holdfast/SettleScope // com.vynatix.holdfast/SettleScopes.open|open(){}[0]
 }
 
+final val com.vynatix.holdfast.tree/internalCaptureCount // com.vynatix.holdfast.tree/internalCaptureCount|@com.vynatix.holdfast.tree.Root{}internalCaptureCount[0]
+    final fun (com.vynatix.holdfast.tree/Root).<get-internalCaptureCount>(): kotlin/Long // com.vynatix.holdfast.tree/internalCaptureCount.<get-internalCaptureCount>|<get-internalCaptureCount>@com.vynatix.holdfast.tree.Root(){}[0]
+final val com.vynatix.holdfast.tree/internalCutRetryCount // com.vynatix.holdfast.tree/internalCutRetryCount|@com.vynatix.holdfast.tree.Root{}internalCutRetryCount[0]
+    final fun (com.vynatix.holdfast.tree/Root).<get-internalCutRetryCount>(): kotlin/Long // com.vynatix.holdfast.tree/internalCutRetryCount.<get-internalCutRetryCount>|<get-internalCutRetryCount>@com.vynatix.holdfast.tree.Root(){}[0]
+final val com.vynatix.holdfast.tree/internalSettleCount // com.vynatix.holdfast.tree/internalSettleCount|@com.vynatix.holdfast.tree.Root{}internalSettleCount[0]
+    final fun (com.vynatix.holdfast.tree/Root).<get-internalSettleCount>(): kotlin/Long // com.vynatix.holdfast.tree/internalSettleCount.<get-internalSettleCount>|<get-internalSettleCount>@com.vynatix.holdfast.tree.Root(){}[0]
 final val com.vynatix.holdfast/internalQualifiedName // com.vynatix.holdfast/internalQualifiedName|@com.vynatix.holdfast.State<*>{}internalQualifiedName[0]
     final fun (com.vynatix.holdfast/State<*>).<get-internalQualifiedName>(): kotlin/String? // com.vynatix.holdfast/internalQualifiedName.<get-internalQualifiedName>|<get-internalQualifiedName>@com.vynatix.holdfast.State<*>(){}[0]
 final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCount|@com.vynatix.holdfast.State<0:0>{0§<kotlin.Any>}observerCount[0]
@@ -844,6 +1076,9 @@ final val com.vynatix.holdfast/observerCount // com.vynatix.holdfast/observerCou
 final val com.vynatix.holdfast/tags // com.vynatix.holdfast/tags|@com.vynatix.holdfast.State<*>{}tags[0]
     final fun (com.vynatix.holdfast/State<*>).<get-tags>(): kotlin.collections/Set<com.vynatix.holdfast/StateTag> // com.vynatix.holdfast/tags.<get-tags>|<get-tags>@com.vynatix.holdfast.State<*>(){}[0]
 
+final fun (com.vynatix.holdfast.tree/Root).com.vynatix.holdfast.tree/internalAddMembershipListener(com.vynatix.holdfast.tree/LeafMembershipListener): com.vynatix.holdfast/Disposable // com.vynatix.holdfast.tree/internalAddMembershipListener|internalAddMembershipListener@com.vynatix.holdfast.tree.Root(com.vynatix.holdfast.tree.LeafMembershipListener){}[0]
+final fun (com.vynatix.holdfast.tree/Root).com.vynatix.holdfast.tree/internalHost(): com.vynatix.holdfast/Store<*> // com.vynatix.holdfast.tree/internalHost|internalHost@com.vynatix.holdfast.tree.Root(){}[0]
+final fun (com.vynatix.holdfast.tree/Root).com.vynatix.holdfast.tree/internalSettleNow(): com.vynatix.holdfast.tree/TreeSnapshot // com.vynatix.holdfast.tree/internalSettleNow|internalSettleNow@com.vynatix.holdfast.tree.Root(){}[0]
 final fun (com.vynatix.holdfast/State<*>).com.vynatix.holdfast/displayValue(kotlin/Any?): kotlin/Any? // com.vynatix.holdfast/displayValue|displayValue@com.vynatix.holdfast.State<*>(kotlin.Any?){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachments(): kotlin.collections/List<com.vynatix.holdfast/StoreAttachment> // com.vynatix.holdfast/internalAttachments|internalAttachments@com.vynatix.holdfast.Store<*>(){}[0]
 final fun (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalDrainPostCommitTasksWhenSettled() // com.vynatix.holdfast/internalDrainPostCommitTasksWhenSettled|internalDrainPostCommitTasksWhenSettled@com.vynatix.holdfast.Store<*>(){}[0]
@@ -861,7 +1096,9 @@ final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derived(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): kotlin/Pair<com.vynatix.holdfast/State<#B>, com.vynatix.holdfast/Disposable> // com.vynatix.holdfast/derived|derived@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any> (#A).com.vynatix.holdfast/derivedState(kotlin/Array<out com.vynatix.holdfast/State<*>>..., kotlin/Function1<#A, #B>): com.vynatix.holdfast/DerivedState<#B> // com.vynatix.holdfast/derivedState|derivedState@0:0(kotlin.Array<out|com.vynatix.holdfast.State<*>>...;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>, #B: kotlin/Any?> (#A).com.vynatix.holdfast/internalTopLevelAction(kotlin/String, kotlin/Function1<#A, #B>): com.vynatix.holdfast/TransactionResult<#B> // com.vynatix.holdfast/internalTopLevelAction|internalTopLevelAction@0:0(kotlin.String;kotlin.Function1<0:0,0:1>){0§<com.vynatix.holdfast.Store<0:0>>;1§<kotlin.Any?>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/internalRemoveMiddleware(com.vynatix.holdfast/Middleware<#A>): kotlin/Boolean // com.vynatix.holdfast/internalRemoveMiddleware|internalRemoveMiddleware@0:0(com.vynatix.holdfast.Middleware<0:0>){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/internalRestoreTagged(com.vynatix.holdfast/StoreSnapshot, com.vynatix.holdfast/StateTag, com.vynatix.holdfast/RestorePolicy, kotlin/Function1<com.vynatix.holdfast/State<*>, kotlin/Boolean>? = ...): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/internalRestoreTagged|internalRestoreTagged@0:0(com.vynatix.holdfast.StoreSnapshot;com.vynatix.holdfast.StateTag;com.vynatix.holdfast.RestorePolicy;kotlin.Function1<com.vynatix.holdfast.State<*>,kotlin.Boolean>?){0§<com.vynatix.holdfast.Store<0:0>>}[0]
+final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/internalSetOuterMiddleware(kotlin.collections/List<com.vynatix.holdfast/Middleware<#A>>) // com.vynatix.holdfast/internalSetOuterMiddleware|internalSetOuterMiddleware@0:0(kotlin.collections.List<com.vynatix.holdfast.Middleware<0:0>>){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/reset(): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/reset|reset@0:0(){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot): com.vynatix.holdfast/TransactionResult<kotlin/Unit> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/restore(com.vynatix.holdfast/StoreSnapshot, com.vynatix.holdfast/RestorePolicy, kotlin/Boolean = ...): com.vynatix.holdfast/TransactionResult<com.vynatix.holdfast/RestoreReport> // com.vynatix.holdfast/restore|restore@0:0(com.vynatix.holdfast.StoreSnapshot;com.vynatix.holdfast.RestorePolicy;kotlin.Boolean){0§<com.vynatix.holdfast.Store<0:0>>}[0]
@@ -869,6 +1106,7 @@ final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapsho
 final fun <#A: com.vynatix.holdfast/Store<#A>> (#A).com.vynatix.holdfast/snapshot(com.vynatix.holdfast/SnapshotScope): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/snapshot|snapshot@0:0(com.vynatix.holdfast.SnapshotScope){0§<com.vynatix.holdfast.Store<0:0>>}[0]
 final fun <#A: com.vynatix.holdfast/StoreAttachment> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachIfAbsent(com.vynatix.holdfast/StoreAttachmentKey<#A>, kotlin/Function0<#A>): #A // com.vynatix.holdfast/internalAttachIfAbsent|internalAttachIfAbsent@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StoreAttachmentKey<0:0>;kotlin.Function0<0:0>){0§<com.vynatix.holdfast.StoreAttachment>}[0]
 final fun <#A: com.vynatix.holdfast/StoreAttachment> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalAttachment(com.vynatix.holdfast/StoreAttachmentKey<#A>): #A? // com.vynatix.holdfast/internalAttachment|internalAttachment@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StoreAttachmentKey<0:0>){0§<com.vynatix.holdfast.StoreAttachment>}[0]
+final fun <#A: com.vynatix.holdfast/StoreAttachment> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/internalDetach(com.vynatix.holdfast/StoreAttachmentKey<#A>): #A? // com.vynatix.holdfast/internalDetach|internalDetach@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.StoreAttachmentKey<0:0>){0§<com.vynatix.holdfast.StoreAttachment>}[0]
 final fun <#A: kotlin/Any, #B: kotlin/Any> (com.vynatix.holdfast/Store<*>).com.vynatix.holdfast/keyedState(com.vynatix.holdfast/Transformer<#B>? = ..., kotlin/Boolean = ..., com.vynatix.holdfast/StateCodec<#B>? = ..., com.vynatix.holdfast/StateCodec<#A>? = ..., kotlin.collections/Set<com.vynatix.holdfast/StateTag> = ..., kotlin/Function1<#A, #B>): com.vynatix.holdfast/KeyedStateProvider<#A, #B> // com.vynatix.holdfast/keyedState|keyedState@com.vynatix.holdfast.Store<*>(com.vynatix.holdfast.Transformer<0:1>?;kotlin.Boolean;com.vynatix.holdfast.StateCodec<0:1>?;com.vynatix.holdfast.StateCodec<0:0>?;kotlin.collections.Set<com.vynatix.holdfast.StateTag>;kotlin.Function1<0:0,0:1>){0§<kotlin.Any>;1§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/effect(kotlin/Function1<#A, kotlin/Unit>): com.vynatix.holdfast/Disposable // com.vynatix.holdfast/effect|effect@com.vynatix.holdfast.State<0:0>(kotlin.Function1<0:0,kotlin.Unit>){0§<kotlin.Any>}[0]
 final fun <#A: kotlin/Any> (com.vynatix.holdfast/State<#A>).com.vynatix.holdfast/observableBacking(): com.vynatix.holdfast/MutableState<#A>? // com.vynatix.holdfast/observableBacking|observableBacking@com.vynatix.holdfast.State<0:0>(){0§<kotlin.Any>}[0]

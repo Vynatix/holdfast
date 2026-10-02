@@ -145,6 +145,16 @@ fun <A : StoreAttachment> Store<*>.internalAttachIfAbsent(
 fun Store<*>.internalAttachments(): List<StoreAttachment> = attachmentSlot.all()
 
 /**
+ * Detach and return the attachment under [key], or `null` when none is
+ * attached under it or the slot is closed (`dispose()` has run). A caller
+ * that must be the only owner of [key] (issue #21: a store leaving one tree)
+ * uses this to release its own attachment early, before the store itself is
+ * disposed.
+ */
+@StoreInternalApi
+fun <A : StoreAttachment> Store<*>.internalDetach(key: StoreAttachmentKey<A>): A? = attachmentSlot.detach(key)
+
+/**
  * One store's attachments, by key, in attach order.
  *
  * [attachIfAbsent] and [close] serialize on [lock], the slot's own lock. Its
@@ -229,6 +239,15 @@ internal class AttachmentSlot(
         lock.withLock {
             closed = true
             all().also { attached = emptyMap() }
+        }
+
+    /** See [internalDetach]. `null` on a closed slot or an absent [key]. */
+    fun <A : StoreAttachment> detach(key: StoreAttachmentKey<A>): A? =
+        lock.withLock {
+            if (closed) return@withLock null
+            val existing = get(key) ?: return@withLock null
+            attached = LinkedHashMap(attached).apply { remove(key) }
+            existing
         }
 
     /**

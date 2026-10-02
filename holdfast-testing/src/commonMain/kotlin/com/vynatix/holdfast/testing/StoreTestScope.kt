@@ -9,6 +9,7 @@ import com.vynatix.holdfast.testing.internal.HandleRegistry
 import com.vynatix.holdfast.testing.internal.OpenTransactionRegistry
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
+import com.vynatix.holdfast.testing.internal.TreeFixtures
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -57,13 +58,16 @@ class StoreTestScope internal constructor(
      * completes only after those children, so this second restore catches
      * them; for a store nobody rebound it is a no-op.
      */
-    private val registry =
+    internal val registry =
         HandleRegistry { handle ->
             testScope.coroutineContext.job.invokeOnCompletion {
                 PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
             }
         }
     private val barriers = BarrierRegistry()
+
+    /** The tracked trees (`trackTree`), unwound at teardown after the leaf handles. */
+    internal val treeFixtures = TreeFixtures()
     private val openTransactions = OpenTransactionRegistry()
     private val awaitings = AwaitingRegistry()
 
@@ -166,14 +170,23 @@ class StoreTestScope internal constructor(
      * removes every tracked handle's entries from the global
      * [PendingErrorRegistry], restores each tracked store's clock binding
      * (`Store.bindClock`) to what it was when the store was first tracked,
-     * and clears the handle registry. When
-     * [bodyAlreadyFailed] is `false`, also aggregates any unconsumed
-     * [TransactionResult.Error] values across all handles and throws an
-     * [AssertionError] listing them — forcing tests to actively assert on (or
-     * explicitly discard) every error they observe. When the body already
-     * threw, the original failure propagates and the unconsumed-error check is
-     * suppressed so the user sees the root-cause exception rather than a
-     * teardown-time message.
+     * unwinds each tracked tree (`trackTree`: its membership listener
+     * disposed, the tree reset as one frame with the tree recorder still
+     * installed — skipped when opted out or the root is disposed, and when a
+     * leaf is still held by an entry teardown cannot wait out after it
+     * re-probed the leaves for a bounded time, about a second of real time,
+     * so a transient holder is waited out but a `suspendAction` body parked
+     * in un-joined work is not — then that recorder removed), and clears
+     * the handle registry. When [bodyAlreadyFailed] is `false`, also
+     * aggregates any unconsumed [TransactionResult.Error] values across all
+     * handles, any tree whose reset failed, and any tree whose reset was
+     * skipped for a held leaf (named, with the opt-out
+     * `resetAtTeardown = false`: a silent skip would leak the body's values
+     * into the next test) into one [AssertionError], in that order — forcing
+     * tests to actively assert on (or explicitly discard) every error they
+     * observe and to join the work they start. When the body already threw,
+     * the original failure propagates and these checks are suppressed so the
+     * user sees the root-cause exception rather than a teardown-time message.
      *
      * Order is fixed: barriers cancel first so coroutines waiting in
      * `arrive()`/`await()` resume; then [AwaitingRegistry.cancelAll] closes
@@ -188,7 +201,9 @@ class StoreTestScope internal constructor(
      * is cleared; then each tracked store's clock binding is restored (after
      * the rollbacks, whose post-commit drain may still read `clock`), so a
      * clock bound after the store was tracked does not leak into the next
-     * test through a long-lived store. The same restore runs again when the
+     * test through a long-lived store; then the tracked trees are unwound,
+     * after every leaf recorder is gone (see
+     * [com.vynatix.holdfast.testing.internal.TreeFixtures]). The same restore runs again when the
      * test's job completes (see [registry]), which covers bindings made by
      * un-joined child coroutines that `runTest` runs after this method; work
      * in `backgroundScope` or on scopes outside the test is not waited for,
@@ -214,36 +229,57 @@ class StoreTestScope internal constructor(
             handle.clearPendingErrorsInternal()
             PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
         }
+        val trees = treeFixtures.tearDown()
         registry.clear()
 
-        if (!bodyAlreadyFailed && unconsumed.isNotEmpty()) {
-            val msg =
-                buildString {
-                    appendLine(
-                        "storeTest body finished with ${unconsumed.size} unconsumed " +
-                            "TransactionResult.Error value(s):",
-                    )
-                    unconsumed.forEachIndexed { index, (handle, err) ->
-                        val type = err.exception::class.simpleName ?: "Throwable"
-                        val message = err.exception.message.orEmpty()
-                        val handleTag = handleLabel(handle)
-                        val txnId = err.transaction.id
-                        appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
-                    }
-                    appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
-                    append("or use handle.consumeAllPendingErrors() to opt out.")
-                }
-            throw AssertionError(msg)
-        }
-    }
-
-    private fun handleLabel(handle: StoreHandle<*>): String {
-        val cls = handle.store::class.simpleName ?: "Store"
-        // Identity tag so two handles to the same store class are distinguishable.
-        return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
-    }
-
-    private companion object {
-        private const val HEX_RADIX = 16
+        if (bodyAlreadyFailed) return
+        // One report for all three, the unconsumed errors first: a test that
+        // leaves an error unconsumed, has a leaf veto the teardown reset and
+        // parks work in a leaf of another tree learns of each.
+        val sections = mutableListOf<String>()
+        if (unconsumed.isNotEmpty()) sections += unconsumedErrorsReport(unconsumed)
+        if (trees.resetFailures.isNotEmpty()) sections += treeResetReport(trees.resetFailures)
+        if (trees.skippedResets.isNotEmpty()) sections += treeResetSkippedReport(trees.skippedResets)
+        if (sections.isNotEmpty()) throw AssertionError(sections.joinToString("\n\n"))
     }
 }
+
+/** [StoreTestScope.tearDown]'s report of the [TransactionResult.Error]s no matcher consumed, one line each. */
+private fun unconsumedErrorsReport(unconsumed: List<Pair<StoreHandle<*>, TransactionResult.Error>>): String =
+    buildString {
+        appendLine(
+            "storeTest body finished with ${unconsumed.size} unconsumed " +
+                "TransactionResult.Error value(s):",
+        )
+        unconsumed.forEachIndexed { index, (handle, err) ->
+            val type = err.exception::class.simpleName ?: "Throwable"
+            val message = err.exception.message.orEmpty()
+            val handleTag = handleLabel(handle)
+            val txnId = err.transaction.id
+            appendLine(" - [#${index + 1}] handle=$handleTag $type \"$message\" (txn '$txnId')")
+        }
+        appendLine("Call .shouldBeError / .shouldBeSuccess / .shouldRollbackWith on each,")
+        append("or use handle.consumeAllPendingErrors() to opt out.")
+    }
+
+/** [StoreTestScope.tearDown]'s report of the tracked trees whose reset failed, one line each. */
+private fun treeResetReport(failures: List<String>): String =
+    "storeTest teardown could not reset ${failures.size} tracked tree(s):\n" +
+        failures.joinToString("\n") { " - $it" }
+
+/**
+ * [StoreTestScope.tearDown]'s report of the tracked trees whose reset it
+ * skipped for a leaf still held, one line each.
+ */
+private fun treeResetSkippedReport(skipped: List<String>): String =
+    "storeTest teardown skipped the reset of ${skipped.size} tracked tree(s) with a leaf still held " +
+        "(the next test would find this body's values):\n" +
+        skipped.joinToString("\n") { " - $it" }
+
+private fun handleLabel(handle: StoreHandle<*>): String {
+    val cls = handle.store::class.simpleName ?: "Store"
+    // Identity tag so two handles to the same store class are distinguishable.
+    return "$cls@${handle.hashCode().toString(HEX_RADIX)}"
+}
+
+private const val HEX_RADIX = 16

@@ -70,6 +70,12 @@ internal class CapturedContent(
     val tags: CaptureTags = CaptureTags.None,
     /** The keyed state families captured, by name: each one's live entries (KeyedSnapshot.kt). */
     val families: Map<String, CapturedFamily> = emptyMap(),
+    /**
+     * What the cut that took this capture read — identity tokens, counters
+     * and family names, never a state or store instance — so a later cut can
+     * reuse it unchanged; `null` when made by hand.
+     */
+    val stamp: CutStamp? = null,
 ) : SnapshotContent() {
     /** [Store.lockOrderKey] of the store captured, or `null` for a snapshot made by hand. */
     val originKey: Long? get() = origin?.key

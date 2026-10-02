@@ -2,8 +2,10 @@
 
 package com.vynatix.holdfast.testing.internal
 
+import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.KeyedState
+import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
@@ -11,10 +13,16 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
 import com.vynatix.holdfast.internalKeyedFamily
+import com.vynatix.holdfast.internalRemoveMiddleware
 import com.vynatix.holdfast.internalSettling
+import com.vynatix.holdfast.internalTransactionLockFree
 import com.vynatix.holdfast.observableBacking
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
+import com.vynatix.holdfast.tree.LeafMembershipListener
+import com.vynatix.holdfast.tree.LeafNode
+import com.vynatix.holdfast.tree.Root
+import com.vynatix.holdfast.tree.internalAddMembershipListener
 import kotlin.time.Clock
 
 /**
@@ -48,6 +56,7 @@ import kotlin.time.Clock
  *    but run brief critical sections under the store's reentrant
  *    `transactionLock` rather than across the entire open-period.
  */
+@Suppress("TooManyFunctions") // The module's one opt-in funnel: it grows with every core seam used.
 internal object PrivilegedHooks {
     /**
      * Read every state currently registered on [store] mapped to its committed
@@ -323,5 +332,74 @@ internal object PrivilegedHooks {
             }
             store.internalDrainPostCommitTasks()
         }
+    }
+
+    /**
+     * Remove one middleware from [store] by identity — the recorder at
+     * teardown — leaving every other middleware the test installed in place.
+     * `false` on a disposed store, without throwing.
+     */
+    fun <V : Store<V>> removeMiddleware(
+        store: V,
+        middleware: Middleware<V>,
+    ): Boolean = store.internalRemoveMiddleware(middleware)
+
+    /**
+     * Hear of every store that joins [root] from now on (the tree fixture's
+     * auto-tracking): [onAttached] runs once per joining store, under the
+     * attaching caller's locks, so it may only record and track — never open
+     * an action, frame, reset or restore.
+     */
+    @OptIn(ExperimentalStoreApi::class)
+    fun addMembershipListener(
+        root: Root,
+        onAttached: (LeafNode) -> Unit,
+    ): Disposable =
+        root.internalAddMembershipListener(
+            object : LeafMembershipListener() {
+                override fun onAttached(leaf: LeafNode) = onAttached(leaf)
+            },
+        )
+
+    /**
+     * Whether [store] is held by an entry teardown could not wait out: a
+     * suspending body (`suspendAction`/`suspendAtomic`, parked or running
+     * elsewhere — [Store.suspendingOwner]), a thread inside a blocking entry
+     * (the transaction lock is taken), or a holder of the store's serializer
+     * that has installed nothing yet (a suspending entry waiting out
+     * lock-only holders, a hydration decision). The tree fixture's teardown
+     * asks before its reset — one `atomic` frame over every leaf, which
+     * would spin on the test thread, the only one able to resume a parked
+     * body — and asks again, yielding between rounds, for a bounded time
+     * (`TEARDOWN_HELD_LEAF_BUDGET`) while the answer is `true`: a transient
+     * holder (an in-flight `suspendDerived` recompute on `Store.scope`) is
+     * waited out that way; a leaf still held when the budget ends skips the
+     * reset and fails the test, naming the leaf.
+     *
+     * Never waits: the lock and the serializer are probed with their
+     * non-blocking acquires and released at once, and, as every holder must
+     * after releasing (`Store.tryTopLevelAction`), the store's post-commit
+     * queue is drained — so a probe round is cheap enough to repeat. A
+     * disposed store is held by nothing. Best effort — a decision, not a
+     * lock: an entry may take the store right after this answers `false`.
+     */
+    fun isHeldByAnEntry(store: Store<*>): Boolean =
+        when {
+            store.isDisposed -> false
+            store.suspendingOwner != null -> true
+            // A thread inside a blocking entry; the probe took nothing.
+            !store.internalTransactionLockFree() -> true
+            else -> serializerTaken(store)
+        }
+
+    /** [isHeldByAnEntry]'s last probe, after the lock probe held the lock for an instant. */
+    private fun serializerTaken(store: Store<*>): Boolean {
+        val serializer = store.asyncSerializer
+        val taken = serializer != null && !serializer.tryBlockingAcquire()
+        if (!taken) serializer?.blockingRelease()
+        // The probes held the lock, and the serializer, for an instant each: a
+        // task handed to them meanwhile is theirs to run.
+        internalSettling { store.internalDrainPostCommitTasks() }
+        return taken
     }
 }
