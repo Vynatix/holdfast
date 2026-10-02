@@ -18,24 +18,21 @@ private class CkLeakingKey {
     override fun toString(): String = "LEAKED-KEY-TEXT"
 }
 
-private class CkOpaqueStore(
-    key: Any,
-    root: CkRoot,
-) : Store<CkOpaqueStore>(root.opaque.at(key)) {
+private class CkOpaqueStore : Store<CkOpaqueStore>() {
     val n by state(codec = IntCodec) { 0 }
 }
 
-private class CkRoot : Root("app") {
-    val opaque by keyed<Any, CkOpaqueStore>()
+private class CkApp : Store<CkApp>() {
+    val opaque by stores<Any, CkOpaqueStore> { CkOpaqueStore() }
 }
 
 /** A keyed branch without a key codec is never encoded — also when it is the captured node itself. */
 class CodecLessKeyedTopTest {
     @Test
     fun aCodecLessKeyedBranchAsTheCapturedNodeEncodesEmptyAndListedAndRoundTrips() {
-        val root = CkRoot()
-        root.opaque.create(CkLeakingKey()) { CkOpaqueStore(it, root) } action { n mutate 7 }
-        val captured = root.snapshot(root.opaque)
+        val root = CkApp()
+        root.opaque.create(CkLeakingKey()) action { n mutate 7 }
+        val captured = root.tree.snapshot(root.opaque)
         assertEquals(1, captured.children.size, "the capture itself holds the entry")
 
         val text = captured.encode()
@@ -46,22 +43,22 @@ class CodecLessKeyedTopTest {
         )
         assertFalse("LEAKED-KEY-TEXT" in text, "a key's toString() never reaches a persisted text")
 
-        val decoded = root.decode(text)
+        val decoded = root.tree.decode(text)
         assertSame(root.opaque, decoded.node)
         assertTrue(decoded.children.isEmpty())
-        assertEquals(emptyList<List<String>>(), decoded.unresolvedPaths, "a branch this root skips is not 'unresolved'")
+        assertEquals(emptyList<List<String>>(), decoded.unresolvedPaths, "a branch this receiver skips is not 'unresolved'")
         assertTrue(decoded.equalsEncodable(captured))
         assertTrue(captured.equalsEncodable(decoded))
-        val report = root.restore(decoded, RestorePolicy.Strict).getOrThrow()
+        val report = root.tree.restore(decoded, RestorePolicy.Strict).getOrThrow()
         assertTrue(report.perNode.isEmpty())
     }
 
     @Test
     fun equalsEncodableTreatsACodecLessKeyedCapturedNodeAsEmptyLikeEncodeDoes() {
-        val root = CkRoot()
-        val before = root.snapshot(root.opaque)
-        root.opaque.create(CkLeakingKey()) { CkOpaqueStore(it, root) }
-        val after = root.snapshot(root.opaque)
+        val root = CkApp()
+        val before = root.tree.snapshot(root.opaque)
+        root.opaque.create(CkLeakingKey())
+        val after = root.tree.snapshot(root.opaque)
         assertNotEquals(before, after, "value equality sees the new entry")
         assertTrue(before.equalsEncodable(after), "the encodable projection of a codec-less keyed node is empty")
         assertTrue(after.equalsEncodable(before))

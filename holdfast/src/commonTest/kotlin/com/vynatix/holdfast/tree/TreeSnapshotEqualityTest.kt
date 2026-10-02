@@ -21,16 +21,13 @@ private class EqStore : Store<EqStore>() {
     val codecLess by state { "c" }
 }
 
-private class EqRoot : Root("eq") {
-    val store = EqStore()
-    val leaf by branch(store)
-    val untypedKeys by keyed<Any, EqKeyedStore>()
+private class EqApp : Store<EqApp>() {
+    val eq = EqStore()
+    val leaf by stores { listOf(eq) }
+    val untypedKeys by stores<Any, EqKeyedStore> { EqKeyedStore() }
 }
 
-private class EqKeyedStore(
-    key: Any,
-    root: EqRoot,
-) : Store<EqKeyedStore>(root.untypedKeys.at(key)) {
+private class EqKeyedStore : Store<EqKeyedStore>() {
     val n by state(codec = IntCodec) { 0 }
 }
 
@@ -38,71 +35,74 @@ private class EqKeyedStore(
 class TreeSnapshotEqualityTest {
     @Test
     fun equalsIsFullValueEqualityIncludingSecretRemoteAndCodecLessStates() {
-        val root = EqRoot()
-        val before = root.snapshot()
-        assertEquals(before, root.snapshot())
-        assertEquals(before.hashCode(), root.snapshot().hashCode())
+        val root = EqApp()
+        val before = root.tree.snapshot()
+        assertEquals(before, root.tree.snapshot())
+        assertEquals(before.hashCode(), root.tree.snapshot().hashCode())
 
-        root.store action { secret mutate "changed" }
-        val secretChanged = root.snapshot()
+        root.eq action { secret mutate "changed" }
+        val secretChanged = root.tree.snapshot()
         assertNotEquals(before, secretChanged, "a Secret-only change is a change")
 
-        root.store action { remote mutate "changed" }
-        val remoteChanged = root.snapshot()
+        root.eq action { remote mutate "changed" }
+        val remoteChanged = root.tree.snapshot()
         assertNotEquals(secretChanged, remoteChanged)
 
-        root.store action { codecLess mutate "changed" }
-        assertNotEquals(remoteChanged, root.snapshot())
+        root.eq action { codecLess mutate "changed" }
+        assertNotEquals(remoteChanged, root.tree.snapshot())
     }
 
     @Test
     fun equalsEncodableIgnoresSecretRemoteAndCodecLessValues() {
-        val root = EqRoot()
-        val before = root.snapshot()
-        root.store action {
+        val root = EqApp()
+        val before = root.tree.snapshot()
+        root.eq action {
             secret mutate "changed"
             codecLess mutate "changed"
         }
-        assertTrue(before.equalsEncodable(root.snapshot()))
+        assertTrue(before.equalsEncodable(root.tree.snapshot()))
 
-        root.store action { remote mutate "changed" }
-        assertTrue(before.equalsEncodable(root.snapshot()), "Remote is left out unless includeRemote")
-        assertFalse(before.equalsEncodable(root.snapshot(), includeRemote = true))
+        root.eq action { remote mutate "changed" }
+        assertTrue(before.equalsEncodable(root.tree.snapshot()), "Remote is left out unless includeRemote")
+        assertFalse(before.equalsEncodable(root.tree.snapshot(), includeRemote = true))
 
-        root.store action { count mutate 1 }
-        assertFalse(before.equalsEncodable(root.snapshot()))
+        root.eq action { count mutate 1 }
+        assertFalse(before.equalsEncodable(root.tree.snapshot()))
     }
 
     @Test
     fun equalsEncodableIgnoresAKeyedBranchWithoutAKeyCodec() {
-        val root = EqRoot()
-        val before = root.snapshot()
-        root.untypedKeys.create(42) { EqKeyedStore(it, root) }
-        val after = root.snapshot()
+        val root = EqApp()
+        val before = root.tree.snapshot()
+        root.untypedKeys.create(42)
+        val after = root.tree.snapshot()
         assertNotEquals(before, after, "value equality sees the new keyed leaf")
         assertTrue(before.equalsEncodable(after), "the un-encodable keyed branch is not part of the projection")
     }
 
     @Test
     fun equalityDistinguishesNamesStructureAndScope() {
-        val root = EqRoot()
-        val whole = root.snapshot()
-        val subtree = root.snapshot(root.leaf)
+        val root = EqApp()
+        val whole = root.tree.snapshot()
+        val subtree = root.tree.snapshot(root.leaf)
         assertNotEquals(whole, subtree)
         assertEquals(subtree, whole[root.leaf])
-        assertNotEquals(whole, root.snapshot(scope = SnapshotScope.Raw), "scope is part of equality")
+        assertNotEquals(whole, root.tree.snapshot(scope = SnapshotScope.Raw), "scope is part of equality")
 
-        class OtherName : Root("other") {
-            val leaf by branch(EqStore())
+        class OtherName : Store<OtherName>() {
+            val leaf by stores { listOf(EqStore()) }
+            val untypedKeys by stores<Any, EqKeyedStore> { EqKeyedStore() }
         }
-        assertNotEquals(whole, OtherName().snapshot(), "the root name differs")
+        val renamed = OtherName().tree.snapshot()
+        assertEquals(whole.children.map { it.name }, renamed.children.map { it.name }, "the same children")
+        assertNotEquals(whole, renamed, "the receiver's class-derived name differs")
     }
 
     @Test
     fun hashCodeIsConsistentWithEquals() {
-        val root = EqRoot()
-        val a = root.snapshot()
-        val b = root.snapshot()
+        val root = EqApp()
+        val a = root.tree.snapshot()
+        val b = root.tree.snapshot()
         assertEquals(a, b)
         assertEquals(a.hashCode(), b.hashCode())
         assertEquals(setOf(a), setOf(a, b))

@@ -7,16 +7,17 @@ import kotlin.test.fail
 
 /**
  * T7.2, the single gate: no tree member takes a `String` except `decode`
- * (the wire text) and `named` (a pin) — nodes and states address
+ * (the wire text) and `store` (its `named` pin) — nodes and states address
  * everything else — checked by reading the committed JVM API dump, so a
  * new string-taking overload has to be added to this test's allow list on
- * purpose.
+ * purpose. Exemptions are by function NAME (any overload of an allowed
+ * name passes, `store$default` included), so keep the list short.
  */
 class TreeApiSurfaceTest {
-    private val allowed = setOf("decode", "named", "<init>", "valueOf")
+    private val allowed = setOf("decode", "store", "<init>", "valueOf")
 
     @Test
-    fun noTreeMemberTakesAStringExceptDecodeAndNamed() {
+    fun noTreeMemberTakesAStringExceptDecodeAndStore() {
         val dump = apiDump()
         var owner: String? = null
         val offenders = mutableListOf<String>()
@@ -40,7 +41,7 @@ class TreeApiSurfaceTest {
         val candidates = listOf(File("api/jvm/holdfast.api"), File("holdfast/api/jvm/holdfast.api"))
         val file = candidates.firstOrNull { it.isFile } ?: fail("holdfast.api not found from ${File(".").absolutePath}")
         val text = file.readText()
-        assertTrue("com/vynatix/holdfast/tree/Root" in text, "the dump lists the tree package")
+        assertTrue("com/vynatix/holdfast/tree/StoreTree" in text, "the dump lists the tree package")
         return text
     }
 }

@@ -31,65 +31,62 @@ private object KfIntKeyCodec : StateCodec<Int> {
     override fun decode(string: String): Int = string.toInt()
 }
 
-private class KfSlicedStore(
-    id: String,
-    root: KfRoot,
-) : Store<KfSlicedStore>(root.bySlice.at(id)) {
+private class KfSlicedStore : Store<KfSlicedStore>() {
     val n by state(codec = IntCodec) { 0 }
 }
 
 private class KfIntStore(
     id: Int,
-    root: KfRoot,
-) : Store<KfIntStore>(root.byInt.at(id)) {
+) : Store<KfIntStore>() {
     val n by state(codec = IntCodec) { id }
 }
 
-private class KfRoot : Root("kf") {
-    val bySlice by keyed<String, KfSlicedStore>(keyCodec = KfSlicingCodec)
-    val byInt by keyed<Int, KfIntStore>(keyCodec = KfIntKeyCodec)
+private class KfApp : Store<KfApp>() {
+    val bySlice by stores<String, KfSlicedStore>(keyCodec = KfSlicingCodec) { KfSlicedStore() }
+    val byInt by stores<Int, KfIntStore>(keyCodec = KfIntKeyCodec) { KfIntStore(it) }
 }
 
 /** A key codec's failure on decode is a `SnapshotFormatException` naming the branch, whatever the codec threw. */
 class KeyCodecFailureTest {
     @Test
     fun anyExceptionFromTheKeyCodecIsAFormatErrorNamingTheBranchNotTheKey() {
-        val root = KfRoot()
-        val store = root.bySlice.create(LEAKY_KEY) { KfSlicedStore(it, root) }
-        val text = root.snapshot().encode()
+        val root = KfApp()
+        val store = root.bySlice.create(LEAKY_KEY)
+        val text = root.tree.snapshot().encode()
         assertContains(text, """"entries":{"$LEAKY_KEY":""")
 
-        val failure = assertFailsWith<SnapshotFormatException> { root.decode(text) }
+        val failure = assertFailsWith<SnapshotFormatException> { root.tree.decode(text) }
         assertContains(failure.message!!, "bySlice")
         assertContains(failure.message!!, "threw")
         assertFalse(LEAKY_KEY in failure.message!!, "the key text is never quoted")
         assertNull(failure.cause, "the codec's exception is not chained: its message may quote the key")
 
         // The same codec decodes a keyed segment of `path`: a failure there is the same format error.
-        val leafText = root.snapshot(root.nodeOf(store)!!).encode()
+        val leafText = root.tree.snapshot(root.tree.nodeOf(store)!!).encode()
         assertContains(leafText, """"path":["bySlice","$LEAKY_KEY"]""")
-        val pathFailure = assertFailsWith<SnapshotFormatException> { root.decode(leafText) }
+        val pathFailure = assertFailsWith<SnapshotFormatException> { root.tree.decode(leafText) }
         assertContains(pathFailure.message!!, "bySlice")
         assertFalse(LEAKY_KEY in pathFailure.message!!)
     }
 
     @Test
     fun twoEntriesDecodingToOneKeyAreAFormatErrorNamingTheBranchNotTheKeys() {
-        val root = KfRoot()
-        val store = root.byInt.create(1) { KfIntStore(it, root) }
+        val root = KfApp()
+        val store = root.byInt.create(1)
         val body = store.snapshot().encode()
-        val text = root.snapshot(root.byInt).encode()
-        assertContains(text, """"entries":{"1":$body}""")
+        val entry = """{"kind":"leaf","store":$body}"""
+        val text = root.tree.snapshot(root.byInt).encode()
+        assertContains(text, """"entries":{"1":$entry}""", message = "a keyed entry is a node object")
 
-        val doubled = text.replace(""""entries":{"1":$body}""", """"entries":{"01":$body,"1":$body}""")
-        val failure = assertFailsWith<SnapshotFormatException> { root.decode(doubled) }
+        val doubled = text.replace(""""entries":{"1":$entry}""", """"entries":{"01":$entry,"1":$entry}""")
+        val failure = assertFailsWith<SnapshotFormatException> { root.tree.decode(doubled) }
         assertContains(failure.message!!, "byInt")
         assertContains(failure.message!!, "one key")
         assertFalse("01" in failure.message!!, "the key text is never quoted")
         assertNull(failure.cause)
 
-        // Distinct keys still decode, and the text this root wrote still round-trips.
-        val decoded = root.decode(text)
+        // Distinct keys still decode, and the text this receiver wrote still round-trips.
+        val decoded = root.tree.decode(text)
         assertEquals(emptyList<List<String>>(), decoded.unresolvedPaths)
         assertEquals(1, decoded[store.n])
     }

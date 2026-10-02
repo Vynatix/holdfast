@@ -27,8 +27,8 @@ package com.vynatix.holdfast
  *
  * The member is deliberately NOT named `store`: [Store] has
  * `operator fun invoke(block: Self.() -> R)`, so a member property named
- * `store` would shadow the top-level `store { }` declaration function the
- * dynamic store tree adds in a later PR (M-2) — a member property plus
+ * `store` would shadow the top-level `store { }` child-declaration function
+ * of the store tree (`com.vynatix.holdfast.tree.store`) — a member property plus
  * `invoke` on an implicit receiver beats a top-level function in Kotlin
  * overload resolution. (This is unrelated to the existing `store { }`
  * plain-invoke idiom on a store instance.)

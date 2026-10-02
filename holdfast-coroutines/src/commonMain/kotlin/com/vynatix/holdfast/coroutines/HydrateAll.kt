@@ -6,48 +6,60 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.tree.LeafNode
-import com.vynatix.holdfast.tree.Root
 import com.vynatix.holdfast.tree.StoreNode
+import com.vynatix.holdfast.tree.StoreTree
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * Hydrate every leaf of the subtree at [node] — the whole tree by default:
- * each live leaf, in `lockOrderKey` order, has its hydrator
- * ([Store.hydratorOrNull]) [hydrate][Hydrator.hydrate]d on [scope] (else
- * its own `Store.scope`), so every seed has committed and every refresh is
- * launched before the next leaf's turn; then, with [awaitSettled], each is
- * [awaited][Hydrator.awaitSettled] in the same order, so the refreshes run
- * concurrently and the report holds where each settled. A leaf without a
- * hydrator is reported [HydrateAllReport.Outcome.NoHydrator]; one disposed
- * meanwhile — before its turn, as its hydrator runs, or while its hydration
- * is awaited — [HydrateAllReport.Outcome.Disposed], under the node it sat
- * at when listed; a hydrator that throws from `hydrate()` (a throwing
- * `base { }`, a rejecting middleware) is reported [Hydration.Failed] with
- * what it threw, and does not stop the rest — nothing here throws for a
- * leaf's failure or its dispose. Idempotent: a hydrated leaf's hydrator does
- * nothing. Cancellation propagates at once, while the refreshes already
- * launched keep running on their scopes.
+ * Hydrate every store of the subtree at [node] — the receiver's whole
+ * subtree by default, the receiver's own store included: each live store,
+ * in `lockOrderKey` order (the receiver first whenever it was constructed
+ * before its children, which a lazily materialized child always is), has
+ * its hydrator ([Store.hydratorOrNull]) [hydrate][Hydrator.hydrate]d on
+ * [scope] (else its own `Store.scope`), so every seed has committed and
+ * every refresh is launched before the next store's turn; then, with
+ * [awaitSettled], each is [awaited][Hydrator.awaitSettled] in the same
+ * order, so the refreshes run concurrently and the report holds where each
+ * settled. A store without a hydrator is reported
+ * [HydrateAllReport.Outcome.NoHydrator]; one disposed meanwhile — before its
+ * turn, as its hydrator runs, or while its hydration is awaited —
+ * [HydrateAllReport.Outcome.Disposed], under the node it sat at when
+ * listed; a hydrator that throws from `hydrate()` (a throwing `base { }`, a
+ * rejecting middleware) is reported [Hydration.Failed] with what it threw,
+ * and does not stop the rest — nothing here throws for a store's failure or
+ * its dispose. Idempotent: a hydrated store's hydrator does nothing.
+ * Cancellation propagates at once, while the refreshes already launched
+ * keep running on their scopes. Lists the subtree through
+ * [StoreTree.stores], so declared children not read yet are materialized
+ * first.
  *
- * Experimental (issue #21 plan PR 21-8, over issue #20's R8).
+ * Experimental (issue #21, over issue #20's R8).
  *
- * @throws IllegalStateException if the root is disposed, or from inside an
- *   action, `atomic` frame, `suspendAction` or `suspendAtomic` body of any
- *   store — before any leaf is touched — as [Hydrator.hydrate] refuses.
- * @throws IllegalArgumentException if [node] belongs to another root.
+ * @throws IllegalStateException if the tree's store is disposed, or from
+ *   inside an action, `atomic` frame, `suspendAction` or `suspendAtomic`
+ *   body of any store — before any store is touched — as
+ *   [Hydrator.hydrate] refuses.
+ * @throws IllegalArgumentException if [node] is not in the receiver's
+ *   subtree.
  */
 @ExperimentalStoreApi
-suspend fun Root.hydrateAll(
-    node: StoreNode = this,
+suspend fun StoreTree.hydrateAll(
+    node: StoreNode = this.node,
     scope: CoroutineScope? = null,
     awaitSettled: Boolean = true,
 ): HydrateAllReport {
-    check(!isDisposed) { "root '$name' disposed" }
-    require(node.root === this) { "node '${node.name}' belongs to root '${node.root.name}', not root '$name'" }
-    val leaves = liveLeavesUnder(node)
-    // Refused before any leaf is touched: inside an entry the first leaf's
+    val owner = checkNotNull(this.node.store) { "hydrateAll(): the tree's store is disposed" }
+    require(node === this.node || node.isUnder(this.node)) { "node '${node.name}' is not under this tree's store" }
+    // Paired now, not after the run: a store disposed meanwhile leaves the
+    // tree, and `nodeOf` no longer finds its node.
+    val leaves =
+        stores(node)
+            .mapNotNull { store -> nodeOf(store)?.let { LiveLeaf(it, store) } }
+            .sortedBy { it.store.lockOrderKey }
+    // Refused before any store is touched: inside an entry the first store's
     // gate would wait forever for the transaction that waits for it.
-    leaves.firstOrNull()?.let { refuseInsideEntry(it.store, "hydrateAll()", ::insideEntryMessage) }
+    refuseInsideEntry(owner, "hydrateAll()", ::insideEntryMessage)
     val outcomes = arrayOfNulls<HydrateAllReport.Outcome>(leaves.size)
     val awaited = arrayOfNulls<Hydrator<*>>(leaves.size)
     for ((index, leaf) in leaves.withIndex()) {
@@ -81,25 +93,11 @@ suspend fun Root.hydrateAll(
     return HydrateAllReport(entries)
 }
 
-/** A leaf as listed: the store and the node it sat at then. */
+/** A store as listed: the store and the node it sat at then. */
 private class LiveLeaf(
     val node: LeafNode,
     val store: Store<*>,
 )
-
-/**
- * The live leaves of the subtree at [node] — what `Root.children(node)`
- * lists — each paired with its node as of this listing, in `lockOrderKey`
- * order. Paired now, not after the run: a leaf disposed meanwhile leaves the
- * registry, and `Root.nodeOf` no longer finds its node.
- */
-private fun Root.liveLeavesUnder(node: StoreNode): List<LiveLeaf> =
-    nodes
-        .mapNotNull { candidate ->
-            val leaf = candidate as? LeafNode ?: return@mapNotNull null
-            if (!leaf.isUnder(node)) return@mapNotNull null
-            leaf.store?.let { LiveLeaf(leaf, it) }
-        }.sortedBy { it.store.lockOrderKey }
 
 /**
  * One step of a leaf's hydration — [step] on [store]'s hydrator — as an

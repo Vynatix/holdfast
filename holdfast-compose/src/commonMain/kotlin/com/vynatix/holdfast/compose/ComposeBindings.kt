@@ -37,8 +37,8 @@ fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): ComposeState<T> =
 /**
  * [collectAsState] for a [State] read without its store at hand: any
  * observable state — a declared one, a `derived`, a `derivedState`/`merged`,
- * or a tree root's `value` (`App.value.collectAsState()`, which recomposes
- * once per settle of the tree). The subscription's lifecycle is the same.
+ * or a store's tree (`App.tree.collectAsState()`, which recomposes once per
+ * settle of the tree). The subscription's lifecycle is the same.
  */
 @Composable
 fun <T : Any> State<T>.collectAsState(): ComposeState<T> =

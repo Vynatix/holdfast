@@ -92,23 +92,7 @@ class FrameMiddlewareSession internal constructor(
 // target, so this class-level opt-in is the only way to opt the supertype in — it also silences per-site
 // opt-in checks inside this class; keep per-site @OptIn comments as documentation.
 @OptIn(ExperimentalStoreApi::class)
-abstract class Store<Self : Store<Self>>() : Stateful {
-    /**
-     * Binds this store into library-owned membership machinery at
-     * construction, via a [StoreMembership] token minted only by that
-     * machinery (issue #21's typed tree: `KeyedBranch.at(key)`). Delegates to
-     * the primary constructor above first, so every [Store] field above has
-     * initialized — and, for an [EventfulStore] subclass, its own fields too
-     * — before [StoreMembership.bind] runs, and every subclass property
-     * initializer and delegated state still runs after it, exactly as with
-     * the plain no-arg constructor. The primary constructor's `<init>()V`
-     * signature is unchanged by this overload existing.
-     */
-    @ExperimentalStoreApi
-    protected constructor(membership: StoreMembership<Self>) : this() {
-        membership.bind(this)
-    }
-
+abstract class Store<Self : Store<Self>> : Stateful {
     /**
      * This store: every [Store] is a [Stateful] whose states it owns itself.
      * Narrowed to `Self` so a subclass handle keeps its own type; a consumer
@@ -431,7 +415,7 @@ abstract class Store<Self : Store<Self>>() : Stateful {
     internal val middlewareList = mutableListOf<Middleware<Self>>()
 
     /**
-     * This store's outer middleware ring (issue #21's `Root.middlewares`),
+     * This store's outer middleware ring (issue #21's `tree.middlewares`),
      * installed and torn down through [internalSetOuterMiddleware] and
      * [internalRemoveMiddleware]. Independent of [middlewareList]:
      * [clearMiddleware] never touches it, and [dispose] clears both.
@@ -848,7 +832,7 @@ abstract class Store<Self : Store<Self>>() : Stateful {
      * placed earlier.
      *
      * This is the consumer-registered list. Library-installed middleware
-     * (issue #21's `Root.middlewares`) lives in a separate outer ring that is
+     * (issue #21's `tree.middlewares`) lives in a separate outer ring that is
      * always outermost of everything registered here — see
      * [internalSetOuterMiddleware].
      */
@@ -861,7 +845,7 @@ abstract class Store<Self : Store<Self>>() : Stateful {
 
     /**
      * Drop every consumer-registered middleware. Never touches the outer
-     * ring (issue #21's `Root.middlewares`) — see [internalSetOuterMiddleware].
+     * ring (issue #21's `tree.middlewares`) — see [internalSetOuterMiddleware].
      */
     fun clearMiddleware() {
         checkNotDisposed()
@@ -1660,7 +1644,7 @@ abstract class Store<Self : Store<Self>>() : Stateful {
      * Internal hook for `:holdfast-coroutines.suspendAction`. Returns a stable
      * snapshot of the currently-registered middleware list — the consumer
      * list ([middlewares]/[clearMiddleware]) followed by the outer ring
-     * ([internalSetOuterMiddleware], issue #21's `Root.middlewares`), which is
+     * ([internalSetOuterMiddleware], issue #21's `tree.middlewares`), which is
      * therefore always outermost — same snapshot semantics as
      * [runMiddlewareChain] uses for the blocking [action] path. The
      * suspending chain runner uses this to invoke each hook directly with its

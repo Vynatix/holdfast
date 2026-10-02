@@ -18,8 +18,8 @@ private const val STORE_SUFFIX = "Store"
  * The default name of a branch leaf: its store's class simple name minus a
  * trailing `Store` (`SettingsStore` → `Settings`; a class named just `Store`
  * keeps it), or `null` when the platform reports no simple name (an
- * anonymous or local class) — a declaration then fails unless the leaf is
- * pinned with `named(store, "...")`.
+ * anonymous or local class) — a group then fails unless the leaf is
+ * pinned with `stores(names = …)`.
  */
 internal fun defaultLeafName(simpleName: String?): String? =
     when {
@@ -30,19 +30,22 @@ internal fun defaultLeafName(simpleName: String?): String? =
     }
 
 /**
- * `Root.verifyPersistedNames(node)` (T6): every persisted store at a
- * class-named leaf of the subtree, and every keyed branch of it declared
+ * `tree.verifyPersistedNames(node)` (T6): every persisted store at a
+ * class-named leaf of the subtree (the receiver's own node excepted: its
+ * name is never written), and every keyed branch of it declared
  * without a key codec. A store is persisted when it declares a
  * `UserAuthored` state or keyed family, implements `SchemaVersioned`, or
  * has an attachment reporting `persistenceKeys`. Reads declarations only —
  * no initializer runs, no lock beyond the registries' is taken.
  */
 internal fun verifyNames(
-    root: Root,
+    ownerNode: LeafNode,
     node: StoreNode,
 ): List<NamingIssue> {
+    checkNotNull(ownerNode.store) { "${ownerNode.name}'s store disposed" }.checkNotDisposed()
     val issues = ArrayList<NamingIssue>()
-    for (candidate in root.registry.nodesPreorder(node)) {
+    // The receiver's own node is never written, so its class-derived name is no issue.
+    for (candidate in nodesPreorder(ownerNode, node).filter { it !== ownerNode }) {
         when (candidate) {
             is LeafNode -> {
                 val store = candidate.store ?: continue
@@ -53,7 +56,7 @@ internal fun verifyNames(
                             kind = NamingIssue.Kind.ClassDerivedNameOnPersistedStore,
                             message =
                                 "leaf '${candidate.name}' is named by its store's class and the store persists; " +
-                                    "pin the name with branch(store).named(store, \"...\")",
+                                    "pin the name with stores(names = mapOf(Store::class to \"...\"))",
                         )
                 }
             }
@@ -65,10 +68,10 @@ internal fun verifyNames(
                             kind = NamingIssue.Kind.KeyedBranchNotEncodable,
                             message =
                                 "keyed branch '${candidate.name}' has no key codec, so encode() skips it; " +
-                                    "declare it with keyed(keyCodec = ...)",
+                                    "declare it with stores<K, S>(keyCodec = ...)",
                         )
                 }
-            is Branch, is Root -> Unit
+            is Branch -> Unit
         }
     }
     return issues

@@ -11,8 +11,8 @@ import kotlinx.atomicfu.atomic
  * One [TreeMiddleware] installed on one leaf: a store [Middleware] in the
  * leaf's outer ring that forwards each hook with the leaf's node. Written
  * against no store type (`Middleware<Nothing>`), so one class serves every
- * leaf. Retired by `Root.removeMiddleware`, a leaf's departure or the
- * root's dispose: a retired adapter starts no new observation, while one it
+ * leaf. Retired by `tree.removeMiddleware`, a leaf's departure or the
+ * installing store's dispose: a retired adapter starts no new observation, while one it
  * started still gets its terminal hook — the mark it stamped in the
  * transaction's `metadata` at `started` (the `ProfilingMiddleware` idiom)
  * says so, and keeps a transaction to one `completed` and one `error` per

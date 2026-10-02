@@ -67,8 +67,6 @@ public abstract class com/vynatix/holdfast/EventfulStore : com/vynatix/holdfast/
 	public fun <init> ()V
 	public fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;)V
 	public synthetic fun <init> (ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	protected fun <init> (Lcom/vynatix/holdfast/StoreMembership;ILkotlinx/coroutines/channels/BufferOverflow;)V
-	public synthetic fun <init> (Lcom/vynatix/holdfast/StoreMembership;ILkotlinx/coroutines/channels/BufferOverflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun emit (Ljava/lang/Object;)V
 	public final fun getEvents ()Lkotlinx/coroutines/flow/SharedFlow;
 	protected fun onDispose ()V
@@ -530,7 +528,6 @@ public abstract interface class com/vynatix/holdfast/Stateful {
 public abstract class com/vynatix/holdfast/Store : com/vynatix/holdfast/Stateful {
 	public static final field Companion Lcom/vynatix/holdfast/Store$Companion;
 	public fun <init> ()V
-	protected fun <init> (Lcom/vynatix/holdfast/StoreMembership;)V
 	public final fun action (Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun bindClock (Lkotlin/time/Clock;)V
 	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
@@ -631,9 +628,6 @@ public final class com/vynatix/holdfast/StoreLock {
 	public final fun acquire ()V
 	public final fun release ()V
 	public final fun withLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
-}
-
-public abstract class com/vynatix/holdfast/StoreMembership {
 }
 
 public final class com/vynatix/holdfast/StoreSnapshot {
@@ -922,38 +916,37 @@ public final class com/vynatix/holdfast/platform/ThreadingKt {
 public final class com/vynatix/holdfast/tree/Branch : com/vynatix/holdfast/tree/StoreNode {
 	public fun getName ()Ljava/lang/String;
 	public fun getNameOrigin ()Lcom/vynatix/holdfast/tree/NameOrigin;
-	public fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
-	public fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
+	public fun getParent ()Lcom/vynatix/holdfast/tree/LeafNode;
+	public synthetic fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
 	public final fun getStores ()Ljava/util/List;
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public final fun leafName (Lcom/vynatix/holdfast/Store;)Ljava/lang/String;
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class com/vynatix/holdfast/tree/BranchDeclaration : kotlin/properties/PropertyDelegateProvider {
-	public final fun named (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
-	public final fun named (Ljava/lang/String;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
-	public fun provideDelegate (Lcom/vynatix/holdfast/tree/Root;Lkotlin/reflect/KProperty;)Lkotlin/properties/ReadOnlyProperty;
+public final class com/vynatix/holdfast/tree/GroupDeclaration : kotlin/properties/PropertyDelegateProvider {
+	public fun provideDelegate (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty;)Lkotlin/properties/ReadOnlyProperty;
 	public synthetic fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Ljava/lang/Object;
 }
 
 public final class com/vynatix/holdfast/tree/KeyedBranch : com/vynatix/holdfast/tree/StoreNode {
-	public final fun at (Ljava/lang/Object;)Lcom/vynatix/holdfast/StoreMembership;
-	public final fun create (Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Store;
+	public final fun create (Ljava/lang/Object;)Lcom/vynatix/holdfast/Store;
+	public final fun get (Ljava/lang/Object;)Lcom/vynatix/holdfast/Store;
+	public final fun getEntries ()Ljava/util/Map;
 	public final fun getKeyClass ()Lkotlin/reflect/KClass;
 	public final fun getKeyCodec ()Lcom/vynatix/holdfast/StateCodec;
 	public fun getName ()Ljava/lang/String;
 	public fun getNameOrigin ()Lcom/vynatix/holdfast/tree/NameOrigin;
-	public final fun getOrCreate (Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/Store;
-	public fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
-	public fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
+	public final fun getOrCreate (Ljava/lang/Object;)Lcom/vynatix/holdfast/Store;
+	public fun getParent ()Lcom/vynatix/holdfast/tree/LeafNode;
+	public synthetic fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
 	public final fun getStoreClass ()Lkotlin/reflect/KClass;
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/vynatix/holdfast/tree/KeyedDeclaration : kotlin/properties/PropertyDelegateProvider {
-	public fun provideDelegate (Lcom/vynatix/holdfast/tree/Root;Lkotlin/reflect/KProperty;)Lkotlin/properties/ReadOnlyProperty;
+	public fun provideDelegate (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty;)Lkotlin/properties/ReadOnlyProperty;
 	public synthetic fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Ljava/lang/Object;
 }
 
@@ -964,7 +957,7 @@ public abstract class com/vynatix/holdfast/tree/LeafMembershipListener {
 }
 
 public final class com/vynatix/holdfast/tree/LeafMembershipListenerKt {
-	public static final fun internalAddMembershipListener (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/LeafMembershipListener;)Lcom/vynatix/holdfast/Disposable;
+	public static final fun internalAddMembershipListener (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/LeafMembershipListener;)Lcom/vynatix/holdfast/Disposable;
 }
 
 public final class com/vynatix/holdfast/tree/LeafNode : com/vynatix/holdfast/tree/StoreNode {
@@ -972,7 +965,6 @@ public final class com/vynatix/holdfast/tree/LeafNode : com/vynatix/holdfast/tre
 	public fun getName ()Ljava/lang/String;
 	public fun getNameOrigin ()Lcom/vynatix/holdfast/tree/NameOrigin;
 	public fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
-	public fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
 	public final fun getStore ()Lcom/vynatix/holdfast/Store;
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 	public fun toString ()Ljava/lang/String;
@@ -1003,62 +995,68 @@ public final class com/vynatix/holdfast/tree/NamingIssue$Kind : java/lang/Enum {
 	public static fun values ()[Lcom/vynatix/holdfast/tree/NamingIssue$Kind;
 }
 
-public abstract class com/vynatix/holdfast/tree/Root : com/vynatix/holdfast/tree/StoreNode {
-	public fun <init> ()V
-	public fun <init> (Ljava/lang/String;)V
-	public synthetic fun <init> (Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun bindToScope (Lkotlinx/coroutines/CoroutineScope;)V
-	protected final fun branch ([Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/Branch;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
-	public static synthetic fun branch$default (Lcom/vynatix/holdfast/tree/Root;[Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/Branch;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/BranchDeclaration;
-	public final fun children (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
-	public final fun decode (Ljava/lang/String;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
-	public final fun dispose ()V
-	public final fun entries (Lcom/vynatix/holdfast/tree/KeyedBranch;)Ljava/util/Map;
-	public final fun get (Lcom/vynatix/holdfast/tree/KeyedBranch;Ljava/lang/Object;)Lcom/vynatix/holdfast/Store;
-	public final fun getName ()Ljava/lang/String;
-	public final fun getNameOrigin ()Lcom/vynatix/holdfast/tree/NameOrigin;
-	public final fun getNodes ()Ljava/util/List;
-	public final fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
-	public final fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
-	public fun getScope ()Lkotlinx/coroutines/CoroutineScope;
-	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
-	public final fun getValue ()Lcom/vynatix/holdfast/State;
-	public final fun isDisposed ()Z
-	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
-	public final fun keyedDeclaration (Lkotlin/reflect/KClass;Lkotlin/reflect/KClass;Lcom/vynatix/holdfast/tree/Branch;Lcom/vynatix/holdfast/StateCodec;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
-	public final fun middlewares ([Lcom/vynatix/holdfast/tree/TreeMiddleware;)V
-	public final fun nodeOf (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/LeafNode;
-	public final fun removeMiddleware (Lcom/vynatix/holdfast/tree/TreeMiddleware;)Z
-	public final fun reset (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/TransactionResult;
-	public static synthetic fun reset$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
-	public final fun restore (Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
-	public static synthetic fun restore$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
-	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
-	public final fun snapshot (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
-	public static synthetic fun snapshot$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
-	public fun toString ()Ljava/lang/String;
-	public final fun verifyPersistedNames (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
-	public static synthetic fun verifyPersistedNames$default (Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
-}
-
-public final class com/vynatix/holdfast/tree/RootInternalsKt {
-	public static final fun getInternalCaptureCount (Lcom/vynatix/holdfast/tree/Root;)J
-	public static final fun getInternalCutRetryCount (Lcom/vynatix/holdfast/tree/Root;)J
-	public static final fun getInternalSettleCount (Lcom/vynatix/holdfast/tree/Root;)J
-	public static final fun internalHost (Lcom/vynatix/holdfast/tree/Root;)Lcom/vynatix/holdfast/Store;
-	public static final fun internalSettleNow (Lcom/vynatix/holdfast/tree/Root;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+public final class com/vynatix/holdfast/tree/StoreDeclaration : kotlin/properties/PropertyDelegateProvider {
+	public fun provideDelegate (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty;)Lkotlin/properties/ReadOnlyProperty;
+	public synthetic fun provideDelegate (Ljava/lang/Object;Lkotlin/reflect/KProperty;)Ljava/lang/Object;
 }
 
 public abstract interface class com/vynatix/holdfast/tree/StoreNode {
 	public abstract fun getName ()Ljava/lang/String;
 	public abstract fun getNameOrigin ()Lcom/vynatix/holdfast/tree/NameOrigin;
 	public abstract fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
-	public abstract fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
 	public fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;)Z
 }
 
 public final class com/vynatix/holdfast/tree/StoreNode$DefaultImpls {
 	public static fun isUnder (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/tree/StoreNode;)Z
+}
+
+public abstract interface class com/vynatix/holdfast/tree/StoreTree : com/vynatix/holdfast/State {
+	public abstract fun decode (Ljava/lang/String;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public abstract fun getChildren ()Ljava/util/List;
+	public abstract fun getNode ()Lcom/vynatix/holdfast/tree/LeafNode;
+	public abstract fun getParent ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public abstract fun middlewares ([Lcom/vynatix/holdfast/tree/TreeMiddleware;)V
+	public abstract fun nodeOf (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/LeafNode;
+	public abstract fun removeMiddleware (Lcom/vynatix/holdfast/tree/TreeMiddleware;)Z
+	public abstract fun reset (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun reset$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+	public abstract fun restore (Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;Z)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+	public abstract fun snapshot (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public static synthetic fun snapshot$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public abstract fun stores (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public static synthetic fun stores$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
+	public abstract fun verifyPersistedNames (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public static synthetic fun verifyPersistedNames$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class com/vynatix/holdfast/tree/StoreTree$DefaultImpls {
+	public static synthetic fun reset$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun restore$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/TreeSnapshot;Lcom/vynatix/holdfast/RestorePolicy;ZILjava/lang/Object;)Lcom/vynatix/holdfast/TransactionResult;
+	public static synthetic fun snapshot$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/SnapshotScope;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
+	public static synthetic fun stores$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
+	public static synthetic fun verifyPersistedNames$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class com/vynatix/holdfast/tree/TreeAccessKt {
+	public static final fun getTree (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/tree/StoreTree;
+}
+
+public final class com/vynatix/holdfast/tree/TreeDeclaringKt {
+	public static final fun keyedDeclaration (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KClass;Lkotlin/reflect/KClass;Lcom/vynatix/holdfast/StateCodec;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
+	public static final fun store (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
+	public static synthetic fun store$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
+	public static final fun stores (Lcom/vynatix/holdfast/Store;Ljava/util/Map;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
+	public static synthetic fun stores$default (Lcom/vynatix/holdfast/Store;Ljava/util/Map;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
+}
+
+public final class com/vynatix/holdfast/tree/TreeInternalsKt {
+	public static final fun getInternalCaptureCount (Lcom/vynatix/holdfast/tree/StoreTree;)J
+	public static final fun getInternalCutRetryCount (Lcom/vynatix/holdfast/tree/StoreTree;)J
+	public static final fun getInternalSettleCount (Lcom/vynatix/holdfast/tree/StoreTree;)J
+	public static final fun internalHost (Lcom/vynatix/holdfast/tree/StoreTree;)Lcom/vynatix/holdfast/Store;
+	public static final fun internalSettleNow (Lcom/vynatix/holdfast/tree/StoreTree;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 }
 
 public abstract class com/vynatix/holdfast/tree/TreeMiddleware {
@@ -1096,6 +1094,8 @@ public final class com/vynatix/holdfast/tree/TreeSnapshot {
 	public final fun get (Lcom/vynatix/holdfast/State;)Ljava/lang/Object;
 	public final fun get (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 	public final fun getChildren ()Ljava/util/List;
+	public final fun getHasStore ()Z
+	public final fun getName ()Ljava/lang/String;
 	public final fun getNode ()Lcom/vynatix/holdfast/tree/StoreNode;
 	public final fun getScope ()Lcom/vynatix/holdfast/SnapshotScope;
 	public final fun getUnresolvedPaths ()Ljava/util/List;

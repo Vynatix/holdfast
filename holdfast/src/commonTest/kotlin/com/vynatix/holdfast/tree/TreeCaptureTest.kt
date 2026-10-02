@@ -14,6 +14,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private class CapLeftStore : Store<CapLeftStore>() {
@@ -37,70 +38,76 @@ private class CapThrowingStore : Store<CapThrowingStore>() {
     }
 }
 
-private class CapKeyedStore(
-    id: String,
-    root: CapRoot,
-) : Store<CapKeyedStore>(root.keyed.at(id)) {
+private class CapKeyedStore : Store<CapKeyedStore>() {
     val n by state { 0 }
 }
 
-private class CapRoot : Root("cap") {
-    val left = CapLeftStore()
-    val right = CapRightStore()
-    val fragileStore = CapThrowingStore()
-    val pair by branch(left, right)
-    val fragile by branch(fragileStore)
-    val keyed by keyed<String, CapKeyedStore>(under = pair)
+/** A mid-tree child holding two store children and a keyed branch, so a subtree capture of it has all three kinds. */
+private class CapPairStore : Store<CapPairStore>() {
+    /** Runs inside the keyed factory, after the store is built and before it attaches. */
+    var insideFactory: (() -> Unit)? = null
+    val left by store { CapLeftStore() }
+    val right by store { CapRightStore() }
+    val keyed by stores<String, CapKeyedStore> { CapKeyedStore().also { insideFactory?.invoke() } }
 }
 
-/** `Root.snapshot` semantics that need no threads: materialization, subtree bounds, and where a capture may be taken from. */
+private class CapApp : Store<CapApp>() {
+    val pair by store { CapPairStore() }
+    val fragileStore = CapThrowingStore()
+    val fragile by stores { listOf(fragileStore) }
+    val left: CapLeftStore get() = pair.left
+    val right: CapRightStore get() = pair.right
+    val keyed: KeyedBranch<String, CapKeyedStore> get() = pair.keyed
+}
+
+/** `tree.snapshot` semantics that need no threads: materialization, subtree bounds, and where a capture may be taken from. */
 class TreeCaptureTest {
     @Test
     fun aSnapshotOfAnUntouchedTreeMaterializesEveryDeclaredState() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         assertEquals(0, root.left.initializerRuns)
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         assertEquals(1, root.left.initializerRuns)
         assertEquals("declared, never read", tree[root.left.untouched])
         assertEquals(2, tree[root.right.y])
-        assertEquals(setOf("x", "untouched"), tree[root.nodeOf(root.left)!!]!!.leaf!!.stateNames)
+        assertEquals(setOf("x", "untouched"), tree[root.tree.nodeOf(root.left)!!]!!.leaf!!.stateNames)
     }
 
     @Test
     fun aSubtreeSnapshotContainsOnlyThatSubtree() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
-        val k = root.keyed.create("k") { CapKeyedStore(it, root) }
-        val pair = root.snapshot(root.pair)
-        assertEquals(listOf("CapLeft", "CapRight", "keyed"), pair.children.map { it.node.name })
-        assertNotNull(pair[root.nodeOf(k)!!])
+        val k = root.keyed.create("k")
+        val pair = root.tree.snapshot(root.tree.nodeOf(root.pair)!!)
+        assertEquals(listOf("left", "right", "keyed"), pair.children.map { it.name })
+        assertNotNull(pair[root.tree.nodeOf(k)!!])
         assertNull(pair[root.fragile])
         assertNull(pair[root.fragileStore.fragile])
-        val leafOnly = root.snapshot(root.nodeOf(root.right)!!)
+        val leafOnly = root.tree.snapshot(root.tree.nodeOf(root.right)!!)
         assertTrue(leafOnly.isLeaf)
         assertEquals(2, leafOnly[root.right.y])
     }
 
     @Test
     fun aSnapshotFromInsideALeafObserverReadsTheCommittedValues() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         var seen: Int? = null
-        root.left.x effect { if (this == 5) seen = root.snapshot()[root.left.x] }
+        root.left.x effect { if (this == 5) seen = root.tree.snapshot()[root.left.x] }
         root.left action { x mutate 5 }
         assertEquals(5, seen, "an observer runs after the apply pass, so the cut holds the new value")
     }
 
     @Test
     fun aSnapshotFromAMiddlewareBeforeCommitReadsTheOldCommittedValue() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         var seen: Int? = null
         root.left.middlewares(
             object : Middleware<CapLeftStore>() {
                 override fun onTransactionCompleted(context: MiddlewareContext<CapLeftStore>) {
-                    seen = root.snapshot()[root.left.x]
+                    seen = root.tree.snapshot()[root.left.x]
                 }
             },
         )
@@ -111,12 +118,12 @@ class TreeCaptureTest {
 
     @Test
     fun aSnapshotInsideAFrameHoldingHigherKeysDoesNotThrow() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         val result =
             atomic(root.left, root.right) {
                 root.left { x mutate 10 }
-                root.snapshot()
+                root.tree.snapshot()
             }
         assertIs<TransactionResult.Success<TreeSnapshot>>(result)
         assertEquals(1, result.value[root.left.x], "inside the body the cut holds committed values only")
@@ -124,56 +131,75 @@ class TreeCaptureTest {
 
     @Test
     fun onTheCommittingThreadASnapshotReadsCommittedNotPendingValues() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         root.left action {
             x mutate 42
             assertEquals(42, x.value, "read-your-own-writes on the owner thread")
-            assertEquals(1, root.snapshot()[root.left.x], "the capture ignores the pending write")
+            assertEquals(1, root.tree.snapshot()[root.left.x], "the capture ignores the pending write")
         }
-        assertEquals(42, root.snapshot()[root.left.x])
+        assertEquals(42, root.tree.snapshot()[root.left.x])
     }
 
     @Test
     fun aDisposedLeafIsLeftOutOfLaterCaptures() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
-        val k = root.keyed.create("k") { CapKeyedStore(it, root) }
+        val k = root.keyed.create("k")
         k.dispose()
         root.left.dispose()
-        val tree = root.snapshot()
-        assertNull(tree[root.nodeOf(root.right)!!]?.let { null })
-        assertEquals(listOf("CapRight", "keyed"), tree[root.pair]!!.children.map { it.node.name })
+        val tree = root.tree.snapshot()
+        assertNull(tree[root.tree.nodeOf(root.right)!!]?.let { null })
+        assertEquals(listOf("right", "keyed"), tree[root.tree.nodeOf(root.pair)!!]!!.children.map { it.name })
         assertTrue(tree[root.keyed]!!.children.isEmpty())
     }
 
     @Test
     fun aCaptureNeverContainsAStoreStillInsideItsFactory() {
-        val root = CapRoot()
+        val root = CapApp()
         root.fragileStore.shouldThrow = false
         var duringFactory: TreeSnapshot? = null
-        root.keyed.create("k") { id ->
-            val store = CapKeyedStore(id, root)
-            duringFactory = root.snapshot()
-            store
-        }
+        root.pair.insideFactory = { duringFactory = root.tree.snapshot() }
+        root.keyed.create("k")
         assertTrue(duringFactory!![root.keyed]!!.children.isEmpty(), "the store was not yet promoted")
-        assertEquals(1, root.snapshot()[root.keyed]!!.children.size)
+        assertEquals(
+            1,
+            root.tree
+                .snapshot()[root.keyed]!!
+                .children.size,
+        )
     }
 
     @Test
     fun aThrowingInitializerPropagatesAndStaysRetryable() {
-        val root = CapRoot()
-        val error = assertFailsWith<IllegalStateException> { root.snapshot() }
+        val root = CapApp()
+        val error = assertFailsWith<IllegalStateException> { root.tree.snapshot() }
         assertEquals("initializer refused", error.message)
         root.fragileStore.shouldThrow = false
-        assertEquals("ok", root.snapshot()[root.fragileStore.fragile])
+        assertEquals("ok", root.tree.snapshot()[root.fragileStore.fragile])
     }
 
     @Test
-    fun aSnapshotOfAnotherRootsNodeIsRefused() {
-        val root = CapRoot()
-        val other = CapRoot()
-        assertFailsWith<IllegalArgumentException> { root.snapshot(other.pair) }
+    fun aSnapshotOfAnotherReceiversNodeIsRefused() {
+        val root = CapApp()
+        val other = CapApp()
+        assertFailsWith<IllegalArgumentException> { root.tree.snapshot(other.fragile) }
+        assertFailsWith<IllegalArgumentException> { root.tree.snapshot(other.tree.nodeOf(other.pair)!!) }
+        assertFailsWith<IllegalArgumentException> { root.tree.snapshot(other.tree.node) }
+    }
+
+    @Test
+    fun aMidTreeChildsOwnTreeCapturesItsSubtreeWithItselfAsTheReceiver() {
+        val root = CapApp()
+        root.fragileStore.shouldThrow = false
+        val pair = root.pair
+        val mid = pair.tree.snapshot()
+        assertSame(pair.tree.node, mid.node)
+        assertEquals("pair", mid.name, "the receiver's node keeps the name of its place under its parent")
+        assertEquals(listOf("left", "right", "keyed"), mid.children.map { it.name })
+        assertEquals(2, mid[root.right.y])
+        assertFailsWith<IllegalArgumentException>("the parent's group is not under the child") {
+            pair.tree.snapshot(root.fragile)
+        }
     }
 }
