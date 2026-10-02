@@ -81,6 +81,15 @@ internal class TreeLeafAttachment(
     /** Completed structural writes on this store's subtree (see `TreeWalk.kt`). */
     val structuralGeneration = atomic(0L)
 
+    /**
+     * The `(structuralGeneration, childDeclarationEpoch)` at the start of the
+     * last complete `materializeSubtree` pass over this store's subtree that
+     * began with no structural writer open, or `null`. While both still match,
+     * every declared child below is built and the pass is skipped (an attach,
+     * detach or new declaration anywhere moves one of them).
+     */
+    val materializedAt = atomic<MaterializedMark?>(null)
+
     /** The tree middleware this store installed: copy-on-write, written under [installLock], read lock-free. */
     @kotlin.concurrent.Volatile
     var installed: List<TreeMiddleware> = emptyList()

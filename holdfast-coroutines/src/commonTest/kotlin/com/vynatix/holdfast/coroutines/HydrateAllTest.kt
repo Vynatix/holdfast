@@ -167,6 +167,15 @@ private class HaOrderedParent : Store<HaOrderedParent>() {
     val mid by store { HaOrderedMidStore(order) }
 }
 
+/** A parent whose one child counts its lambda's runs: materialization is visible. */
+private class HaCountingParent : Store<HaCountingParent>() {
+    var childRuns = 0
+    val child by store {
+        childRuns++
+        HaPlainStore()
+    }
+}
+
 /** `StoreTree.hydrateAll`: every hydrator of the subtree driven, the receiver's first; failures aggregated; entries refused. */
 class HydrateAllTest {
     @Test
@@ -492,4 +501,28 @@ class HydrateAllTest {
             assertSame(parent.keyed, leaf.parent, "a disposed store's node keeps the place it had")
             assertEquals("Entry(late: Disposed)", entry.toString())
         }
+
+    @Test
+    fun theInsideAnEntryRefusalComesBeforeTheListingMaterializesAnyChild() =
+        runBlocking {
+            val parent = HaCountingParent()
+            val tree = parent.tree
+            val refused = parent.suspendAction { runCatching { tree.hydrateAll() }.exceptionOrNull() }.getOrThrow()
+            assertIs<IllegalStateException>(refused)
+            assertEquals(0, parent.childRuns, "refused before any child lambda ran")
+            plainAction(parent) { runCatching { runBlocking { tree.hydrateAll() } }.exceptionOrNull() }
+            assertEquals(0, parent.childRuns, "nor from a blocking action")
+            val report = tree.hydrateAll()
+            assertEquals(1, parent.childRuns, "outside every entry the listing materializes the child once")
+            assertEquals(listOf("HaCountingParent", "child"), report.entries.map { it.node.name })
+        }
+
+    private fun plainAction(
+        parent: HaCountingParent,
+        body: () -> Throwable?,
+    ) {
+        var thrown: Throwable? = null
+        parent.action { thrown = body() }.getOrThrow()
+        assertIs<IllegalStateException>(thrown)
+    }
 }

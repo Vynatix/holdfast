@@ -58,6 +58,14 @@ sealed interface StoreTree : State<TreeSnapshot> {
      * child's [LeafNode], each group's [Branch], each keyed branch's
      * [KeyedBranch] (listed from its declaration on, with or without
      * entries). A child whose lambda throws makes this throw.
+     *
+     * WARNING — this property is not a cheap field read: it RUNS THE CHILD
+     * LAMBDAS of every declared child not materialized yet, at any depth, on
+     * the calling thread (user code, which may open actions and build
+     * stores), and it may PARK the calling thread for a moment while another
+     * thread finishes attaching a child it materialized first. Do not read
+     * it from code that must not run user code or block (an observer, a
+     * listener, a hot loop); hold the list it answered instead.
      */
     val children: List<StoreNode>
 

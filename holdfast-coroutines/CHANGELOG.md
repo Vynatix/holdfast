@@ -16,13 +16,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Outcome.Disposed`, which `isHealthy` ignores; cancellation still
   propagates. `HydrateAllReport.Entry.node` of a disposed store is the
   `LeafNode` it sat at when listed, never the queried node.
+- **Issue #21 review (PR #25).** `hydrateAll` refuses a call from inside an
+  entry BEFORE the listing materializes any declared child (it used to
+  run the child lambdas first), lists the subtree once with each store's
+  node (`@StoreInternalApi StoreTree.internalLeaves`, instead of one
+  `nodeOf` walk per store), and reports a store whose `hydratorOrNull()`
+  throws as `Disposed` only when it is disposed — anything else is
+  `Ran(Failed(thrown))`, never `NoHydrator`.
 
 ### Added
 
 - **`StoreTree.hydrateAll(node, scope, awaitSettled)`** (experimental,
   issue #21 plan PR 21-8): hydrate every live store of the subtree at
   `node` of a store's `tree` — the receiver's own hydrator included when
-  `node` is its own (the default) — after materializing declared children,
+  `node` is its own (the default) — after the inside-an-entry refusal,
+  materializing declared children through one listing,
   in `lockOrderKey` order (the receiver first whenever it was constructed
   before its children, as children built on first use always are): each
   hydrator `hydrate`d on `scope` (else its store's `Store.scope`), every

@@ -13,13 +13,20 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.displayName
 import com.vynatix.holdfast.internalAttachment
+import kotlinx.atomicfu.atomic
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 
 /**
- * The one [StoreTree] of [owner], kept on its tree state ([attachment]) and
- * created with its value machinery: the host and the [TreeValue] (which
- * registers its membership listener on [owner]'s registry now and captures
- * nothing until the value is used). Every observation path resolves the
- * value through [observableBacking].
+ * The one [StoreTree] of [owner], kept on its tree state ([attachment]).
+ * Its value machinery — the host store and the [TreeValue], which registers
+ * the membership listener on [owner]'s registry — is created lazily, on the
+ * first [value] read or observation ([observableBacking]) or by the
+ * `@StoreInternalApi` seams that need it (`internalHost()`,
+ * `internalSettleNow()`): a handle used only for structure (`snapshot`,
+ * `stores`, `middlewares`, the harness's `track`, `hydrateAll`) builds no
+ * host and registers no listener. Every observation path resolves the value
+ * through [observableBacking].
  */
 @Suppress("TooManyFunctions") // The tree DSL is intentionally broad; each member is one primitive.
 internal class StoreTreeImpl(
@@ -31,16 +38,47 @@ internal class StoreTreeImpl(
 
     private val registry = attachment.registry
 
-    val host = TreeValueHost(owner)
+    /** Guards the creation of [valueRef] against [onOwnerDisposed]; taken before the registry lock, never under it. */
+    private val valueLock = SynchronizedObject()
 
-    val treeValue = TreeValue(owner, node, registry, host)
+    private val valueRef = atomic<TreeValue?>(null)
+
+    /** Set by [onOwnerDisposed] under [valueLock]: no value machinery is created from then on. */
+    private var ownerDisposed = false
+
+    /** The value machinery, if anything created it yet; never creates it. */
+    val treeValueOrNull: TreeValue? get() = valueRef.value
+
+    /**
+     * The value machinery, created on first need: the host store, then the
+     * [TreeValue] (registering its listener on [owner]'s registry).
+     *
+     * @throws IllegalStateException if [owner] is disposed and it was never created.
+     */
+    fun treeValue(): TreeValue =
+        valueRef.value ?: synchronized(valueLock) {
+            valueRef.value ?: run {
+                check(!ownerDisposed) { "store disposed" }
+                owner.checkNotDisposed()
+                val host = TreeValueHost(owner)
+                var created = false
+                try {
+                    TreeValue(owner, node, registry, host).also {
+                        created = true
+                        valueRef.value = it
+                    }
+                } finally {
+                    if (!created) host.dispose()
+                }
+            }
+        }
 
     override val parent: StoreNode? get() = node.parent
 
-    override val value: TreeSnapshot get() = treeValue.read()
+    override val value: TreeSnapshot get() = treeValue().read()
 
     override val observableBacking: MutableState<TreeSnapshot>
-        get() = treeValue.node().backing
+        get() = treeValue().node().backing
 
     override val children: List<StoreNode>
         get() {
@@ -49,11 +87,14 @@ internal class StoreTreeImpl(
             return registry.liveChildNodes()
         }
 
-    override fun stores(node: StoreNode): List<Store<*>> {
+    override fun stores(node: StoreNode): List<Store<*>> = leaves(node).map { it.second }
+
+    /** [stores] with each store's node, from one materialization and one listing. */
+    fun leaves(node: StoreNode): List<Pair<LeafNode, Store<*>>> {
         owner.checkNotDisposed()
         requireInSubtree(node)
         materializeSubtree(this.node)
-        return liveLeavesUnder(this.node, node).map { it.second }
+        return liveLeavesUnder(this.node, node)
     }
 
     override fun nodeOf(store: Store<*>): LeafNode? {
@@ -115,13 +156,20 @@ internal class StoreTreeImpl(
     override fun removeMiddleware(middleware: TreeMiddleware): Boolean = removeTreeMiddleware(owner, middleware)
 
     /**
-     * Step 6 of [owner]'s tree dispose: stop the value, then dispose the
+     * Step 6 of [owner]'s tree dispose (nothing to do when no value machinery
+     * was ever created): stop the value, then dispose the
      * host where no lock of [owner]'s is held — when the open settle scope
      * settles, else after the holder of [owner]'s transaction lock on this
      * thread releases it (every holder drains the store's post-commit queue
      * after releasing), else inline.
      */
     fun onOwnerDisposed(disposing: Store<*>) {
+        val treeValue =
+            synchronized(valueLock) {
+                ownerDisposed = true
+                valueRef.value
+            } ?: return
+        val host = treeValue.host
         treeValue.disposeSync()
         when {
             SettleScopes.current()?.enqueue(HostDisposeTask(host)) == true -> Unit

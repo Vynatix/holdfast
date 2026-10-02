@@ -80,7 +80,7 @@ class TreeValueCoalescingTest {
         val parent = TreeValueCoalescingParent()
         val tree = parent.tree
         val hostLog = TreeValueCoalescingHostLog<TreeValueHost>()
-        (tree as StoreTreeImpl).host.middlewares(hostLog)
+        (tree as StoreTreeImpl).treeValue().host.middlewares(hostLog)
         val seen = tree.seen()
         assertEquals(1, seen.size, "the baseline, read after subscribing")
         assertEquals(1, tree.internalSettleCount, "the initial capture")

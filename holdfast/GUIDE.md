@@ -1048,9 +1048,9 @@ cd.dispose()
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
 | `store { }`/`stores { }` declaration, a child's registration when it attaches, `KeyedBranch.create` registration, a store's detach and its dispose's release of its children, `tree.children`/`stores`/`nodeOf`, `KeyedBranch.get`/`entries`, every subtree listing | child registry lock (per store) | yes | Taken after any store's `transactionLock` (a store disposing from inside its own action detaches from its parent's registry under it) and after a keyed entry's construction lock. One at a time: a listing takes a parent's, releases it, then a child's. Nothing is taken under it, and no store, lambda or listener is called while it is held — callers copy, release, then touch stores (§17) |
-| First read of a `store { }`/`stores { }` child (materialization) | the child declaration's latch | no — re-entering it is a cycle, which throws | Shared with state initializers' latches (one cycle detector across both). The lambda runs outside every tree lock, holding its latch plus whatever the reading thread already holds |
+| First read of a `store { }`/`stores { }` child (materialization) | none while the lambda runs (a per-thread mark only); the declaration's attach lock across attach phases 3–7 | the mark: no — re-entering it on the same thread is a cycle, which throws | The lambda runs holding no lock or latch of the tree's — only what the reading thread already holds — and racing first reads may each run it. The first to claim the declaration holds its attach lock across the attach (no user code there); another reader parks on it, then takes the winner's child |
 | Linking a child to its parent; releasing a disposed parent's children | tree structure lock (one per process) | yes | Held only for the parent link, the cycle check, the node's fields and the ancestor chain: never with a child registry lock, never across a lambda, a factory, a listener or a middleware sync |
-| `KeyedBranch.create`/`getOrCreate` factory | per-entry construction lock | yes | Held across the factory and the attach; a `getOrCreate` on another thread parks on it, a same-thread re-entry is a cycle error (§17.2) |
+| `KeyedBranch.create`/`getOrCreate` factory | none while the factory runs (a per-thread mark only); the per-entry construction lock across the attach | yes | Held only by the creator whose store claimed the key, from the claim through the attach (no user code there); a lookup or losing `getOrCreate` on another thread parks on it. A same-thread re-entry of the factory for its own key is a cycle error (§17.2) |
 | `tree.middlewares(...)`/`removeMiddleware` and the ring sync of a store that attaches or detaches | a store's tree install lock, then each member's sync lock in turn | yes | The install lock guards only the installing store's own list; a member's sync lock is taken alone, never nested with another's or under a registry lock, and holds that member's outer middleware ring lock while it replaces the ring (§17.9) |
 
 ### 10.2 Lock ordering
@@ -1090,8 +1090,10 @@ left. Initializers waiting for each other's latches in a cycle — on one
 thread or across threads — are detected and throw instead of deadlocking.
 
 **The tree's host locks** (§17.8). Every store's `tree` handle hosts its
-value on a private store of its own, created with the handle — one host per
-handle, so one per value in use. That store's `transactionLock` — a host
+value on a private store of its own, created lazily with the value — on the
+first read or observation of that store's `tree.value`, never by
+`snapshot()`, `stores`, `middlewares`, `track(tree)` or `hydrateAll` — so
+one host per value in use. That store's `transactionLock` — a host
 lock — is taken only by a settle of the value and by the host's dispose. A
 settle is a top-level action on the host that runs after the entry being
 settled has released every store lock it took, or inline where a change
@@ -3702,7 +3704,7 @@ fun useTheTree() {
 - **Declared at construction, built on first use.** A `store { }` or
   `stores { }` declaration registers a child entry when the property binds
   — in the parent's constructor, or an `object`'s initializer — and runs
-  nothing. The lambda runs once: on the property's first read, or when a
+  nothing. The lambda runs on the property's first read, or when a
   tree operation needs the subtree (`tree.children`, `stores`, `nodeOf`,
   `snapshot`, `restore`, `reset`, `decode`, `verifyPersistedNames`,
   `middlewares`, the first read of the tree's value, `hydrateAll`,
@@ -3711,9 +3713,11 @@ fun useTheTree() {
   once a tree value at or above the child is in use (read or observed),
   the settle that follows the attach captures the new store, which
   materializes its never-read states as `snapshot()` does (§17.8).
-  Concurrent first reads run
-  the lambda once and all get the same store; a lambda that throws leaves
-  the child unbuilt, and the next read runs it again. A keyed branch exists
+  Concurrent first reads may EACH run the lambda: the first result to
+  attach wins, every reader gets that one store, and each other run's
+  stores — those built during that run that nothing else holds — are
+  disposed, never attached or announced. A lambda that throws leaves the
+  child unbuilt, and the next read runs it again. A keyed branch exists
   from its declaration on; its factory runs per key (§17.2).
 - **What a child can be.** `store { }` takes any `Stateful` and attaches
   its `owningStore`: a store, or an inline `object : NodeStore(), Draft {
@@ -3735,7 +3739,9 @@ fun useTheTree() {
   store its own ancestor fails naming the path; so does a child lambda
   that returns a disposed store, and a group that lists a store twice or
   lists a disposed one. A failure before the child attaches leaves nothing
-  attached, and the next read retries.
+  attached, and the next read retries; when it comes after the lambda
+  returned, the stores that run built (and nothing else holds) are
+  disposed — a store that existed before the run never is.
 - **Names come from the program, or from pins.** A `store { }` child is
   named by its property (`NameOrigin.Property`) or by
   `store(named = "prefs-v2") { … }` (`Pinned`). A group is named by its
@@ -3747,8 +3753,10 @@ fun useTheTree() {
   (`Key`). A store with no parent — a `tree`'s receiver that nobody
   declared, or a subtree root — is named by its class (`App`). Sibling
   names must be unique, which the declaration checks when the property
-  binds; two group leaves with one name, or a listed class without a
-  simple name (anonymous, local), need a pin. `StoreNode.nameOrigin`
+  binds; two group leaves of different classes with one name, or a listed
+  class without a simple name (anonymous, local), need a pin — and two
+  stores of the SAME class cannot be pinned apart (a pin names a class),
+  so declare them as separate `store { }` children. `StoreNode.nameOrigin`
   records where a name came from; the persisted-name self-check reads it
   (§17.7).
 - **Lookups take nodes and stores, never strings.** `App.tree.children`
@@ -3761,20 +3769,29 @@ fun useTheTree() {
   Any store's own node is `store.tree.node`, and `store.tree.parent` is the
   node it hangs under (`null` for a subtree root). A `tree` member given a
   node outside the receiver's subtree throws `IllegalArgumentException`.
-- **Cycles throw, they never deadlock.** A child declaration and a state
-  initializer share one latch graph: a child lambda that reads the
-  property it is building — directly, or through a state initializer or
-  another child — is a cycle, on one thread or across threads, and throws
-  ("Materialization cycle: …", naming every declaration and initializer
-  in order). A child lambda that blocks on another store's action or on a
-  keyed construction is outside that detection: do not open an action on
-  a store another thread may hold while materializing the same child.
-- **The lambda is ordinary code.** It runs outside every tree lock and
-  outside any transaction, so a child's constructor may run actions,
-  register effects and install middleware. A child first read inside a
-  state initializer, a `migrate` or a derived state's compute runs there,
-  where every write is refused: a constructor that writes fails in that
-  case.
+- **Cycles throw, they never deadlock.** A child lambda (and a keyed
+  factory) runs holding NO lock or latch: the reading thread only marks it
+  as running. A lambda that needs the property it is building on the same
+  thread — directly, or through a state initializer, another child or a
+  keyed factory — is a cycle and throws ("Materialization cycle: …",
+  naming every declaration, factory and initializer in order). Across
+  threads nothing waits on a lambda, so a mutual need cannot hang: each
+  thread runs the other declaration's lambda itself and meets its own
+  mark. State initializers keep their latch (and their cross-thread cycle
+  report).
+- **The lambda is ordinary code, run on the reading thread.** It holds
+  nothing of the tree's — only what that thread already holds — so a
+  child's constructor may run actions on any store (the parent included),
+  register effects and install middleware, even while another thread
+  reads the same child from inside one of the parent's actions. Inside an
+  action the lambda runs IN that action: it sees the action's uncommitted
+  writes. Attaching is structural, not transactional: a rollback of that
+  action does not undo it. A child first read inside a state initializer,
+  a `migrate` or a derived state's compute inherits that no-write region:
+  a constructor that opens an action or writes fails there (the
+  declaration stays retryable) — first-read such children outside that
+  code. Because racing first reads may each run it, keep side effects
+  other than building the child out of it.
 
 ### 17.2 Keyed stores: the factory is declared once
 
@@ -3785,25 +3802,30 @@ answers the live store for the key, or creates it. The store class is an
 ordinary store — no token, no constructor argument for the tree — and a
 `ThreadStore(id)` constructed anywhere else is simply in no tree.
 
-- **Liveness is the factory call.** A keyed store is live — found by
+- **Liveness is the attach.** A keyed store is live — found by
   `threads[key]`, `entries`, `tree.stores`, captures, the value, reset and
   tree middleware — once the factory has returned it and it attached.
-  Until then it is invisible to every other thread: a racing `create` for
-  the same key fails with "already exists" (use `getOrCreate` to share
-  one), a `getOrCreate` on another thread parks until the construction
-  ends, and one from inside the factory constructing that key is a cycle
-  error. The construction ends only after the attach has synced the new
-  store's tree middleware and told the membership listeners, so
-  `threads[key]`, `entries` and `getOrCreate` on another thread never hand
-  out a store those do not cover yet (they park for that moment); a listing
-  (`tree.stores`, a capture) may include it from its registration on, a
-  moment earlier.
-- **A failing factory leaves no entry.** A throwing factory, or one that
-  returns a store of another class, a disposed store, or a store that
-  already has a parent: the reservation is dropped, no listener hears of
-  it, and a retry runs the factory again. The tree disposes nothing and
-  keeps no reference to a store it refused; such a store is the factory's
-  to dispose.
+  The factory runs on the calling thread holding no lock of the tree's
+  (like a child lambda, §17.1: inside an action it sees that action's
+  uncommitted writes, and a rollback does not undo the attach), so racing
+  creators of one key may each run it: the first store to claim the key
+  wins, `getOrCreate` on every other thread returns that store, a racing
+  `create` fails with "already exists" (use `getOrCreate` to share one),
+  and each loser disposes the store its own run built — never attached,
+  never announced. A factory that needs its own key again on the same
+  thread is a cycle error. The winner's attach ends only after it has
+  synced the new store's tree middleware and told the membership
+  listeners, so `threads[key]`, `entries` and `getOrCreate` on another
+  thread never hand out a store those do not cover yet (they park for
+  that moment, which runs no user code); a listing (`tree.stores`, a
+  capture) may include it from its registration on, a moment earlier.
+- **A failing factory leaves no entry.** A throwing factory leaves no
+  entry and no listener hears of it; whatever it built before throwing is
+  its own. A factory that returns a store of another class, a disposed
+  store, or a store that already has a parent — or whose parent disposed
+  meanwhile — fails the call, and the store that run built is disposed
+  (never a store that existed before the run, nor one another parent
+  holds). Either way a retry runs the factory again.
 - **Factory code is ordinary store code.** A constructor may run an
   `action` on the new store; inside a Strict `atomic` frame it may not (the
   new store is not enrolled), exactly as outside a tree. A factory may
@@ -3818,8 +3840,12 @@ ordinary store — no token, no constructor argument for the tree — and a
   that throws fails `create`/`getOrCreate` with an `IllegalStateException`
   naming the parent and the branch, never the key.
 - **Nothing in the tree opens a transaction.** `create`, lookups,
-  materialization and `dispose` take only the tree's own locks (§10.1), so
-  they work from inside actions, frames and observers.
+  materialization and `dispose` take only the tree's own locks (§10.1),
+  and none of them is held while a factory or child lambda runs, so they
+  work from inside actions, frames and observers. `threads[key]`,
+  `entries` and `tree.children` are not plain field reads: they may park
+  for a moment (another thread finishing an attach), and `children` runs
+  the child lambdas not run yet.
 
 ### 17.3 Dispose and detach
 
@@ -4227,10 +4253,18 @@ fun watchTheTree() {
   window the changed stores are read in.
 - **Every store has its own value; each costs what it follows.** Any
   store's `tree` is a value over that store's subtree. A value costs
-  nothing until it is read or observed. Once it is, it follows every store
-  of its subtree, so a store under D materialized values is recaptured D
-  times per commit — captures are reused per value through its previous
-  tree, never across values. Read or observe the value of the store whose
+  nothing until it is read or observed: no host store, no listener, no
+  capture — structural calls (`snapshot()`, `stores`, `middlewares`,
+  `track(tree)`, `hydrateAll`) build none of it. Once it is read, it
+  follows every store of its subtree: each materialized ancestor value
+  recomputes once per outermost entry that commits below it, and each such
+  recompute lists that ancestor's whole subtree and checks every store's
+  cut stamp — O(subtree) per ancestor even when one store moved — then
+  recaptures the stores whose stamp moved. So a commit under a chain of d
+  ancestors whose values are all read costs O(N·d) for a subtree of N
+  stores, and a store under D materialized values is recaptured D times
+  per commit: captures are reused per value through its previous tree,
+  never across values. Read or observe the value of the store whose
   subtree you need, not one at every level of a deep tree.
 - **When a read is fresh.** The first read or observation builds the
   value (materializing declared children, and running never-read
@@ -4269,8 +4303,10 @@ fun watchTheTree() {
   answering after the receiver is disposed): `internalSettleCount`,
   `internalCaptureCount` (store captures, so reuse shows; the first settle
   captures the receiver too) and `internalCutRetryCount`; `internalHost()`
-  (the host store, never a member of any tree, created with the handle) and
-  `internalSettleNow()` (run a queued recompute now, outside every entry).
+  (the host store, never a member of any tree, created lazily with the
+  value — this call creates it too, so a test can install host middleware
+  before the first read) and `internalSettleNow()` (run a queued recompute
+  now, outside every entry).
 
 ### 17.9 Tree middleware
 
@@ -4387,7 +4423,10 @@ fun testTheTree() =
   `TransactionResult.Error`s. `tree.root` is the receiver store.
 - **The tree timeline.** `TreeEvent(node, store, phase, transaction, cause,
   timestamp)`, in observation order across the tree; `events(node)` narrows
-  to the subtree at a node (a store's own events and its descendants');
+  to the subtree at a node (a store's own events and its descendants'),
+  judged by where each event's store sat when the event was recorded — a
+  store released since (its parent disposed) keeps its earlier events
+  under its former ancestors;
   `committedFrameIds(node)` lists the frames committed in that subtree (a
   frame vetoed on its last participant committed nowhere);
   `shouldCommitTogether(node)`/`shouldNotCommitTogether(node)` judge
@@ -4396,8 +4435,9 @@ fun testTheTree() =
   committing with its children. A `Secret` never reaches a tree event.
 - **Teardown.** The store recorders come off, then, unless
   `resetAtTeardown = false`, the receiver and its subtree are reset as one
-  frame — the receiver's own states included — so the next test finds the
-  initial values. The tree middleware is still installed then, so a vetoed
+  frame — the RECEIVER'S OWN STATES included, not only its descendants',
+  and every hydrator in it, the receiver's too, back to `Detached` — so the
+  next test finds the initial values. The tree middleware is still installed then, so a vetoed
   reset fails the test naming the store and the veto (unless the body
   already failed); a store disposed in the body is skipped; then that
   middleware comes off. Every middleware the test installed stays. A store
@@ -4468,8 +4508,9 @@ suspend fun hydrateTheTree() {
   (`Feeds`), since nobody declared it.
 - **Where it may run.** Outside every entry: inside an action, an `atomic`
   frame, a `suspendAction` or `suspendAtomic` body of any store it fails
-  before touching a store, for the reasons `Hydrator.hydrate` gives
-  (§16.7). It throws on a disposed receiver and on a node outside the
+  before touching a store — before the listing materializes a single
+  child — for the reasons `Hydrator.hydrate` gives (§16.7). The subtree is
+  listed once, each store with its node. It throws on a disposed receiver and on a node outside the
   receiver's subtree. A cancellation propagates at once; the refreshes
   already launched keep running on their scopes. The report names nodes
   and outcomes, never a value.

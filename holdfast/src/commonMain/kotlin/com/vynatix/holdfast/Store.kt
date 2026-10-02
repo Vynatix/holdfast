@@ -21,6 +21,14 @@ import kotlin.uuid.Uuid
 private val storeLockOrderKeyGen = atomic(0L)
 
 /**
+ * The [Store.lockOrderKey] of the store constructed last in this process.
+ * Read before running user code that may build stores (a tree child lambda,
+ * a keyed factory): a store it returns whose key is greater was constructed
+ * during that run.
+ */
+internal fun lastStoreLockOrderKey(): Long = storeLockOrderKeyGen.value
+
+/**
  * One store's middleware hooks, pre-bound to a frame root transaction. Handed
  * out by [Store.internalFrameMiddlewareSession] so `atomic(...)` and
  * `:holdfast-coroutines.suspendAtomic` can drive per-store middleware without

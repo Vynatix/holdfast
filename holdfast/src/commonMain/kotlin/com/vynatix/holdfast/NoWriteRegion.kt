@@ -195,18 +195,19 @@ internal fun computeWriteMessage(
         "make the write in the action that changes the sources, or compute that value as a derived state too."
 
 /**
- * The cycle message for [latched], which this thread already holds (or, for
- * a state `reset()` re-runs, is re-running). Rendered from the latches this
- * thread holds ([MaterializingStack]), else — for a reset re-run, which holds
- * no latch — from its stack of running initializers. Keeps the
+ * The cycle message for [latched], which this thread already runs — holding
+ * its latch, marked through `InitializerGraph.runMarked`, or (a state
+ * `reset()` re-runs) re-running it. Rendered from the steps this thread runs
+ * ([MaterializingStack]), else — for a reset re-run, which neither holds nor
+ * marks — from its stack of running initializers. Keeps the
  * "State initializer cycle" wording when every element is a state
  * declaration; a chain through tree child declarations is a
  * "Materialization cycle".
  */
-internal fun sameThreadCycleMessage(latched: Latched): String {
+internal fun sameThreadCycleMessage(latched: CycleStep): String {
     val held = MaterializingStack.stack()
-    val stack = if (latched in held) held else NoWriteRegion.stack()
-    val from = stack.indexOf(latched)
+    val stack: List<CycleStep> = if (held.any { it == latched }) held else NoWriteRegion.stack()
+    val from = stack.indexOfFirst { it == latched }
     val chain = (if (from >= 0) stack.subList(from, stack.size) else listOf(latched)) + latched
     if (chain.all { it is StateDeclaration<*> }) {
         return "State initializer cycle: ${chain.render()}. Each initializer reads the next state before its own " +
@@ -222,8 +223,8 @@ internal fun sameThreadCycleMessage(latched: Latched): String {
 internal fun crossThreadCycleMessage(cycle: List<Latched>): String {
     val mine = cycle.last()
     val stack = MaterializingStack.stack()
-    val from = stack.indexOf(mine)
-    val here = if (from >= 0) stack.subList(from, stack.size) else listOf(mine)
+    val from = stack.indexOfFirst { it == mine }
+    val here: List<CycleStep> = if (from >= 0) stack.subList(from, stack.size) else listOf(mine)
     val chain = here + cycle
     if (chain.all { it is StateDeclaration<*> }) {
         return "State initializer cycle across threads: ${chain.render()}. This thread is initializing " +
@@ -240,9 +241,9 @@ internal fun crossThreadCycleMessage(cycle: List<Latched>): String {
 }
 
 /** A state declaration by its qualified name (the historical wording); anything else by its own description. */
-private fun Latched.nameForCycle(): String = (this as? StateDeclaration<*>)?.qualifiedName ?: describeForCycle()
+private fun CycleStep.nameForCycle(): String = (this as? StateDeclaration<*>)?.qualifiedName ?: describeForCycle()
 
-private fun List<Latched>.render(): String =
+private fun List<CycleStep>.render(): String =
     if (all { it is StateDeclaration<*> }) {
         joinToString(" → ") { it.nameForCycle() }
     } else {

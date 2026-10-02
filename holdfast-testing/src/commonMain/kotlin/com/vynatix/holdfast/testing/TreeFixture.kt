@@ -16,9 +16,11 @@ import com.vynatix.holdfast.tree.StoreTree
  * declared children not read yet. Idempotent by receiver identity (a second
  * call answers the same handle, ignoring its arguments). At teardown the
  * store recorders come off, then, with [resetAtTeardown], the receiver and
- * its subtree are reset as one frame — the receiver's own states included,
- * with the tree middleware still installed, so a vetoed reset names its
- * store — and then that middleware comes off; every middleware the test
+ * its subtree are reset as one frame — THE RECEIVER'S OWN STATES TOO, not
+ * only its descendants', and every hydrator in it, the receiver's included,
+ * goes back to Detached (`reset()` does that to a hydrated store) — with
+ * the tree middleware still installed, so a vetoed reset names its store —
+ * and then that middleware comes off; every middleware the test
  * installed stays, and no store is ever disposed. A store still held by
  * un-joined work when teardown runs is re-probed for a bounded time, then
  * skips the reset and fails the test naming the store — pass

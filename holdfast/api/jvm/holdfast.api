@@ -1056,6 +1056,8 @@ public final class com/vynatix/holdfast/tree/TreeInternalsKt {
 	public static final fun getInternalCutRetryCount (Lcom/vynatix/holdfast/tree/StoreTree;)J
 	public static final fun getInternalSettleCount (Lcom/vynatix/holdfast/tree/StoreTree;)J
 	public static final fun internalHost (Lcom/vynatix/holdfast/tree/StoreTree;)Lcom/vynatix/holdfast/Store;
+	public static final fun internalLeaves (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public static synthetic fun internalLeaves$default (Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/tree/StoreNode;ILjava/lang/Object;)Ljava/util/List;
 	public static final fun internalSettleNow (Lcom/vynatix/holdfast/tree/StoreTree;)Lcom/vynatix/holdfast/tree/TreeSnapshot;
 }
 

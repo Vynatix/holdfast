@@ -69,8 +69,21 @@ internal class TreeValue(
      */
     private val leafStores = HashMap<LeafNode, Store<*>>()
 
-    /** Attach (`true`) and detach events that arrived before the node existed; replayed once it does. */
+    /**
+     * Attach (`true`) and detach events that arrived before the node existed;
+     * replayed once it does. A detach is recorded only while a seed is in
+     * progress ([seeding]); before that it only cancels the store's pending
+     * attach, so churn before the first read leaves nothing behind.
+     */
     private var pendingEdges: MutableList<Pair<Store<*>, Boolean>>? = ArrayList()
+
+    /**
+     * Seeds in progress: counted up before a seed lists the live stores and
+     * down once its node replayed [pendingEdges] (or lost the race). While
+     * it is above zero, a listing may already have seen a store that leaves,
+     * so the leave is recorded for the replay.
+     */
+    private var seeding = 0
 
     /** Set by [disposeSync]: a membership event delivered after it is refused, and nothing is held. */
     private var disposed = false
@@ -131,12 +144,18 @@ internal class TreeValue(
         added: Boolean,
     ): DerivedStateNode<TreeSnapshot>? {
         val pending = pendingEdges ?: return nodeRef.value
-        // Before the node exists: a leave cancels the store's pending join and
-        // is itself recorded, because the seed's listing may already have
-        // listed the store (it joined before this value's listener existed,
-        // or before the leave): the replay removes that edge.
-        if (!added) pending.removeAll { it.first === store }
-        pending += store to added
+        // Before the node exists: a leave cancels the store's pending join.
+        // It is itself recorded only while a seed is in progress, whose
+        // listing may already have listed the store (it joined before this
+        // value's listener existed, or before the leave): the replay removes
+        // that edge. With no seed in progress, the next seed lists after the
+        // leave and never sees the store.
+        if (added) {
+            pending += store to true
+        } else {
+            pending.removeAll { it.first === store }
+            if (seeding > 0) pending += store to false
+        }
         return null
     }
 
@@ -153,34 +172,53 @@ internal class TreeValue(
             node.removeSourceStoreQuietly(store)
         }
 
+    /** Membership events recorded for the node's replay (none once it is seeded); for tests. */
+    val pendingEdgeCount: Int get() = synchronized(edgeLock) { pendingEdges?.size ?: 0 }
+
     /** The derived node, created on first use: the first capture of the subtree, outside every lock of ours. */
     fun node(): DerivedStateNode<TreeSnapshot> = nodeRef.value ?: seed()
 
     private fun seed(): DerivedStateNode<TreeSnapshot> {
         owner.checkNotDisposed()
         materializeSubtree(ownerNode)
-        val built = buildNode()
-        if (!nodeRef.compareAndSet(null, built)) {
-            // Another thread seeded first; its node follows every store.
-            built.dispose()
-            return checkNotNull(nodeRef.value)
-        }
-        // Replayed under the edge lock, so a later event for the same store
-        // applies after its replay, never before.
-        val replayed =
-            synchronized(edgeLock) {
-                val replay = pendingEdges.orEmpty().also { pendingEdges = null }
-                replay.count { (store, added) -> applyEdgeLocked(built, store, added) } > 0
+        // Counted before the listing, so a leave from here on is recorded.
+        synchronized(edgeLock) { seeding++ }
+        var counted = true
+        try {
+            val built = buildNode()
+            if (!nodeRef.compareAndSet(null, built)) {
+                // Another thread seeded first; its node follows every store.
+                built.dispose()
+                return checkNotNull(nodeRef.value)
             }
-        if (replayed) built.recomputeForSourceStores()
-        // Disposed while seeding: stop the node at once, keeping its first tree readable.
-        if (synchronized(edgeLock) { disposed }) built.dispose()
-        return built
+            // Replayed under the edge lock, so a later event for the same store
+            // applies after its replay, never before.
+            val replayed =
+                synchronized(edgeLock) {
+                    val replay = pendingEdges.orEmpty().also { pendingEdges = null }
+                    counted = false
+                    endSeedLocked()
+                    replay.count { (store, added) -> applyEdgeLocked(built, store, added) } > 0
+                }
+            if (replayed) built.recomputeForSourceStores()
+            // Disposed while seeding: stop the node at once, keeping its first tree readable.
+            if (synchronized(edgeLock) { disposed }) built.dispose()
+            return built
+        } finally {
+            if (counted) synchronized(edgeLock) { endSeedLocked() }
+        }
+    }
+
+    /** Under [edgeLock]: one seed ended; with none left, the recorded leaves no listing can still need go. */
+    private fun endSeedLocked() {
+        seeding--
+        if (seeding == 0) pendingEdges?.removeAll { !it.second }
     }
 
     private fun buildNode(): DerivedStateNode<TreeSnapshot> {
         while (true) {
-            val live = liveStores()
+            // The receiver and every live store under it, receiver first.
+            val live = liveLeavesUnder(ownerNode, ownerNode).map { it.second }.filter { !it.isDisposed }
             val attempt =
                 runCatching {
                     host.derivedStateOverStores(VALUE_NAME, sourceStores = live) { compute() }
@@ -192,20 +230,23 @@ internal class TreeValue(
         }
     }
 
-    /** The receiver and every live store under it, receiver first. */
-    private fun liveStores(): List<Store<*>> {
-        val listed = liveLeavesUnder(ownerNode, ownerNode)
-        return listed.map { it.second }.filter { !it.isDisposed }
-    }
-
     /** The recompute: ONE consistent capture of the subtree, reusing the last one's unmoved captures. */
     private fun compute(): TreeSnapshot {
+        // Cleared BEFORE the capture, so a change landing during it marks the
+        // value pending again; set back when the capture fails, so a later
+        // read never takes the stale backing for settled.
         structuralPending.value = false
         val previous = lastTree.value
         // Disposed meanwhile: the value freezes at the last tree rather than failing the recompute.
         if (owner.isDisposed && previous != null) return previous
         val stats = CaptureStats()
-        val tree = captureTree(ownerNode, ownerNode, SnapshotScope.All, previous, stats)
+        var captured = false
+        val tree =
+            try {
+                captureTree(ownerNode, ownerNode, SnapshotScope.All, previous, stats).also { captured = true }
+            } finally {
+                if (!captured) structuralPending.value = true
+            }
         lastTree.value = tree
         counters.settles.incrementAndGet()
         counters.captures.addAndGet(stats.captured)

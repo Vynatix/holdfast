@@ -70,20 +70,27 @@ private fun <T : Any> create(decl: StateDeclaration<T>): MutableState<T> {
 }
 
 /**
- * Something whose one-time work runs behind a latch of an [InitializerGraph]:
- * a state declaration (its initializer) or a tree child declaration (its
- * child lambda). The graph's lock guards [latchOwner]; [latch] is held by the
- * one thread running the work.
+ * One step of a materialization chain as a cycle message names it: a state
+ * declaration whose initializer runs behind its latch ([Latched]), or a tree
+ * child declaration or keyed construction whose user code runs holding
+ * nothing, marked on this thread only ([InitializerGraph.runMarked]).
  */
-internal interface Latched {
+internal interface CycleStep {
+    /** How a cycle message names this step ("state initializer 'App.x'"). */
+    fun describeForCycle(): String
+}
+
+/**
+ * Something whose one-time work runs behind a latch of an [InitializerGraph]:
+ * a state declaration (its initializer). The graph's lock guards
+ * [latchOwner]; [latch] is held by the one thread running the work.
+ */
+internal interface Latched : CycleStep {
     /** Held by the thread running the work; waiters block on it. */
     val latch: SynchronousMutex
 
     /** The thread holding [latch], or [NO_LATCH_OWNER]. Guarded by the graph's lock. */
     var latchOwner: Long
-
-    /** How a cycle message names this latch ("state initializer 'App.x'"). */
-    fun describeForCycle(): String
 
     /** Throw when the work may not run (its store is disposed); checked before every claim. */
     fun checkMayRun()
@@ -92,8 +99,9 @@ internal interface Latched {
 /**
  * The latches of every declaration that shares this graph, and which thread
  * waits for which latch: the wait-for graph that materialization cycles are
- * found in. Every store uses [Process] — a cycle can span stores, and state
- * initializers and tree child declarations — except in tests.
+ * found in. Every store uses [Process] — a cycle can span stores — except in
+ * tests. Tree child declarations and keyed factories take no latch here;
+ * they only mark this thread ([runMarked]).
  *
  * Every ownership change and every wait registration happens under [lock], so
  * the graph is always consistent: a latch's owner holds it until its work
@@ -141,6 +149,29 @@ internal class InitializerGraph(
                 }
             }
             awaitRelease(latched, me)
+        }
+    }
+
+    /**
+     * Run [body] marked on this thread as running [step] — holding NO latch
+     * and no lock: other threads may run the same step concurrently (tree
+     * child lambdas and keyed factories race, and the first to attach
+     * wins). Only a re-entry on this thread — [body] needing [step] again,
+     * directly or through state initializers and other steps — is a cycle,
+     * and throws the same-thread cycle message naming the chain in order.
+     * A cross-thread mutual recursion cannot hang: each thread runs the
+     * other step itself and meets its own mark.
+     */
+    fun <R> runMarked(
+        step: CycleStep,
+        body: () -> R,
+    ): R {
+        if (MaterializingStack.stack().any { it == step }) throw IllegalStateException(sameThreadCycleMessage(step))
+        MaterializingStack.push(step)
+        try {
+            return body()
+        } finally {
+            MaterializingStack.pop(step)
         }
     }
 
@@ -233,29 +264,31 @@ internal class InitializerGraph(
 }
 
 /**
- * The latches this thread holds through [InitializerGraph.hold], innermost
- * on top (`platform/MaterializingLocal`): state declarations and tree child
- * declarations alike, so a cycle message prints an interleaved chain in
+ * The steps this thread is running, innermost on top
+ * (`platform/MaterializingLocal`): the latches it holds through
+ * [InitializerGraph.hold] (state declarations) and the steps it marked
+ * through [InitializerGraph.runMarked] (tree child declarations, keyed
+ * constructions) alike, so a cycle message prints an interleaved chain in
  * order.
  */
 internal object MaterializingStack {
     private class Frame(
-        val latched: Latched,
+        val latched: CycleStep,
         val parent: Frame?,
     )
 
-    fun push(latched: Latched) {
+    fun push(latched: CycleStep) {
         setMaterializingLocal(Frame(latched, currentMaterializingLocal() as Frame?))
     }
 
-    /** Pop [latched]'s frame (the innermost one, as holds nest). */
-    fun pop(latched: Latched) {
+    /** Pop [latched]'s frame (the innermost one, as holds and marks nest). */
+    fun pop(latched: CycleStep) {
         val top = currentMaterializingLocal() as Frame? ?: return
         if (top.latched === latched) setMaterializingLocal(top.parent)
     }
 
-    /** The latches held on this thread, outermost first. */
-    fun stack(): List<Latched> {
+    /** The steps running on this thread, outermost first. */
+    fun stack(): List<CycleStep> {
         val innermostFirst =
             generateSequence(currentMaterializingLocal() as Frame?) { it.parent }
                 .map { it.latched }

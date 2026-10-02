@@ -74,13 +74,33 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   read racing the receiver's `dispose()` answers `Absent` instead of
   throwing. `tree.decode` documents `SnapshotFormatException` and the
   64-level nesting cap.
-- **Issue #21 review — keyed construction.** A `getOrCreate` racing another
-  thread's construction of the same key parks from the moment the key is
-  reserved (the construction lock is held from `reserveOrExisting` on)
-  instead of spinning on the registry before the factory starts; the key
-  is named through the branch's key codec once per call, and a throwing
-  codec fails with an `IllegalStateException` naming the declaring store
-  and branch only.
+- **Issue #21 review (PR #25) — tree materialization, keyed construction
+  and the value.** A child lambda and a keyed factory now run holding NO
+  lock or latch of the tree's: a lambda that opened `parent action { }`
+  while another thread read the child from inside a parent action
+  deadlocked (child latch against `transactionLock`), and so did a keyed
+  factory against a `getOrCreate` inside an action, and a child lambda and
+  a keyed factory needing each other on two threads. Racing first reads
+  and racing creators of one key may each run the lambda/factory; the
+  first result to attach wins and is returned to every caller (`create`
+  losers fail "already exists"), and each loser disposes the stores its
+  own run built — never attached, never announced. A same-thread re-entry
+  throws the cycle message naming the chain; a cross-thread mutual need
+  cannot hang. When an attach fails after the lambda/factory returned
+  (wrong class, a disposed child, the owner disposed meanwhile, a refused
+  group listing), the stores that run built are disposed; a store that
+  existed before the run, or one another tree parent holds, never is. A
+  tree handle builds its host store and value machinery (and registers its
+  membership listener) only on the first value read or observation (or
+  `internalHost()`/`internalSettleNow()`), not for `snapshot`, `stores`,
+  `middlewares`, `track(tree)` or `hydrateAll`; keyed churn before the
+  first read no longer leaves one recorded edge per churned store behind;
+  and a read after a failed recompute is no longer the stale backing. The
+  group naming error for two stores of one class says to declare them as
+  separate `store { }` children (a pin names a class, never an instance).
+  The key is named through the branch's key codec once per call, and a
+  throwing codec fails with an `IllegalStateException` naming the
+  declaring store and branch only.
 
 ### Added
 
@@ -128,19 +148,25 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     { … }` declares a group (`Branch`) of listed stores, and
     `stores<K, S>(keyCodec) { key -> … }` a keyed branch (`KeyedBranch`)
     whose factory is declared once. A declaration registers when the
-    property binds and runs no child code; the lambda runs once, on the
-    property's first read or when a tree operation needs the subtree
-    (concurrent first reads share one run; a throwing lambda leaves the
-    child unbuilt and the next read retries). Child declarations share the
-    latch graph of state initializers: a cycle through child lambdas and
-    initializers, on one thread or across threads, throws ("Materialization
-    cycle: …", naming each in order; an all-initializer cycle keeps its
-    "State initializer cycle" message) instead of deadlocking.
+    property binds and runs no child code; the lambda runs on the
+    property's first read or when a tree operation needs the subtree, on
+    the reading thread, holding no lock or latch of the tree's (inside an
+    action it sees that action's uncommitted writes, and the attach is
+    structural: a rollback does not undo it; inside an initializer, a
+    derived compute or a migrate it inherits that no-write region).
+    Concurrent first reads may each run it; the first result to attach
+    wins and every reader gets it, the losers' freshly built stores
+    disposed; a throwing lambda leaves the child unbuilt and the next read
+    retries. A same-thread cycle through child lambdas, keyed factories and
+    state initializers throws ("Materialization cycle: …", naming each in
+    order; an all-initializer cycle keeps its "State initializer cycle"
+    message); across threads nothing waits on a lambda, so nothing can
+    deadlock.
   - A store has one parent: a second declaration of it fails when it
     materializes, naming both parents, and a declaration that would make a
     store its own ancestor fails naming the path; a lambda returning a
     disposed store and a group listing a store twice or a disposed one fail
-    too, leaving nothing attached. Names come from the property, a pin
+    too, leaving nothing attached and disposing what that run built. Names come from the property, a pin
     (`store(named = …)`, `stores(names = mapOf(Store::class to …))` by exact
     class), a group leaf's class minus `Store`, or a keyed store's encoded
     key, with `NameOrigin` recording which; a store with no parent is named
@@ -156,11 +182,13 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     once the factory returned it and it attached (`get`, `entries` and
     `getOrCreate` on another thread answer it only once the attach has also
     synced its tree middleware and told the listeners, parking until then);
-    a duplicate `create` fails, `getOrCreate` parks on another thread's
-    construction, a
-    same-thread re-entry is a cycle error, and a factory that throws or
-    returns a store of another class, a disposed one or one with a parent
-    leaves no entry (the tree disposes nothing).
+    the factory runs holding no lock, so racing creators may each run it:
+    the first store to claim the key wins, `getOrCreate` everywhere returns
+    it, a losing or duplicate `create` fails, and losers dispose their own
+    run's store; a same-thread re-entry is a cycle error; a factory that
+    throws leaves no entry (what it built is its own), and one that returns
+    a store of another class, a disposed one or one with a parent leaves
+    no entry and has the store its run built disposed.
   - Disposing a store detaches it from its parent and releases its
     children as subtree roots (class-named again, every store and state
     kept); it disposes none of them, and a released child can be declared
@@ -267,8 +295,9 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   T3/T4; GUIDE §17.8, §10.2). `StoreTree` is itself a
   `State<TreeSnapshot>` over the receiver's subtree — a derived state
   following the receiver and every live store under it as wholes (the
-  #20 PR 15 store-level edges), hosted on a private store created with the
-  handle — recomputed as ONE lock-free capture once per outermost `action`,
+  #20 PR 15 store-level edges), hosted on a private store created lazily
+  with the value (first read or observation; structural calls build
+  none) — recomputed as ONE lock-free capture once per outermost `action`,
   `atomic`, `suspendAction`, `suspendAtomic`, `restore` or `reset` that
   changes the subtree, after every lock that entry took is released, and
   published only when the tree differs (full value equality). A commit, an
@@ -284,8 +313,11 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   only the stores whose cut stamp moved and shares the other captures by
   reference (`captureConsistent` gains `previous`/`stats`; a capture's
   `CutStamp` records the states one cut listed and their write counters);
-  every store's `tree` is a value of its own, so a store under D read
-  values is recaptured D times per commit. The value's flows default to
+  every store's `tree` is a value of its own: each materialized ancestor
+  value recomputes once per commit below it and lists its whole subtree,
+  checking every store's cut stamp (O(N·d) per commit for a chain of
+  depth d with every value read), and a store under D read values is
+  recaptured D times per commit. The value's flows default to
   the receiver's `scope`, and a throwing observer or failing recompute
   reaches the receiver's `uncaughtObserverHandler`. Disposing the receiver
   stops following, drops the value's observers, keeps the last tree

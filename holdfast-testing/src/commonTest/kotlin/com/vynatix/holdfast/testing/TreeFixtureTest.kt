@@ -14,6 +14,7 @@ import com.vynatix.holdfast.testing.matcher.shouldCommitTogether
 import com.vynatix.holdfast.testing.matcher.shouldNotCommitTogether
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
+import com.vynatix.holdfast.tree.store
 import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
@@ -48,6 +49,18 @@ private class FxParent : Store<FxParent>() {
 
     val a: FxLeafStore get() = pair.stores[0] as FxLeafStore
     val b: FxLeafStore get() = pair.stores[1] as FxLeafStore
+}
+
+private class FxPlainStore : Store<FxPlainStore>() {
+    val n by state { 0 }
+}
+
+private class FxMidStore : Store<FxMidStore>() {
+    val leaf by store { FxPlainStore() }
+}
+
+private class FxRoot : Store<FxRoot>() {
+    val mid by store { FxMidStore() }
 }
 
 private class CountingConsumer<V : Store<V>> : Middleware<V>() {
@@ -179,6 +192,24 @@ class TreeFixtureTest {
             assertEquals(2, tree.events(parent.tree.node).size)
             assertEquals(0, tree.events(parent.pair).size)
             assertSame(track(k), tree.handle(k), "a former member still answers its handle")
+        }
+
+    @Test
+    fun aReleasedStoresEarlierEventsStayUnderItsFormerAncestors() =
+        storeTest {
+            val root = FxRoot()
+            val tree = track(root.tree)
+            val mid = root.mid
+            val midNode = mid.tree.node
+            val leaf = mid.leaf
+            leaf action { n mutate 1 }
+            // Disposing `mid` releases `leaf` as a subtree root: its parent link is gone today.
+            mid.dispose()
+            assertEquals(null, leaf.tree.parent, "the leaf is a subtree root now")
+            val underMid = tree.events(midNode)
+            assertEquals(listOf("Started", "Completed"), underMid.map { "${it.phase}" }, "judged by where the leaf sat when recorded")
+            assertTrue(underMid.all { it.store === leaf })
+            assertEquals(2, tree.events(root.tree.node).size, "and still under the root")
         }
 
     @Test

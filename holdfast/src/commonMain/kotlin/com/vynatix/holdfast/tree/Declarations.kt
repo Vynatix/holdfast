@@ -153,5 +153,8 @@ private fun declareChild(
     }
     thisRef.checkNotDisposed()
     val attachment = thisRef.treeAttachment()
-    return entry(attachment).also { attachment.registry.declare(it) }
+    return entry(attachment).also {
+        attachment.registry.declare(it)
+        childDeclarationEpoch.incrementAndGet()
+    }
 }

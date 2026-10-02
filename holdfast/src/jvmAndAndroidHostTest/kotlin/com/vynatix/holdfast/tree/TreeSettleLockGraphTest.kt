@@ -58,7 +58,7 @@ private class TreeSettleLockGraphReplayingBridge(
     override fun publish(value: Int): Boolean = true
 }
 
-private val StoreTree.host: TreeValueHost get() = (this as StoreTreeImpl).host
+private val StoreTree.host: TreeValueHost get() = (this as StoreTreeImpl).treeValue().host
 
 /**
  * GUIDE §10.2 for the tree: the host lock is taken only by a settle (and by

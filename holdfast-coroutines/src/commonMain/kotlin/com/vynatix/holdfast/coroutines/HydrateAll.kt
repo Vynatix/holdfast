@@ -8,6 +8,7 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.tree.LeafNode
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.StoreTree
+import com.vynatix.holdfast.tree.internalLeaves
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
@@ -30,9 +31,12 @@ import kotlinx.coroutines.CoroutineScope
  * and does not stop the rest — nothing here throws for a store's failure or
  * its dispose. Idempotent: a hydrated store's hydrator does nothing.
  * Cancellation propagates at once, while the refreshes already launched
- * keep running on their scopes. Lists the subtree through
- * [StoreTree.stores], so declared children not read yet are materialized
- * first.
+ * keep running on their scopes. Lists the subtree once, as
+ * [StoreTree.stores] does, so declared children not read yet are
+ * materialized first — after the inside-an-entry refusal, never before it.
+ * A store whose `hydratorOrNull()` throws is reported
+ * [HydrateAllReport.Outcome.Disposed] when it is disposed, else
+ * [Hydration.Failed] with what it threw.
  *
  * Experimental (issue #21, over issue #20's R8).
  *
@@ -51,29 +55,30 @@ suspend fun StoreTree.hydrateAll(
 ): HydrateAllReport {
     val owner = checkNotNull(this.node.store) { "hydrateAll(): the tree's store is disposed" }
     require(node === this.node || node.isUnder(this.node)) { "node '${node.name}' is not under this tree's store" }
-    // Paired now, not after the run: a store disposed meanwhile leaves the
-    // tree, and `nodeOf` no longer finds its node.
-    val leaves =
-        stores(node)
-            .mapNotNull { store -> nodeOf(store)?.let { LiveLeaf(it, store) } }
-            .sortedBy { it.store.lockOrderKey }
-    // Refused before any store is touched: inside an entry the first store's
-    // gate would wait forever for the transaction that waits for it.
+    // Refused before any store is touched — before the listing materializes
+    // a single child: inside an entry the first store's gate would wait
+    // forever for the transaction that waits for it.
     refuseInsideEntry(owner, "hydrateAll()", ::insideEntryMessage)
+    // One materialization and one listing, each store paired with its node
+    // now, not after the run: a store disposed meanwhile leaves the tree.
+    val leaves =
+        internalLeaves(node)
+            .map { (leaf, store) -> LiveLeaf(leaf, store) }
+            .sortedBy { it.store.lockOrderKey }
     val outcomes = arrayOfNulls<HydrateAllReport.Outcome>(leaves.size)
     val awaited = arrayOfNulls<Hydrator<*>>(leaves.size)
     for ((index, leaf) in leaves.withIndex()) {
         val store = leaf.store
-        val hydrator = runCatching { store.hydratorOrNull() }.getOrNull()
         outcomes[index] =
-            when {
-                store.isDisposed -> HydrateAllReport.Outcome.Disposed
-                hydrator == null -> HydrateAllReport.Outcome.NoHydrator
-                else ->
+            stepOutcome(store, { store.hydratorOrNull() }) { hydrator ->
+                if (hydrator == null) {
+                    HydrateAllReport.Outcome.NoHydrator
+                } else {
                     stepOutcome(store, { hydrator.hydrate(scope ?: store.scope) }) {
                         awaited[index] = hydrator
                         null // Settled, and reported, below.
                     }
+                }
             }
     }
     for ((index, leaf) in leaves.withIndex()) {

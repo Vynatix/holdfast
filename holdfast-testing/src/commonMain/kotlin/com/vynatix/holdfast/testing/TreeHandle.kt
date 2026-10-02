@@ -24,7 +24,9 @@ import kotlinx.atomicfu.locks.synchronized
  *
  * Teardown (see [StoreTestScope]) removes the per-store recorders from the
  * members, then, unless `resetAtTeardown = false`, resets [root] and its
- * subtree as one frame — [root]'s own states included — so the next test
+ * subtree as one frame — [root]'s own states included, and every hydrator
+ * of the subtree, [root]'s too, back to Detached (a reset sends a hydrated
+ * store's hydrator there) — so the next test
  * finds the initial values — with the tree middleware still installed, so a
  * vetoed reset fails the test naming the store and the veto (unless the
  * body already failed); a store disposed in the body is skipped — and only
@@ -92,10 +94,13 @@ class TreeHandle internal constructor(
 
     /**
      * The events of the subtree at [node]: a store's own and its
-     * descendants', or every store's under a group or keyed branch — a store
-     * disposed since still listed under the node it had.
+     * descendants', or every store's under a group or keyed branch — judged
+     * by where each event's store sat WHEN IT WAS RECORDED, so the history
+     * keeps: a store disposed since is still listed under the node it had,
+     * and a store released since (its parent disposed; it is a subtree root
+     * now) keeps its earlier events under its former ancestors.
      */
-    fun events(node: StoreNode): List<TreeEvent> = timeline.filter { it.node.isUnder(node) }
+    fun events(node: StoreNode): List<TreeEvent> = recorder.recordedUnder(node)
 
     /**
      * The [StoreHandle] of [store], tracked with [captureMode] when it joined

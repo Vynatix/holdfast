@@ -33,6 +33,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the track registration race hands its bridge wrappers to the winner (or
   unwraps them when the winner is `Capture.None`) instead of feeding a
   disposed recorder.
+- **Issue #21 review (PR #25).** `TreeHandle.events(node)` keeps history:
+  it filters by the ancestry each event was recorded under, not by
+  today's parent links, so a store released since (its parent disposed)
+  keeps its earlier events under its former ancestors. The `track(tree)`
+  and `TreeHandle` KDoc now say that `resetAtTeardown` resets the
+  receiver's OWN states too and sends every hydrator in the subtree, the
+  receiver's included, back to `Detached`. A `track(tree)` no longer
+  builds the tree value's host store (the core builds it on the first
+  value read only).
 
 ### BREAKING (behavior)
 
@@ -67,8 +76,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its node into the `TreeHandle.timeline` of `TreeEvent`s (`node`, `store`,
   `phase`, `transaction`, `cause`, `timestamp`), in observation order across
   the tree; `events(node)` narrows to the subtree at a node (a store's own
-  events and its descendants'), a keyed store disposed since still listed
-  under its branch. `TreeHandle` exposes `tree` and `root` (the receiver
+  events and its descendants', judged by where each event's store sat when
+  it was recorded), a keyed store disposed since still listed under its
+  branch and a released one under its former ancestors. `TreeHandle` exposes `tree` and `root` (the receiver
   store), `handle(store)`, `group(node)` (a `StoreHandleGroup` of the live
   stores of a subtree), `committedFrameIds(node)` and
   `consumeAllPendingErrors()`; `TreeHandle.shouldCommitTogether(node)`/
@@ -77,7 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its own events, so a parent that took no part in a frame does not pass
   on its children's (a frame vetoed on its last participant committed
   nowhere). Teardown disposes the membership listener, resets the receiver
-  and its subtree as one frame — the receiver's own states included —
+  and its subtree as one frame — the receiver's own states included, and
+  every hydrator in it back to `Detached` —
   (unless opted out or the receiver is disposed) with the recorder still
   installed — so a vetoed reset fails the test naming the store and the
   veto, unless the body already failed; a store disposed in the body is

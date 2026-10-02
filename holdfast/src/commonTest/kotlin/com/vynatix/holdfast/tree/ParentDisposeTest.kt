@@ -88,7 +88,7 @@ class ParentDisposeTest {
         val parent = DsParent()
         val tree = parent.tree
         tree.value
-        val node = (tree as StoreTreeImpl).treeValue.node()
+        val node = (tree as StoreTreeImpl).treeValue().node()
         assertEquals(listOf(parent, parent.left), node.sourceStores)
         parent.dispose()
         parent.dispose()

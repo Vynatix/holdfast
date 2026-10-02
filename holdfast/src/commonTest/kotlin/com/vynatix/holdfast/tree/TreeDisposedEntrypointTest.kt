@@ -101,6 +101,7 @@ class TreeDisposedEntrypointTest {
                 probe.internalAddMembershipListener(object : LeafMembershipListener() {})
             },
             TdeEntrypoint("internalSettleNow (value never read)") { _, tree, _ -> tree.internalSettleNow() },
+            TdeEntrypoint("internalHost (value never read: no host was ever built)") { _, tree, _ -> tree.internalHost() },
             TdeEntrypoint("value (never read)") { _, tree, _ -> tree.value },
             TdeEntrypoint("value observed (never read)") { _, tree, _ -> tree effect { } },
         )
@@ -121,7 +122,6 @@ class TreeDisposedEntrypointTest {
             TdeEntrypoint("removeMiddleware answers false") { _, tree, _ ->
                 check(!tree.removeMiddleware(object : TreeMiddleware() {}))
             },
-            TdeEntrypoint("internalHost") { _, tree, _ -> check(tree.internalHost().isDisposed) },
             TdeEntrypoint("internalSettleCount (its last value)") { _, tree, _ -> check(tree.internalSettleCount == 0L) },
             TdeEntrypoint("owningStore") { probe, _, _ -> check(probe.owningStore === probe) },
             TdeEntrypoint("dispose (idempotent)") { probe, _, _ -> probe.dispose() },
@@ -163,6 +163,7 @@ class TreeDisposedEntrypointTest {
         assertSame(last, tree.internalSettleNow())
         assertEquals(4, tree.value[leafStore.n])
         assertTrue(tree.internalSettleCount > 0L, "the counters answer their last values")
+        assertTrue(tree.internalHost().isDisposed, "a host built before the dispose answers, disposed")
     }
 
     @Test

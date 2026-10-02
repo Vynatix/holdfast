@@ -17,14 +17,26 @@ import kotlin.reflect.KClass
 // `provideDelegate` and runs nothing; the child lambda runs on the first
 // read of the delegate, or when a tree operation needs the subtree
 // (`materializeSubtree`, called first by every public structural entrypoint).
-// It runs behind the entry's latch in the process-wide `InitializerGraph`
-// that state initializers use — so a cycle through child declarations and
-// state initializers, on one thread or across threads, throws instead of
-// deadlocking — and OUTSIDE every lock of the tree and outside any
-// `NoWriteRegion` of its own (a child constructor may open actions); a child
-// first read from inside an initializer, a migrate or a derived compute
-// inherits that caller's region. A throwing lambda publishes nothing, and
-// the next read runs it again.
+//
+// The lambda is ordinary user code run on the reading thread HOLDING NO LOCK
+// OR LATCH of the tree's (only whatever its caller holds: read inside an
+// action, it runs under that action's `transactionLock` and sees its
+// uncommitted writes; read inside a state initializer, a migrate or a
+// derived compute, it inherits that `NoWriteRegion`). So a lambda may open
+// actions on any store, the parent included, while another thread reads the
+// same child from inside an action of the parent: nothing it holds can be
+// waited on by a reader. Racing first reads may each run the lambda; the
+// first to claim the entry (Declared → Constructing under the registry lock)
+// attaches its result through the attach phases, and every other reader
+// returns that winner — disposing what its own run built that nothing else
+// holds (`RunBuilt`). A same-thread re-entry — the lambda needing its own
+// declaration, directly or through another child or a state initializer —
+// is a cycle: it throws the cycle message naming the chain in order
+// (`InitializerGraph.runMarked`, a per-thread mark). A cross-thread mutual
+// recursion cannot hang: each thread runs the other lambda itself and meets
+// its own mark. A throwing lambda publishes nothing, and the next read runs
+// it again. Attaching is structural, not transactional: a rollback of the
+// action the first read ran in does not undo it.
 
 /**
  * The tree's structure lock: held only for parent-edge compare-and-set, the
@@ -37,138 +49,146 @@ internal val treeStructureLock = StoreLock()
 
 /**
  * The child of [entry] (a `store { }` child or a `stores { }` group of the
- * entry's owner), materialized if it has not been: run the lambda, attach
- * the result under the owner, announce it. Joins the settle scope open on
- * this thread, else settles once after return, so a recompute the attach
- * queues runs after the child is visible, never inside the lambda.
+ * entry's owner), materialized if it has not been: run the lambda holding
+ * nothing, then claim the entry and attach the result under the owner, or
+ * answer the result another thread attached first. Joins the settle scope
+ * open on this thread, else settles once after return, so a recompute the
+ * attach queues runs after the child is visible, never inside the lambda.
  *
- * @throws IllegalStateException if the owner is disposed, on a
+ * @throws IllegalStateException if the owner is disposed, on a same-thread
  *   materialization cycle, or when the child already has a parent, would be
  *   its own ancestor, or is disposed; the lambda's own throw propagates.
- *   The entry stays retryable.
+ *   The entry stays retryable, and the stores the failed run built that
+ *   nothing else holds are disposed.
  * @throws IllegalArgumentException when a group lists a store twice, a
  *   disposed store, pins a class it does not list, or names two leaves alike.
  */
-internal fun materializeChild(entry: ChildEntry): Any =
-    settling {
-        InitializerGraph.Process.hold(entry) { entry.produced ?: materializeHeld(entry) }
-    }
-
-/**
- * Materialize every declared child of [ownerNode]'s store that has not run
- * yet, then, recursively, every live child's own. A child that disposed
- * meanwhile is skipped with its subtree; the first throwing lambda of a
- * live store propagates (its entry stays retryable and the entries after it
- * are left unmaterialized). A store whose tree state is gone has nothing to
- * materialize.
- */
-internal fun materializeSubtree(ownerNode: LeafNode) {
-    val registry = ownerNode.attachment?.registry ?: return
-    settling {
-        for (entry in registry.declaredEntries()) {
-            if (entry.kind != ChildEntry.Kind.Keyed && entry.produced == null) materializeChild(entry)
-        }
-        for ((leaf, store) in registry.liveChildStores()) {
-            if (store.isDisposed) continue
-            try {
-                materializeSubtree(leaf)
-            } catch (e: IllegalStateException) {
-                // A child that disposed meanwhile is skipped as a listing skips it,
-                // so an ancestor's `children` never throws "disposed" for it.
-                if (leaf.store?.isDisposed == false) throw e
-            }
-        }
-    }
+internal fun materializeChild(entry: ChildEntry): Any {
+    entry.produced?.let { return it }
+    return settling { awaitClaimable(entry) ?: materializeRacing(entry) }
 }
 
+/** What one run of a child lambda produced, validated and ready to attach. */
+internal class Candidate(
+    /** What the delegate answers: the child (`Stateful`) or the group's [Branch]. */
+    val produced: Any,
+    /** The node the entry takes: the child's [LeafNode] or the [Branch]. */
+    val node: StoreNode,
+    /** The stores the run returned, for [RunBuilt.disposeOrphans]. */
+    val stores: List<Store<*>>,
+    val targets: List<AttachTarget>,
+)
+
+/** The stores a winner's [ChildEntry.produced] holds: what a loser must never dispose. */
+internal fun storesOf(produced: Any?): List<Store<*>> =
+    when (produced) {
+        is Branch -> produced.stores
+        is Stateful -> listOf(produced.owningStore)
+        else -> emptyList()
+    }
+
+/** Run the lambda (the entry was free to claim when this began), then claim and attach, or join the winner. */
+private fun materializeRacing(entry: ChildEntry): Any {
+    entry.owner.checkNotDisposed()
+    val built = RunBuilt.mark()
+    // Phase 1: the lambda, holding nothing of the tree's; marked on this thread only.
+    val output = InitializerGraph.Process.runMarked(entry) { entry.runLambda() }
+    var prepared = false
+    val candidate =
+        try {
+            prepare(entry, output).also { prepared = true }
+        } finally {
+            if (!prepared) built.disposeOrphans(producedStores(entry, output))
+        }
+    val winner = claimOrJoin(entry, candidate, built)
+    if (winner == null) return attachClaimed(entry, candidate, built)
+    built.disposeOrphans(candidate.stores, keep = storesOf(winner))
+    return winner
+}
+
+/** The lambda's raw output as stores, for disposing a run that failed validation. */
+private fun producedStores(
+    entry: ChildEntry,
+    output: Any,
+): List<Store<*>> =
+    when (entry.kind) {
+        ChildEntry.Kind.Group -> (output as? List<*>).orEmpty().filterIsInstance<Store<*>>()
+        else -> storesOf(output)
+    }
+
+@Suppress("UNCHECKED_CAST")
+private fun ChildEntry.runLambda(): Any =
+    when (kind) {
+        ChildEntry.Kind.Store -> (lambda as () -> Stateful)()
+        ChildEntry.Kind.Group -> (lambda as () -> List<Store<*>>)()
+        ChildEntry.Kind.Keyed -> error("$label is materialized at declaration")
+    }
+
 /**
- * Holding [entry]'s latch: phases 1–7. A failure before the attach
- * registered (phase 4) makes the entry retryable again — before the latch
- * is released, so a waiter that runs the phases next is never reset.
+ * Holding [entry]'s claim: attach phases 3–7. A failure before the attach
+ * registered (phase 4) makes the entry retryable again and disposes the
+ * run's orphaned stores; the claim ends under the registry lock either way.
  */
-private fun materializeHeld(entry: ChildEntry): Any {
+private fun attachClaimed(
+    entry: ChildEntry,
+    candidate: Candidate,
+    built: RunBuilt,
+): Any {
     val registry = entry.registry
     var reachedLive = false
+    var done = false
     try {
-        val produced =
-            when (entry.kind) {
-                ChildEntry.Kind.Store -> attachStoreChild(entry) { reachedLive = true }
-                ChildEntry.Kind.Group -> attachGroup(entry) { reachedLive = true }
-                ChildEntry.Kind.Keyed -> error("${entry.label} is materialized at declaration")
-            }
+        val parentNode = if (entry.kind == ChildEntry.Kind.Group) candidate.node else entry.ownerNode
+        val attach = ChildAttach(entry.owner, registry, entry.name, parentNode, candidate.targets, null)
+        attachUnder(attach, { reachedLive = true }) { live ->
+            entry.phase = ChildEntry.Phase.Live
+            (candidate.node as? Branch)?.live?.addAll(live)
+        }
+        done = true
+    } finally {
         // Phase 7, LAST, so no reader sees a produced-but-unattached child. On
         // a registry closed meanwhile the attach completed and the child is a
         // subtree root by now: hand it to the caller anyway.
-        registry.lock.withLock { if (!registry.disposed) entry.produced = produced }
-        return produced
-    } finally {
-        if (!reachedLive) {
-            registry.lock.withLock {
-                if (entry.phase == ChildEntry.Phase.Constructing) {
-                    entry.phase = ChildEntry.Phase.Declared
-                    entry.node = null
-                }
+        registry.lock.withLock {
+            if (reachedLive && !registry.disposed) entry.produced = candidate.produced
+            if (!reachedLive && entry.phase == ChildEntry.Phase.Constructing) {
+                entry.phase = ChildEntry.Phase.Declared
+                entry.node = null
             }
+            entry.attachingThreadId = null
+            entry.attaching = null
+            entry.attachLock.release()
         }
+        if (!done && !reachedLive) built.disposeOrphans(candidate.stores)
     }
+    return candidate.produced
 }
 
-/** Phases 1–6 of a `store { }` child; [registered] runs right after phase 4. */
-private fun attachStoreChild(
+/** Validate one run's output and take its stores' tree state (phase 1's tail and phase 2's node). */
+private fun prepare(
     entry: ChildEntry,
-    registered: () -> Unit,
-): Stateful {
-    val registry = entry.registry
+    output: Any,
+): Candidate =
+    if (entry.kind == ChildEntry.Kind.Group) {
+        @Suppress("UNCHECKED_CAST")
+        val listed = output as List<Store<*>>
 
-    // Phase 1: the lambda, outside every lock of the tree.
-    @Suppress("UNCHECKED_CAST")
-    val produced = (entry.lambda as () -> Stateful)()
-    val child = produced.owningStore
-    check(!child.isDisposed) { "${entry.label}: the child lambda returned a disposed store" }
-    val attachment = child.treeAttachment()
-    // Phase 2: claim the entry; no slot lookup under the registry lock.
-    registry.lock.withLock {
-        registry.checkOpen()
-        entry.phase = ChildEntry.Phase.Constructing
-        entry.node = attachment.node
+        @Suppress("UNCHECKED_CAST")
+        val pins = entry.pin as Map<KClass<out Store<*>>, String>
+        val named = nameGroup(entry.label, listed, pins)
+        val attachments = listed.map { it.treeAttachment() }
+        val members = listed.zip(attachments.map { it.node })
+        val branch = Branch(entry.ownerNode, entry.name, entry.origin, members, entry.owner, entry.registry)
+        val targets = attachments.mapIndexed { i, a -> AttachTarget(a, named[i].first, named[i].second, key = null) }
+        Candidate(branch, branch, listed, targets)
+    } else {
+        val produced = output as Stateful
+        val child = produced.owningStore
+        check(!child.isDisposed) { "${entry.label}: the child lambda returned a disposed store" }
+        val attachment = child.treeAttachment()
+        val target = AttachTarget(attachment, entry.name, entry.origin, key = null)
+        Candidate(produced, attachment.node, listOf(child), listOf(target))
     }
-    val target = AttachTarget(attachment, entry.name, entry.origin, key = null)
-    val attach = ChildAttach(entry.owner, registry, entry.name, entry.ownerNode, listOf(target), null)
-    attachUnder(attach, registered) { entry.phase = ChildEntry.Phase.Live }
-    return produced
-}
-
-/** Phases 1–6 of a `stores { }` group; [registered] runs right after phase 4. */
-private fun attachGroup(
-    entry: ChildEntry,
-    registered: () -> Unit,
-): Branch {
-    val registry = entry.registry
-
-    // Phase 1: the lambda, outside every lock; validate; take the attachments.
-    @Suppress("UNCHECKED_CAST")
-    val listed = (entry.lambda as () -> List<Store<*>>)()
-
-    @Suppress("UNCHECKED_CAST")
-    val pins = entry.pin as Map<KClass<out Store<*>>, String>
-    val named = nameGroup(entry.label, listed, pins)
-    val attachments = listed.map { it.treeAttachment() }
-    // Phase 2: the group's node, complete before anything can list it.
-    val members = listed.zip(attachments.map { it.node })
-    val branch = Branch(entry.ownerNode, entry.name, entry.origin, members, entry.owner, registry)
-    registry.lock.withLock {
-        registry.checkOpen()
-        entry.phase = ChildEntry.Phase.Constructing
-        entry.node = branch
-    }
-    val targets = attachments.mapIndexed { i, a -> AttachTarget(a, named[i].first, named[i].second, key = null) }
-    val attach = ChildAttach(entry.owner, registry, entry.name, branch, targets, null)
-    attachUnder(attach, registered) { live ->
-        entry.phase = ChildEntry.Phase.Live
-        branch.live.addAll(live)
-    }
-    return branch
-}
 
 /**
  * Validate a group's listing and name its leaves: by `stores(names = …)`
@@ -195,12 +215,29 @@ private fun nameGroup(
                 "$label lists a store whose class has no simple name (anonymous or local); pin it with " +
                     "stores(names = mapOf(Store::class to \"...\"))"
             }
-        require(taken.add(name)) {
-            "$label has two leaves named '$name'; pin one with stores(names = mapOf(Store::class to \"...\"))"
-        }
+        require(taken.add(name)) { duplicateLeafMessage(label, name, store, listed) }
         name to (if (pin != null) NameOrigin.Pinned else NameOrigin.ClassName)
     }
 }
+
+/**
+ * Two leaves of one group would be named [name]. A pin is an exact-class
+ * lookup, so two stores of one class can never be told apart by one: they
+ * belong in separate `store { }` children. Stores of two classes whose
+ * simple names collide can be pinned apart.
+ */
+private fun duplicateLeafMessage(
+    label: String,
+    name: String,
+    store: Store<*>,
+    listed: List<Store<*>>,
+): String =
+    if (listed.count { it::class == store::class } > 1) {
+        "$label lists two ${store::class.simpleName}s, so two leaves would be named '$name'; a stores(names = …) " +
+            "pin names a class, never one instance, so declare each of them as its own store { } child instead"
+    } else {
+        "$label has two leaves named '$name'; pin one with stores(names = mapOf(Store::class to \"...\"))"
+    }
 
 /**
  * Phases 3–6 of [attach]: link, register (running [registryStep] over the

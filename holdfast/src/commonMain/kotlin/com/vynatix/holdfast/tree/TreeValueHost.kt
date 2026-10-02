@@ -9,7 +9,8 @@ import com.vynatix.holdfast.StoreInternalApi
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * The store that hosts one `tree` handle's value: created with the handle,
+ * The store that hosts one `tree` handle's value: created lazily with the
+ * value (its first read or observation, or `internalHost()`),
  * never a member of any tree, with no declared state — only the unregistered
  * backing of the tree value, written by its recompute. Its transaction lock
  * is the "host lock" of GUIDE §10.2: taken by a settle and by its own

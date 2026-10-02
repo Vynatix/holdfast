@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -198,15 +199,24 @@ class KeyedConstructionVisibilityTest {
         }
 
     @Test
-    fun concurrentGetOrCreateRunsTheFactoryOnce() =
+    fun concurrentGetOrCreateReturnsTheOneWinnerAndDisposesTheLosers() =
         completesWithin(20, "concurrent getOrCreate") {
             val parent = VisParent()
             val barrier = CyclicBarrier(WORKERS)
             val runs = AtomicInteger()
+            val built = ConcurrentLinkedQueue<VisSlowStore>()
             parent.builds[4] = { id ->
                 runs.incrementAndGet()
-                VisSlowStore(id, null)
+                VisSlowStore(id, null).also { built += it }
             }
+            val announced = AtomicInteger()
+            parent.internalAddMembershipListener(
+                object : LeafMembershipListener() {
+                    override fun onAttached(leaf: LeafNode) {
+                        announced.incrementAndGet()
+                    }
+                },
+            )
             val results =
                 java.util.concurrent.ConcurrentHashMap
                     .newKeySet<VisSlowStore>()
@@ -218,9 +228,18 @@ class KeyedConstructionVisibilityTest {
                     }
                 }
             workers.forEach { it.join() }
-            assertEquals(1, runs.get())
-            assertEquals(1, results.size)
-            assertSame(results.single(), parent.slow[4])
+            // The factory runs holding no lock, so racing callers may each run it; exactly one store wins.
+            assertTrue(runs.get() in 1..WORKERS, "factory runs: ${runs.get()}")
+            assertEquals(1, results.size, "every caller got the same store")
+            val winner = results.single()
+            assertSame(winner, parent.slow[4])
+            assertFalse(winner.isDisposed)
+            val losers = built.filter { it !== winner }
+            assertEquals(runs.get() - 1, losers.size)
+            assertTrue(losers.all { it.isDisposed }, "every losing run's store is disposed")
+            assertTrue(losers.none { parent.tree.nodeOf(it) != null }, "no losing store was attached")
+            assertEquals(listOf<Store<*>>(parent, winner), parent.tree.stores())
+            assertEquals(1, announced.get(), "only the winner was announced")
         }
 
     @Test

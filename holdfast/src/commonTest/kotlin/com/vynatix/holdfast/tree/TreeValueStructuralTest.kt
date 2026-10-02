@@ -72,7 +72,7 @@ class TreeValueStructuralTest {
     }
 
     private fun StoreTree.hostLog(): TreeValueStructuralHostLog =
-        TreeValueStructuralHostLog().also { (this as StoreTreeImpl).host.middlewares(it) }
+        TreeValueStructuralHostLog().also { (this as StoreTreeImpl).treeValue().host.middlewares(it) }
 
     @Test
     fun theFirstReadBuildsTheTreeAndTakingTheHandleTakesNoCapture() {
@@ -185,7 +185,7 @@ class TreeValueStructuralTest {
         val parent = TreeValueStructuralParent()
         val tree = parent.tree
         tree.value
-        val node = (tree as StoreTreeImpl).treeValue.node()
+        val node = (tree as StoreTreeImpl).treeValue().node()
         val baseline = node.sourceStores.size
         repeat(1_000) { i ->
             val k = parent.keyed.create("k$i")

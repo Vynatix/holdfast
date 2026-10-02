@@ -2,22 +2,22 @@
 
 package com.vynatix.holdfast.tree
 
+import com.vynatix.holdfast.CycleStep
 import com.vynatix.holdfast.ExperimentalStoreApi
-import com.vynatix.holdfast.Latched
-import com.vynatix.holdfast.NO_LATCH_OWNER
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreLock
 import com.vynatix.holdfast.displayName
-import kotlinx.atomicfu.locks.SynchronousMutex
 
 /**
- * One keyed store's slot under a [KeyedBranch], from its reservation by
- * `create`/`getOrCreate` to its detachment. [constructionLock] is held by
- * the reserving thread from the reservation itself
- * ([ChildRegistry.reserveOrExisting] takes it) through the factory and the
- * attach, so a `getOrCreate` on another thread parks on it instead of
- * spinning — even in the window before the factory starts.
+ * One keyed store's slot under a [KeyedBranch], from the claim of its key
+ * by the `create`/`getOrCreate` whose factory run attached first to its
+ * detachment. An entry exists only once a factory returned (the factory
+ * runs holding nothing, `KeyedConstruction.kt`): it is created Constructing
+ * by [ChildRegistry.claimKey], with [constructionLock] taken, and the
+ * claiming thread holds that lock through attach phases 3–6, which run no
+ * user code — so a lookup or a losing creator on another thread parks on it
+ * instead of spinning, and never waits on user code.
  */
 internal class LeafEntry(
     val branch: KeyedBranch<*, *>,
@@ -26,20 +26,18 @@ internal class LeafEntry(
 ) {
     val constructionLock = StoreLock()
 
-    /** The thread running this entry's factory, `null` outside a construction. */
+    /** The thread attaching this entry's store, `null` once that attach ended. */
     @kotlin.concurrent.Volatile
     var constructingThreadId: Long? = null
 
     @kotlin.concurrent.Volatile
-    var phase: Phase = Phase.Reserved
+    var phase: Phase = Phase.Constructing
 
-    /** The produced store's node, set once the factory returned (keyed phase 2). */
+    /** The produced store's node, set by the claim. */
     @kotlin.concurrent.Volatile
     var leaf: LeafNode? = null
 
     sealed interface Phase {
-        data object Reserved : Phase
-
         data object Constructing : Phase
 
         class Live(
@@ -53,10 +51,13 @@ internal class LeafEntry(
 /**
  * One child declaration of [owner] — `store { }`, `stores { }` or
  * `stores<K, S> { }` — named [name], in declaration order in [owner]'s
- * [ChildRegistry]. A `store`/`stores` child is materialized on first need
- * behind this entry's latch (`InitializerGraph.hold`, shared with state
- * initializers so a cycle through both is reported, never a deadlock); a
- * keyed entry is live from its declaration.
+ * [ChildRegistry]. A `store`/`stores` child is materialized on first need:
+ * its lambda runs holding no lock or latch, marked on the reading thread
+ * only (`InitializerGraph.runMarked`, so a same-thread re-entry — directly,
+ * through another child or through a state initializer — throws a cycle
+ * error naming the chain), and racing first reads may each run it; the
+ * first to claim the entry attaches its result and every other reader gets
+ * that (`TreeMaterialize.kt`). A keyed entry is live from its declaration.
  *
  * [ownerAttachment] is the owner's tree state, captured at `provideDelegate`:
  * materialization reaches the owner's registry and node through it, never
@@ -72,7 +73,7 @@ internal class ChildEntry(
     val lambda: Any,
     /** The leaf-name pins of a [Kind.Group] (`Map<KClass<out Store<*>>, String>`); `null` otherwise. */
     val pin: Any?,
-) : Latched {
+) : CycleStep {
     /** The declaring store, captured while it is live (its tree state drops it on dispose). */
     val owner: Store<*> = checkNotNull(ownerAttachment.storeRef) { "a child declared on a disposed store" }
 
@@ -85,12 +86,25 @@ internal class ChildEntry(
     /** `Owner.name`, for messages. */
     val label: String get() = "${owner.displayName}.$name"
 
-    override val latch = SynchronousMutex()
-    override var latchOwner: Long = NO_LATCH_OWNER
-
     override fun describeForCycle(): String = "child declaration '${owner.displayName}.$name'"
 
-    override fun checkMayRun() = owner.checkNotDisposed()
+    /**
+     * Held by the thread that claimed this entry (Declared → Constructing,
+     * under the registry lock) from the claim through attach phases 3–7,
+     * which run no user code; a racing reader parks on it, then reads the
+     * entry again. Taken by a fresh claim under the registry lock, and
+     * released under it together with the phase change that ends the claim,
+     * so a claimer never finds the lock held by a finished claim.
+     */
+    val attachLock = StoreLock()
+
+    /** The thread holding [attachLock] for a claim, `null` outside one. */
+    @kotlin.concurrent.Volatile
+    var attachingThreadId: Long? = null
+
+    /** The claimer's result while it attaches (answered to its own thread's re-reads, e.g. from a listener). */
+    @kotlin.concurrent.Volatile
+    var attaching: Any? = null
 
     enum class Kind { Store, Group, Keyed }
 
@@ -172,17 +186,36 @@ internal class ChildRegistry(
     fun declaredEntriesLocked(): Collection<ChildEntry> = declared.values
 
     /**
-     * Reserve [key] under [branch] for the calling `create`, or answer the
-     * entry already there so `getOrCreate` can join or wait for it. The
-     * second value is `true` when this call reserved it — and then the
-     * calling thread holds the new entry's construction lock, which
-     * `constructReserved` releases once the store attached or the
-     * reservation was abandoned.
+     * The entry under [key] of [branch], live or still being attached; `null`
+     * when there is none.
+     *
+     * @throws IllegalStateException on a closed registry.
      */
-    fun reserveOrExisting(
+    fun keyedEntry(
+        branch: KeyedBranch<*, *>,
+        key: Any,
+    ): LeafEntry? =
+        lock.withLock {
+            checkOpen()
+            checkNotNull(keyed[branch]) { "${owner.displayName}: '${branch.name}' is not declared here" }[key]
+        }
+
+    /**
+     * Claim [key] under [branch] for a store a factory run returned, whose
+     * node is [leaf], or answer the entry already there (another run won).
+     * The second value is `true` when this call claimed it — and then the
+     * calling thread holds the new entry's construction lock, which the
+     * construction releases once the store attached or the claim was
+     * abandoned.
+     *
+     * @throws IllegalStateException on a closed registry.
+     */
+    fun claimKey(
         branch: KeyedBranch<*, *>,
         key: Any,
         leafName: String,
+        leaf: LeafNode,
+        threadId: Long,
     ): Pair<LeafEntry, Boolean> =
         lock.withLock {
             checkOpen()
@@ -197,13 +230,12 @@ internal class ChildRegistry(
             // reasoning fails here instead of waiting under this lock). Every
             // later take of the registry lock by a construction-lock holder
             // keeps the documented order, and no path holds the registry lock
-            // while waiting on a published entry's construction lock. Holding
-            // it from the reservation on closes the window before the factory
-            // starts, in which a `getOrCreate` on another thread would find a
-            // Reserved entry with a free lock and spin until the creator ran.
+            // while waiting on a published entry's construction lock.
             check(entry.constructionLock.tryAcquire()) {
                 "${owner.displayName}: a fresh keyed entry's construction lock was already held"
             }
+            entry.leaf = leaf
+            entry.constructingThreadId = threadId
             entries[key] = entry
             entry to true
         }
@@ -219,7 +251,7 @@ internal class ChildRegistry(
         entry.phase = LeafEntry.Phase.Live(store)
     }
 
-    /** Drop a reservation whose construction failed. Idempotent; bumps nothing (a reservation is never listed). */
+    /** Drop a claim whose attach failed. Idempotent; bumps nothing (an unpromoted claim is never listed). */
     fun abandon(entry: LeafEntry) =
         lock.withLock {
             val entries = keyed[entry.branch]

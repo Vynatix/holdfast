@@ -297,7 +297,10 @@ class TreeDeclarationTest {
             val two by stores { listOf(DeclSessionStore(), DeclSessionStore()) }
         }
         val sameClass = assertFailsWith<IllegalArgumentException> { SameClass().two }
-        assertTrue("has two leaves named 'DeclSession'" in sameClass.message!!, sameClass.message)
+        assertTrue("two leaves would be named 'DeclSession'" in sameClass.message!!, sameClass.message)
+        // A pin names a class, so it cannot tell two instances apart: the message says so.
+        assertTrue("as its own store { } child" in sameClass.message!!, sameClass.message)
+        assertTrue("pin one" !in sameClass.message!!, sameClass.message)
 
         class Collide : Store<Collide>() {
             val two by stores { listOf(DeclDupA.SessionStore(), DeclDupB.SessionStore()) }

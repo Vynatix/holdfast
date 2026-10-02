@@ -91,7 +91,7 @@ class TreeValueAncestryTest {
         disposables.forEach { it.dispose() }
     }
 
-    private fun StoreTree.followed(): List<Store<*>> = (this as StoreTreeImpl).treeValue.node().sourceStores
+    private fun StoreTree.followed(): List<Store<*>> = (this as StoreTreeImpl).treeValue().node().sourceStores
 
     @Test
     fun aGrandchildCommitSettlesTheChildsAndTheParentsValuesOnceEach() {
@@ -120,7 +120,7 @@ class TreeValueAncestryTest {
     fun aParentWithNoMaterializedValueCostsNothing() {
         val top = TreeValueAncestryTopStore()
         val topTree = top.tree
-        val log = TreeValueAncestryHostLog().also { (topTree as StoreTreeImpl).host.middlewares(it) }
+        val log = TreeValueAncestryHostLog().also { (topTree as StoreTreeImpl).treeValue().host.middlewares(it) }
         val leaf = top.mid.leaf
         val midTree = top.mid.tree
         midTree.value

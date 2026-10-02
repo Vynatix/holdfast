@@ -54,7 +54,7 @@ private class PdrDetachCounter : LeafMembershipListener() {
  * a value above never keeps an edge to a store that left its subtree.
  */
 class ParentDisposeRaceTest {
-    private fun StoreTree.followed(): List<Store<*>> = (this as StoreTreeImpl).treeValue.node().sourceStores
+    private fun StoreTree.followed(): List<Store<*>> = (this as StoreTreeImpl).treeValue().node().sourceStores
 
     @Test
     fun aDeepDescendantDisposingWhileItsGrandparentDisposesIsDetachedAtMostTwice() =

@@ -11,11 +11,11 @@ import com.vynatix.holdfast.daemon
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -40,25 +40,33 @@ private class PkStore(
 }
 
 /**
- * The branch's factory is declared once and counts its runs, naming the
- * thread of each ([runThreads]); it parks on [gate] when one is set, and
- * fails after constructing its store while [failNext] is set (once).
+ * The branch's factory is declared once and records every run — the
+ * thread ([runThreads]) and the store it built ([built]). A run on the
+ * thread named [gatedThread] parks on [gate] after building its store; a
+ * run on the thread named [failingThread] throws after building it.
  */
 private class PkParent(
     codec: PkCountingKeyCodec,
 ) : Store<PkParent>() {
     val runThreads = ConcurrentLinkedQueue<String>()
+    val built = ConcurrentLinkedQueue<PkStore>()
 
     @Volatile
     var gate: CountDownLatch? = null
-    val failNext = AtomicBoolean(false)
+
+    @Volatile
+    var gatedThread: String? = null
+
+    @Volatile
+    var failingThread: String? = null
 
     val slow by stores<Int, PkStore>(keyCodec = codec) { id ->
-        runThreads += Thread.currentThread().name
-        gate?.await()
-        val built = PkStore(id)
-        check(!failNext.getAndSet(false)) { "refused after construction" }
-        built
+        val thread = Thread.currentThread().name
+        runThreads += thread
+        val store = PkStore(id).also { built += it }
+        if (thread == gatedThread) gate?.await()
+        check(thread != failingThread) { "refused after construction" }
+        store
     }
 }
 
@@ -69,98 +77,95 @@ private const val MAX_RUNNABLE_SHARE = 0.2
 private const val WAIT_SECONDS = 10L
 
 /**
- * `KeyedBranch.getOrCreate` parks on another thread's construction of the
- * key and never spins: not while the factory runs, and not in the creator's
- * window between reserving the key and starting the factory.
+ * `KeyedBranch.getOrCreate` under races. The factory runs holding no lock,
+ * so a racing `getOrCreate` never waits on another thread's factory: it
+ * runs the factory itself, and the first store to claim the key wins —
+ * every caller gets it and the losers' stores are disposed, never attached.
+ * It parks (never spins) only while another thread finishes ATTACHING the
+ * key's store, which runs no user code.
  */
 class KeyedGetOrCreateParkingTest {
     @Test
-    fun aGetOrCreateParksWhileTheKeyIsReservedButItsFactoryHasNotStarted() =
-        completesWithin(30, "getOrCreate against a reserved key") {
+    fun aGetOrCreateParksWhileAnotherThreadIsStillAttachingTheKey() =
+        completesWithin(30, "getOrCreate against an attach still being announced") {
             val codec = PkCountingKeyCodec()
             val parent = PkParent(codec)
-            val branch = parent.slow
-            // The creator's window, held open: the key is reserved on this
-            // thread but its factory has not started (`createKeyed` between
-            // `reserveOrExisting` and `constructReserved`).
-            val (entry, reserved) = branch.registry.reserveOrExisting(branch, 1, branch.leafNameFor(1))
-            assertTrue(reserved)
+            val announcing = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            parent.internalAddMembershipListener(
+                object : LeafMembershipListener() {
+                    override fun onAttached(leaf: LeafNode) {
+                        // Test-only stall of attach phase 6 (no user code runs there otherwise).
+                        announcing.countDown()
+                        release.await()
+                    }
+                },
+            )
+            val created = AtomicReference<PkStore?>(null)
+            val creator = daemon("creator") { created.set(parent.slow.create(1)) }
+            assertTrue(announcing.await(WAIT_SECONDS, TimeUnit.SECONDS))
             val encodesBefore = codec.encodes.get()
             val result = AtomicReference<PkStore?>(null)
-            val waiter = daemon("waiter") { result.set(branch.getOrCreate(1)) }
+            val waiter = daemon("waiter") { result.set(parent.slow.getOrCreate(1)) }
             val share = runnableShare(waiter)
-            assertNull(result.get(), "the waiter returned before the key was constructed")
-            assertNull(branch[1], "a reserved key has no live store")
+            assertNull(result.get(), "the waiter returned before the attach was announced")
             assertTrue(
                 share < MAX_RUNNABLE_SHARE,
                 "the waiting getOrCreate was runnable in ${(share * 100).toInt()}% of samples: it spins on the " +
                     "registry instead of parking on the construction lock",
             )
-            val created = branch.constructReserved(entry, 1)
+            release.countDown()
+            creator.join()
             waiter.join()
-            assertSame(created, result.get(), "the waiter gets the creator's instance")
-            assertEquals(
-                listOf(Thread.currentThread().name),
-                parent.runThreads.toList(),
-                "the declared factory ran once, for the creator; never for the waiter",
-            )
-            assertEquals(
-                1,
-                codec.encodes.get() - encodesBefore,
-                "the waiter's getOrCreate names the key once, not once per wake-up",
-            )
+            assertSame(created.get(), result.get(), "the waiter gets the creator's instance")
+            assertEquals(listOf("creator"), parent.runThreads.toList(), "a live key is never built again")
+            assertEquals(1, codec.encodes.get() - encodesBefore, "named once for the whole wait")
         }
 
     @Test
-    fun aGetOrCreateParksOnTheCreatorsFactoryAndSharesItsInstance() =
+    fun aGetOrCreateNeverWaitsOnAnotherThreadsFactoryAndTheFirstToAttachWins() =
         completesWithin(30, "getOrCreate against a running factory") {
             val codec = PkCountingKeyCodec()
             val parent = PkParent(codec)
             val gate = CountDownLatch(1)
             parent.gate = gate
-            val created = AtomicReference<PkStore?>(null)
-            val creator = daemon("creator") { created.set(parent.slow.create(2)) }
-            awaitUntil("the creator entering its factory") { parent.runThreads.size == 1 }
+            parent.gatedThread = "creator"
+            val creatorOutcome = AtomicReference<Result<PkStore>?>(null)
+            val creator = daemon("creator") { creatorOutcome.set(runCatching { parent.slow.getOrCreate(2) }) }
+            awaitUntil("the creator parked inside its factory") { parent.runThreads.size == 1 }
             val encodesBefore = codec.encodes.get()
-            val result = AtomicReference<PkStore?>(null)
-            val waiter = daemon("waiter") { result.set(parent.slow.getOrCreate(2)) }
-            val share = runnableShare(waiter)
-            assertNull(result.get(), "the waiter returned while the factory was still parked")
-            assertTrue(share < MAX_RUNNABLE_SHARE, "runnable in ${(share * 100).toInt()}% of samples")
+            // The factory is not a lock: the waiter runs it itself and wins while the creator is parked.
+            val waiterStore = parent.slow.getOrCreate(2)
+            assertSame(waiterStore, parent.slow[2])
+            assertEquals(2, parent.runThreads.size, "the waiter ran the factory itself: ${parent.runThreads}")
+            assertEquals(1, codec.encodes.get() - encodesBefore, "named once")
             gate.countDown()
             creator.join()
-            waiter.join()
-            assertSame(created.get(), result.get())
-            assertEquals(listOf("creator"), parent.runThreads.toList(), "the factory ran once, for the creator")
-            assertEquals(1, codec.encodes.get() - encodesBefore, "named once for the whole wait")
+            val creatorStore = creatorOutcome.get()!!.getOrThrow()
+            assertSame(waiterStore, creatorStore, "the losing getOrCreate returns the winner's store")
+            val losers = parent.built.filter { it !== waiterStore }
+            assertEquals(1, losers.size)
+            assertTrue(losers.single().isDisposed, "the loser's freshly built store is disposed")
+            assertNull(parent.tree.nodeOf(losers.single()), "a loser's store is never attached")
+            assertFalse(waiterStore.isDisposed)
+            assertEquals(listOf<Store<*>>(parent, waiterStore), parent.tree.stores())
         }
 
     @Test
-    fun aGetOrCreateConstructsTheKeyItselfWhenTheCreatorsFactoryFails() =
+    fun aFailingFactoryRunDisposesWhatItBuiltAndTheNextCallerBuildsItsOwn() =
         completesWithin(30, "getOrCreate after a failed create") {
             val codec = PkCountingKeyCodec()
             val parent = PkParent(codec)
-            val gate = CountDownLatch(1)
-            parent.gate = gate
-            parent.failNext.set(true)
+            parent.failingThread = "creator"
             val creatorFailed = AtomicReference<Throwable?>(null)
-            val creator = daemon("creator") { creatorFailed.set(runCatching { parent.slow.create(3) }.exceptionOrNull()) }
-            awaitUntil("the creator entering its factory") { parent.runThreads.size == 1 }
-            val result = AtomicReference<PkStore?>(null)
-            val waiter = daemon("waiter") { result.set(parent.slow.getOrCreate(3)) }
-            val share = runnableShare(waiter)
-            assertNull(result.get())
-            assertTrue(share < MAX_RUNNABLE_SHARE, "runnable in ${(share * 100).toInt()}% of samples")
-            gate.countDown()
-            creator.join()
-            waiter.join()
+            daemon("creator") { creatorFailed.set(runCatching { parent.slow.create(3) }.exceptionOrNull()) }.join()
             assertTrue(creatorFailed.get()?.message?.contains("refused") == true, "${creatorFailed.get()}")
-            assertEquals(
-                listOf("creator", "waiter"),
-                parent.runThreads.toList(),
-                "the abandoned reservation releases its lock; the waiter runs the factory itself",
-            )
+            assertNull(parent.slow[3], "a throwing factory leaves no entry")
+            val result = AtomicReference<PkStore?>(null)
+            daemon("waiter") { result.set(parent.slow.getOrCreate(3)) }.join()
+            assertEquals(listOf("creator", "waiter"), parent.runThreads.toList())
             assertSame(result.get(), parent.slow[3])
+            assertEquals(2, parent.built.size)
         }
 
     private companion object {
