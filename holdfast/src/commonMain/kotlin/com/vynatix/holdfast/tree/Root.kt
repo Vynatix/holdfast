@@ -320,11 +320,17 @@ abstract class Root(
      * to the outermost place.
      *
      * @throws IllegalStateException if the root is disposed, or from inside
-     *   an `atomic` frame or a transaction of any leaf (an action body, a
-     *   `suspendAction`/`suspendAtomic` body, a hook, an observer): the
-     *   chain is snapshotted per transaction, so install from outside. A
-     *   parked suspending body on another coroutine is no such transaction:
-     *   installing beside it is allowed and does not reach it.
+     *   an `atomic` frame, a transaction of any leaf (an action body, a
+     *   hook, an observer) or a `suspendAction`/`suspendAtomic` body of any
+     *   leaf: the chain is snapshotted per transaction, so install from
+     *   outside. Conservatively, also from inside any entry on this thread
+     *   (an action, a frame, an observer or a recompute, of any store)
+     *   while a leaf is held by a suspending body parked elsewhere — the
+     *   guard cannot tell that entry from the holder's body. From outside
+     *   every entry an install beside a parked suspending holder is allowed
+     *   and does not reach it. On iOS, inside a nested `withContext` on
+     *   another dispatcher within the body, the entry's carrier is replaced,
+     *   so the refusal is not guaranteed there.
      */
     fun middlewares(vararg middleware: TreeMiddleware) {
         checkNotDisposed()
@@ -338,8 +344,10 @@ abstract class Root(
      * whose `dispose()` removed everything (a documented no-check
      * exception, so teardown code can unwind a root disposed meanwhile).
      *
-     * @throws IllegalStateException from inside an `atomic` frame or a
-     *   transaction of any leaf, as [middlewares].
+     * @throws IllegalStateException from inside an `atomic` frame, a
+     *   transaction or a suspending body of any leaf, and conservatively
+     *   from inside any entry beside a parked suspending holder, as
+     *   [middlewares].
      */
     fun removeMiddleware(middleware: TreeMiddleware): Boolean {
         if (isDisposed) return false

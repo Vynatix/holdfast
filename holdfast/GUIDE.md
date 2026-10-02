@@ -4132,9 +4132,20 @@ fun auditTheTree() {
   back, and the tree error hook fires for each — while on the suspending
   path a hook's throw is isolated, as for store middleware there.
 - **Install and remove from outside.** `middlewares`/`removeMiddleware`
-  throw inside an `atomic` frame or a transaction of any leaf (an action
-  body, a hook, an observer): the chain is snapshotted per transaction, so
-  an install never applies to an in-flight action and never waits for one.
+  throw inside an `atomic` frame, a transaction of any leaf (an action
+  body, a hook, an observer) or a `suspendAction`/`suspendAtomic` body of
+  any leaf: the chain is snapshotted per transaction, so an install never
+  applies to an in-flight action and never waits for one. The suspending
+  check is conservative: a suspending body resumes on any thread, so the
+  guard's probe is the settle scope its entry carries across dispatch, and
+  that cannot tell the holder's body from another entry on the same
+  thread — from inside any entry on the calling thread (an action or an
+  observer of an unrelated store, say) while a leaf is held by a parked
+  suspending body the call is refused too, naming the held leaf; from
+  outside every entry it is allowed beside a parked holder and does not
+  reach it. On iOS a nested `withContext` on another dispatcher inside the
+  body replaces the carrier of that scope, so the refusal is not
+  guaranteed in that section.
   `removeMiddleware` returns whether it was installed; no new observation
   starts once it returns, and an observation it started still gets its
   terminal hook (a parked action or `suspendAction` included). A leaf that

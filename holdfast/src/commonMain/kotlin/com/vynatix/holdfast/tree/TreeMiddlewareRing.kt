@@ -175,10 +175,22 @@ internal class TreeMiddlewareRing(
      * chains are snapshotted per transaction. A suspending body resumes on
      * any thread, so no member can tell "inside" it from "beside" it — a
      * holder parked on another coroutine, whose chain was snapshotted at
-     * its start, is no reason to refuse — but the settle scope its entry
-     * carries across dispatch can: an open one while a member has a
-     * suspending owner is that owner's body (or its commit, or its
-     * recompute), never a bystander.
+     * its start, is by itself no reason to refuse — so the probe is the
+     * settle scope its entry carries across dispatch: an open scope on this
+     * thread while a member has a suspending owner. That is conservative:
+     * the scope may be the holder's body (or its commit, or its recompute),
+     * or another entry on this thread — an action, a frame, an observer, a
+     * recompute, of an unrelated store or not — beside a holder parked
+     * elsewhere, and the probe cannot tell the two apart. So the message
+     * states what the probe knows (an entry is open here; which leaf is
+     * held) and never places the caller inside that body; from outside
+     * every entry a change beside a parked holder is allowed. Not
+     * guaranteed on iOS (or wasmJs): the scope rides
+     * `slotBracketingInterceptor` there, which a nested
+     * `withContext(otherDispatcher)` inside the body replaces, so in that
+     * section the probe sees no scope (`SettleAmbientContext.kt`);
+     * JVM/Android carry it in a `ThreadContextElement` that survives the
+     * switch.
      */
     private fun guard(attempt: String) {
         check(FrameMarkers.current() == null) {
@@ -196,8 +208,9 @@ internal class TreeMiddlewareRing(
         val inEntry = SettleScopes.current() != null
         val held = if (inEntry) current.firstOrNull { it.store.suspendingOwner != null } else null
         check(held == null) {
-            "Cannot $attempt on root '${root.name}' from inside a suspendAction or suspendAtomic body holding its " +
-                "leaf '${held?.leaf?.name}': install or remove it from outside"
+            "Cannot $attempt on root '${root.name}' while an entry is open on this thread and its leaf " +
+                "'${held?.leaf?.name}' is held by a suspendAction or suspendAtomic body (this call is inside that " +
+                "body, or inside another entry beside it): install or remove it from outside every entry"
         }
     }
 }
