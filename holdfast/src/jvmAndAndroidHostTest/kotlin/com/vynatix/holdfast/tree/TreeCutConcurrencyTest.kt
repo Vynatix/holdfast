@@ -45,8 +45,25 @@ private class CutRoot : Root("cut") {
 }
 
 private const val FRAMES = 3_000
+private const val MAX_FRAMES = 30_000
+private const val CHURN_ROUNDS = 500
+private const val MAX_CHURN_ROUNDS = 50_000
 private const val MIN_CUTS = 1_000
 private const val MIN_CAPTURES_BEFORE_DISPOSE = 20
+
+/**
+ * Whether a writer runs one more round: at least [minimum] rounds, then as
+ * many more — up to [bound] — as it takes for [reader] to take [MIN_CUTS]
+ * cuts; never once the test is [done] or the reader has gone.
+ */
+private fun moreRounds(
+    rounds: Int,
+    minimum: Int,
+    bound: Int,
+    cuts: AtomicInteger,
+    done: AtomicBoolean,
+    reader: Thread,
+): Boolean = !done.get() && (rounds < minimum || (rounds < bound && cuts.get() < MIN_CUTS && reader.isAlive))
 
 /**
  * T4 (never a mix): a tree capture during another thread's two-store
@@ -57,8 +74,12 @@ private const val MIN_CAPTURES_BEFORE_DISPOSE = 20
  * flowing while a `suspendAction` body is parked holding the serializer.
  *
  * Every racing reader has a progress minimum ([MIN_CUTS]): the writer keeps
- * committing until the reader has taken that many cuts, so a fast machine
- * cannot finish the writes before the reader has raced any of them.
+ * committing — the churner keeps creating and disposing — until the reader
+ * has taken that many cuts, so a fast machine cannot finish the writes
+ * before the reader has raced any of them. Every writer loop is bounded
+ * ([MAX_FRAMES], [MAX_CHURN_ROUNDS]) and stops on the test's `done` flag
+ * ([moreRounds]), so a reader that hangs fails the test on its minimum
+ * instead of leaving a daemon committing until the Gradle worker exits.
  */
 class TreeCutConcurrencyTest {
     @Test
@@ -104,37 +125,42 @@ class TreeCutConcurrencyTest {
             val committed = AtomicInteger()
             val done = AtomicBoolean(false)
             val start = CyclicBarrier(3)
-            val reader =
-                daemon("reader", failures) {
-                    start.await()
-                    while (!done.get()) {
-                        val tree = root.snapshot(root.nodeOf(root.left)!!)
-                        val a = tree[root.left.x]
-                        val b = tree[root.left.x2]
-                        if (a != b) mixes += "x=$a x2=$b"
-                        cuts.incrementAndGet()
-                    }
-                }
-            val writer =
-                daemon("writer", failures) {
-                    start.await()
-                    // At least FRAMES commits, and as many more as it takes for the reader to race MIN_CUTS of them.
-                    while (committed.get() < FRAMES || (cuts.get() < MIN_CUTS && reader.isAlive)) {
-                        val k = committed.incrementAndGet()
-                        root.left action {
-                            x mutate k
-                            x2 mutate k
+            try {
+                val reader =
+                    daemon("reader", failures) {
+                        start.await()
+                        while (!done.get()) {
+                            val tree = root.snapshot(root.nodeOf(root.left)!!)
+                            val a = tree[root.left.x]
+                            val b = tree[root.left.x2]
+                            if (a != b) mixes += "x=$a x2=$b"
+                            cuts.incrementAndGet()
                         }
                     }
-                }
-            start.await()
-            writer.join(100_000)
-            done.set(true)
-            reader.join(10_000)
-            assertTrue(failures.isEmpty(), failures.joinToString())
-            assertEquals(emptyList(), mixes.toList().take(5))
-            assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
-            assertEquals(committed.get(), root.left.x.value)
+                val writer =
+                    daemon("writer", failures) {
+                        start.await()
+                        while (moreRounds(committed.get(), FRAMES, MAX_FRAMES, cuts, done, reader)) {
+                            val k = committed.incrementAndGet()
+                            root.left action {
+                                x mutate k
+                                x2 mutate k
+                            }
+                        }
+                    }
+                start.await()
+                writer.join(100_000)
+                done.set(true)
+                reader.join(10_000)
+                assertTrue(failures.isEmpty(), failures.joinToString())
+                assertTrue(!writer.isAlive && !reader.isAlive, "both threads finished")
+                assertEquals(emptyList(), mixes.toList().take(5))
+                assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
+                assertTrue(committed.get() >= FRAMES, "the writer committed ${committed.get()} times")
+                assertEquals(committed.get(), root.left.x.value)
+            } finally {
+                done.set(true)
+            }
         }
 
     @Test
@@ -168,28 +194,40 @@ class TreeCutConcurrencyTest {
             val done = AtomicBoolean(false)
             val failures = ConcurrentLinkedQueue<Throwable>()
             val cuts = AtomicInteger()
-            val churner =
-                daemon("churner", failures) {
-                    repeat(500) { i ->
-                        val s = root.keyed.create(i) { CutKeyedStore(it, root) }
-                        s action { n mutate i }
-                        s.dispose()
+            val rounds = AtomicInteger()
+            val start = CyclicBarrier(3)
+            try {
+                val reader =
+                    daemon("reader", failures) {
+                        start.await()
+                        while (!done.get()) {
+                            val tree = root.snapshot()
+                            for (child in tree[root.keyed]!!.children) checkNotNull(child.leaf)
+                            cuts.incrementAndGet()
+                        }
                     }
-                }
-            val reader =
-                daemon("reader", failures) {
-                    while (!done.get()) {
-                        val tree = root.snapshot()
-                        for (child in tree[root.keyed]!!.children) checkNotNull(child.leaf)
-                        cuts.incrementAndGet()
+                val churner =
+                    daemon("churner", failures) {
+                        start.await()
+                        while (moreRounds(rounds.get(), CHURN_ROUNDS, MAX_CHURN_ROUNDS, cuts, done, reader)) {
+                            val i = rounds.getAndIncrement()
+                            val s = root.keyed.create(i) { CutKeyedStore(it, root) }
+                            s action { n mutate i }
+                            s.dispose()
+                        }
                     }
-                }
-            churner.join()
-            done.set(true)
-            reader.join()
-            assertTrue(failures.isEmpty(), failures.joinToString())
-            assertTrue(cuts.get() > 0)
-            assertTrue(root.snapshot()[root.keyed]!!.children.isEmpty())
+                start.await()
+                churner.join(50_000)
+                done.set(true)
+                reader.join(5_000)
+                assertTrue(failures.isEmpty(), failures.joinToString())
+                assertTrue(!churner.isAlive && !reader.isAlive, "both threads finished")
+                assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
+                assertTrue(rounds.get() >= CHURN_ROUNDS, "the churner ran ${rounds.get()} rounds")
+                assertTrue(root.snapshot()[root.keyed]!!.children.isEmpty())
+            } finally {
+                done.set(true)
+            }
         }
 
     @Test
@@ -239,15 +277,11 @@ class TreeCutConcurrencyTest {
         val lag = root.left.x effect { if (slow.get()) Thread.sleep(0, 100_000) }
         val mixes = ConcurrentLinkedQueue<String>()
         val cuts = AtomicInteger()
+        val committed = AtomicInteger()
         val done = AtomicBoolean(false)
         val start = CyclicBarrier(3)
         try {
             completesWithin(180, "tree captures during $what frames") {
-                val writer =
-                    daemon("$what-writer") {
-                        start.await()
-                        repeat(FRAMES) { commit(root, it + 1) }
-                    }
                 val reader =
                     daemon("tree-reader") {
                         start.await()
@@ -259,6 +293,13 @@ class TreeCutConcurrencyTest {
                             cuts.incrementAndGet()
                         }
                     }
+                val writer =
+                    daemon("$what-writer") {
+                        start.await()
+                        while (moreRounds(committed.get(), FRAMES, MAX_FRAMES, cuts, done, reader)) {
+                            commit(root, committed.incrementAndGet())
+                        }
+                    }
                 start.await()
                 writer.join(150_000)
                 done.set(true)
@@ -267,8 +308,9 @@ class TreeCutConcurrencyTest {
             }
             assertEquals(emptyList(), mixes.toList().take(5), "a capture held one frame's write on one store only")
             assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
-            assertEquals(FRAMES, root.left.x.value)
-            assertEquals(FRAMES, root.right.y.value)
+            assertTrue(committed.get() >= FRAMES, "the writer committed ${committed.get()} frames")
+            assertEquals(committed.get(), root.left.x.value)
+            assertEquals(committed.get(), root.right.y.value)
         } finally {
             done.set(true)
             slow.set(false)

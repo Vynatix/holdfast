@@ -47,31 +47,38 @@ private class RingRecordingMiddleware(
     }
 }
 
-/** The ids of the transactions a middleware started and completed; guarded, since the racing workers' actions write it. */
+/**
+ * The transactions a middleware started and completed, by instance; guarded,
+ * since the racing workers' actions write it. Never by `Transaction.id`:
+ * every action from one lambda site shares an id (`Store.actionId` is the
+ * body's class name), so an id-keyed log would answer `true` for every later
+ * action of a site once it saw the first. [Transaction] keeps identity
+ * equality, so these sets are keyed by instance.
+ */
 private class RingTransactionLog {
     private val lock = StoreLock()
-    private val started = HashSet<String>()
-    private val completed = HashSet<String>()
+    private val started = HashSet<Transaction>()
+    private val completed = HashSet<Transaction>()
 
-    fun started(id: String) {
-        lock.withLock { started += id }
+    fun started(txn: Transaction) {
+        lock.withLock { started += txn }
     }
 
-    fun completed(id: String) {
-        lock.withLock { completed += id }
+    fun completed(txn: Transaction) {
+        lock.withLock { completed += txn }
     }
 
-    /** Whether the middleware observed transaction [id] from `started` through `completed`. */
-    fun observed(id: String): Boolean = lock.withLock { id in started && id in completed }
+    /** Whether the middleware observed [txn] from `started` through `completed`. */
+    fun observed(txn: Transaction): Boolean = lock.withLock { txn in started && txn in completed }
 }
 
 /** A consumer-list member (`middlewares(...)`): the chain lists every one of these before any ring member. */
 private open class RingConsumerMember(
     val log: RingTransactionLog = RingTransactionLog(),
 ) : Middleware<RingTestVault>() {
-    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction.id)
+    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction)
 
-    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction.id)
+    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction)
 }
 
 /** One member of a whole-set ring install: every ring member one snapshot lists shares a [generation]. */
@@ -83,21 +90,21 @@ private class RingMember(
 private class RingSentinelMember(
     val log: RingTransactionLog = RingTransactionLog(),
 ) : Middleware<RingTestVault>() {
-    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction.id)
+    override fun onTransactionStarted(context: MiddlewareContext<RingTestVault>) = log.started(context.transaction)
 
-    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction.id)
+    override fun onTransactionCompleted(context: MiddlewareContext<RingTestVault>) = log.completed(context.transaction)
 }
 
-/** A guarded list the racing workers append to: the invariant violations they found, the transaction ids they ran. */
-private class RingGuardedList {
+/** A guarded list the racing workers append to: the invariant violations they found, the transactions they ran. */
+private class RingGuardedList<T> {
     private val lock = StoreLock()
-    private val items = ArrayList<String>()
+    private val items = ArrayList<T>()
 
-    operator fun plusAssign(item: String) {
+    operator fun plusAssign(item: T) {
         lock.withLock { items += item }
     }
 
-    fun toList(): List<String> = lock.withLock { items.toList() }
+    fun toList(): List<T> = lock.withLock { items.toList() }
 }
 
 private const val RING_SIZE = 3
@@ -231,8 +238,8 @@ class MiddlewareRingTest {
                 return listOf(sentinel) + List(RING_SIZE) { RingMember(generation) }
             }
             v.internalSetOuterMiddleware(wholeInstall())
-            val violations = RingGuardedList()
-            val transactions = RingGuardedList()
+            val violations = RingGuardedList<String>()
+            val transactions = RingGuardedList<Transaction>()
 
             fun verify(where: String) {
                 val chain = v.snapshotMiddleware()
@@ -291,9 +298,9 @@ class MiddlewareRingTest {
                             n mutate i
                         }
                     val txn = (result as TransactionResult.Success).transaction
-                    transactions += txn.id
+                    transactions += txn
                     val stillInstalled = v.snapshotMiddleware().any { it === member }
-                    if (stillInstalled && !member.log.observed(txn.id)) {
+                    if (stillInstalled && !member.log.observed(txn)) {
                         violations += "actor $w: a consumer member installed throughout action $i did not observe it"
                     }
                 }
@@ -316,8 +323,10 @@ class MiddlewareRingTest {
             assertEquals(emptyList(), violations.toList().take(5))
             val ran = transactions.toList()
             assertEquals(2 * OPS_PER_WORKER, ran.size, "every action ran")
-            val unseen = ran.filterNot { sentinel.log.observed(it) }
-            assertEquals(emptyList(), unseen.take(5), "the sentinel ring member observes every transaction of the run")
+            // Ids repeat per action site (`Store.actionId`), instances never: the log below is keyed by instance.
+            assertEquals(ran.size, ran.toSet().size, "every action opened a transaction of its own")
+            val unseen = ran.count { !sentinel.log.observed(it) }
+            assertEquals(0, unseen, "the sentinel ring member observes every transaction of the run; $unseen of ${ran.size} unseen")
 
             // The store is still usable afterwards: a fresh chain runs an action to completion.
             v.clearMiddleware()

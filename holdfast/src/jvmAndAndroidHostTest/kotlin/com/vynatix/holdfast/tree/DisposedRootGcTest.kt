@@ -4,8 +4,8 @@ package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.awaitCollected
 import java.lang.ref.WeakReference
-import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -27,15 +27,12 @@ private class DgRoot : Root("dg") {
     val threads by keyed<Int, DgThreadStore>()
 }
 
-private val GC_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(5)
-private const val PRESSURE_CHUNKS = 32
-private const val PRESSURE_CHUNK_BYTES = 256 * 1024
-
 /**
  * A keyed store live when its root disposed, and disposed itself later, is
  * collectable while the root is still referenced: the root heard nothing of
  * that later dispose (the membership was released), so it must hold nothing
- * of the store. `KeyedStoreGcTest` covers the live-root case.
+ * of the store. `KeyedStoreGcTest` covers the live-root case. The wait is
+ * `awaitCollected` (`GcSupport.kt`).
  */
 class DisposedRootGcTest {
     /** Keeps each root reachable for the whole test, so a collected store is not explained by a collected root. */
@@ -45,7 +42,7 @@ class DisposedRootGcTest {
     fun aKeyedStoreDisposedAfterItsRootIsCollectable() {
         val root = DgRoot().also { roots += it }
         val ref = createDisposeRootThenStore(root)
-        awaitCollected(ref)
+        assertTrue(awaitCollected(ref), "a keyed store disposed after its root was not collected within the budget")
         assertNull(ref.get(), "a disposed root must not keep a keyed store it once listed reachable")
         assertTrue(root.isDisposed)
     }
@@ -54,7 +51,7 @@ class DisposedRootGcTest {
     fun aKeyedStoreThatJoinedInsideTheActionDisposingTheRootIsCollectable() {
         val root = DgRoot().also { roots += it }
         val ref = createInsideAnActionThatDisposesTheRoot(root)
-        awaitCollected(ref)
+        assertTrue(awaitCollected(ref), "a keyed store joined inside the disposing action was not collected within the budget")
         assertNull(ref.get(), "a join still pending at dispose must not keep the store reachable")
         assertTrue(root.isDisposed)
     }
@@ -80,17 +77,5 @@ class DisposedRootGcTest {
         store!!.dispose()
         store = null
         return ref
-    }
-
-    /** Polls under allocation pressure, never `System.runFinalization()`. */
-    private fun awaitCollected(ref: WeakReference<*>) {
-        val deadline = System.nanoTime() + GC_BUDGET_NANOS
-        while (ref.get() != null && System.nanoTime() < deadline) {
-            val pressure = ArrayList<ByteArray>(PRESSURE_CHUNKS)
-            repeat(PRESSURE_CHUNKS) { pressure += ByteArray(PRESSURE_CHUNK_BYTES) }
-            pressure.clear()
-            System.gc()
-            Thread.sleep(20)
-        }
     }
 }
