@@ -3,18 +3,44 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.platform.threadYield
 import com.vynatix.holdfast.testing.TreeEvent
 import com.vynatix.holdfast.testing.TreeHandle
 import com.vynatix.holdfast.tree.Root
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
+
+/**
+ * How long [TreeFixtures.tearDown] re-probes a tree's live leaves for one
+ * still held by an entry it cannot wait out before it skips the reset and
+ * fails the test. Real time, between probes the thread yields: a transient
+ * holder — an in-flight `suspendDerived` recompute on `Store.scope`, which
+ * no test can join, a thread finishing an action — is gone long before
+ * this; a `suspendAction` body parked in un-joined work never is.
+ */
+internal val TEARDOWN_HELD_LEAF_BUDGET: Duration = 1.seconds
+
+/**
+ * What [TreeFixtures.tearDown] found, one line per tree: the trees whose
+ * reset ran and failed, and the trees whose reset it skipped because a
+ * leaf was still held when [TEARDOWN_HELD_LEAF_BUDGET] ran out — each a
+ * failure of the test unless the body already failed.
+ */
+internal class TreeTeardownReport(
+    val resetFailures: List<String>,
+    val skippedResets: List<String>,
+)
 
 /**
  * The trees one `StoreTestScope` tracks (`trackTree`), by root identity, and
  * their teardown: after the leaf handles' recorders are gone, each tree
- * stops hearing of new members, is reset as one frame (unless opted out, the
- * root is disposed, or a leaf is still held — see [tearDown]) with its
+ * stops hearing of new members, is reset as one frame (unless opted out,
+ * the root is disposed, or a leaf is still held — see [tearDown]) with its
  * recorder still installed so a veto is recorded with its leaf, and then
  * loses its recorder. Never disposes a root.
  */
@@ -42,45 +68,96 @@ internal class TreeFixtures {
     }
 
     /**
-     * Unwind every tracked tree, in track order; one line per tree whose
-     * reset failed.
+     * Unwind every tracked tree, in track order, and report the trees whose
+     * reset failed or was skipped.
      *
      * The reset is one `atomic` frame over every live leaf, taken through
-     * each leaf's serializer and transaction lock. A leaf still held when
-     * teardown runs — a `suspendAction`/`suspendAtomic` body parked in
-     * un-joined work, a thread inside an action — skips the whole tree's
-     * reset instead of waiting: the wait would spin on the test thread, the
-     * only one that could resume a parked body, and un-joined work is not
-     * waited for by contract. The skip is not a failure; the next test finds
-     * the values the body left.
+     * each leaf's serializer and transaction lock, and it would wait for a
+     * leaf an entry still holds — spinning on the test thread when that
+     * entry is a `suspendAction`/`suspendAtomic` body parked in un-joined
+     * work, which only the test thread could resume. So before resetting,
+     * every live leaf is probed ([PrivilegedHooks.isHeldByAnEntry]), and
+     * while one is held the probe repeats, yielding between rounds, for up
+     * to [TEARDOWN_HELD_LEAF_BUDGET]: a transient holder (an in-flight
+     * `suspendDerived` recompute on `Store.scope`, a thread finishing an
+     * action) is waited out and the reset runs. A leaf still held when the
+     * budget ends skips the whole tree's reset — and that skip is reported,
+     * naming the tree and the held leaves, because it leaves the body's
+     * values for the next test to find; `resetAtTeardown = false` is the
+     * opt-out for a test that parks work deliberately. The probe is a
+     * decision, not a lock: an entry taking a leaf right after it answered
+     * free is waited for by the reset like any `atomic` would.
      */
-    fun tearDown(): List<String> {
+    fun tearDown(): TreeTeardownReport {
         val all = synchronized(lock) { trees.toList().also { trees.clear() } }
-        val failures = mutableListOf<String>()
+        val resetFailures = mutableListOf<String>()
+        val skippedResets = mutableListOf<String>()
         for (tree in all) {
             runCatching { tree.listener.dispose() }
-            if (tree.resetAtTeardown && !tree.root.isDisposed && !aLeafIsHeld(tree.root)) {
-                val outcome = runCatching { tree.root.reset() }
-                outcome.onFailure {
-                    failures += "tree '${tree.root.name}': reset threw ${it::class.simpleName}: ${it.message}"
-                }
-                outcome.onSuccess { result ->
-                    if (result is TransactionResult.Error) failures += describeResetFailure(tree, result)
+            if (tree.resetAtTeardown && !tree.root.isDisposed) {
+                val held = heldLeaves(tree.root)
+                when {
+                    held == null -> Unit // the root was disposed meanwhile: nothing left to reset
+                    held.isNotEmpty() -> skippedResets += describeSkippedReset(tree, held)
+                    else -> resetFailureOf(tree)?.let { resetFailures += it }
                 }
             }
             runCatching { tree.root.removeMiddleware(tree.recorder) }
             tree.recorder.dispose()
         }
-        return failures
+        return TreeTeardownReport(resetFailures, skippedResets)
     }
 
     /**
-     * Whether a live leaf of [root] is held by an entry teardown cannot wait
-     * out ([PrivilegedHooks.isHeldByAnEntry]). A root disposed meanwhile is
-     * treated as held: there is nothing left to reset.
+     * The names of the live leaves of [root] still held by an entry teardown
+     * cannot wait out once [TEARDOWN_HELD_LEAF_BUDGET] has passed; empty as
+     * soon as one probe round finds none held; `null` when the root was
+     * disposed meanwhile (nothing left to reset). Yields between rounds and
+     * never blocks on a leaf.
      */
-    private fun aLeafIsHeld(root: Root): Boolean =
-        runCatching { root.children(root).any { PrivilegedHooks.isHeldByAnEntry(it) } }.getOrDefault(true)
+    private fun heldLeaves(root: Root): List<String>? {
+        val deadline = TimeSource.Monotonic.markNow() + TEARDOWN_HELD_LEAF_BUDGET
+        var held = probeHeld(root)
+        while (!held.isNullOrEmpty() && !deadline.hasPassedNow()) {
+            threadYield()
+            held = probeHeld(root)
+        }
+        return held?.map { leafName(root, it) }
+    }
+
+    /**
+     * The live leaves of [root] an entry holds right now
+     * ([PrivilegedHooks.isHeldByAnEntry]); `null` on a disposed root.
+     */
+    private fun probeHeld(root: Root): List<Store<*>>? =
+        runCatching { root.children(root).filter { PrivilegedHooks.isHeldByAnEntry(it) } }.getOrNull()
+
+    /** How the report names [store]: its node's name, or its class when the root is gone. */
+    private fun leafName(
+        root: Root,
+        store: Store<*>,
+    ): String = runCatching { root.nodeOf(store)?.name }.getOrNull() ?: (store::class.simpleName ?: "a leaf")
+
+    /** Reset [tree] and describe the failure, or `null` when it committed. */
+    private fun resetFailureOf(tree: TreeHandle): String? {
+        val outcome = runCatching { tree.root.reset() }
+        val thrown = outcome.exceptionOrNull()
+        if (thrown != null) {
+            return "tree '${tree.root.name}': reset threw ${thrown::class.simpleName}: ${thrown.message}"
+        }
+        val result = outcome.getOrThrow()
+        return if (result is TransactionResult.Error) describeResetFailure(tree, result) else null
+    }
+
+    private fun describeSkippedReset(
+        tree: TreeHandle,
+        held: List<String>,
+    ): String =
+        "tree '${tree.root.name}': reset skipped — ${held.joinToString(", ") { "leaf '$it'" }} still held after " +
+            "$TEARDOWN_HELD_LEAF_BUDGET by an entry teardown cannot wait out (a suspendAction/suspendAtomic body " +
+            "parked in un-joined work, a thread inside an action, or a holder of the leaf's serializer), so the " +
+            "next test would find this body's values. Join or finish that work before the body ends, or opt out " +
+            "with trackTree(root, resetAtTeardown = false)"
 
     private fun describeResetFailure(
         tree: TreeHandle,

@@ -4198,9 +4198,16 @@ fun testTheTree() =
   body already failed); a leaf disposed in the body is skipped — and then
   that middleware comes off. Every middleware the test installed on a leaf
   or the root stays. A leaf still held when teardown runs (a
-  `suspendAction` body parked in un-joined work) skips the whole tree's
-  reset without failing the test: un-joined work is not waited for, and
-  waiting would hang the test. The root is never disposed. `trackTree` is
+  `suspendAction` body parked in un-joined work, a thread inside an
+  action) is re-probed for about a second of real time — a transient
+  holder, such as an in-flight `suspendDerived` recompute on `Store.scope`,
+  is waited out and the reset runs — and one still held after that skips
+  the whole tree's reset and FAILS the test, naming the tree and the leaf:
+  a silent skip would leak the body's values into the next test, and
+  waiting longer would hang the test thread, the only one able to resume a
+  parked body. Join such work before the body ends, or opt out with
+  `resetAtTeardown = false` for a test that deliberately parks it. The
+  root is never disposed. `trackTree` is
   idempotent by root identity and throws on a disposed root, or from inside
   a leaf's action or an `atomic` frame (a refused call leaves nothing
   behind).

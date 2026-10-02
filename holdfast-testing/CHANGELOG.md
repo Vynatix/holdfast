@@ -10,11 +10,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Issue #21 review (PR #24).** `trackTree`'s teardown reset is skipped,
-  not failed, when a live leaf is still held by an entry teardown cannot
-  wait out (a `suspendAction`/`suspendAtomic` body parked in un-joined
-  work, a thread inside an action, or a holder of the leaf's serializer);
-  it previously spun forever on the test thread. `trackTree` from inside a
+- **Issue #21 review (PR #24).** `trackTree`'s teardown no longer spins
+  forever on the test thread when a live leaf is still held by an entry it
+  cannot wait out (a `suspendAction`/`suspendAtomic` body parked in
+  un-joined work, a thread inside an action, or a holder of the leaf's
+  serializer): it re-probes every live leaf for a bounded time (about one
+  second of real time), so a transient holder — an in-flight
+  `suspendDerived` recompute on `Store.scope`, which no test can join — is
+  waited out and the reset runs; a leaf still held when the budget ends
+  skips the tree's reset and fails the test, naming the tree and the held
+  leaves in a section of the teardown `AssertionError` of its own (after
+  the unconsumed errors and the vetoed resets) that points at the opt-out,
+  `trackTree(root, resetAtTeardown = false)`, for a test that deliberately
+  parks work. A silent skip would leak the body's values into the next
+  test. `trackTree` from inside a
   leaf's action or an `atomic` frame is refused and leaves nothing behind
   (no tracked leaf, no membership listener, no tree middleware). Teardown
   reports unconsumed `TransactionResult.Error`s and a failed tree reset in

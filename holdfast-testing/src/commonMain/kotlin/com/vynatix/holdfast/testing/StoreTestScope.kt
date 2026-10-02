@@ -172,16 +172,21 @@ class StoreTestScope internal constructor(
      * (`Store.bindClock`) to what it was when the store was first tracked,
      * unwinds each tracked tree (`trackTree`: its membership listener
      * disposed, the tree reset as one frame with the tree recorder still
-     * installed — skipped when opted out, the root is disposed, or a leaf is
-     * still held by un-joined work — then that recorder removed), and clears
+     * installed — skipped when opted out or the root is disposed, and when a
+     * leaf is still held by an entry teardown cannot wait out after it
+     * re-probed the leaves for a bounded time, about a second of real time,
+     * so a transient holder is waited out but a `suspendAction` body parked
+     * in un-joined work is not — then that recorder removed), and clears
      * the handle registry. When [bodyAlreadyFailed] is `false`, also
      * aggregates any unconsumed [TransactionResult.Error] values across all
-     * handles and any tree whose reset failed into one [AssertionError], the
-     * unconsumed errors listed first — forcing tests to actively assert on
-     * (or explicitly discard) every error they observe. When the body already
-     * threw, the original failure propagates and the unconsumed-error check is
-     * suppressed so the user sees the root-cause exception rather than a
-     * teardown-time message.
+     * handles, any tree whose reset failed, and any tree whose reset was
+     * skipped for a held leaf (named, with the opt-out
+     * `resetAtTeardown = false`: a silent skip would leak the body's values
+     * into the next test) into one [AssertionError], in that order — forcing
+     * tests to actively assert on (or explicitly discard) every error they
+     * observe and to join the work they start. When the body already threw,
+     * the original failure propagates and these checks are suppressed so the
+     * user sees the root-cause exception rather than a teardown-time message.
      *
      * Order is fixed: barriers cancel first so coroutines waiting in
      * `arrive()`/`await()` resume; then [AwaitingRegistry.cancelAll] closes
@@ -224,15 +229,17 @@ class StoreTestScope internal constructor(
             handle.clearPendingErrorsInternal()
             PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
         }
-        val treeFailures = treeFixtures.tearDown()
+        val trees = treeFixtures.tearDown()
         registry.clear()
 
         if (bodyAlreadyFailed) return
-        // One report for both, the unconsumed errors first: a test that leaves
-        // an error unconsumed and has a leaf veto the teardown reset learns of both.
+        // One report for all three, the unconsumed errors first: a test that
+        // leaves an error unconsumed, has a leaf veto the teardown reset and
+        // parks work in a leaf of another tree learns of each.
         val sections = mutableListOf<String>()
         if (unconsumed.isNotEmpty()) sections += unconsumedErrorsReport(unconsumed)
-        if (treeFailures.isNotEmpty()) sections += treeResetReport(treeFailures)
+        if (trees.resetFailures.isNotEmpty()) sections += treeResetReport(trees.resetFailures)
+        if (trees.skippedResets.isNotEmpty()) sections += treeResetSkippedReport(trees.skippedResets)
         if (sections.isNotEmpty()) throw AssertionError(sections.joinToString("\n\n"))
     }
 }
@@ -259,6 +266,15 @@ private fun unconsumedErrorsReport(unconsumed: List<Pair<StoreHandle<*>, Transac
 private fun treeResetReport(failures: List<String>): String =
     "storeTest teardown could not reset ${failures.size} tracked tree(s):\n" +
         failures.joinToString("\n") { " - $it" }
+
+/**
+ * [StoreTestScope.tearDown]'s report of the tracked trees whose reset it
+ * skipped for a leaf still held, one line each.
+ */
+private fun treeResetSkippedReport(skipped: List<String>): String =
+    "storeTest teardown skipped the reset of ${skipped.size} tracked tree(s) with a leaf still held " +
+        "(the next test would find this body's values):\n" +
+        skipped.joinToString("\n") { " - $it" }
 
 private fun handleLabel(handle: StoreHandle<*>): String {
     val cls = handle.store::class.simpleName ?: "Store"

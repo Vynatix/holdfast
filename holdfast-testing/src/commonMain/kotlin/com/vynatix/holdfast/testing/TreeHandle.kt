@@ -29,11 +29,17 @@ import kotlinx.atomicfu.locks.synchronized
  * the body is skipped — and only then removes the tree middleware from the
  * root. Every middleware the test installed stays. A leaf still held when
  * teardown runs (a `suspendAction`/`suspendAtomic` body parked in un-joined
- * work, a thread inside an action) skips the whole tree's reset without
- * failing the test: the reset is one frame over every leaf, un-joined work
- * is not waited for, and waiting would hang the test thread — the only one
- * that could resume the body. Join such work before the body ends, or reset
- * by hand. The root itself is never disposed.
+ * work, a thread inside an action, a holder of the leaf's serializer) is
+ * re-probed for a bounded time — about a second of real time, so a
+ * transient holder such as an in-flight `suspendDerived` recompute on
+ * `Store.scope` is waited out and the reset runs — and one still held after
+ * that skips the whole tree's reset and FAILS the test, naming the tree and
+ * the held leaves: the reset is one frame over every leaf, waiting longer
+ * would hang the test thread (the only one that could resume a parked
+ * body), and a silent skip would leak the body's values into the next
+ * test. Join such work before the body ends, or opt out with
+ * `resetAtTeardown = false` for a test that parks it deliberately. The root
+ * itself is never disposed.
  */
 @ExperimentalStoreApi
 class TreeHandle internal constructor(

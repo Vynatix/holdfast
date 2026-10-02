@@ -370,14 +370,18 @@ internal object PrivilegedHooks {
      * lock-only holders, a hydration decision). The tree fixture's teardown
      * asks before its reset — one `atomic` frame over every leaf, which
      * would spin on the test thread, the only one able to resume a parked
-     * body.
+     * body — and asks again, yielding between rounds, for a bounded time
+     * (`TEARDOWN_HELD_LEAF_BUDGET`) while the answer is `true`: a transient
+     * holder (an in-flight `suspendDerived` recompute on `Store.scope`) is
+     * waited out that way; a leaf still held when the budget ends skips the
+     * reset and fails the test, naming the leaf.
      *
      * Never waits: the lock and the serializer are probed with their
      * non-blocking acquires and released at once, and, as every holder must
      * after releasing (`Store.tryTopLevelAction`), the store's post-commit
-     * queue is drained. A disposed store is held by nothing. Best effort — a
-     * decision, not a lock: an entry may take the store right after this
-     * answers `false`.
+     * queue is drained — so a probe round is cheap enough to repeat. A
+     * disposed store is held by nothing. Best effort — a decision, not a
+     * lock: an entry may take the store right after this answers `false`.
      */
     fun isHeldByAnEntry(store: Store<*>): Boolean =
         when {

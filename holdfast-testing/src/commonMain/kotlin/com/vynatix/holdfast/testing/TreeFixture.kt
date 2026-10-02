@@ -16,8 +16,10 @@ import com.vynatix.holdfast.tree.Root
  * reset as one frame — with the tree middleware still installed, so a
  * vetoed reset names its leaf — and then that middleware comes off; every
  * middleware the test installed stays, and the root is never disposed. A
- * leaf still held by un-joined work when teardown runs skips the reset
- * without failing the test (see [TreeHandle]).
+ * leaf still held by un-joined work when teardown runs is re-probed for a
+ * bounded time, then skips the reset and fails the test naming the leaf —
+ * pass [resetAtTeardown] `false` for a test that parks work deliberately
+ * (see [TreeHandle]).
  *
  * @throws IllegalStateException if [root] is disposed, or from inside a
  *   transaction of a leaf or an `atomic` frame (the tree middleware is
