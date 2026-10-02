@@ -7,12 +7,14 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 
 /**
- * A group of a store's children: the stores a `val session by stores {
- * listOf(SignInStore(), ProfileStore()) }` declaration listed, each at its
- * own [LeafNode] (named by a `stores(names = …)` pin, else its class name
- * minus `Store`). Created when the group is first materialized — the lambda
- * runs then, never at declaration — and fixed for its life: a listed store
- * that disposes leaves the group, the others stay.
+ * A group of a store's children: the stores a `val session by group {
+ * listOf(SignInStore() named "sign-in", ProfileStore()) }` declaration
+ * listed, each at its own [LeafNode] (named by its `named` pin, else its
+ * class name minus `Store`). Created when the group is first materialized —
+ * the lambda runs then, never at declaration — and fixed for its life: a
+ * listed store that disposes leaves the group, the others stay. When the
+ * declaring store disposes, the group's stores are released as subtree
+ * roots (never disposed: compare [KeyedBranch]).
  */
 @ExperimentalStoreApi
 class Branch internal constructor(

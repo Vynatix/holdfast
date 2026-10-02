@@ -55,8 +55,8 @@ private class RsThreadStore(
 private class RsStore : Store<RsStore>() {
     val profile = RsProfileStore()
     val vault = RsVaultStore()
-    val main by stores { listOf(profile, vault) }
-    val threads by stores<String, RsThreadStore> { RsThreadStore(it) }
+    val main by group { listOf(profile, vault) }
+    val threads by keyed<String, RsThreadStore> { RsThreadStore(it) }
 }
 
 /** Declares [RsProfileStore.visits] as text: its encoded leaf is corrupt for an RsProfileStore. */
@@ -65,11 +65,16 @@ private class RsProfileAsText : Store<RsProfileAsText>() {
     val visits by state(codec = StringCodec) { "many" }
 }
 
-private class RsProfileAsTextApp : Store<RsProfileAsTextApp>() {
+/** Identified as `Rs`, the receiver identity of [RsStore] (its node name), so its texts decode there. */
+private class RsProfileAsTextApp :
+    Store<RsProfileAsTextApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "Rs"
+
     val profile = RsProfileAsText()
     val vault = RsVaultStore()
-    val main by stores(names = mapOf(RsProfileAsText::class to "RsProfile")) { listOf(profile, vault) }
-    val threads by stores<String, RsThreadStore2> { RsThreadStore2(it) }
+    val main by group { listOf(profile named "RsProfile", vault) }
+    val threads by keyed<String, RsThreadStore2> { RsThreadStore2(it) }
 }
 
 private class RsThreadStore2(
@@ -121,12 +126,20 @@ private class RsVersionedV1Store : Store<RsVersionedV1Store>() {
 }
 
 /** Two stores of one class: one pinned, the other as a `store { }` child, so neither name comes from the class. */
-private class RsVersionedApp : Store<RsVersionedApp>() {
+private class RsVersionedApp :
+    Store<RsVersionedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "versioned-app"
+
     val a by store { RsVersionedStore() }
     val b by store { RsVersionedStore() }
 }
 
-private class RsVersionedV1App : Store<RsVersionedV1App>() {
+private class RsVersionedV1App :
+    Store<RsVersionedV1App>(),
+    TreeIdentified {
+    override val treeId: String get() = "versioned-app"
+
     val a by store { RsVersionedV1Store() }
     val b by store { RsVersionedV1Store() }
 }
@@ -489,7 +502,7 @@ private class RsSterileStore : Store<RsSterileStore>() {
 
 private class RsSterileApp : Store<RsSterileApp>() {
     val a = RsSterileStore()
-    val leaf by stores(names = mapOf(RsSterileStore::class to "a")) { listOf(a) }
+    val leaf by group { listOf(a named "a") }
 }
 
 /** A parent with states of its own: they are captured and restored with its children's. */

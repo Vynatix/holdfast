@@ -83,7 +83,7 @@ private class CmtMixedParent : Store<CmtMixedParent>() {
         CmtLeafStore().also { builtChildren += it }
     }
 
-    val threads by stores<String, CmtKeyedStore> { key ->
+    val threads by keyed<String, CmtKeyedStore> { key ->
         factoryBody(key)
         CmtKeyedStore().also { builtKeyed += it }
     }
@@ -200,7 +200,7 @@ class ChildMaterializationThreadTest {
             },
             "$failures",
         )
-        assertEquals(emptyMap(), parent.threads.entries)
+        assertEquals(emptyMap(), parent.threads.entries())
         assertTrue(
             parent
                 .treeAttachment()
@@ -229,7 +229,7 @@ class ChildMaterializationThreadTest {
         }
         assertEquals(2, failures.size, "both fail: $failures")
         assertTrue(failures.all { it.message.orEmpty().startsWith("Materialization cycle") }, "$failures")
-        assertEquals(emptyMap(), parent.threads.entries)
+        assertEquals(emptyMap(), parent.threads.entries())
     }
 
     @Test

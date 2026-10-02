@@ -22,8 +22,8 @@ private class CrossKeyedStore(
 
 private class CrossParent : Store<CrossParent>() {
     val base by store { CrossStore() }
-    val group by stores { listOf(CrossStore()) }
-    val keyed by stores<String, CrossKeyedStore> { CrossKeyedStore(it) }
+    val group by group { listOf(CrossStore()) }
+    val keyed by keyed<String, CrossKeyedStore> { CrossKeyedStore(it) }
 }
 
 /** A store's tree never accepts a node outside its own subtree: nodes are values, and membership is the live links. */

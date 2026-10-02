@@ -8,8 +8,8 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.merged
+import com.vynatix.holdfast.tree.group
 import com.vynatix.holdfast.tree.internalSettleCount
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -133,5 +133,5 @@ private class TreeRightStore : Store<TreeRightStore>() {
 private class TreeParentStore : Store<TreeParentStore>() {
     val left = TreeLeftStore()
     val right = TreeRightStore()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }

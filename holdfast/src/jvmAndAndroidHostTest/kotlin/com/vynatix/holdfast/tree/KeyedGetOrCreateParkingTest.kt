@@ -60,7 +60,7 @@ private class PkParent(
     @Volatile
     var failingThread: String? = null
 
-    val slow by stores<Int, PkStore>(keyCodec = codec) { id ->
+    val slow by keyed<Int, PkStore>(keyCodec = codec) { id ->
         val thread = Thread.currentThread().name
         runThreads += thread
         val store = PkStore(id).also { built += it }

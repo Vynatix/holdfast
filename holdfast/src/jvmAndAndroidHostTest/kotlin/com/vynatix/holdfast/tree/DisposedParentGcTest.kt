@@ -22,15 +22,15 @@ private class DgThreadStore(
 
 private class DgParent : Store<DgParent>() {
     val leaf by store { DgLeafStore() }
-    val threads by stores<Int, DgThreadStore> { DgThreadStore(it) }
+    val threads by keyed<Int, DgThreadStore> { DgThreadStore(it) }
 }
 
 /**
- * A keyed store live when its parent disposed — released as a subtree root —
- * and disposed itself later is collectable while the parent is still
- * referenced: the parent heard nothing of that later dispose (it had
- * released the store), so it must hold nothing of it — not in its registry,
- * not in its tree value. `KeyedStoreGcTest` covers the live-parent case. The
+ * A keyed store live when its parent disposed — released as a subtree root,
+ * then disposed by its branch (`KeyedDisposal.Dispose`; the test's own
+ * later `dispose()` is a no-op) — is collectable while the parent is still
+ * referenced: the parent had released the store before disposing it, so it
+ * must hold nothing of it — not in its registry, not in its tree value. `KeyedStoreGcTest` covers the live-parent case. The
  * wait is `awaitCollected` (`GcSupport.kt`).
  */
 class DisposedParentGcTest {

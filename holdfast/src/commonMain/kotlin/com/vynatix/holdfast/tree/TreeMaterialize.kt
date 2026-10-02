@@ -4,16 +4,14 @@ package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.InitializerGraph
-import com.vynatix.holdfast.Stateful
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreLock
 import com.vynatix.holdfast.displayName
 import com.vynatix.holdfast.settling
-import kotlin.reflect.KClass
 
 // Children are declared eagerly and materialized lazily, like states: a
-// `store { }`/`stores { }` declaration registers a `ChildEntry` at
+// `store { }`/`group { }` declaration registers a `ChildEntry` at
 // `provideDelegate` and runs nothing; the child lambda runs on the first
 // read of the delegate, or when a tree operation needs the subtree
 // (`materializeSubtree`, called first by every public structural entrypoint).
@@ -48,7 +46,7 @@ import kotlin.reflect.KClass
 internal val treeStructureLock = StoreLock()
 
 /**
- * The child of [entry] (a `store { }` child or a `stores { }` group of the
+ * The child of [entry] (a `store { }` child or a `group { }` of the
  * entry's owner), materialized if it has not been: run the lambda holding
  * nothing, then claim the entry and attach the result under the owner, or
  * answer the result another thread attached first. Joins the settle scope
@@ -61,7 +59,7 @@ internal val treeStructureLock = StoreLock()
  *   The entry stays retryable, and the stores the failed run built that
  *   nothing else holds are disposed.
  * @throws IllegalArgumentException when a group lists a store twice, a
- *   disposed store, pins a class it does not list, or names two leaves alike.
+ *   disposed store, pins a store it does not list, or names two leaves alike.
  */
 internal fun materializeChild(entry: ChildEntry): Any {
     entry.produced?.let { return it }
@@ -70,7 +68,7 @@ internal fun materializeChild(entry: ChildEntry): Any {
 
 /** What one run of a child lambda produced, validated and ready to attach. */
 internal class Candidate(
-    /** What the delegate answers: the child (`Stateful`) or the group's [Branch]. */
+    /** What the delegate answers: the child store or the group's [Branch]. */
     val produced: Any,
     /** The node the entry takes: the child's [LeafNode] or the [Branch]. */
     val node: StoreNode,
@@ -83,7 +81,7 @@ internal class Candidate(
 internal fun storesOf(produced: Any?): List<Store<*>> =
     when (produced) {
         is Branch -> produced.stores
-        is Stateful -> listOf(produced.owningStore)
+        is Store<*> -> listOf(produced)
         else -> emptyList()
     }
 
@@ -92,11 +90,12 @@ private fun materializeRacing(entry: ChildEntry): Any {
     entry.owner.checkNotDisposed()
     val built = RunBuilt.mark()
     // Phase 1: the lambda, holding nothing of the tree's; marked on this thread only.
-    val output = InitializerGraph.Process.runMarked(entry) { entry.runLambda() }
+    val pins = GroupScope()
+    val output = InitializerGraph.Process.runMarked(entry) { entry.runLambda(pins) }
     var prepared = false
     val candidate =
         try {
-            prepare(entry, output).also { prepared = true }
+            prepare(entry, output, pins).also { prepared = true }
         } finally {
             if (!prepared) built.disposeOrphans(producedStores(entry, output))
         }
@@ -117,10 +116,10 @@ private fun producedStores(
     }
 
 @Suppress("UNCHECKED_CAST")
-private fun ChildEntry.runLambda(): Any =
+private fun ChildEntry.runLambda(scope: GroupScope): Any =
     when (kind) {
-        ChildEntry.Kind.Store -> (lambda as () -> Stateful)()
-        ChildEntry.Kind.Group -> (lambda as () -> List<Store<*>>)()
+        ChildEntry.Kind.Store -> (lambda as () -> Any)()
+        ChildEntry.Kind.Group -> (lambda as GroupScope.() -> List<Store<*>>)(scope)
         ChildEntry.Kind.Keyed -> error("$label is materialized at declaration")
     }
 
@@ -168,22 +167,25 @@ private fun attachClaimed(
 private fun prepare(
     entry: ChildEntry,
     output: Any,
+    scope: GroupScope,
 ): Candidate =
     if (entry.kind == ChildEntry.Kind.Group) {
         @Suppress("UNCHECKED_CAST")
         val listed = output as List<Store<*>>
-
-        @Suppress("UNCHECKED_CAST")
-        val pins = entry.pin as Map<KClass<out Store<*>>, String>
-        val named = nameGroup(entry.label, listed, pins)
+        val named = nameGroup(entry.label, listed, scope.pins)
         val attachments = listed.map { it.treeAttachment() }
         val members = listed.zip(attachments.map { it.node })
         val branch = Branch(entry.ownerNode, entry.name, entry.origin, members, entry.owner, entry.registry)
         val targets = attachments.mapIndexed { i, a -> AttachTarget(a, named[i].first, named[i].second, key = null) }
         Candidate(branch, branch, listed, targets)
     } else {
-        val produced = output as Stateful
-        val child = produced.owningStore
+        val child =
+            checkNotNull(output as? Store<*>) {
+                "${entry.label}: store { } must produce a Store, not " +
+                    "${output::class.simpleName ?: "an anonymous object"}; " +
+                    "an inline child is object : NodeStore(), YourInterface { … }"
+            }
+        val produced = output
         check(!child.isDisposed) { "${entry.label}: the child lambda returned a disposed store" }
         val attachment = child.treeAttachment()
         val target = AttachTarget(attachment, entry.name, entry.origin, key = null)
@@ -191,53 +193,50 @@ private fun prepare(
     }
 
 /**
- * Validate a group's listing and name its leaves: by `stores(names = …)`
- * pin (an exact-class lookup), else by class name minus `Store`.
+ * Validate a group's listing and name its leaves: by the `named` pin the
+ * lambda gave the store (by identity), else by class name minus `Store`.
  */
 private fun nameGroup(
     label: String,
     listed: List<Store<*>>,
-    pins: Map<KClass<out Store<*>>, String>,
+    pins: List<Pair<Store<*>, String>>,
 ): List<Pair<String, NameOrigin>> {
     for ((index, store) in listed.withIndex()) {
         require(listed.indexOfFirst { it === store } == index) { "$label lists ${store.displayName} twice" }
         require(!store.isDisposed) { "$label lists a disposed ${store.displayName}" }
     }
-    val unlisted = pins.keys.firstOrNull { pinned -> listed.none { it::class == pinned } }
+    val unlisted = pins.firstOrNull { (pinned, _) -> listed.none { it === pinned } }
     require(unlisted == null) {
-        "stores(names = …) on '$label' pins ${unlisted?.simpleName}, which the group does not list"
+        "$label pins a ${unlisted?.first?.displayName} named '${unlisted?.second}' that the group does not list"
     }
     val taken = HashSet<String>()
     return listed.map { store ->
-        val pin = pins[store::class]
+        val pin = pins.firstOrNull { it.first === store }?.second
         val name =
             pin ?: checkNotNull(defaultLeafName(store::class.simpleName)) {
-                "$label lists a store whose class has no simple name (anonymous or local); pin it with " +
-                    "stores(names = mapOf(Store::class to \"...\"))"
+                "$label lists a store whose class has no simple name (anonymous or local); pin it in the group " +
+                    "lambda: group { listOf(store named \"...\") }"
             }
         require(taken.add(name)) { duplicateLeafMessage(label, name, store, listed) }
         name to (if (pin != null) NameOrigin.Pinned else NameOrigin.ClassName)
     }
 }
 
-/**
- * Two leaves of one group would be named [name]. A pin is an exact-class
- * lookup, so two stores of one class can never be told apart by one: they
- * belong in separate `store { }` children. Stores of two classes whose
- * simple names collide can be pinned apart.
- */
+/** Two leaves of one group would be named [name]: pin one of them apart with `named`. */
 private fun duplicateLeafMessage(
     label: String,
     name: String,
     store: Store<*>,
     listed: List<Store<*>>,
-): String =
-    if (listed.count { it::class == store::class } > 1) {
-        "$label lists two ${store::class.simpleName}s, so two leaves would be named '$name'; a stores(names = …) " +
-            "pin names a class, never one instance, so declare each of them as its own store { } child instead"
-    } else {
-        "$label has two leaves named '$name'; pin one with stores(names = mapOf(Store::class to \"...\"))"
-    }
+): String {
+    val what =
+        if (listed.count { it::class == store::class } > 1) {
+            "lists two ${store::class.simpleName}s, so two leaves would be named '$name'"
+        } else {
+            "has two leaves named '$name'"
+        }
+    return "$label $what; pin one of them with named: group { listOf(a named \"...\", b) }"
+}
 
 /**
  * Phases 3–6 of [attach]: link, register (running [registryStep] over the

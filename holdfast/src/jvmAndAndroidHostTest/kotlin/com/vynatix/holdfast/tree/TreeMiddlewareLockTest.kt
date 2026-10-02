@@ -32,7 +32,7 @@ private class LkKeyedStore(
 private class LkParent : Store<LkParent>() {
     val a by store { LkLeafStore() }
     val b by store { LkLeafStore() }
-    val keyed by stores<Int, LkKeyedStore> { LkKeyedStore(it) }
+    val keyed by keyed<Int, LkKeyedStore> { LkKeyedStore(it) }
 }
 
 /** The tree middleware [store] installed itself (`tree.middlewares` on its own handle). */

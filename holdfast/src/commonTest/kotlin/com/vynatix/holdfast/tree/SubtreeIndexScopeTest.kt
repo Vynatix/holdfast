@@ -22,8 +22,8 @@ private class SiBStore : Store<SiBStore>() {
 private class SiApp : Store<SiApp>() {
     val sa = SiAStore()
     val sb = SiBStore()
-    val left by stores { listOf(sa) }
-    val right by stores { listOf(sb) }
+    val left by group { listOf(sa) }
+    val right by group { listOf(sb) }
 }
 
 /** A subtree taken out of a whole capture with `tree[node]` reads only what lies under that node. */

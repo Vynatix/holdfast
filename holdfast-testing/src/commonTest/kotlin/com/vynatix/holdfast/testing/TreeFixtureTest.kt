@@ -14,8 +14,9 @@ import com.vynatix.holdfast.testing.matcher.shouldCommitTogether
 import com.vynatix.holdfast.testing.matcher.shouldNotCommitTogether
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
+import com.vynatix.holdfast.tree.group
+import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.store
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -44,8 +45,8 @@ private class FxKeyedStore(
 
 private class FxParent : Store<FxParent>() {
     val own by state { 0 }
-    val pair by stores(names = mapOf(FxAStore::class to "a", FxBStore::class to "b")) { listOf(FxAStore(), FxBStore()) }
-    val keyed by stores<String, FxKeyedStore> { FxKeyedStore(it) }
+    val pair by group { listOf(FxAStore() named "a", FxBStore() named "b") }
+    val keyed by keyed<String, FxKeyedStore> { FxKeyedStore(it) }
 
     val a: FxLeafStore get() = pair.stores[0] as FxLeafStore
     val b: FxLeafStore get() = pair.stores[1] as FxLeafStore

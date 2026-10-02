@@ -19,7 +19,7 @@ fun persistTheTree(): String {
     val n2 = Notes.byId.create("n2")
     n2 action { body mutate "remember me" }
     Notes.prefs action { theme mutate "dark" }
-    println(Notes.tree.verifyPersistedNames())                                    // "[]": prefs is named by its property, n2 by its key
+    println(Notes.tree.verifyPersistedNames())                                    // "[]": Notes has a tree id, prefs and byId pins, n2 its key
     val text = Notes.tree.snapshot(scope = SnapshotScope.UserAuthored).encode()   // names for structure; each store its own body
     n2.dispose()
     return text
@@ -47,13 +47,16 @@ class GuideTreeEncodeTwin {
                 rehydrateTheTree(text)
             }
         assertEquals(listOf("[]", "[n2]", "remember me", "[]"), printed)
-        assertTrue(text.startsWith("""{"format":"holdfast.tree","v":1,"scope":"UserAuthored","path":[],"tree":{"kind":"leaf","store":"""), text)
+        assertTrue(
+            text.startsWith("""{"format":"holdfast.tree","v":1,"receiver":"notes","scope":"UserAuthored","path":[],"tree":{"kind":"leaf","store":"""),
+            text,
+        )
         assertTrue(""""prefs":{"kind":"leaf"""" in text, "the child's property name, never its class name")
         assertTrue(""""byId":{"kind":"keyed","entries":{"n2":{"kind":"leaf"""" in text, text)
         assertTrue("PrefsStore" !in text && "Prefs\"" !in text, "no class-derived name in the persisted text")
-        assertTrue("Notes" !in text, "the receiver's own name is never written")
+        assertTrue("Notes" !in text, "the receiver is identified by its tree id, never its class name")
         assertEquals("light", Notes.prefs.theme.value, "the twin leaves the tree reset")
         assertEquals("inbox", Notes.folder.value)
-        assertEquals(emptyMap(), Notes.byId.entries)
+        assertEquals(emptyMap(), Notes.byId.entries())
     }
 }

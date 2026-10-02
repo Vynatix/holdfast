@@ -26,7 +26,7 @@ private class PdrMidStore : Store<PdrMidStore>() {
     val deep by store { PdrDeepStore() }
 
     /** Created after the value above was seeded: a deep attach the value hears announced. */
-    val late by stores<Int, PdrDeepStore> { PdrDeepStore() }
+    val late by keyed<Int, PdrDeepStore> { PdrDeepStore() }
 }
 
 private class PdrGrandStore : Store<PdrGrandStore>() {

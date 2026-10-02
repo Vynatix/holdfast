@@ -10,8 +10,9 @@ import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.bridge.StringCodec
 import com.vynatix.holdfast.snippets.capturePrintln
+import com.vynatix.holdfast.tree.TreeIdentified
+import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.store
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,10 +27,11 @@ class NoteStore(val id: String) : Store<NoteStore>() {
     val body by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "" }
 }
 
-object Notes : Store<Notes>() {
+object Notes : Store<Notes>(), TreeIdentified {
+    override val treeId get() = "notes"                                    // the receiver's identity in encode(): survives a class rename
     val folder by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "inbox" }   // the parent's own state
-    val prefs by store { PrefsStore() }                                    // node "prefs", named by its property
-    val byId by stores<String, NoteStore> { id -> NoteStore(id) }
+    val prefs by store(named = "prefs") { PrefsStore() }                   // node "prefs", pinned: survives a property rename
+    val byId by keyed<String, NoteStore>(named = "byId") { id -> NoteStore(id) }
 }
 
 fun undoAndResetTheTree() {
@@ -62,6 +64,6 @@ class GuideTreeRestoreTwin {
         val printed = capturePrintln { undoAndResetTheTree() }
         assertEquals(listOf("inbox", "light", "draft", "[Notes, prefs, n1]", "true", "dark", "light"), printed)
         assertEquals("inbox", Notes.folder.value, "the twin leaves the parent reset")
-        assertEquals(emptyMap(), Notes.byId.entries, "the twin leaves no keyed store behind")
+        assertEquals(emptyMap(), Notes.byId.entries(), "the twin leaves no keyed store behind")
     }
 }

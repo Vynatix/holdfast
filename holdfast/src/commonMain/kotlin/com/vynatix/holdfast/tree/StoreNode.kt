@@ -6,16 +6,16 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StoreInternalApi
 
 // The dynamic store tree (issue #21). A store declares its children next to
-// its states — `val settings by store { SettingsStore }`, `val session by
-// stores { listOf(…) }`, `val threads by stores<String, ThreadStore> { … }`
+// its states — `val settings by store { SettingsStore() }`, `val session by
+// group { listOf(…) }`, `val threads by keyed<String, ThreadStore> { … }`
 // — and the tree is addressed by node and state identity: strings appear
 // only in `encode()` and `render()`. Package `tree` is a plug-in over the
 // root kernel: it imports `com.vynatix.holdfast` and `platform/` only.
 
 /**
  * A position in a store tree: a [LeafNode] (one store's place, for the
- * store's whole life), a [Branch] (a `stores { }` group of a store) or a
- * [KeyedBranch] (a `stores<K, S> { }` family of a store, whose stores are
+ * store's whole life), a [Branch] (a `group { }` of a store) or a
+ * [KeyedBranch] (a `keyed<K, S> { }` family of a store, whose stores are
  * created per key at runtime). Nodes compare by identity; subtree
  * operations — `tree.snapshot(node)`, `tree.reset(node)`,
  * `tree.stores(node)` — take node values, never names.
@@ -53,12 +53,13 @@ sealed interface StoreNode {
  * Where a [StoreNode.name] came from. `Property` and `ClassName` are read
  * from the program's own identifiers and change under obfuscation;
  * `verifyPersistedNames` flags a persisted store whose leaf name is
- * `ClassName`. `Key` names never persist through anything but the branch's
+ * `ClassName`, and a `Property`-named node with a persisted store at or
+ * under it. `Key` names never persist through anything but the branch's
  * key codec; `Pinned` names are literals the program chose.
  */
 @ExperimentalStoreApi
 enum class NameOrigin {
-    /** A child, group or keyed branch named by its delegated property. */
+    /** A child, group or keyed branch named by its delegated property (no `named =` pin). */
     Property,
 
     /**
@@ -71,7 +72,7 @@ enum class NameOrigin {
     /** A keyed leaf named by its encoded key. */
     Key,
 
-    /** A name given as a literal: `store(named = …)`, `stores(names = …)`. */
+    /** A name given as a literal: `store(named = …)`, `group(named = …)`, `keyed(named = …)`, a group's `named` pin. */
     Pinned,
 }
 

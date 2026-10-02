@@ -41,8 +41,8 @@ private class DeclThreadStore(
 /** A store with children of its own: a group and a keyed branch, so nesting is a store declaring under itself. */
 private class DeclOuterStore : Store<DeclOuterStore>() {
     val token by state { "" }
-    val inner by stores { listOf(DeclProfileStore()) }
-    val threads by stores<String, DeclThreadStore> { DeclThreadStore(it) }
+    val inner by group { listOf(DeclProfileStore()) }
+    val threads by keyed<String, DeclThreadStore> { DeclThreadStore(it) }
 }
 
 private class DeclParent(
@@ -51,12 +51,12 @@ private class DeclParent(
     val outerStore: DeclOuterStore = DeclOuterStore(),
 ) : Store<DeclParent>() {
     var settingsRuns = 0
-    val settings by stores {
+    val settings by group {
         settingsRuns++
         listOf(settingsStore, profileStore)
     }
     val session by store { outerStore }
-    val threads by stores<String, DeclThreadStore> { DeclThreadStore(it) }
+    val threads by keyed<String, DeclThreadStore> { DeclThreadStore(it) }
 }
 
 /** Two stores whose classes share the simple name `SessionStore`, so their default leaf names collide. */
@@ -117,7 +117,7 @@ class TreeDeclarationTest {
         assertEquals(0, parent.settingsRuns, "declaring a group runs none of its code")
 
         val tree = parent.tree
-        assertEquals(listOf("settings", "session", "threads"), tree.children.map { it.name })
+        assertEquals(listOf("settings", "session", "threads"), tree.children().map { it.name })
         assertEquals(1, parent.settingsRuns)
         assertEquals(NameOrigin.Property, parent.settings.nameOrigin)
         assertSame(tree.node, parent.settings.parent)
@@ -148,8 +148,8 @@ class TreeDeclarationTest {
         val shared = DeclSessionStore()
 
         class Twice : Store<Twice>() {
-            val first by stores { listOf(shared) }
-            val second by stores { listOf(shared) }
+            val first by group { listOf(shared) }
+            val second by group { listOf(shared) }
         }
         val twice = Twice()
         assertEquals(listOf<Store<*>>(shared), twice.first.stores)
@@ -162,7 +162,7 @@ class TreeDeclarationTest {
         // tree operation, which materializes the declared children first.
         assertSame(twice.first, shared.tree.parent)
         assertFailsWith<IllegalStateException> { twice.second }
-        assertFailsWith<IllegalStateException> { twice.tree.children }
+        assertFailsWith<IllegalStateException> { twice.tree.children() }
         assertSame(twice.first, shared.tree.parent)
     }
 
@@ -191,7 +191,7 @@ class TreeDeclarationTest {
         val fresh = DeclProfileStore()
 
         class Failing : Store<Failing>() {
-            val b by stores { listOf(fresh, taken) }
+            val b by group { listOf(fresh, taken) }
         }
         val failing = Failing()
         assertFailsWith<IllegalStateException> { failing.b }
@@ -229,7 +229,7 @@ class TreeDeclarationTest {
 
         class Holder : Store<Holder>() {
             val one by store { dead }
-            val group by stores { listOf(dead) }
+            val group by group { listOf(dead) }
         }
         val holder = Holder()
         val single = assertFailsWith<IllegalStateException> { holder.one }
@@ -239,7 +239,7 @@ class TreeDeclarationTest {
     }
 
     @Test
-    fun aGroupLeafNameDefaultsToClassNameMinusStoreAndNamesPinsItByClass() {
+    fun aGroupLeafNameDefaultsToClassNameMinusStoreAndNamedPinsOneInstance() {
         val parent = DeclParent()
         assertEquals("DeclSettings", parent.settings.leafName(parent.settingsStore))
         assertEquals(NameOrigin.ClassName, parent.tree.nodeOf(parent.settingsStore)!!.nameOrigin)
@@ -247,7 +247,7 @@ class TreeDeclarationTest {
         val pinnedStore = DeclSettingsStore()
 
         class Pinning : Store<Pinning>() {
-            val settings by stores(names = mapOf(DeclSettingsStore::class to "prefs")) { listOf(pinnedStore) }
+            val settings by group { listOf(pinnedStore named "prefs") }
         }
         val pinning = Pinning()
         assertEquals("prefs", pinning.settings.leafName(pinnedStore))
@@ -259,10 +259,13 @@ class TreeDeclarationTest {
     @Test
     fun aPinThatTheGroupDoesNotListIsRefused() {
         class Pinning : Store<Pinning>() {
-            val settings by stores(names = mapOf(DeclProfileStore::class to "p")) { listOf(DeclSettingsStore()) }
+            val settings by group {
+                DeclProfileStore() named "p"
+                listOf(DeclSettingsStore())
+            }
         }
         val error = assertFailsWith<IllegalArgumentException> { Pinning().settings }
-        assertTrue("pins DeclProfileStore, which the group does not list" in error.message!!, error.message)
+        assertTrue("pins a DeclProfileStore named 'p' that the group does not list" in error.message!!, error.message)
     }
 
     @Test
@@ -274,7 +277,7 @@ class TreeDeclarationTest {
         val node = assertNotNull(parent.tree.nodeOf(parent.settings))
         assertEquals("prefs", node.name)
         assertEquals(NameOrigin.Pinned, node.nameOrigin)
-        assertEquals(listOf("prefs"), parent.tree.children.map { it.name })
+        assertEquals(listOf("prefs"), parent.tree.children().map { it.name })
         val empty = assertFailsWith<IllegalArgumentException> { parent.store(named = "") { DeclSettingsStore() } }
         assertTrue("must not be empty" in empty.message!!, empty.message)
     }
@@ -294,24 +297,33 @@ class TreeDeclarationTest {
     @Test
     fun duplicateLeafNamesInOneGroupFailUnlessPinnedApart() {
         class SameClass : Store<SameClass>() {
-            val two by stores { listOf(DeclSessionStore(), DeclSessionStore()) }
+            val two by group { listOf(DeclSessionStore(), DeclSessionStore()) }
         }
         val sameClass = assertFailsWith<IllegalArgumentException> { SameClass().two }
         assertTrue("two leaves would be named 'DeclSession'" in sameClass.message!!, sameClass.message)
-        // A pin names a class, so it cannot tell two instances apart: the message says so.
-        assertTrue("as its own store { } child" in sameClass.message!!, sameClass.message)
-        assertTrue("pin one" !in sameClass.message!!, sameClass.message)
+        assertTrue("pin one of them with named" in sameClass.message!!, sameClass.message)
+
+        // Two stores of ONE class, told apart by a per-instance pin.
+        val first = DeclSessionStore()
+        val second = DeclSessionStore()
+
+        class SameClassPinned : Store<SameClassPinned>() {
+            val two by group { listOf(first named "first", second) }
+        }
+        val pinned = SameClassPinned()
+        assertEquals(listOf("first", "DeclSession"), pinned.two.leaves.map { it.name })
+        assertEquals("first", pinned.two.leafName(first))
+        assertEquals(NameOrigin.Pinned, pinned.tree.nodeOf(first)!!.nameOrigin)
+        assertEquals(NameOrigin.ClassName, pinned.tree.nodeOf(second)!!.nameOrigin)
 
         class Collide : Store<Collide>() {
-            val two by stores { listOf(DeclDupA.SessionStore(), DeclDupB.SessionStore()) }
+            val two by group { listOf(DeclDupA.SessionStore(), DeclDupB.SessionStore()) }
         }
         val collision = assertFailsWith<IllegalArgumentException> { Collide().two }
         assertTrue("has two leaves named 'Session'" in collision.message!!, collision.message)
 
         class Apart : Store<Apart>() {
-            val two by stores(names = mapOf(DeclDupB.SessionStore::class to "other")) {
-                listOf(DeclDupA.SessionStore(), DeclDupB.SessionStore())
-            }
+            val two by group { listOf(DeclDupA.SessionStore(), DeclDupB.SessionStore() named "other") }
         }
         assertEquals(listOf("Session", "other"), Apart().two.leaves.map { it.name })
     }
@@ -327,13 +339,13 @@ class TreeDeclarationTest {
         val anonymous = object : NodeStore() {}
 
         class Unpinned : Store<Unpinned>() {
-            val group by stores { listOf(anonymous) }
+            val group by group { listOf(anonymous) }
         }
         val error = assertFailsWith<IllegalStateException> { Unpinned().group }
         assertTrue("has no simple name" in error.message!!, error.message)
 
         class Pinned : Store<Pinned>() {
-            val group by stores(names = mapOf(anonymous::class to "anon")) { listOf(anonymous) }
+            val group by group { listOf(anonymous named "anon") }
         }
         assertEquals(listOf("anon"), Pinned().group.leaves.map { it.name })
     }
@@ -366,7 +378,7 @@ class TreeDeclarationTest {
                 internalAddMembershipListener(listener)
             }
 
-            val a by stores { listOf(settings, DeclProfileStore()) }
+            val a by group { listOf(settings, DeclProfileStore()) }
         }
         val parent = Listened()
         assertTrue(listener.attached.isEmpty(), "declaring a group announces nothing")
@@ -376,7 +388,7 @@ class TreeDeclarationTest {
         assertTrue(listener.detached.isEmpty())
         assertSame(parent.tree.nodeOf(settings), listener.attached[0])
         parent.a
-        parent.tree.children
+        parent.tree.children()
         assertEquals(2, listener.attached.size, "a materialized child is never announced again")
     }
 
@@ -396,6 +408,47 @@ class TreeDeclarationTest {
         val declaration = first.store { DeclProfileStore() }
         val error = assertFailsWith<IllegalArgumentException> { DeclThief(declaration) }
         val message = assertNotNull(error.message)
-        assertTrue("'stolen' on DeclThief was declared through DeclParent.store/stores" in message, message)
+        assertTrue("'stolen' on DeclThief was declared through DeclParent's store/group/keyed" in message, message)
+    }
+
+    @Test
+    fun aGroupPinIsPerInstanceNonEmptyAndOncePerStore() {
+        val store = DeclSessionStore()
+
+        class Twice : Store<Twice>() {
+            val two by group {
+                store named "a"
+                listOf(store named "b")
+            }
+        }
+        val twice = assertFailsWith<IllegalArgumentException> { Twice().two }
+        assertTrue("pinned twice in one group" in twice.message!!, twice.message)
+
+        class Empty : Store<Empty>() {
+            val one by group { listOf(DeclSessionStore() named "") }
+        }
+        val empty = assertFailsWith<IllegalArgumentException> { Empty().one }
+        assertTrue("must not be empty" in empty.message!!, empty.message)
+    }
+
+    @Test
+    fun namedPinsAGroupAndAKeyedBranch() {
+        class Pinned : Store<Pinned>() {
+            val session by group(named = "session-v2") { listOf(DeclSessionStore()) }
+            val threads by keyed<String, DeclThreadStore>(named = "threads-v2") { DeclThreadStore(it) }
+            val plain by group { listOf(DeclProfileStore()) }
+        }
+        val parent = Pinned()
+        assertEquals("session-v2", parent.session.name)
+        assertEquals(NameOrigin.Pinned, parent.session.nameOrigin)
+        assertEquals("threads-v2", parent.threads.name)
+        assertEquals(NameOrigin.Pinned, parent.threads.nameOrigin)
+        assertEquals(NameOrigin.Property, parent.plain.nameOrigin)
+        assertEquals(listOf("session-v2", "threads-v2", "plain"), parent.tree.children().map { it.name })
+        val t = parent.threads.create("t")
+        assertTrue(""""threads-v2":{"kind":"keyed","entries":{"t":""" in parent.tree.snapshot().encode())
+        t.dispose()
+        assertFailsWith<IllegalArgumentException> { parent.group(named = "") { emptyList() } }
+        assertFailsWith<IllegalArgumentException> { parent.keyed<String, DeclThreadStore>(named = "") { DeclThreadStore(it) } }
     }
 }

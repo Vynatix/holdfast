@@ -24,10 +24,10 @@ private class BlThreadStore(
 }
 
 private class BlApp : Store<BlApp>() {
-    val threads by stores<String, BlThreadStore> { BlThreadStore(it) }
+    val threads by keyed<String, BlThreadStore> { BlThreadStore(it) }
 }
 
-private const val BL_HEAD = """{"format":"holdfast.tree","v":1,"scope":"All","path":["threads","t1"],"""
+private const val BL_HEAD = """{"format":"holdfast.tree","v":1,"receiver":"BlApp","scope":"All","path":["threads","t1"],"""
 
 /**
  * A keyed leaf text written without a body (`{"kind":"leaf"}`, what a
@@ -42,7 +42,7 @@ class BodyLessKeyedLeafDecodeTest {
         val t1 = root.threads.create("t1")
         val text = root.tree.snapshot(root.tree.nodeOf(t1)!!, SnapshotScope.UserAuthored).encode()
         assertEquals(
-            """{"format":"holdfast.tree","v":1,"scope":"UserAuthored","path":["threads","t1"],""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"BlApp","scope":"UserAuthored","path":["threads","t1"],""" +
                 """"tree":{"kind":"leaf"},"skipped":[]}""",
             text,
             "an untagged keyed leaf under UserAuthored is written without a body",

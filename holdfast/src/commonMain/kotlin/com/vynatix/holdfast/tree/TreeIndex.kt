@@ -34,6 +34,13 @@ internal class TreeIndex(
     val memberKeys: Set<Long>,
     val ownerNode: LeafNode,
 ) {
+    /**
+     * The receiver's identity as of the capture or decode — its
+     * `TreeIdentified.treeId`, else its node name — written as the
+     * envelope's `receiver`.
+     */
+    val receiver: String = receiverIdentity(ownerNode.store, ownerNode)
+
     val byNode = HashMap<StoreNode, TreeSnapshot>()
     val byStoreKey = HashMap<Long, TreeSnapshot>()
 

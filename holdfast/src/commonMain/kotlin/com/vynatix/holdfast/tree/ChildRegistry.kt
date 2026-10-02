@@ -49,9 +49,9 @@ internal class LeafEntry(
 }
 
 /**
- * One child declaration of [owner] — `store { }`, `stores { }` or
- * `stores<K, S> { }` — named [name], in declaration order in [owner]'s
- * [ChildRegistry]. A `store`/`stores` child is materialized on first need:
+ * One child declaration of [owner] — `store { }`, `group { }` or
+ * `keyed<K, S> { }` — named [name], in declaration order in [owner]'s
+ * [ChildRegistry]. A `store`/`group` child is materialized on first need:
  * its lambda runs holding no lock or latch, marked on the reading thread
  * only (`InitializerGraph.runMarked`, so a same-thread re-entry — directly,
  * through another child or through a state initializer — throws a cycle
@@ -69,10 +69,8 @@ internal class ChildEntry(
     val name: String,
     val origin: NameOrigin,
     val kind: Kind,
-    /** `() -> Stateful` for [Kind.Store]; `() -> List<Store<*>>` for [Kind.Group]; unused for [Kind.Keyed]. */
+    /** `() -> Any` for [Kind.Store]; `GroupScope.() -> List<Store<*>>` for [Kind.Group]; unused for [Kind.Keyed]. */
     val lambda: Any,
-    /** The leaf-name pins of a [Kind.Group] (`Map<KClass<out Store<*>>, String>`); `null` otherwise. */
-    val pin: Any?,
 ) : CycleStep {
     /** The declaring store, captured while it is live (its tree state drops it on dispose). */
     val owner: Store<*> = checkNotNull(ownerAttachment.storeRef) { "a child declared on a disposed store" }
@@ -344,7 +342,7 @@ internal class ChildRegistry(
             out
         }
 
-    /** The declared children's live nodes, in declaration order: what `tree.children` lists. */
+    /** The declared children's live nodes, in declaration order: what `tree.children()` lists. */
     fun liveChildNodes(): List<StoreNode> = lock.withLock { declared.values.mapNotNull { it.liveNode } }
 
     /** Under [lock]: every directly attached child leaf, in declaration (then listing/creation) order. */

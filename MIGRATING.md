@@ -298,18 +298,6 @@ committed cut of its sources — no longer after each source commit.
   body has returned, a caller cancelled meanwhile still gets the committed
   `TransactionResult`, as before.
 
-## Source break: `Store.owningStore` (experimental, unreleased)
-
-`Store` now implements the experimental `Stateful` marker and gains
-`@ExperimentalStoreApi final override val owningStore: Self` (the store
-itself), so a consumer interface over an inline `NodeStore` child can reach the
-store that owns its states. A member of your own `Store` subclass named
-`owningStore` now conflicts with it and stops compiling, whatever its type.
-
-| Your member | Status | Migration |
-|---|---|---|
-| `val owningStore` / `var owningStore` / `val owningStore by state { … }` in a `Store` subclass | **BREAKING (source)** — experimental surface, no deprecation cycle | Rename it (for example to `parentStore`); the base member is `final` and cannot be overridden |
-
 ## See also
 
 - [`holdfast/CHANGELOG.md`](holdfast/CHANGELOG.md) — core release history

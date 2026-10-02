@@ -96,19 +96,18 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `middlewares`, `track(tree)` or `hydrateAll`; keyed churn before the
   first read no longer leaves one recorded edge per churned store behind;
   and a read after a failed recompute is no longer the stale backing. The
-  group naming error for two stores of one class says to declare them as
-  separate `store { }` children (a pin names a class, never an instance).
+  group naming error for two leaves of one name says to pin one of them
+  with `named`.
   The key is named through the branch's key codec once per call, and a
   throwing codec fails with an `IllegalStateException` naming the
   declaring store and branch only.
 
 ### Added
 
-- **`Stateful`, `NodeStore`, `Store.owningStore`** (experimental; issue
-  #21): every `Store` is a `Stateful` whose `owningStore` is itself, and
-  `NodeStore` is the non-recursive base for an anonymous inline child
-  (`object : NodeStore(), Draft { … }`) a consumer interface reaches
-  through `draft.owningStore action { … }` — what `store<Draft> { … }`
+- **`NodeStore`** (experimental; issue #21): the non-recursive base for an
+  anonymous inline child (`object : NodeStore(), Draft { … }`) behind a
+  plain consumer interface, written through the interface's own methods
+  or `(draft as NodeStore) action { … }` — what `store<Draft> { … }`
   attaches as a child of the store tree (below).
 - **Kernel seams for issue #21's store tree** (issue #21 plan PR 21-1,
   decision U12), consumed by the `tree` package (below):
@@ -140,14 +139,17 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   parent is an ordinary store — states, actions, middleware and hydrator
   of its own; every child keeps its own actions, middleware and locks:
   `object App : Store<App>() { val settings by store { SettingsStore() };
-  val session by stores { listOf(SignInStore(), ProfileStore()) };
-  val threads by stores<String, ThreadStore> { id -> ThreadStore(id) } }`.
-  - `store(named) { … }` declares one child: any `Stateful`, attached by
-    its `owningStore`, so an inline `store<Draft> { object : NodeStore(),
-    Draft { … } }` works (the type argument is required). `stores(names)
-    { … }` declares a group (`Branch`) of listed stores, and
-    `stores<K, S>(keyCodec) { key -> … }` a keyed branch (`KeyedBranch`)
-    whose factory is declared once. A declaration registers when the
+  val session by group { listOf(SignInStore() named "sign-in", ProfileStore()) };
+  val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) } }`.
+  - `store(named) { … }` declares one child, which must be a store, so an
+    inline `store<Draft> { object : NodeStore(), Draft { … } }` works (the
+    type argument is required; anything but a store fails the first read
+    with a message showing that shape). Its property is a stable `val`: a
+    disposed child keeps being answered, and stays reachable, for the
+    parent's life. `group(named) { … }` declares a group (`Branch`) of
+    listed stores, and `keyed<K, S>(keyCodec, named, onParentDispose)
+    { key -> … }` a keyed branch (`KeyedBranch`) whose factory is declared
+    once. A declaration registers when the
     property binds and runs no child code; the lambda runs on the
     property's first read or when a tree operation needs the subtree, on
     the reading thread, holding no lock or latch of the tree's (inside an
@@ -166,20 +168,23 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     materializes, naming both parents, and a declaration that would make a
     store its own ancestor fails naming the path; a lambda returning a
     disposed store and a group listing a store twice or a disposed one fail
-    too, leaving nothing attached and disposing what that run built. Names come from the property, a pin
-    (`store(named = …)`, `stores(names = mapOf(Store::class to …))` by exact
-    class), a group leaf's class minus `Store`, or a keyed store's encoded
-    key, with `NameOrigin` recording which; a store with no parent is named
-    by its class. Sibling names are unique.
+    too, leaving nothing attached and disposing what that run built. Names
+    come from the property, a pin (`store(named = …)`, `group(named = …)`,
+    `keyed(named = …)`, or a group member's `store named "…"` inside the
+    group lambda, which pins that one instance — so two stores of one class
+    can share a group), a group leaf's class minus `Store`, or a keyed
+    store's encoded key, with `NameOrigin` recording which; a store with no
+    parent is named by its class. Sibling names are unique; two group
+    leaves of one name fail, telling to pin one with `named`.
   - `Store<*>.tree: StoreTree` (a sealed interface: the library's handle is
     the only implementation) is a store's view of its subtree: `node`,
-    `parent`, `children` (declaration order), `stores(node)` (tree order),
+    `parent`, `children()` (declaration order), `stores(node)` (tree order),
     `nodeOf(store)`, each materializing declared children first; a node
     outside the receiver's subtree is refused. A keyed store is created by
     `KeyedBranch.create(key)`/`getOrCreate(key)` through the declared
     factory — an ordinary store class, no token — and is live (`get`,
-    `entries`, `tree.stores`, captures, the value, reset, tree middleware)
-    once the factory returned it and it attached (`get`, `entries` and
+    `entries()`, `tree.stores`, captures, the value, reset, tree middleware)
+    once the factory returned it and it attached (`get`, `entries()` and
     `getOrCreate` on another thread answer it only once the attach has also
     synced its tree middleware and told the listeners, parking until then);
     the factory runs holding no lock, so racing creators may each run it:
@@ -190,9 +195,16 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
     a store of another class, a disposed one or one with a parent leaves
     no entry and has the store its run built disposed.
   - Disposing a store detaches it from its parent and releases its
-    children as subtree roots (class-named again, every store and state
-    kept); it disposes none of them, and a released child can be declared
-    under another parent. The detach is one settle-scoped entry: observers
+    `store { }` and `group { }` children as subtree roots (class-named
+    again, every store and state kept), and a released child can be
+    declared under another parent. A keyed branch OWNS the stores its
+    factory built: they are disposed with the declaring store
+    (`KeyedDisposal.Dispose`, the default; `onParentDispose =
+    KeyedDisposal.Release` releases them instead) — released first, then
+    disposed outside every lock of the tree's, when the enclosing entry
+    settles (a parent disposed inside its own action never deadlocks on
+    them). `KeyedBranch.dispose(key)` (`false` when no live store) and
+    `disposeAll()` dispose keyed stores directly. The detach is one settle-scoped entry: observers
     of an ancestor's tree value run once it has finished (the released
     children are subtree roots with re-synced middleware), wherever
     `dispose()` was called from. A keyed `create` that the parent's dispose
@@ -269,8 +281,10 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `TreeRestoreReport` (per-store `RestoreReport`s, `skipped`, `rebound`,
   `unresolvedPaths`, flattened `issues`) and `TreeResetReport` (`reset`,
   `skipped`) come back in the frame's `TransactionResult`. `encode()`
-  writes the `holdfast.tree` v1 text: the captured node's path from the
-  receiver (whose own name is never written), uniform nodes — a store's
+  writes the `holdfast.tree` v1 text: the receiver's identity
+  (`receiver`: its `TreeIdentified.treeId` when the store implements the
+  new `TreeIdentified` interface, else its node name), the captured node's
+  path from the receiver, uniform nodes — a store's
   `leaf` with its own `holdfast.store` v1 body verbatim and its
   `children`, a group's `branch`, a keyed branch's `keyed` node with
   `entries` under their encoded keys (children and entries sorted) — a
@@ -282,14 +296,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   the tree's one string diagnostic; a keyed entry with a body and no live
   store becomes a typed `pendingKeys(branch)` for the process-death idiom:
   create, then restore) and retains bodies as name-keyed text until the
-  restore, so `migrate` runs per store then; a bad envelope or an
-  undecodable key throws `SnapshotFormatException` quoting no value.
-  `verifyPersistedNames(node)` lists every persisted store (a
+  restore, so `migrate` runs per store then; a bad envelope, a text
+  captured under another receiver ("captured under 'X', decoding under
+  'Y'") or an undecodable key throws `SnapshotFormatException` quoting no
+  value. `verifyPersistedNames(node)` lists every persisted store (a
   `UserAuthored` state or family, `SchemaVersioned`, or an attachment
-  reporting `persistenceKeys`) at a class-named leaf — never the receiver —
-  and every keyed branch without a key codec, reading declarations only.
-  No tree member takes a `String` except `decode` and `store(named)`,
-  gated by a test over the JVM API dump.
+  reporting `persistenceKeys`) at a class-named group leaf, every
+  property-named `store { }` child, group or keyed branch with a persisted
+  store at or under it (pin it with `named =`), a class-named top-level
+  receiver with no `TreeIdentified` over a persisting subtree (exposed to
+  class renames and R8), and every keyed branch without a key codec,
+  reading declarations only. No tree member takes a `String` except
+  `decode` and the `named` pins of `store`, `group`, `keyed` and
+  `GroupScope.named`, gated by a test over the JVM API dump.
 - **The store tree, step 4: the tree's value, one consistent capture
   settled once per outermost entry** (issue #21 plan PR 21-5, decisions
   T3/T4; GUIDE §17.8, §10.2). `StoreTree` is itself a

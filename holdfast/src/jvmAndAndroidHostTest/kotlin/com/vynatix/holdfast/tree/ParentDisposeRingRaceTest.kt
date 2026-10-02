@@ -36,7 +36,7 @@ private class RrAdopter : Store<RrAdopter>() {
 
 /** A released child whose keyed child is created while the released child's former parent is still disposing. */
 private class RrMiddleStore : Store<RrMiddleStore>() {
-    val lates by stores<Int, RrLeafStore> { RrLeafStore() }
+    val lates by keyed<Int, RrLeafStore> { RrLeafStore() }
 }
 
 private class RrDisposing : Store<RrDisposing>() {

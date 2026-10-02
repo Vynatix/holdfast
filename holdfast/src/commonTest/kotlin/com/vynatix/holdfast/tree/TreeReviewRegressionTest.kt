@@ -42,23 +42,26 @@ private class TrrFlakyStore(
 private class TrrParent : Store<TrrParent>() {
     var childHook: () -> TrrLeafStore = { TrrLeafStore() }
     var groupHook: () -> List<Store<*>> = { listOf(TrrKeyedStore()) }
+    var pinnedHook: GroupScope.() -> List<Store<*>> = { listOf(TrrKeyedStore() named "pinned") }
     var keyedHook: (String) -> TrrKeyedStore = { TrrKeyedStore() }
 
     var flakyFailing = false
 
     val child by store { childHook() }
-    val group by stores { groupHook() }
-    val pinnedGroup by stores(names = mapOf(TrrKeyedStore::class to "pinned")) { groupHook() }
-    val keyed by stores<String, TrrKeyedStore> { keyedHook(it) }
-    val flaky by stores<String, TrrFlakyStore> { TrrFlakyStore { flakyFailing } }
+    val group by group { groupHook() }
+    val pinnedGroup by group { pinnedHook() }
+    val keyed by keyed<String, TrrKeyedStore> { keyedHook(it) }
+    val flaky by keyed<String, TrrFlakyStore> { TrrFlakyStore { flakyFailing } }
 
-    /** Declared as `stores<String, TrrSubKeyedStore>` while its factory builds plain [TrrKeyedStore]s. */
+    /** Declared as `keyed<String, TrrSubKeyedStore>` while its factory builds plain [TrrKeyedStore]s. */
     val built = ArrayList<TrrKeyedStore>()
 
     @Suppress("UNCHECKED_CAST")
-    val wrongClass by keyedDeclaration(String::class, TrrSubKeyedStore::class as KClass<TrrKeyedStore>, null) {
-        TrrKeyedStore().also { built += it }
-    }
+    val wrongClass by keyedDeclaration(
+        KeyedSpec(String::class, TrrSubKeyedStore::class as KClass<TrrKeyedStore>, null, null, KeyedDisposal.Dispose) {
+            TrrKeyedStore().also { built += it }
+        },
+    )
 }
 
 /** Whether this tree lists [store] (by its node). */
@@ -94,7 +97,7 @@ class TreeReviewRegressionTest {
         val impl = tree as StoreTreeImpl
         tree.snapshot()
         tree.stores()
-        tree.children
+        tree.children()
         tree.middlewares(object : TreeMiddleware() {})
         val early = parent.keyed.create("early")
         assertNull(impl.treeValueOrNull, "snapshot, stores, children and middlewares build no value machinery")
@@ -209,13 +212,16 @@ class TreeReviewRegressionTest {
         val older = TrrLeafStore()
         val parent2 = TrrParent()
         val built2 = ArrayList<Store<*>>()
-        // The pin names TrrKeyedStore, which this listing lacks: refused after the lambda returned.
-        parent2.groupHook = { listOf(older, TrrLeafStore().also { built2 += it }) }
+        // The pin names a store this listing lacks: refused after the lambda returned.
+        parent2.pinnedHook = {
+            TrrKeyedStore() named "pinned"
+            listOf(older, TrrLeafStore().also { built2 += it })
+        }
         assertFailsWith<IllegalArgumentException> { parent2.pinnedGroup }
         assertTrue(built2.single().isDisposed, "the fresh member is disposed")
         assertFalse(older.isDisposed, "the older member is not")
         // The declaration stays retryable.
-        parent2.groupHook = { listOf(older, TrrKeyedStore()) }
+        parent2.pinnedHook = { listOf(older, TrrKeyedStore() named "pinned") }
         assertEquals(listOf("TrrLeaf", "pinned"), parent2.pinnedGroup.leaves.map { it.name })
     }
 }

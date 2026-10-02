@@ -45,6 +45,6 @@ class GuideTreeMiddlewareTwin {
         assertEquals(listOf("[Notes alone, prefs alone, prefs in a frame, n4 in a frame]", "true"), printed)
         assertEquals("light", Notes.prefs.theme.value, "the twin leaves the tree reset")
         assertEquals("inbox", Notes.folder.value)
-        assertEquals(emptyMap(), Notes.byId.entries)
+        assertEquals(emptyMap(), Notes.byId.entries())
     }
 }

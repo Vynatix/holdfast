@@ -48,12 +48,12 @@ private class RtKeyedStore(
 /** A mid-tree store with no states of its own: a leaf child and a keyed branch under it. */
 private class RtPanelsStore : Store<RtPanelsStore>() {
     val panel by store { RtPanelStore() }
-    val keyed by stores<String, RtKeyedStore> { RtKeyedStore(it) }
+    val keyed by keyed<String, RtKeyedStore> { RtKeyedStore(it) }
 }
 
 private class RtOthersStore : Store<RtOthersStore>() {
     val other by store { RtOtherStore() }
-    val emptyKeyed by stores<String, RtKeyedStore> { RtKeyedStore(it) }
+    val emptyKeyed by keyed<String, RtKeyedStore> { RtKeyedStore(it) }
 }
 
 private class RtResetApp : Store<RtResetApp>() {
@@ -262,5 +262,5 @@ private class RtFragileStore : Store<RtFragileStore>() {
 private class RtFragileApp : Store<RtFragileApp>() {
     val fragile = RtFragileStore()
     val sibling = RtOtherStore()
-    val leaves by stores { listOf(fragile, sibling) }
+    val leaves by group { listOf(fragile, sibling) }
 }

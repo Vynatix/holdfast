@@ -10,7 +10,7 @@ import com.vynatix.holdfast.writeStoreBody
 
 // The tree wire format, `holdfast.tree` v1 (issue #21 decision U9):
 //
-//   {"format":"holdfast.tree","v":1,"scope":"All","path":[],
+//   {"format":"holdfast.tree","v":1,"receiver":"App","scope":"All","path":[],
 //    "tree":{"kind":"leaf","store":<receiver body>,
 //            "children":{"settings":{"kind":"leaf","store":<body>},
 //                        "session":{"kind":"branch","children":{"Profile":{"kind":"leaf","store":<body>}}},
@@ -25,7 +25,10 @@ import com.vynatix.holdfast.writeStoreBody
 // `entries`, whose values are leaf nodes. `path` locates the captured node
 // from the receiver — the store whose `tree` took the capture, whose own
 // name is never written (a keyed leaf's segment is its encoded key) — and
-// `skipped` paths are relative to the receiver too. Every store body is the
+// `skipped` paths are relative to the receiver too. `receiver` is the
+// receiver's identity (`TreeIdentified.treeId`, else its node name as of the
+// capture): `decode` refuses a text captured under another receiver. Every
+// store body is the
 // `holdfast.store` v1 body of issue #20 R1, embedded verbatim, so a store's
 // text is byte-identical to that store's own `encode()`. A keyed branch
 // without a key codec is never encoded: as a child it is left out, as the
@@ -51,6 +54,8 @@ internal fun encodeTree(
     writer.value(TREE_SNAPSHOT_FORMAT)
     writer.name("v")
     writer.value(TREE_SNAPSHOT_VERSION)
+    writer.name("receiver")
+    writer.value(tree.index.receiver)
     writer.name("scope")
     writer.value(tree.scope.toString())
     writer.name("path")
@@ -79,7 +84,7 @@ private fun refuseClassDerivedLeaves(tree: TreeSnapshot) {
         error(
             "Cannot encode a UserAuthored tree capture: leaf '${tree.name}' under '$parentName' is named by its " +
                 "store's class, which a rename or obfuscation would change and orphan what was persisted under " +
-                "it; pin it with stores(names = mapOf(Store::class to \"...\"))",
+                "it; pin it with named: group { listOf(store named \"...\") }",
         )
     }
     for (child in tree.children) refuseClassDerivedLeaves(child)
@@ -101,7 +106,7 @@ private fun pathBelow(tree: TreeSnapshot): List<String> {
         check(parent !is KeyedBranch<*, *> || parent.keyCodec != null) {
             "Cannot encode a tree capture under keyed branch '${index.nameOf(parent)}' of " +
                 "'${index.ownerNode.name}': the branch has no key codec, so no path can spell the captured " +
-                "node's key; declare it with stores<K, S>(keyCodec = ...)"
+                "node's key; declare it with keyed<K, S>(keyCodec = ...)"
         }
         current = parent
     }

@@ -37,8 +37,8 @@ private class CutKeyedStore : Store<CutKeyedStore>() {
 private class CutApp : Store<CutApp>() {
     val left = CutLeftStore()
     val right = CutRightStore()
-    val pair by stores { listOf(left, right) }
-    val keyed by stores<Int, CutKeyedStore> { CutKeyedStore() }
+    val pair by group { listOf(left, right) }
+    val keyed by keyed<Int, CutKeyedStore> { CutKeyedStore() }
 }
 
 private const val FRAMES = 3_000

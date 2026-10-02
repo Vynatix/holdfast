@@ -25,7 +25,7 @@ private class ScopePrefsStore : Store<ScopePrefsStore>() {
 /** A group leaf with children of its own: the keyed notes hang under this store. */
 private class ScopeSyncStore : Store<ScopeSyncStore>() {
     val etag by state(tags = setOf(StateTag.Remote)) { "" }
-    val notes by stores<String, ScopeNoteStore> { ScopeNoteStore(it) }
+    val notes by keyed<String, ScopeNoteStore> { ScopeNoteStore(it) }
 }
 
 private class ScopeNoteStore(
@@ -37,8 +37,8 @@ private class ScopeNoteStore(
 private class ScopeApp : Store<ScopeApp>() {
     val prefsStore = ScopePrefsStore()
     val syncStore = ScopeSyncStore()
-    val prefs by stores(names = mapOf(ScopePrefsStore::class to "prefs")) { listOf(prefsStore) }
-    val sync by stores { listOf(syncStore) }
+    val prefs by group { listOf(prefsStore named "prefs") }
+    val sync by group { listOf(syncStore) }
     val notes: KeyedBranch<String, ScopeNoteStore> get() = syncStore.notes
 }
 

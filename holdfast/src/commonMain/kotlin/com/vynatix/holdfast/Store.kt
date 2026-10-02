@@ -96,23 +96,7 @@ class FrameMiddlewareSession internal constructor(
  */
 @StoreActionDsl
 @Suppress("TooManyFunctions") // The Store DSL is intentionally broad; each member is a single primitive.
-// Implements the experimental Stateful marker; its member is annotated below. kotlin.OptIn has no TYPE
-// target, so this class-level opt-in is the only way to opt the supertype in — it also silences per-site
-// opt-in checks inside this class; keep per-site @OptIn comments as documentation.
-@OptIn(ExperimentalStoreApi::class)
-abstract class Store<Self : Store<Self>> : Stateful {
-    /**
-     * This store: every [Store] is a [Stateful] whose states it owns itself.
-     * Narrowed to `Self` so a subclass handle keeps its own type; a consumer
-     * interface over an inline child (`interface Draft : Stateful`) sees it
-     * as `Store<*>` and can still open an action on it
-     * (`draft.owningStore action { … }`). Works after [dispose], like
-     * [isDisposed]: it reads nothing the store tears down.
-     */
-    @ExperimentalStoreApi
-    final override val owningStore: Self
-        get() = self
-
+abstract class Store<Self : Store<Self>> {
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
      * sorts its store arguments by this key before acquiring locks, giving

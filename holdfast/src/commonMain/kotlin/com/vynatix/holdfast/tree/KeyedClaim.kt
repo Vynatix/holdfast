@@ -59,7 +59,7 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.runFactory(key: K): Pair<
     var verified = false
     try {
         check(storeClass.isInstance(produced)) {
-            "${owner.displayName}: $name is declared as stores<…, ${storeClass.simpleName}> but the factory " +
+            "${owner.displayName}: $name is declared as keyed<…, ${storeClass.simpleName}> but the factory " +
                 "returned ${produced::class.simpleName}"
         }
         check(!produced.isDisposed) {

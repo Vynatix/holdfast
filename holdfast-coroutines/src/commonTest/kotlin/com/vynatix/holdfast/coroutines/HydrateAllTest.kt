@@ -10,8 +10,9 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.tree.LeafNode
+import com.vynatix.holdfast.tree.group
+import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.store
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -71,8 +72,8 @@ private class HaParent(
 ) : Store<HaParent>() {
     val a by store { HaFeedStore(remoteA) }
     val b by store { HaFeedStore(remoteB) }
-    val other by stores { listOf(HaPlainStore()) }
-    val keyed by stores<String, HaKeyedStore> { HaKeyedStore(it) }
+    val other by group { listOf(HaPlainStore()) }
+    val keyed by keyed<String, HaKeyedStore> { HaKeyedStore(it) }
 
     val plain: HaPlainStore get() = other.stores.single() as HaPlainStore
 }
@@ -183,7 +184,7 @@ class HydrateAllTest {
         runBlocking {
             val parent = HaParent()
             val tree = parent.tree
-            assertEquals(4, tree.children.size, "a, b, other, keyed — materialized first, so the keyed store sorts after them")
+            assertEquals(4, tree.children().size, "a, b, other, keyed — materialized first, so the keyed store sorts after them")
             val k = parent.keyed.create("k")
             val report = tree.hydrateAll()
             assertEquals(listOf("HaParent", "a", "b", "HaPlain", "k"), report.entries.map { it.node.name })
@@ -357,7 +358,7 @@ class HydrateAllTest {
             val victim = bystander.keyed.create("victim")
             val parent = HaParent()
             val tree = parent.tree
-            assertEquals(4, tree.children.size, "materialized first: the keyed store sorts (and is driven) after b")
+            assertEquals(4, tree.children().size, "materialized first: the keyed store sorts (and is driven) after b")
             val late = parent.keyed.create("late")
             parent.plain.middlewares(object : Middleware<HaPlainStore>() {})
             // Dispose the keyed store right after b's seed committed: from b's hydration observer.
@@ -488,7 +489,7 @@ class HydrateAllTest {
         runBlocking {
             val parent = HaParent()
             val tree = parent.tree
-            assertEquals(4, tree.children.size, "materialized first: the keyed store sorts (and is driven) after b")
+            assertEquals(4, tree.children().size, "materialized first: the keyed store sorts (and is driven) after b")
             val late = parent.keyed.create("late")
             parent.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
             val report = tree.hydrateAll()

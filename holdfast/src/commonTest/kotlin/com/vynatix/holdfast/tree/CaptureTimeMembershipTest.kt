@@ -33,9 +33,9 @@ private class CmOutsideStore : Store<CmOutsideStore>() {
 private class CmApp : Store<CmApp>() {
     val sa = CmAStore()
     val sb = CmBStore()
-    val left by stores { listOf(sa) }
-    val right by stores { listOf(sb) }
-    val keyed by stores<String, CmKeyedStore> { CmKeyedStore() }
+    val left by group { listOf(sa) }
+    val right by group { listOf(sb) }
+    val keyed by keyed<String, CmKeyedStore> { CmKeyedStore() }
 }
 
 /**

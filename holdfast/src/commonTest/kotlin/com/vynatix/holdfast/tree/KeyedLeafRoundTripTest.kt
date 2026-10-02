@@ -30,12 +30,12 @@ private class KlOpaqueStore : Store<KlOpaqueStore>() {
 
 /** A child store declaring the keyed branch, so the keyed leaves sit two levels under the receiver. */
 private class KlSessionStore : Store<KlSessionStore>() {
-    val threads by stores<String, KlThreadStore> { KlThreadStore(it) }
+    val threads by keyed<String, KlThreadStore> { KlThreadStore(it) }
 }
 
 private class KlApp : Store<KlApp>() {
     val session by store { KlSessionStore() }
-    val opaque by stores<Any, KlOpaqueStore> { KlOpaqueStore() }
+    val opaque by keyed<Any, KlOpaqueStore> { KlOpaqueStore() }
 }
 
 /** A key whose `toString()` must never reach a message or a persisted text. */
@@ -115,7 +115,7 @@ class KeyedLeafRoundTripTest {
         // A text naming a path through that branch (written by hand: this receiver never writes one) does not resolve.
         val body = store.snapshot().encode()
         val text =
-            """{"format":"holdfast.tree","v":1,"scope":"All","path":["opaque","x"],""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"KlApp","scope":"All","path":["opaque","x"],""" +
                 """"tree":{"kind":"leaf","store":$body},"skipped":[]}"""
         val decoded = root.tree.decode(text)
         assertEquals(listOf(listOf("opaque", "x")), decoded.unresolvedPaths)

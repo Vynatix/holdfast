@@ -27,9 +27,9 @@ private class RdJoinedStore : Store<RdJoinedStore>() {
 private class RdApp : Store<RdApp>() {
     val insideStore = RdInsideStore()
     val outsideStore = RdOutsideStore()
-    val captured by stores { listOf(insideStore) }
-    val other by stores { listOf(outsideStore) }
-    val later by stores<Int, RdJoinedStore> { RdJoinedStore() }
+    val captured by group { listOf(insideStore) }
+    val other by group { listOf(outsideStore) }
+    val later by keyed<Int, RdJoinedStore> { RdJoinedStore() }
 }
 
 private const val ROUNDS = 300

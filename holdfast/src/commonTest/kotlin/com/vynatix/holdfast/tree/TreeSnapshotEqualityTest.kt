@@ -23,8 +23,8 @@ private class EqStore : Store<EqStore>() {
 
 private class EqApp : Store<EqApp>() {
     val eq = EqStore()
-    val leaf by stores { listOf(eq) }
-    val untypedKeys by stores<Any, EqKeyedStore> { EqKeyedStore() }
+    val leaf by group { listOf(eq) }
+    val untypedKeys by keyed<Any, EqKeyedStore> { EqKeyedStore() }
 }
 
 private class EqKeyedStore : Store<EqKeyedStore>() {
@@ -90,8 +90,8 @@ class TreeSnapshotEqualityTest {
         assertNotEquals(whole, root.tree.snapshot(scope = SnapshotScope.Raw), "scope is part of equality")
 
         class OtherName : Store<OtherName>() {
-            val leaf by stores { listOf(EqStore()) }
-            val untypedKeys by stores<Any, EqKeyedStore> { EqKeyedStore() }
+            val leaf by group { listOf(EqStore()) }
+            val untypedKeys by keyed<Any, EqKeyedStore> { EqKeyedStore() }
         }
         val renamed = OtherName().tree.snapshot()
         assertEquals(whole.children.map { it.name }, renamed.children.map { it.name }, "the same children")

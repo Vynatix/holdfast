@@ -18,7 +18,7 @@ private class TreeValueGcKeyedStore(
 }
 
 private class TreeValueGcParent : Store<TreeValueGcParent>() {
-    val threads by stores<Int, TreeValueGcKeyedStore> { TreeValueGcKeyedStore(it) }
+    val threads by keyed<Int, TreeValueGcKeyedStore> { TreeValueGcKeyedStore(it) }
 }
 
 /**

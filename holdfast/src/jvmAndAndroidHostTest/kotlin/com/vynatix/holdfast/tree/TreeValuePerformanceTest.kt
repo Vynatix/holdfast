@@ -17,7 +17,7 @@ private class TreeValuePerformanceLeafStore : Store<TreeValuePerformanceLeafStor
 }
 
 private class TreeValuePerformanceParent : Store<TreeValuePerformanceParent>() {
-    val leaves by stores<Int, TreeValuePerformanceLeafStore> { TreeValuePerformanceLeafStore() }
+    val leaves by keyed<Int, TreeValuePerformanceLeafStore> { TreeValuePerformanceLeafStore() }
 }
 
 private const val LEAVES = 16

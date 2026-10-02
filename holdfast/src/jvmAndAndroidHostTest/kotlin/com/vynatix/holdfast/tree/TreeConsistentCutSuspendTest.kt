@@ -29,7 +29,7 @@ private class RcsRightStore : Store<RcsRightStore>() {
 private class RcsApp : Store<RcsApp>() {
     val left = RcsLeftStore()
     val right = RcsRightStore()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }
 
 private const val FRAMES = 2_000

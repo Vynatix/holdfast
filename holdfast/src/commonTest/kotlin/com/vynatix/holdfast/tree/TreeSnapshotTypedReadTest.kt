@@ -38,9 +38,9 @@ private class TrThreadStore(
 private class TrStore : Store<TrStore>() {
     val settingsStore = TrSettingsStore()
     val profileStore = TrProfileStore()
-    val settings by stores { listOf(settingsStore) }
-    val profile by stores { listOf(profileStore) }
-    val threads by stores<String, TrThreadStore> { TrThreadStore(it) }
+    val settings by group { listOf(settingsStore) }
+    val profile by group { listOf(profileStore) }
+    val threads by keyed<String, TrThreadStore> { TrThreadStore(it) }
 }
 
 /** T5 and T7.4: reads are typed by the state and addressed by identity. */

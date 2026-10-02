@@ -5,7 +5,6 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.NodeStore
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Stateful
 import com.vynatix.holdfast.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,19 +19,19 @@ private class TypingThreadStore(
 
 private class TypingSettingsStore : Store<TypingSettingsStore>() {
     val theme by state { "light" }
-    val threads by stores<String, TypingThreadStore> { TypingThreadStore(it) }
+    val threads by keyed<String, TypingThreadStore> { TypingThreadStore(it) }
 }
 
 private class TypingProfileStore : Store<TypingProfileStore>()
 
 /** A consumer interface over an inline child. */
-private interface TypingDraft : Stateful {
+private interface TypingDraft {
     val text: State<String>
 }
 
 private class TypingParent : Store<TypingParent>() {
     val settings by store { TypingSettingsStore() }
-    val group by stores { listOf(TypingProfileStore()) }
+    val group by group { listOf(TypingProfileStore()) }
     val draft by store<TypingDraft> {
         object : NodeStore(), TypingDraft {
             override val text by state { "" }
@@ -54,7 +53,7 @@ private object TypingPinned : Store<TypingPinned>() {
 }
 
 private class TypingPinnedParent : Store<TypingPinnedParent>() {
-    val pinned by stores(names = mapOf(TypingPinned::class to "p")) { listOf(TypingPinned) }
+    val pinned by group { listOf(TypingPinned named "p") }
 }
 
 /**
@@ -76,7 +75,7 @@ class TreeTypingCompileTest {
         val created: TypingThreadStore = settings.threads.create("a")
         val shared: TypingThreadStore = settings.threads.getOrCreate("a")
         val looked: TypingThreadStore? = settings.threads["a"]
-        val entries: Map<String, TypingThreadStore> = settings.threads.entries
+        val entries: Map<String, TypingThreadStore> = settings.threads.entries()
         assertSame(created, looked)
         assertSame(created, shared)
         assertEquals(setOf("a"), entries.keys)
@@ -89,7 +88,7 @@ class TreeTypingCompileTest {
         val keyed: KeyedBranch<String, TypingThreadStore> = parent.settings.threads
         val node: StoreNode = keyed
         val stores: List<Store<*>> = parent.tree.stores(node)
-        val children: List<StoreNode> = parent.tree.children
+        val children: List<StoreNode> = parent.tree.children()
         val leaf: LeafNode? = parent.tree.nodeOf(parent.settings)
         assertSame(leaf, keyed.parent)
         assertSame(parent.tree.node, group.parent)
@@ -102,14 +101,14 @@ class TreeTypingCompileTest {
         val parent = TypingParent()
         val draft: TypingDraft = parent.draft
         val text: State<String> = draft.text
-        draft.owningStore action { draft.text mutate "x" }
+        (draft as NodeStore) action { draft.text mutate "x" }
         assertEquals("x", text.value)
     }
 
     @Test
-    fun aPinByClassNeverInitializesAnObject() {
+    fun aPinnedGroupMemberObjectIsInitializedOnlyByTheFirstRead() {
         val parent = TypingPinnedParent()
-        assertEquals(0, typingPinnedInits, "declaring the pin touched no object")
+        assertEquals(0, typingPinnedInits, "declaring the group touched no object")
         assertEquals("p", parent.pinned.leafName(TypingPinned))
         assertEquals(1, typingPinnedInits)
     }

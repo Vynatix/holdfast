@@ -3,6 +3,9 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.SettleScopes
+import com.vynatix.holdfast.SettleTask
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
 import kotlinx.atomicfu.locks.synchronized
@@ -11,9 +14,15 @@ import kotlinx.atomicfu.locks.synchronized
 // the last step of `Store.dispose()`, on the disposing thread, under whatever
 // locks its caller holds — possibly inside the store's own action, holding
 // its `transactionLock`). The store leaves its parent; its children are
-// released as subtree roots and keep working (the tree disposes nothing);
-// every ancestor's listeners hear each leaf that left their subtree; the
-// rings are re-synced; the store's own tree value stops.
+// released as subtree roots and keep working; every ancestor's listeners
+// hear each leaf that left their subtree; the rings are re-synced; the
+// store's own tree value stops. Last, the keyed stores the store's keyed
+// branches OWN (`KeyedDisposal.Dispose`, the default) are disposed — never
+// under a tree lock and never inside a step: through the settle scope open
+// on this thread (so inside an action or frame they dispose when that entry
+// settles, after it released every lock), else handed to the post-commit
+// queue of this store when this thread holds its transaction lock with no
+// scope open (as the value host's dispose is), else inline, last.
 //
 // Every step runs in its own `runCatching`; failures are collected and
 // thrown together at the end, so `AttachmentSlot.notifyDisposed` reports
@@ -41,6 +50,9 @@ internal class StoreDetach(
     private var released: List<LeafNode> = emptyList()
     private var descendants: Map<LeafNode, List<LeafNode>> = emptyMap()
 
+    /** The released keyed stores whose branch owns them (`KeyedDisposal.Dispose`): disposed last (step 9). */
+    private var owned: List<Store<*>> = emptyList()
+
     fun run() {
         treeStructureLock.withLock {
             chain = ancestorsOf(node.parent)
@@ -54,6 +66,8 @@ internal class StoreDetach(
         step("dispose the tree value") { disposeValue() }
         step("re-sync the released subtrees' middleware") { resyncReleased() }
         node.attachment = null
+        // Step 9: the keyed stores this store's branches owned, each already a released subtree root.
+        step("dispose the owned keyed stores") { if (owned.isNotEmpty()) OwnedKeyedDisposeTask(owned).dispatch(store) }
         reportFailures()
     }
 
@@ -97,6 +111,8 @@ internal class StoreDetach(
         } finally {
             endBumps(targets)
         }
+        val registry = attachment.registry
+        owned = released.mapNotNull { child -> child.store?.takeIf { child.isOwnedByKeyedBranchOf(registry) } }
         descendants =
             released.associateWith { child ->
                 runCatching {
@@ -200,5 +216,48 @@ internal class StoreDetach(
             )
         for (other in failures.drop(1)) reported.addSuppressed(other)
         throw reported
+    }
+}
+
+/**
+ * Whether this released leaf hangs under a keyed branch of the store whose
+ * children [registry] holds, and that branch disposes its stores with it
+ * (`KeyedDisposal.Dispose`).
+ */
+private fun LeafNode.isOwnedByKeyedBranchOf(registry: ChildRegistry): Boolean {
+    val edge = attachment?.parentEdge?.value
+    val branch = edge?.parentNode as? KeyedBranch<*, *>
+    return branch != null && edge.ownerRegistry === registry && branch.onParentDispose == KeyedDisposal.Dispose
+}
+
+/**
+ * The keyed stores a disposed store's branches owned, disposed once — when
+ * the settle scope the parent's dispose ran in settles, or by whoever runs
+ * it directly. `Store.dispose()` never throws and is idempotent.
+ */
+internal class OwnedKeyedDisposeTask(
+    private val stores: List<Store<*>>,
+) : SettleTask {
+    override val settleRank: Int get() = 0
+
+    override fun settle() {
+        for (store in stores) store.dispose()
+    }
+
+    override fun deferPastSettle(report: Boolean) = settle()
+
+    /**
+     * Dispose the stores where no lock [disposing]'s dispose holds is held:
+     * when the settle scope open on this thread settles, else from
+     * [disposing]'s post-commit queue when this thread holds its transaction
+     * lock with no scope open, else now.
+     */
+    fun dispatch(disposing: Store<*>?) {
+        when {
+            SettleScopes.current()?.enqueue(this) == true -> Unit
+            disposing != null && disposing.transactionLock.isHeldByCurrentThread() ->
+                disposing.handOffPostCommit(::settle)
+            else -> settle()
+        }
     }
 }

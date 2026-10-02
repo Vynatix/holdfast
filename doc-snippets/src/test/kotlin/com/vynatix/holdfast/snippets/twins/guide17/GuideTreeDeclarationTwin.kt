@@ -1,4 +1,4 @@
-// Twin of GUIDE §17.1 (declaring children with store { } / stores { }, keyed
+// Twin of GUIDE §17.1 (declaring children with store { } / group { }, keyed
 // stores through the declared factory, an inline child). The block is
 // embedded at top level; the test drives it and asserts the output its
 // comments claim. Module-wide opt-in stands in for the `-opt-in` flag the
@@ -10,12 +10,12 @@ package com.vynatix.holdfast.snippets.twins.guide17
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.NodeStore
 import com.vynatix.holdfast.State
-import com.vynatix.holdfast.Stateful
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.snippets.capturePrintln
 import com.vynatix.holdfast.tree.NameOrigin
 import com.vynatix.holdfast.tree.store
-import com.vynatix.holdfast.tree.stores
+import com.vynatix.holdfast.tree.group
+import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,25 +37,35 @@ class ThreadStore(val id: String) : Store<ThreadStore>() {       // an ordinary 
     val title by state { "thread $id" }
 }
 
-interface Draft : Stateful {                                     // the typed face of an inline child
+interface Draft {                                                // the typed face of an inline child: a plain interface
     val text: State<String>
+
+    fun edit(value: String)
 }
 
 object App : Store<App>() {
     val openThreads by state { emptySet<String>() }                         // a parent is a store: it has states
     val settings by store { SettingsStore() }                              // one child, node "settings"
-    val session by stores { listOf(SignInStore(), ProfileStore()) }        // a group: leaves "SignIn", "Profile"
-    val threads by stores<String, ThreadStore> { id -> ThreadStore(id) }   // keyed: the factory is declared once
-    val draft by store<Draft> { object : NodeStore(), Draft { override val text by state { "" } } }   // the type argument is required
+    val session by group { listOf(SignInStore() named "sign-in", ProfileStore()) }   // leaves "sign-in" (pinned), "Profile"
+    val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) }    // keyed: the factory is declared once
+    val draft by store<Draft> {                                            // the type argument is required
+        object : NodeStore(), Draft {
+            override val text by state { "" }
+
+            override fun edit(value: String) {
+                text mutate value
+            }
+        }
+    }
 }
 
 fun useTheTree() {
-    println(App.tree.children.map { it.name })              // "[settings, session, threads, draft]": the lambdas run now
+    println(App.tree.children().map { it.name })            // "[settings, session, threads, draft]": the lambdas run now
     val t1 = App.threads.create("t1")                         // runs the factory; live once create returns
     println(App.threads.getOrCreate("t1") === t1)             // "true": the same store, the factory not run again
     println(App.tree.nodeOf(t1)?.name)                        // "t1"
-    println(App.tree.stores(App.session).size)                // "2": SignIn, then Profile
-    App.draft.owningStore action { App.draft.text mutate "hi" }   // an inline child, reached through Stateful
+    println(App.tree.stores(App.session).size)                // "2": sign-in, then Profile
+    App.draft.edit("hi")                                      // an inline child, written through its own method
     println(App.draft.text.value)                             // "hi"
     println(App.tree.nodeOf(ThreadStore("bare")))             // "null": built outside the factory, it is in no tree
     t1.dispose()                                              // leaves the tree
@@ -68,7 +78,8 @@ class GuideTreeDeclarationTwin {
     fun useTheTreePrintsWhatItsCommentsClaim() {
         val printed = capturePrintln { useTheTree() }
         assertEquals(listOf("[settings, session, threads, draft]", "true", "t1", "2", "hi", "null", "null"), printed)
-        assertEquals("SignIn", App.session.leafName(App.session.stores.first()))
+        assertEquals("sign-in", App.session.leafName(App.session.stores.first()))
+        assertEquals(NameOrigin.Pinned, App.tree.nodeOf(App.session.stores.first())!!.nameOrigin)
         assertEquals("Profile", App.session.leafName(App.session.stores.last()))
         assertEquals("App", App.tree.node.name, "a store nobody declared is named by its class")
         assertEquals(NameOrigin.ClassName, App.tree.node.nameOrigin)

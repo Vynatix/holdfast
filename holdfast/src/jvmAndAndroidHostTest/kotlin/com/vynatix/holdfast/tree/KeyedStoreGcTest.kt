@@ -20,7 +20,7 @@ private class GcThreadStore(
 private class GcParent : Store<GcParent>() {
     var failingKey: Int? = null
     var built: WeakReference<GcThreadStore>? = null
-    val threads by stores<Int, GcThreadStore> { id ->
+    val threads by keyed<Int, GcThreadStore> { id ->
         val store = GcThreadStore(id)
         if (id == failingKey) {
             built = WeakReference(store)
@@ -44,7 +44,7 @@ class KeyedStoreGcTest {
         val ref = createDisposeAndForget(parent)
         assertTrue(awaitCollected(ref), "a disposed keyed store was not collected within the budget")
         assertNull(ref.get(), "the parent must not keep a disposed keyed store reachable")
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
     }
 
     /** A frame of its own, so no interpreter-local slot of the test method keeps the store alive. */

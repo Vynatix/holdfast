@@ -59,7 +59,7 @@ private class RtOpaqueStore : Store<RtOpaqueStore>() {
 
 /** A mid-tree store with no states: its node is a leaf carrying children (`store` body empty). */
 private class RtSessionStore : Store<RtSessionStore>() {
-    val threads by stores<String, RtThreadStore> { RtThreadStore(it) }
+    val threads by keyed<String, RtThreadStore> { RtThreadStore(it) }
 }
 
 /** The receiver: a parent with a state of its own, a pinned group, a child store and a codec-less keyed branch. */
@@ -67,9 +67,9 @@ private class RtApp : Store<RtApp>() {
     val opened by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "none" }
     val settingsStore = RtSettingsStore()
     val profileStore = RtProfileStore()
-    val settings by stores(names = mapOf(RtSettingsStore::class to "settings")) { listOf(settingsStore, profileStore) }
+    val settings by group { listOf(settingsStore named "settings", profileStore) }
     val session by store { RtSessionStore() }
-    val opaque by stores<Any, RtOpaqueStore> { RtOpaqueStore() }
+    val opaque by keyed<Any, RtOpaqueStore> { RtOpaqueStore() }
     val threads: KeyedBranch<String, RtThreadStore> get() = session.threads
 }
 
@@ -78,9 +78,14 @@ private class RtReaderV1 : Store<RtReaderV1>() {
     val fontSize by state(codec = IntCodec) { 14 }
 }
 
-private class RtReaderV1App : Store<RtReaderV1App>() {
+/** Both reader apps carry one tree id: the receiver of a text survives the app class's "rename". */
+private class RtReaderV1App :
+    Store<RtReaderV1App>(),
+    TreeIdentified {
+    override val treeId: String get() = "reader-app"
+
     val v1 = RtReaderV1()
-    val prefs by stores(names = mapOf(RtReaderV1::class to "reader")) { listOf(v1) }
+    val prefs by group { listOf(v1 named "reader") }
 }
 
 /** Schema 2 renames `fontSize` to `textSize`; the same tree shape, a newer store. */
@@ -100,15 +105,23 @@ private class RtReaderV2 :
     }
 }
 
-private class RtReaderV2App : Store<RtReaderV2App>() {
+private class RtReaderV2App :
+    Store<RtReaderV2App>(),
+    TreeIdentified {
+    override val treeId: String get() = "reader-app"
+
     val v2 = RtReaderV2()
-    val prefs by stores(names = mapOf(RtReaderV2::class to "reader")) { listOf(v2) }
+    val prefs by group { listOf(v2 named "reader") }
 }
 
-/** The same store class as [RtSettingsStore], at a class-named leaf. */
-private class RtUnpinnedApp : Store<RtUnpinnedApp>() {
+/** The same store class as [RtSettingsStore], at a class-named leaf; one tree id with its "renamed" twin. */
+private class RtUnpinnedApp :
+    Store<RtUnpinnedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "settings-app"
+
     val settingsStore = RtSettingsStore()
-    val settings by stores { listOf(settingsStore) }
+    val settings by group { listOf(settingsStore) }
 }
 
 /** [RtSettingsStore] as a `store { }` child: named by its property, never by its class. */
@@ -120,14 +133,31 @@ private class RtRenamedSettingsStore : Store<RtRenamedSettingsStore>() {
     val theme by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "light" }
 }
 
-private class RtRenamedPinnedApp : Store<RtRenamedPinnedApp>() {
-    val renamed = RtRenamedSettingsStore()
-    val settings by stores(names = mapOf(RtRenamedSettingsStore::class to "settings")) { listOf(renamed) }
+/** [RtSettingsStore] at a pinned group leaf, under the tree id its "renamed" twin shares. */
+private class RtPinnedApp :
+    Store<RtPinnedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "pinned-settings-app"
+    val settingsStore = RtSettingsStore()
+    val settings by group { listOf(settingsStore named "settings") }
 }
 
-private class RtRenamedUnpinnedApp : Store<RtRenamedUnpinnedApp>() {
+private class RtRenamedPinnedApp :
+    Store<RtRenamedPinnedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "pinned-settings-app"
+
     val renamed = RtRenamedSettingsStore()
-    val settings by stores { listOf(renamed) }
+    val settings by group { listOf(renamed named "settings") }
+}
+
+private class RtRenamedUnpinnedApp :
+    Store<RtRenamedUnpinnedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "settings-app"
+
+    val renamed = RtRenamedSettingsStore()
+    val settings by group { listOf(renamed) }
 }
 
 private object RtThrowingKeyCodec : StateCodec<Int> {
@@ -143,7 +173,7 @@ private class RtIntKeyedStore(
 }
 
 private class RtIntKeyApp : Store<RtIntKeyApp>() {
-    val byInt by stores<Int, RtIntKeyedStore>(keyCodec = RtThrowingKeyCodec) { RtIntKeyedStore(it) }
+    val byInt by keyed<Int, RtIntKeyedStore>(keyCodec = RtThrowingKeyCodec) { RtIntKeyedStore(it) }
 }
 
 private class RtReplyStore(
@@ -157,11 +187,11 @@ private class RtForumThreadStore(
     id: String,
 ) : Store<RtForumThreadStore>() {
     val title by state(codec = StringCodec) { "thread $id" }
-    val replies by stores<String, RtReplyStore> { RtReplyStore(it) }
+    val replies by keyed<String, RtReplyStore> { RtReplyStore(it) }
 }
 
 private class RtForumApp : Store<RtForumApp>() {
-    val threads by stores<String, RtForumThreadStore> { RtForumThreadStore(it) }
+    val threads by keyed<String, RtForumThreadStore> { RtForumThreadStore(it) }
 }
 
 /** Runs [during] when its store disposes — before the store's tree state hears of it (attached first). */
@@ -242,7 +272,7 @@ class TreeSnapshotRoundTripTest {
         val t1Body = root.threads["t1"]!!.snapshot().encode()
         val t2Body = root.threads["t2"]!!.snapshot().encode()
         val expected =
-            """{"format":"holdfast.tree","v":1,"scope":"All","path":[],""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"RtApp","scope":"All","path":[],""" +
                 """"tree":{"kind":"leaf","store":$appBody,"children":{""" +
                 """"session":{"kind":"leaf","store":$sessionBody,"children":{"threads":{"kind":"keyed","entries":{""" +
                 """"t1":{"kind":"leaf","store":$t1Body},"t2":{"kind":"leaf","store":$t2Body}}}}},""" +
@@ -328,7 +358,7 @@ class TreeSnapshotRoundTripTest {
         val badFormat = assertFailsWith<SnapshotFormatException> { root.tree.decode(text.replace("holdfast.tree", "holdfast.store")) }
         assertContains(badFormat.message!!, "holdfast.tree")
         val badVersion =
-            assertFailsWith<SnapshotFormatException> { root.tree.decode(text.replace(""""v":1,"scope"""", """"v":2,"scope"""")) }
+            assertFailsWith<SnapshotFormatException> { root.tree.decode(text.replace(""""v":1,"receiver"""", """"v":2,"receiver"""")) }
         assertContains(badVersion.message!!, "version")
         assertFailsWith<SnapshotFormatException> { root.tree.decode("[]") }
         assertFailsWith<SnapshotFormatException> { root.tree.decode("""{"format":"holdfast.tree","v":1}""") }
@@ -381,7 +411,7 @@ class TreeSnapshotRoundTripTest {
         assertEquals(listOf(listOf("settings", "RtSettings")), lost.unresolvedPaths, "the class-derived name no longer resolves")
         assertNull(lost[renamedUnpinned.renamed.theme])
 
-        val pinnedOriginal = RtApp()
+        val pinnedOriginal = RtPinnedApp()
         pinnedOriginal.settingsStore action { theme mutate "dark" }
         val pinnedText = pinnedOriginal.tree.snapshot(scope = SnapshotScope.UserAuthored).encode()
         val renamedPinned = RtRenamedPinnedApp()
@@ -473,7 +503,8 @@ class TreeSnapshotRoundTripTest {
         val threadBody = thread.snapshot().encode()
         val replyBody = reply.snapshot().encode()
         assertEquals(
-            """{"format":"holdfast.tree","v":1,"scope":"All","path":[],"tree":{"kind":"leaf","store":$forumBody,""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"RtForumApp","scope":"All","path":[],""" +
+                """"tree":{"kind":"leaf","store":$forumBody,""" +
                 """"children":{"threads":{"kind":"keyed","entries":{"42":{"kind":"leaf","store":$threadBody,""" +
                 """"children":{"replies":{"kind":"keyed","entries":{"7":{"kind":"leaf","store":$replyBody}}}}}}}}},""" +
                 """"skipped":[]}""",
@@ -530,32 +561,42 @@ class TreeSnapshotRoundTripTest {
 
     @Test
     fun aTopLevelPersistedStoreWithNoPinEncodesWhileTheSameStoreInAGroupIsRefused() {
-        // As a receiver, its class-derived name is never written: no issue, and UserAuthored encodes.
+        // As a receiver, its class-derived name is its identity: flagged (a class rename breaks decode), but it
+        // encodes and decodes through another instance of the same class.
         val alone = RtSettingsStore()
         alone action { theme mutate "dark" }
-        assertEquals(emptyList<NamingIssue>(), alone.tree.verifyPersistedNames())
+        assertEquals(
+            listOf(NamingIssue.Kind.ReceiverNameIsClassDerived),
+            alone.tree.verifyPersistedNames().map { it.kind },
+        )
         val text = alone.tree.snapshot(scope = SnapshotScope.UserAuthored).encode()
         assertContains(text, """"path":[],"tree":{"kind":"leaf","store":""")
         val elsewhere = RtSettingsStore()
         elsewhere.tree.restore(elsewhere.tree.decode(text), RestorePolicy.Strict).getOrThrow()
         assertEquals("dark", elsewhere.theme.value)
 
-        // As a `store { }` child, it is named by its property: no issue either.
+        // As a `store { }` child, it is named by its property: the property name is flagged (pin it with named =),
+        // and so is the class-named top-level receiver; never a class-derived leaf.
         val child = RtPropertyChildApp()
-        assertEquals(emptyList<NamingIssue>(), child.tree.verifyPersistedNames())
+        assertEquals(
+            setOf(NamingIssue.Kind.PropertyDerivedNameOnPersistedSubtree, NamingIssue.Kind.ReceiverNameIsClassDerived),
+            child.tree
+                .verifyPersistedNames()
+                .map { it.kind }
+                .toSet(),
+        )
         assertContains(child.tree.snapshot(scope = SnapshotScope.UserAuthored).encode(), """"settings":{"kind":"leaf"""")
 
         // In a group, the same store sits at a class-named leaf: flagged and refused.
         val grouped = RtUnpinnedApp()
-        val issues = grouped.tree.verifyPersistedNames()
+        val issues = grouped.tree.verifyPersistedNames().filter { it.kind == NamingIssue.Kind.ClassDerivedNameOnPersistedStore }
         assertEquals(listOf<StoreNode>(grouped.tree.nodeOf(grouped.settingsStore)!!), issues.map { it.node })
-        assertEquals(NamingIssue.Kind.ClassDerivedNameOnPersistedStore, issues.single().kind)
         val refused = assertFailsWith<IllegalStateException> { grouped.tree.snapshot(scope = SnapshotScope.UserAuthored).encode() }
         assertContains(refused.message!!, "leaf 'RtSettings' under 'settings' is named by its store's class")
     }
 
     @Test
-    fun anAnonymousReceiverEncodesWithoutItsNameAndRoundTrips() {
+    fun anAnonymousReceiverEncodesUnderItsNodeNameAndRoundTrips() {
         val anon =
             object : NodeStore() {
                 val opened by state(codec = StringCodec) { "none" }
@@ -569,10 +610,11 @@ class TreeSnapshotRoundTripTest {
         val anonBody = anon.snapshot().encode()
         val profileBody = anon.profile.snapshot().encode()
         assertEquals(
-            """{"format":"holdfast.tree","v":1,"scope":"All","path":[],"tree":{"kind":"leaf","store":$anonBody,""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"Store","scope":"All","path":[],""" +
+                """"tree":{"kind":"leaf","store":$anonBody,""" +
                 """"children":{"profile":{"kind":"leaf","store":$profileBody}}},"skipped":[]}""",
             captured.encode(),
-            "the receiver's own name is never written, so an anonymous one needs no pin",
+            "an anonymous receiver is identified by its node name, 'Store', and needs no pin",
         )
 
         anon action { anon.opened mutate "elsewhere" }

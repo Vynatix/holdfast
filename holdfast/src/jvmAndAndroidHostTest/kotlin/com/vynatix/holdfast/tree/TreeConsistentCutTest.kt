@@ -36,8 +36,8 @@ private class RcKeyedStore : Store<RcKeyedStore>() {
 private class RcApp : Store<RcApp>() {
     val left = RcLeftStore()
     val right = RcRightStore()
-    val pair by stores { listOf(left, right) }
-    val keyed by stores<Int, RcKeyedStore> { RcKeyedStore() }
+    val pair by group { listOf(left, right) }
+    val keyed by keyed<Int, RcKeyedStore> { RcKeyedStore() }
 }
 
 private const val FRAMES = 3_000
@@ -185,7 +185,7 @@ class TreeConsistentCutTest {
             reader.join()
             assertEquals(emptyList<Throwable>(), failures.toList())
             assertTrue(reads.get() >= MIN_READS, "reader progress ${reads.get()}")
-            assertEquals(0, root.keyed.entries.size)
+            assertEquals(0, root.keyed.entries().size)
             assertEquals(
                 0,
                 root.tree.value[root.keyed]!!

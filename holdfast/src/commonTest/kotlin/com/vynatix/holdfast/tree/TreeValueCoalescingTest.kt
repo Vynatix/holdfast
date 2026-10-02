@@ -44,7 +44,7 @@ private class TreeValueCoalescingDerivedStore : Store<TreeValueCoalescingDerived
 private class TreeValueCoalescingParent : Store<TreeValueCoalescingParent>() {
     val left = TreeValueCoalescingLeftStore()
     val right = TreeValueCoalescingRightStore()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }
 
 private class TreeValueCoalescingDerivedParent : Store<TreeValueCoalescingDerivedParent>() {

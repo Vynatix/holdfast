@@ -26,8 +26,8 @@ private class LsKeyedStore : Store<LsKeyedStore>() {
 
 private class LsApp : Store<LsApp>() {
     val plain = LsPlainStore()
-    val left by stores(names = mapOf(LsPlainStore::class to "plain")) { listOf(plain) }
-    val keyed by stores<String, LsKeyedStore> { LsKeyedStore() }
+    val left by group { listOf(plain named "plain") }
+    val keyed by keyed<String, LsKeyedStore> { LsKeyedStore() }
 }
 
 /** `tree.snapshot(leafNode, …)`: the requested node is always returned, empty when its leaf captured nothing. */
@@ -72,7 +72,7 @@ class LeafSnapshotTest {
 
         val text = empty.encode()
         assertEquals(
-            """{"format":"holdfast.tree","v":1,"scope":"UserAuthored","path":["left","plain"],""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"LsApp","scope":"UserAuthored","path":["left","plain"],""" +
                 """"tree":{"kind":"leaf"},"skipped":[]}""",
             text,
         )

@@ -54,7 +54,7 @@ private class VisSlowStore(
  */
 private class VisParent : Store<VisParent>() {
     val builds = ConcurrentHashMap<Int, (Int) -> VisSlowStore>()
-    val slow by stores<Int, VisSlowStore> { id -> builds[id]?.invoke(id) ?: VisSlowStore(id, null) }
+    val slow by keyed<Int, VisSlowStore> { id -> builds[id]?.invoke(id) ?: VisSlowStore(id, null) }
 }
 
 private const val WORKERS = 8
@@ -112,7 +112,7 @@ class KeyedConstructionVisibilityTest {
                                     seenLive.incrementAndGet()
                                 }
                             }
-                            for (live in parent.slow.entries.values) check(live.complete)
+                            for (live in parent.slow.entries().values) check(live.complete)
                             parent.tree.stores(parent.slow).forEach { check((it as VisSlowStore).complete) }
                             if (tail) tailLookups.incrementAndGet()
                         }
@@ -301,7 +301,7 @@ class KeyedConstructionVisibilityTest {
             val lookups =
                 listOf<Pair<String, () -> VisSlowStore?>>(
                     "get" to { parent.slow[1] },
-                    "entries" to { parent.slow.entries[1] },
+                    "entries" to { parent.slow.entries()[1] },
                     "getOrCreate" to { parent.slow.getOrCreate(1) },
                 ).map { (name, lookup) ->
                     daemon(name, failures) {

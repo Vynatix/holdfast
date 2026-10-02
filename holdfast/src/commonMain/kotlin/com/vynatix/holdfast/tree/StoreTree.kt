@@ -13,7 +13,7 @@ import com.vynatix.holdfast.TransactionResult
 /**
  * A store's view of its subtree (`store.tree`): the store itself — the
  * receiver — and every store declared under it with `store { }`,
- * `stores { }` and `stores<K, S> { }`, at any depth.
+ * `group { }` and `keyed<K, S> { }`, at any depth.
  *
  * It is itself the subtree's value: a [TreeSnapshot] over every live store
  * of the subtree as ONE consistent capture, kept current — recomputed once
@@ -59,7 +59,7 @@ sealed interface StoreTree : State<TreeSnapshot> {
      * [KeyedBranch] (listed from its declaration on, with or without
      * entries). A child whose lambda throws makes this throw.
      *
-     * WARNING — this property is not a cheap field read: it RUNS THE CHILD
+     * WARNING — this is not a cheap read: it RUNS THE CHILD
      * LAMBDAS of every declared child not materialized yet, at any depth, on
      * the calling thread (user code, which may open actions and build
      * stores), and it may PARK the calling thread for a moment while another
@@ -67,7 +67,7 @@ sealed interface StoreTree : State<TreeSnapshot> {
      * it from code that must not run user code or block (an observer, a
      * listener, a hot loop); hold the list it answered instead.
      */
-    val children: List<StoreNode>
+    fun children(): List<StoreNode>
 
     /**
      * Every live store of the subtree at [node], in tree order (the receiver
@@ -130,17 +130,27 @@ sealed interface StoreTree : State<TreeSnapshot> {
     /**
      * Read a `holdfast.tree` v1 text ([TreeSnapshot.encode]) back into a
      * capture addressed by this subtree's nodes; a path the subtree does not
-     * declare is listed in [TreeSnapshot.unresolvedPaths].
+     * declare is listed in [TreeSnapshot.unresolvedPaths]. The text must
+     * have been captured under this receiver: its `receiver` must equal this
+     * receiver's identity — its [TreeIdentified.treeId], else its node name
+     * (a child's property name or pin; a top-level store's class name minus
+     * `Store`, which a class rename changes).
      *
      * @throws com.vynatix.holdfast.SnapshotFormatException if the text is not
-     *   a well-formed `holdfast.tree` v1 envelope.
+     *   a well-formed `holdfast.tree` v1 envelope, or was captured under
+     *   another receiver (the message names both, never a value).
      */
     fun decode(text: String): TreeSnapshot
 
     /**
-     * The persisted-name self-check: every persisted store of the subtree at
-     * [node] sitting at a leaf named by its class rather than pinned, and
-     * every keyed branch declared without a key codec.
+     * The persisted-name self-check over the subtree at [node]: every
+     * persisted store at a group leaf named by its class rather than pinned;
+     * every `store { }` child, group or keyed branch named by its Kotlin
+     * property with a persisted store at or under it (pin it with
+     * `named =`); every keyed branch declared without a key codec; and the
+     * receiver, when it is a top-level store identified by its class name
+     * (not [TreeIdentified]) and the subtree persists. Each is a name a
+     * rename or obfuscation would change under persisted data.
      *
      * @throws IllegalArgumentException if [node] is not in the receiver's subtree.
      */

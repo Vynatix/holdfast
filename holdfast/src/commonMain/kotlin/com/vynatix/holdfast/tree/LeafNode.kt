@@ -25,7 +25,7 @@ internal const val DETACHED = 4
 /**
  * One store's place in a store tree, for the store's whole life: created
  * with the store's tree state, re-parented when the store is declared as a
- * child (`store { }`, `stores { }`, a keyed `create`), and reset to a
+ * child (`store { }`, `group { }`, a keyed `create`), and reset to a
  * parentless, class-named node when its parent disposes (it becomes a
  * subtree root and keeps working).
  *

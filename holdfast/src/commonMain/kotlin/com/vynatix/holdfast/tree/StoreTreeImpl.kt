@@ -80,12 +80,11 @@ internal class StoreTreeImpl(
     override val observableBacking: MutableState<TreeSnapshot>
         get() = treeValue().node().backing
 
-    override val children: List<StoreNode>
-        get() {
-            owner.checkNotDisposed()
-            materializeSubtree(this.node)
-            return registry.liveChildNodes()
-        }
+    override fun children(): List<StoreNode> {
+        owner.checkNotDisposed()
+        materializeSubtree(this.node)
+        return registry.liveChildNodes()
+    }
 
     override fun stores(node: StoreNode): List<Store<*>> = leaves(node).map { it.second }
 

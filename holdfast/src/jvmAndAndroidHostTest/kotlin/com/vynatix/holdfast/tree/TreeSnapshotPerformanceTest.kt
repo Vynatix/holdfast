@@ -16,7 +16,7 @@ private class PerfLeafStore : Store<PerfLeafStore>() {
 }
 
 private class PerfApp : Store<PerfApp>() {
-    val leaves by stores<Int, PerfLeafStore> { PerfLeafStore() }
+    val leaves by keyed<Int, PerfLeafStore> { PerfLeafStore() }
 }
 
 private const val LEAVES = 16

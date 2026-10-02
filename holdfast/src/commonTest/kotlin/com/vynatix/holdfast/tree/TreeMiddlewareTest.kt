@@ -44,8 +44,8 @@ private class TmKeyedStore(
 
 private class TmParent : Store<TmParent>() {
     val own by state { 0 }
-    val pair by stores(names = mapOf(TmAStore::class to "a", TmBStore::class to "b")) { listOf(TmAStore(), TmBStore()) }
-    val keyed by stores<String, TmKeyedStore> { TmKeyedStore(it) }
+    val pair by group { listOf(TmAStore() named "a", TmBStore() named "b") }
+    val keyed by keyed<String, TmKeyedStore> { TmKeyedStore(it) }
 
     val a: TmLeafStore get() = pair.stores[0] as TmLeafStore
     val b: TmLeafStore get() = pair.stores[1] as TmLeafStore

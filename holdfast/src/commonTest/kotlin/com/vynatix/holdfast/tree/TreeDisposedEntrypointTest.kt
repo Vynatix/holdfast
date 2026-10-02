@@ -28,22 +28,22 @@ private class DisposedKeyedStore(
 private class DisposedProbeParent : Store<DisposedProbeParent>() {
     val n by state { 0 }
     val leaf by store { DisposedLeafStore() }
-    val keyed by stores<String, DisposedKeyedStore> { DisposedKeyedStore(it) }
+    val keyed by keyed<String, DisposedKeyedStore> { DisposedKeyedStore(it) }
 
     /** The probe's node, read before it is disposed. */
     var nodeBeforeDispose: LeafNode? = null
 
     /** A group never read, so its delegate read after dispose would be its first. */
-    val group by stores { listOf(DisposedLeafStore()) }
+    val group by group { listOf(DisposedLeafStore()) }
 
     /** A declaration not yet bound, so a row can bind it after dispose. */
     fun lateStore() = store { DisposedLeafStore() }
 
     /** A group declaration not yet bound. */
-    fun lateGroup() = stores { listOf(DisposedLeafStore()) }
+    fun lateGroup() = group { listOf(DisposedLeafStore()) }
 
     /** A keyed declaration not yet bound. */
-    fun lateKeyed() = stores<String, DisposedKeyedStore> { DisposedKeyedStore(it) }
+    fun lateKeyed() = keyed<String, DisposedKeyedStore> { DisposedKeyedStore(it) }
 }
 
 /** Hangs a probe under a parent of its own, so the probe's own place can be checked after its dispose. */
@@ -70,7 +70,7 @@ class TreeDisposedEntrypointTest {
             TdeEntrypoint("Store.tree (the accessor, no handle ever made)") { _, _, _ ->
                 DisposedProbeParent().also { it.dispose() }.tree
             },
-            TdeEntrypoint("children") { _, tree, _ -> tree.children },
+            TdeEntrypoint("children") { _, tree, _ -> tree.children() },
             TdeEntrypoint("stores") { _, tree, _ -> tree.stores() },
             TdeEntrypoint("nodeOf") { probe, tree, _ -> tree.nodeOf(probe) },
             TdeEntrypoint("snapshot") { _, tree, _ -> tree.snapshot() },
@@ -84,17 +84,19 @@ class TreeDisposedEntrypointTest {
             TdeEntrypoint("KeyedBranch.create") { _, _, keyed -> keyed.create("x") },
             TdeEntrypoint("KeyedBranch.getOrCreate") { _, _, keyed -> keyed.getOrCreate("x") },
             TdeEntrypoint("KeyedBranch.get") { _, _, keyed -> keyed["k"] },
-            TdeEntrypoint("KeyedBranch.entries") { _, _, keyed -> keyed.entries },
-            TdeEntrypoint("stores<K, S> { } delegate read") { probe, _, _ -> probe.keyed },
-            TdeEntrypoint("stores<K, S> declaration (provideDelegate)") { probe, _, _ ->
+            TdeEntrypoint("KeyedBranch.entries") { _, _, keyed -> keyed.entries() },
+            TdeEntrypoint("KeyedBranch.dispose(key)") { _, _, keyed -> keyed.dispose("k") },
+            TdeEntrypoint("KeyedBranch.disposeAll") { _, _, keyed -> keyed.disposeAll() },
+            TdeEntrypoint("keyed<K, S> { } delegate read") { probe, _, _ -> probe.keyed },
+            TdeEntrypoint("keyed<K, S> declaration (provideDelegate)") { probe, _, _ ->
                 probe.lateKeyed().provideDelegate(probe, DisposedProbeParent::keyed)
             },
             TdeEntrypoint("store { } delegate read") { probe, _, _ -> probe.leaf },
             TdeEntrypoint("store declaration (provideDelegate)") { probe, _, _ ->
                 probe.lateStore().provideDelegate(probe, DisposedProbeParent::leaf)
             },
-            TdeEntrypoint("stores { } delegate read (never read before)") { probe, _, _ -> probe.group },
-            TdeEntrypoint("stores { } declaration (provideDelegate)") { probe, _, _ ->
+            TdeEntrypoint("group { } delegate read (never read before)") { probe, _, _ -> probe.group },
+            TdeEntrypoint("group { } declaration (provideDelegate)") { probe, _, _ ->
                 probe.lateGroup().provideDelegate(probe, DisposedProbeParent::group)
             },
             TdeEntrypoint("internalAddMembershipListener") { probe, _, _ ->
@@ -123,7 +125,6 @@ class TreeDisposedEntrypointTest {
                 check(!tree.removeMiddleware(object : TreeMiddleware() {}))
             },
             TdeEntrypoint("internalSettleCount (its last value)") { _, tree, _ -> check(tree.internalSettleCount == 0L) },
-            TdeEntrypoint("owningStore") { probe, _, _ -> check(probe.owningStore === probe) },
             TdeEntrypoint("dispose (idempotent)") { probe, _, _ -> probe.dispose() },
         )
 
@@ -167,7 +168,7 @@ class TreeDisposedEntrypointTest {
     }
 
     @Test
-    fun disposingAParentReleasesItsSubtreeWithoutDisposingItAndDropsItsListeners() {
+    fun disposingAParentReleasesItsChildrenDisposesItsKeyedStoresAndDropsItsListeners() {
         val grandparent = DisposedProbeGrandparent()
         val probe = grandparent.probe
         val leafStore = probe.leaf
@@ -198,15 +199,17 @@ class TreeDisposedEntrypointTest {
 
         probe.dispose()
 
-        assertFalse(leafStore.isDisposed || keyed.isDisposed, "the children are released, never disposed")
+        assertFalse(leafStore.isDisposed, "a store { } child is released, never disposed")
+        assertTrue(keyed.isDisposed, "a keyed store its branch's factory built is disposed with the parent")
         for ((node, name) in listOf(leafNode to "DisposedLeaf", keyedNode to "DisposedKeyed")) {
-            assertNull(node.parent, "$name is a subtree root")
+            assertNull(node.parent, "$name was released as a subtree root")
             assertEquals(name, node.name)
             assertEquals(NameOrigin.ClassName, node.nameOrigin)
             assertNull(node.key)
-            val store = assertNotNull(node.store)
-            assertNull(store.internalAttachment(treeMembershipKey)?.parentEdge?.value)
         }
+        val store = assertNotNull(leafNode.store)
+        assertNull(store.internalAttachment(treeMembershipKey)?.parentEdge?.value)
+        assertNull(keyedNode.store, "the disposed keyed store dropped its node's store")
         // The disposed store's own node keeps the place it had.
         assertSame(grandparent.tree.node, probeNode.parent)
         assertEquals("probe", probeNode.name)

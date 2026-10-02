@@ -8,8 +8,8 @@ import com.vynatix.holdfast.StoreInternalApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 private class ParentDisposePendingValueLeafStore : Store<ParentDisposePendingValueLeafStore>() {
     val n by state { 0 }
@@ -24,7 +24,7 @@ private class ParentDisposePendingValueKeyedStore(
 private class ParentDisposePendingValueParent : Store<ParentDisposePendingValueParent>() {
     val left = ParentDisposePendingValueLeafStore()
     val leaf by store { left }
-    val keyed by stores<String, ParentDisposePendingValueKeyedStore> { ParentDisposePendingValueKeyedStore(it) }
+    val keyed by keyed<String, ParentDisposePendingValueKeyedStore> { ParentDisposePendingValueKeyedStore(it) }
 }
 
 /**
@@ -50,7 +50,7 @@ class ParentDisposePendingValueTest {
         assertSame(last, after, "frozen at the last settled tree")
         assertEquals(3, after[parent.left.n])
         assertSame(last, tree.value, "and every later read answers the same tree")
-        assertFalse(created!!.isDisposed, "the store that joined is released, never disposed")
+        assertTrue(created!!.isDisposed, "the keyed store that joined is disposed with its parent once the action settled")
         assertFailsWith<IllegalStateException> { parent.tree }
     }
 

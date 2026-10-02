@@ -42,7 +42,7 @@ private object ObjApp : Store<ObjApp>() {
         objChildConstructions.incrementAndGet()
         ObjSettingsStore()
     }
-    val threads by stores<String, ObjThreadStore> { ObjThreadStore(it) }
+    val threads by keyed<String, ObjThreadStore> { ObjThreadStore(it) }
 }
 
 /** A child object that reads its PARENT (never the parent's delegate for itself) while it initializes. */
@@ -108,7 +108,7 @@ class ObjectInitOrderTest {
         assertEquals(listOf("settings", "threads"), registry.liveChildNodes().map { it.name })
 
         // `children` materializes every declared child that has not run yet.
-        assertEquals(listOf("settings", "session-v2", "threads"), ObjApp.tree.children.map { it.name })
+        assertEquals(listOf("settings", "session-v2", "threads"), ObjApp.tree.children().map { it.name })
         assertEquals(2, objChildConstructions.get())
         assertEquals("ObjApp", ObjApp.tree.node.name)
     }

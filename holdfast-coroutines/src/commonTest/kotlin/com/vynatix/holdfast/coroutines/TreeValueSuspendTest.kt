@@ -7,8 +7,8 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.observerCount
 import com.vynatix.holdfast.tree.TreeSnapshot
+import com.vynatix.holdfast.tree.group
 import com.vynatix.holdfast.tree.internalSettleCount
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +35,7 @@ private class TreeValueSuspendRightStore : Store<TreeValueSuspendRightStore>() {
 private class TreeValueSuspendParent : Store<TreeValueSuspendParent>() {
     val left = TreeValueSuspendLeftStore()
     val right = TreeValueSuspendRightStore()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }
 
 /**

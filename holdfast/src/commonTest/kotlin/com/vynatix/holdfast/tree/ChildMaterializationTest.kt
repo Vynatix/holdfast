@@ -177,13 +177,13 @@ class ChildMaterializationTest {
     @Test
     fun childrenMaterializesEveryDeclaredChildRecursivelyAndNoStateInitializer() {
         val parent = CmLazyParent()
-        assertEquals(listOf("leaf", "middle"), parent.tree.children.map { it.name })
+        assertEquals(listOf("leaf", "middle"), parent.tree.children().map { it.name })
         assertEquals(1, parent.leafRuns)
         assertEquals(1, parent.middleRuns)
         assertEquals(1, parent.middle.grandchildRuns, "a child's own declarations materialize too")
         assertEquals(0, parent.middle.grandchild.initializerRuns)
         assertEquals(0, parent.leaf.initializerRuns)
-        parent.tree.children
+        parent.tree.children()
         parent.tree.stores()
         assertEquals(1, parent.leafRuns, "a materialized child is never run again")
         assertEquals(1, parent.middle.grandchildRuns)
@@ -198,7 +198,7 @@ class ChildMaterializationTest {
         assertTrue("child declaration 'CmLoop.c' → child declaration 'CmLoop.c'" in message, message)
         // Nothing was published: the next read runs the lambda (and meets the cycle) again.
         assertFailsWith<IllegalStateException> { loop.c }
-        assertFailsWith<IllegalStateException> { loop.tree.children }
+        assertFailsWith<IllegalStateException> { loop.tree.children() }
     }
 
     @Test

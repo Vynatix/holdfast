@@ -26,8 +26,11 @@ private class ParentDisposeFanoutRaceKeyedStore(
     val n by state { id }
 }
 
+/** `Release`: this test is about a keyed store the parent's dispose RELEASES, so the branch must not dispose it. */
 private class ParentDisposeFanoutRaceParent : Store<ParentDisposeFanoutRaceParent>() {
-    val threads by stores<Int, ParentDisposeFanoutRaceKeyedStore> { ParentDisposeFanoutRaceKeyedStore(it) }
+    val threads by keyed<Int, ParentDisposeFanoutRaceKeyedStore>(onParentDispose = KeyedDisposal.Release) {
+        ParentDisposeFanoutRaceKeyedStore(it)
+    }
 }
 
 /** What the creator saw of the store its `create` returned, recorded while it still held the store. */
@@ -42,7 +45,7 @@ private class ParentDisposeFanoutRaceOutcome(
  * parent disposes. The store was promoted (phase 4) before the dispose, so
  * the attach is irrevocable: the parent's dispose releases it as a subtree
  * root and the announcer delivers its deferred detach. The `create` returns
- * the store live and unattached — the tree disposes nothing — and the
+ * the store live and unattached — a `Release` branch disposes nothing — and the
  * parent's tree value, whose membership listener the announce reaches after
  * the dispose cleared its bookkeeping, must refuse that late attach: the
  * store is collectable once the caller drops it, and nothing is reported.
@@ -138,7 +141,7 @@ class ParentDisposeFanoutRaceTest {
 
             assertEquals(emptyList(), failures.toList(), "the create returned: the attach was irrevocable")
             val seen = checkNotNull(outcome.get()) { "the creator recorded its outcome" }
-            assertEquals(false, seen.disposed, "the tree disposes nothing: the store is live")
+            assertEquals(false, seen.disposed, "a Release branch disposes nothing: the store is live")
             assertNull(seen.parentNode, "released as a subtree root")
             assertEquals(false, seen.hasParentEdge, "with no parent edge left")
             assertEquals(emptyList(), reported.toList(), "nothing was reported through the parent's handler")

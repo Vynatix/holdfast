@@ -36,7 +36,7 @@ private class TreeValueStructuralKeyedStore(
 private class TreeValueStructuralParent : Store<TreeValueStructuralParent>() {
     val left = TreeValueStructuralLeafStore()
     val leaf by store { left }
-    val keyed by stores<String, TreeValueStructuralKeyedStore> { TreeValueStructuralKeyedStore(it) }
+    val keyed by keyed<String, TreeValueStructuralKeyedStore> { TreeValueStructuralKeyedStore(it) }
 }
 
 private class TreeValueStructuralHostLog : Middleware<TreeValueHost>() {
@@ -193,9 +193,9 @@ class TreeValueStructuralTest {
             assertEquals(0, k.internalAttachment(STORE_EDGES)?.followerCount ?: 0)
         }
         assertEquals(baseline, node.sourceStores.size)
-        assertEquals(0, parent.keyed.entries.size)
+        assertEquals(0, parent.keyed.entries().size)
         assertEquals(1 + 2_000, tree.internalSettleCount, "one settle per join and one per leave")
-        assertEquals(listOf(tree.nodeOf(parent.left)!!, parent.keyed), tree.children)
+        assertEquals(listOf(tree.nodeOf(parent.left)!!, parent.keyed), tree.children())
         assertEquals(listOf<Store<*>>(parent, parent.left), tree.stores())
     }
 

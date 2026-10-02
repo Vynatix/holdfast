@@ -28,7 +28,7 @@ private class SharedCycle : Store<SharedCycle>() {
 private class SharedApp : Store<SharedApp>() {
     val left = SharedLeft()
     val right = SharedRight()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }
 
 /**
@@ -72,7 +72,7 @@ class TreeSharedThreadModelTest {
 
         class CycleApp : Store<CycleApp>() {
             val cycle = SharedCycle()
-            val leaf by stores { listOf(cycle) }
+            val leaf by group { listOf(cycle) }
         }
         val root = CycleApp()
         root.cycle.initializerGraph = graph

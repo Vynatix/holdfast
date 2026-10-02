@@ -33,7 +33,7 @@ private class SusRightStore : Store<SusRightStore>() {
 private class SusApp : Store<SusApp>() {
     val left = SusLeftStore()
     val right = SusRightStore()
-    val pair by stores { listOf(left, right) }
+    val pair by group { listOf(left, right) }
 }
 
 /** `tree.restore`/`tree.reset` and suspending entries: refused inside, waited out from outside. */

@@ -48,13 +48,13 @@ private class CapPairStore : Store<CapPairStore>() {
     var insideFactory: (() -> Unit)? = null
     val left by store { CapLeftStore() }
     val right by store { CapRightStore() }
-    val keyed by stores<String, CapKeyedStore> { CapKeyedStore().also { insideFactory?.invoke() } }
+    val keyed by keyed<String, CapKeyedStore> { CapKeyedStore().also { insideFactory?.invoke() } }
 }
 
 private class CapApp : Store<CapApp>() {
     val pair by store { CapPairStore() }
     val fragileStore = CapThrowingStore()
-    val fragile by stores { listOf(fragileStore) }
+    val fragile by group { listOf(fragileStore) }
     val left: CapLeftStore get() = pair.left
     val right: CapRightStore get() = pair.right
     val keyed: KeyedBranch<String, CapKeyedStore> get() = pair.keyed

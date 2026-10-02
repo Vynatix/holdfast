@@ -68,7 +68,7 @@ private class KmThrowingStore(
 private class KmFolderStore(
     val id: String,
 ) : Store<KmFolderStore>() {
-    val files by stores<String, KmQuietStore> { KmQuietStore(it) }
+    val files by keyed<String, KmQuietStore> { KmQuietStore(it) }
 }
 
 /**
@@ -82,29 +82,29 @@ private class KmParent : Store<KmParent>() {
     var throwingRuns = 0
 
     val session by store { KmSessionStore() }
-    val threads by stores<String, KmThreadStore> { id ->
+    val threads by keyed<String, KmThreadStore> { id ->
         threadRuns++
         threadHooks[id]?.invoke(id) ?: KmThreadStore(id)
     }
-    val eventful by stores<String, KmEventfulStore> { KmEventfulStore(it) }
-    val throwing by stores<String, KmThrowingStore> { id ->
+    val eventful by keyed<String, KmEventfulStore> { KmEventfulStore(it) }
+    val throwing by keyed<String, KmThrowingStore> { id ->
         throwingRuns++
         KmThrowingStore(id)
     }
-    val quiet by stores<String, KmQuietStore> { KmQuietStore(it) }
-    val folders by stores<String, KmFolderStore> { KmFolderStore(it) }
+    val quiet by keyed<String, KmQuietStore> { KmQuietStore(it) }
+    val folders by keyed<String, KmFolderStore> { KmFolderStore(it) }
 
     /**
-     * Declared as `stores<String, KmSubThreadStore>` while its factory builds
+     * Declared as `keyed<String, KmSubThreadStore>` while its factory builds
      * plain [KmThreadStore]s: only an unchecked cast of the class literal
      * gets there, which is what the factory's runtime class check is for.
      */
     @Suppress("UNCHECKED_CAST")
     val wrongClass by keyedDeclaration(
-        String::class,
-        KmSubThreadStore::class as KClass<KmThreadStore>,
-        null,
-    ) { KmThreadStore(it) }
+        KeyedSpec(String::class, KmSubThreadStore::class as KClass<KmThreadStore>, null, null, KeyedDisposal.Dispose) {
+            KmThreadStore(it)
+        },
+    )
 }
 
 private class KmRecordingListener : LeafMembershipListener() {
@@ -128,7 +128,7 @@ class KeyedMembershipTest {
         val found: KmThreadStore? = parent.threads["a"]
         assertSame(t, found)
         assertEquals("constructed a", t.title.value)
-        assertEquals(mapOf("a" to t), parent.threads.entries)
+        assertEquals(mapOf("a" to t), parent.threads.entries())
         val leaf = assertNotNull(parent.tree.nodeOf(t))
         assertSame(parent.threads, leaf.parent)
         assertEquals("a", leaf.key)
@@ -137,7 +137,7 @@ class KeyedMembershipTest {
         t.dispose()
         assertNull(parent.threads["a"])
         assertNull(parent.tree.nodeOf(t))
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
         assertEquals("a", leaf.name, "a disposed store's node keeps the place it had")
     }
 
@@ -152,7 +152,7 @@ class KeyedMembershipTest {
         assertTrue("KmThreadStore already belongs to KmParent/threads" in message, message)
         assertTrue("a store has one parent" in message, message)
         assertNull(parent.threads["f"])
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
         assertSame(foreign, other.threads["f"])
         assertSame(other.threads, foreign.tree.parent, "the store stays where it was")
     }
@@ -172,7 +172,7 @@ class KeyedMembershipTest {
         val error = assertFailsWith<IllegalStateException> { parent.throwing.create("t") }
         assertEquals("constructor of t refused", error.message)
         assertNull(parent.throwing["t"])
-        assertTrue(parent.throwing.entries.isEmpty())
+        assertTrue(parent.throwing.entries().isEmpty())
         assertEquals(1, parent.throwingRuns)
 
         // The key is free again: a retry runs the factory once more.
@@ -193,7 +193,7 @@ class KeyedMembershipTest {
         }
         assertFailsWith<IllegalStateException> { parent.threads.create("leak") }
         val built = assertNotNull(leaked)
-        assertFalse(built.isDisposed, "the tree disposes nothing: the store a failing factory built is the factory's own")
+        assertFalse(built.isDisposed, "left alone: the store a failing factory built is the factory's own")
         assertNull(built.internalAttachment(treeMembershipKey), "the tree never reached the store")
         assertNull(parent.threads["leak"])
         assertTrue(parent.tree.stores().none { it === built })
@@ -278,15 +278,16 @@ class KeyedMembershipTest {
         assertEquals(listOf("attached:docs", "attached:readme"), listener.events)
         assertSame(folder.files, parent.tree.nodeOf(file)?.parent)
         assertTrue(file in parent.tree.stores(parent.folders))
+        val fileNode = file.tree.node
         folder.dispose()
         assertEquals(
             listOf("attached:docs", "attached:readme", "detached:docs", "detached:readme"),
             listener.events,
             "the folder's dispose releases its file and the parent hears both leave",
         )
-        assertFalse(file.isDisposed, "the tree disposes nothing")
-        assertNull(file.tree.parent, "the released file is a subtree root")
-        assertEquals("KmQuiet", file.tree.node.name, "named by its class again")
+        assertTrue(file.isDisposed, "the folder's keyed branch built the file, so it disposes it")
+        assertNull(fileNode.parent, "released first, as a subtree root")
+        assertEquals("KmQuiet", fileNode.name, "named by its class again")
         assertTrue(parent.tree.stores().none { it === file })
     }
 
@@ -298,7 +299,7 @@ class KeyedMembershipTest {
         assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.create("x") }.message!!)
         assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.getOrCreate("x") }.message!!)
         assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads["x"] }.message!!)
-        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.entries }.message!!)
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.entries() }.message!!)
         assertTrue("disposed" in assertFailsWith<IllegalStateException> { parent.threads }.message!!)
         assertEquals(0, parent.threadRuns)
     }
@@ -339,7 +340,7 @@ class KeyedMembershipTest {
         val parent = KmParent()
         val b = parent.threads.create("b")
         val a = parent.threads.create("a")
-        val entries: Map<String, KmThreadStore> = parent.threads.entries
+        val entries: Map<String, KmThreadStore> = parent.threads.entries()
         assertEquals(listOf("b", "a"), entries.keys.toList())
         assertEquals(listOf(b, a), entries.values.toList())
     }
@@ -363,7 +364,7 @@ class KeyedMembershipTest {
         val error = assertFailsWith<IllegalStateException> { parent.threads.getOrCreate("c") }
         assertTrue("cycle" in error.message!!, error.message)
         assertNull(parent.threads["c"])
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
     }
 
     @Test

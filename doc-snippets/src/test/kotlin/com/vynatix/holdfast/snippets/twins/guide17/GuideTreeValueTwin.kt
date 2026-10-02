@@ -38,6 +38,6 @@ class GuideTreeValueTwin {
         val printed = capturePrintln { watchTheTree() }
         assertEquals(listOf("3", "(dark, hi)", "true"), printed)
         assertEquals("light", Notes.prefs.theme.value, "the twin leaves the tree reset")
-        assertEquals(emptyMap(), Notes.byId.entries)
+        assertEquals(emptyMap(), Notes.byId.entries())
     }
 }

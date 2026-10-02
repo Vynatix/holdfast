@@ -38,7 +38,7 @@ private class TreeValueAncestryTopStore : Store<TreeValueAncestryTopStore>() {
 /** Grafts whatever [next] holds — a store whose own subtree may already be materialized — under a key. */
 private class TreeValueAncestryGraftStore : Store<TreeValueAncestryGraftStore>() {
     var next: TreeValueAncestryMidStore? = null
-    val mids by stores<String, TreeValueAncestryMidStore> { checkNotNull(next) { "nothing to graft" } }
+    val mids by keyed<String, TreeValueAncestryMidStore> { checkNotNull(next) { "nothing to graft" } }
 }
 
 /** Runs [onDisposed] from its `onDispose()`: after it is disposed, before its tree dispose ran. */

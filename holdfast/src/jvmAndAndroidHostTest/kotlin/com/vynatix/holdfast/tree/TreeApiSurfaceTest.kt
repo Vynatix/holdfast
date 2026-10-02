@@ -7,17 +7,19 @@ import kotlin.test.fail
 
 /**
  * T7.2, the single gate: no tree member takes a `String` except `decode`
- * (the wire text) and `store` (its `named` pin) — nodes and states address
- * everything else — checked by reading the committed JVM API dump, so a
- * new string-taking overload has to be added to this test's allow list on
- * purpose. Exemptions are by function NAME (any overload of an allowed
- * name passes, `store$default` included), so keep the list short.
+ * (the wire text) and the `named` pins of the declarations — `store`,
+ * `group`, `keyed` and the group lambda's `GroupScope.named` — so nodes and
+ * states address everything else; checked by reading the committed JVM API
+ * dump, so a new string-taking overload has to be added to this test's
+ * allow list on purpose. Exemptions are by function NAME (any overload of
+ * an allowed name passes, `store$default` included), so keep the list
+ * short.
  */
 class TreeApiSurfaceTest {
-    private val allowed = setOf("decode", "store", "<init>", "valueOf")
+    private val allowed = setOf("decode", "store", "group", "keyed", "named", "<init>", "valueOf")
 
     @Test
-    fun noTreeMemberTakesAStringExceptDecodeAndStore() {
+    fun noTreeMemberTakesAStringExceptDecodeAndTheNamedPins() {
         val dump = apiDump()
         var owner: String? = null
         val offenders = mutableListOf<String>()

@@ -60,7 +60,8 @@ internal class ParentEdge(
  * `treeStructureLock`), its children ([registry]), the seqlock pair walks
  * validate against, its tree middleware, and its `tree` handle with the
  * handle's value machinery. Its [onStoreDisposed] detaches the store from
- * its parent and releases its children as subtree roots (`StoreDetach.kt`).
+ * its parent, releases its children as subtree roots and disposes the keyed
+ * stores its branches own (`StoreDetach.kt`).
  */
 internal class TreeLeafAttachment(
     store: Store<*>,

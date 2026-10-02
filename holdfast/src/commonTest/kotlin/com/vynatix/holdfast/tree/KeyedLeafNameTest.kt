@@ -96,12 +96,12 @@ private class LnCountedStore(
 private class LnParent(
     counting: LnCountingKeyCodec,
 ) : Store<LnParent>() {
-    val byInt by stores<Int, LnIntStore>(keyCodec = LnRefusingKeyCodec) { LnIntStore(it) }
-    val lookup by stores<Int, LnLookupStore>(keyCodec = LnLookupKeyCodec) { LnLookupStore(it) }
-    val cast by stores<Int, LnCastStore>(keyCodec = LnCastingKeyCodec) { LnCastStore(it) }
-    val opaque by stores<LnOpaqueKey, LnOpaqueStore> { LnOpaqueStore(it) }
-    val nulling by stores<LnNullingKey, LnNullingStore> { LnNullingStore(it) }
-    val counted by stores<Int, LnCountedStore>(keyCodec = counting) { LnCountedStore(it) }
+    val byInt by keyed<Int, LnIntStore>(keyCodec = LnRefusingKeyCodec) { LnIntStore(it) }
+    val lookup by keyed<Int, LnLookupStore>(keyCodec = LnLookupKeyCodec) { LnLookupStore(it) }
+    val cast by keyed<Int, LnCastStore>(keyCodec = LnCastingKeyCodec) { LnCastStore(it) }
+    val opaque by keyed<LnOpaqueKey, LnOpaqueStore> { LnOpaqueStore(it) }
+    val nulling by keyed<LnNullingKey, LnNullingStore> { LnNullingStore(it) }
+    val counted by keyed<Int, LnCountedStore>(keyCodec = counting) { LnCountedStore(it) }
 }
 
 /**
@@ -130,7 +130,7 @@ class KeyedLeafNameTest {
         val error = assertFailsWith<IllegalStateException> { parent.byInt.create(-7) }
         assertNamesTheBranchOnly(error, "byInt", "confidential", "-7")
         assertNull(parent.byInt[-7])
-        assertTrue(parent.byInt.entries.isEmpty(), "nothing was reserved")
+        assertTrue(parent.byInt.entries().isEmpty(), "nothing was reserved")
         val later = parent.byInt.create(7)
         assertSame(later, parent.byInt[7], "the branch still works for keys the codec accepts")
     }
@@ -141,7 +141,7 @@ class KeyedLeafNameTest {
         val error = assertFailsWith<IllegalStateException> { parent.byInt.getOrCreate(-7) }
         assertNamesTheBranchOnly(error, "byInt", "confidential", "-7")
         assertNull(parent.byInt[-7])
-        assertTrue(parent.byInt.entries.isEmpty())
+        assertTrue(parent.byInt.entries().isEmpty())
     }
 
     @Test
@@ -150,7 +150,7 @@ class KeyedLeafNameTest {
         val error = assertFailsWith<IllegalStateException> { parent.lookup.create(42) }
         assertNamesTheBranchOnly(error, "lookup", "42", "missing")
         assertNull(parent.lookup[42])
-        assertTrue(parent.lookup.entries.isEmpty(), "nothing was reserved")
+        assertTrue(parent.lookup.entries().isEmpty(), "nothing was reserved")
         val later = parent.lookup.create(1)
         assertSame(later, parent.lookup[1], "the branch still works for keys the table has")
     }
@@ -161,7 +161,7 @@ class KeyedLeafNameTest {
         val error = assertFailsWith<IllegalStateException> { parent.lookup.getOrCreate(42) }
         assertNamesTheBranchOnly(error, "lookup", "42", "missing")
         assertNull(parent.lookup[42])
-        assertTrue(parent.lookup.entries.isEmpty())
+        assertTrue(parent.lookup.entries().isEmpty())
     }
 
     @Test
@@ -169,7 +169,7 @@ class KeyedLeafNameTest {
         val parent = LnParent(LnCountingKeyCodec())
         val error = assertFailsWith<IllegalStateException> { parent.cast.create(9) }
         assertNamesTheBranchOnly(error, "cast", "confidential", "9")
-        assertTrue(parent.cast.entries.isEmpty())
+        assertTrue(parent.cast.entries().isEmpty())
     }
 
     @Test
@@ -178,7 +178,7 @@ class KeyedLeafNameTest {
         val key = LnOpaqueKey(1)
         val error = assertFailsWith<IllegalStateException> { parent.opaque.create(key) }
         assertNamesTheBranchOnly(error, "opaque", "hidden", "identity 1")
-        assertTrue(parent.opaque.entries.isEmpty())
+        assertTrue(parent.opaque.entries().isEmpty())
     }
 
     @Test
@@ -188,7 +188,7 @@ class KeyedLeafNameTest {
         val error =
             assertFailsWith<IllegalStateException> { parent.nulling.getOrCreate(key) }
         assertNamesTheBranchOnly(error, "nulling", "hidden", "identity 3")
-        assertTrue(parent.nulling.entries.isEmpty())
+        assertTrue(parent.nulling.entries().isEmpty())
     }
 
     @Test

@@ -5,6 +5,7 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.DecodedContent
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.JsonKind
+import com.vynatix.holdfast.SnapshotFormatException
 import com.vynatix.holdfast.SnapshotJsonReader
 import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.StateCodec
@@ -47,6 +48,7 @@ private class DecodedNode(
 )
 
 private class Envelope(
+    val receiver: String,
     val scope: SnapshotScope,
     val path: List<String>,
     val tree: DecodedNode,
@@ -60,6 +62,13 @@ internal fun decodeTree(
     val envelope = readEnvelope(SnapshotJsonReader(text))
     val members = listingOf(ownerNode, ownerNode).memberKeys
     val index = TreeIndex(members, ownerNode)
+    if (envelope.receiver != index.receiver) {
+        throw SnapshotFormatException(
+            "Cannot decode $TREE_SNAPSHOT_FORMAT: captured under '${envelope.receiver}', decoding under " +
+                "'${index.receiver}'; decode through the tree of the store that captured it (a top-level store's " +
+                "class rename changes its name: implement TreeIdentified to pin it)",
+        )
+    }
     val unresolved = ArrayList<List<String>>()
     // A keyed segment of `path` is pending only as its last segment, and only
     // when the text holds a body at the top.
@@ -80,6 +89,7 @@ private fun readEnvelope(reader: SnapshotJsonReader): Envelope {
     val start = reader.position
     var format: String? = null
     var version: Int? = null
+    var receiver: String? = null
     var scope: String? = null
     var path: List<String>? = null
     var tree: DecodedNode? = null
@@ -88,6 +98,7 @@ private fun readEnvelope(reader: SnapshotJsonReader): Envelope {
         when (reader.nextName()) {
             "format" -> format = reader.nextStringOrNull("format")
             "v" -> version = reader.nextInt("v")
+            "receiver" -> receiver = reader.nextStringOrNull("receiver")
             "scope" -> scope = reader.nextStringOrNull("scope")
             "path" -> path = reader.readStrings()
             "tree" -> tree = reader.readNode()
@@ -98,8 +109,21 @@ private fun readEnvelope(reader: SnapshotJsonReader): Envelope {
     reader.endDocument()
     if (format != TREE_SNAPSHOT_FORMAT) snapshotFormatError("not a $TREE_SNAPSHOT_FORMAT document", start)
     if (version != TREE_SNAPSHOT_VERSION) snapshotFormatError("unsupported $TREE_SNAPSHOT_FORMAT version", start)
+    return envelopeOf(receiver, scope, path, tree, start)
+}
+
+/** The envelope's fields once its format and version passed, each required one present. */
+private fun envelopeOf(
+    receiver: String?,
+    scope: String?,
+    path: List<String>?,
+    tree: DecodedNode?,
+    start: Int,
+): Envelope {
     val resolvedScope = scopeNamed(scope) ?: snapshotFormatError("unknown snapshot scope", start)
-    return Envelope(resolvedScope, path ?: emptyList(), tree ?: snapshotFormatError("missing \"tree\"", start))
+    val resolvedReceiver = receiver ?: snapshotFormatError("missing \"receiver\"", start)
+    val resolvedTree = tree ?: snapshotFormatError("missing \"tree\"", start)
+    return Envelope(resolvedReceiver, resolvedScope, path ?: emptyList(), resolvedTree)
 }
 
 private fun scopeNamed(name: String?): SnapshotScope? =

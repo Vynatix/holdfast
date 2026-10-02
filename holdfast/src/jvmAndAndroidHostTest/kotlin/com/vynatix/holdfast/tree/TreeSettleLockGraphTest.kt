@@ -36,7 +36,7 @@ private class TreeSettleLockGraphKeyedStore(
 private class TreeSettleLockGraphParent : Store<TreeSettleLockGraphParent>() {
     val a by store { TreeSettleLockGraphLeafStore() }
     val b by store { TreeSettleLockGraphLeafStore() }
-    val keyed by stores<String, TreeSettleLockGraphKeyedStore> { TreeSettleLockGraphKeyedStore(it) }
+    val keyed by keyed<String, TreeSettleLockGraphKeyedStore> { TreeSettleLockGraphKeyedStore(it) }
 }
 
 private class TreeSettleLockGraphHostLog : Middleware<TreeValueHost>() {

@@ -21,7 +21,7 @@ private class BdBStore : Store<BdBStore>() {
 /** A parent whose group lists [listed] when it first materializes; its leaves are named `BdA` and `BdB`. */
 private class BdParent : Store<BdParent>() {
     var listed: List<Store<*>> = emptyList()
-    val group by stores { listed }
+    val group by group { listed }
 }
 
 private class BdGrandparent(
@@ -75,7 +75,7 @@ class GroupMaterializationDisposeTest {
         assertTrue(a.isDisposed)
         assertNull(parent.tree.nodeOf(a))
         assertEquals(emptyList<Store<*>>(), parent.tree.stores(group))
-        assertEquals(listOf<StoreNode>(group), parent.tree.children, "a group with no member left is still listed")
+        assertEquals(listOf<StoreNode>(group), parent.tree.children(), "a group with no member left is still listed")
     }
 
     @Test

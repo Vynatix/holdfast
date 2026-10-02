@@ -25,8 +25,8 @@ private class LeakThreadStore(
 }
 
 private class LeakParent : Store<LeakParent>() {
-    val fixed by stores { listOf(LeakBranchStore()) }
-    val threads by stores<Int, LeakThreadStore> { LeakThreadStore(it) }
+    val fixed by group { listOf(LeakBranchStore()) }
+    val threads by keyed<Int, LeakThreadStore> { LeakThreadStore(it) }
 }
 
 private class CountingLeakListener : LeafMembershipListener() {
@@ -64,12 +64,12 @@ class KeyedLifecycleLeakTest {
         }
         val elapsed = started.elapsedNow()
         assertTrue(elapsed.inWholeSeconds < BUDGET_SECONDS, "1,000 cycles took $elapsed")
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
         assertEquals(CYCLES, listener.attached, "one parent: each store is announced exactly once")
         assertEquals(CYCLES, listener.detached, "one parent: each store's detach is announced exactly once")
         assertEquals(0, sampledObservers, "the tree installs no observers on a keyed store")
         assertEquals(listOf(parent, fixed), parent.tree.stores())
-        assertEquals(listOf<StoreNode>(parent.fixed, parent.threads), parent.tree.children)
+        assertEquals(listOf<StoreNode>(parent.fixed, parent.threads), parent.tree.children())
     }
 
     @Test
@@ -77,7 +77,7 @@ class KeyedLifecycleLeakTest {
         val parent = LeakParent()
         val stores = (0 until 50).map { i -> parent.threads.create(i) }
         stores.asReversed().forEach { it.dispose() }
-        assertTrue(parent.threads.entries.isEmpty())
+        assertTrue(parent.threads.entries().isEmpty())
         stores.forEach { assertNull(parent.tree.nodeOf(it)) }
         assertEquals(listOf(parent, parent.fixed.stores.single()), parent.tree.stores())
     }

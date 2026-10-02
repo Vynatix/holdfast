@@ -48,6 +48,6 @@ class GuideTreeTestingTwin {
         )
         assertEquals("light", Notes.prefs.theme.value, "teardown reset the tree")
         assertEquals("inbox", Notes.folder.value, "teardown reset the parent's own state too")
-        assertEquals(emptyMap(), Notes.byId.entries)
+        assertEquals(emptyMap(), Notes.byId.entries())
     }
 }

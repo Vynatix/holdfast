@@ -23,7 +23,7 @@ private class CkOpaqueStore : Store<CkOpaqueStore>() {
 }
 
 private class CkApp : Store<CkApp>() {
-    val opaque by stores<Any, CkOpaqueStore> { CkOpaqueStore() }
+    val opaque by keyed<Any, CkOpaqueStore> { CkOpaqueStore() }
 }
 
 /** A keyed branch without a key codec is never encoded — also when it is the captured node itself. */
@@ -37,7 +37,7 @@ class CodecLessKeyedTopTest {
 
         val text = captured.encode()
         assertEquals(
-            """{"format":"holdfast.tree","v":1,"scope":"All","path":["opaque"],""" +
+            """{"format":"holdfast.tree","v":1,"receiver":"CkApp","scope":"All","path":["opaque"],""" +
                 """"tree":{"kind":"keyed","entries":{}},"skipped":[["opaque"]]}""",
             text,
         )

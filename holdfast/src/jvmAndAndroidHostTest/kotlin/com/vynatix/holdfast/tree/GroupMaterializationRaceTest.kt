@@ -28,7 +28,7 @@ private class GmrBStore : Store<GmrBStore>() {
 /** A parent whose group lists [listed] when it first materializes (set before the materializing thread starts). */
 private class GmrParent : Store<GmrParent>() {
     var listed: List<Store<*>> = emptyList()
-    val group by stores { listed }
+    val group by group { listed }
 }
 
 /** Records every membership event a parent hears, from any thread. */

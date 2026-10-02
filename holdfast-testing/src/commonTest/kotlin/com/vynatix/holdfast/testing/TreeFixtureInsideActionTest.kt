@@ -6,8 +6,8 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
+import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.store
-import com.vynatix.holdfast.tree.stores
 import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,7 +28,7 @@ private class IaKeyedStore(
 private class IaParent : Store<IaParent>() {
     val a by store { IaLeafStore() }
     val b by store { IaLeafStore() }
-    val keyed by stores<String, IaKeyedStore> { IaKeyedStore(it) }
+    val keyed by keyed<String, IaKeyedStore> { IaKeyedStore(it) }
 }
 
 /**

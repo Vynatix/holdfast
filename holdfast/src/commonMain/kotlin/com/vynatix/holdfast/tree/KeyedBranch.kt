@@ -10,7 +10,7 @@ import kotlin.reflect.KClass
 
 /**
  * A family of a store's children created per key at runtime
- * (`val threads by stores<String, ThreadStore> { id -> ThreadStore(id) }`),
+ * (`val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) }`),
  * one [LeafNode] per live key, named by the key's encoding through
  * [keyCodec] (`toString()` without one; such a branch is never encoded).
  *
@@ -36,31 +36,44 @@ import kotlin.reflect.KClass
  * has a parent, the declaring store disposed meanwhile) disposes the
  * store(s) that run built. Attaching is structural, not transactional: a
  * rollback of the action the create ran in does not undo it. A live keyed
- * store leaves the branch when it is disposed; when the declaring store
- * disposes, every keyed store is released as a subtree root and keeps
- * working.
+ * store leaves the branch when it is disposed ([dispose], [disposeAll] or
+ * its own `dispose()`).
  *
- * Present from the declaration on: `tree.children` lists it with or without
- * entries.
+ * The branch OWNS its stores — its factory built every one of them — so
+ * when the declaring store disposes, every live keyed store is disposed
+ * with it ([onParentDispose] [KeyedDisposal.Dispose], the default), or
+ * released as a subtree root that keeps working ([KeyedDisposal.Release]).
+ * Either way each store is first released (it leaves the branch and becomes
+ * a parentless root); under `Dispose` it is then disposed once the declaring
+ * store's dispose has released every tree lock — inside an action or
+ * frame, when that entry settles.
+ *
+ * Present from the declaration on: `tree.children()` lists it with or
+ * without entries.
  */
 @ExperimentalStoreApi
-// One branch's declaration fields; the factory, owner and registry are carried from provideDelegate.
-@Suppress("LongParameterList")
 class KeyedBranch<K : Any, S : Store<S>> internal constructor(
     /** The node of the store that declared this branch. */
     override val parent: LeafNode,
     override val name: String,
-    /** The key type, for messages and the persisted-name self-check. */
-    val keyClass: KClass<K>,
-    /** The store type every key's store must be (a subclass is accepted). */
-    val storeClass: KClass<S>,
-    /** How keys are written into `encode()` and read back by `decode`; `null` means this branch is never encoded. */
-    val keyCodec: StateCodec<K>?,
-    internal val factory: (K) -> S,
+    override val nameOrigin: NameOrigin,
+    spec: KeyedSpec<K, S>,
     internal val owner: Store<*>,
     internal val registry: ChildRegistry,
 ) : StoreNode {
-    override val nameOrigin: NameOrigin get() = NameOrigin.Property
+    /** The key type, for messages and the persisted-name self-check. */
+    val keyClass: KClass<K> = spec.keyClass
+
+    /** The store type every key's store must be (a subclass is accepted). */
+    val storeClass: KClass<S> = spec.storeClass
+
+    /** How keys are written into `encode()` and read back by `decode`; `null` means this branch is never encoded. */
+    val keyCodec: StateCodec<K>? = spec.keyCodec
+
+    /** What the branch's live stores become when the declaring store disposes. */
+    val onParentDispose: KeyedDisposal = spec.onParentDispose
+
+    internal val factory: (K) -> S = spec.factory
 
     /**
      * Run the declared factory for [key] and make its store live under this
@@ -117,22 +130,47 @@ class KeyedBranch<K : Any, S : Store<S>> internal constructor(
      * The live stores by key, in creation order. A copy. Parks, as [get]
      * does, while another thread is still attaching one of them.
      *
-     * WARNING — this property is not a cheap field read: it may PARK the
-     * calling thread (once per entry another thread is still attaching), and
-     * it builds a fresh map on every read. Read it once and hold the copy.
+     * WARNING — this is not a cheap read: it may PARK the calling thread
+     * (once per entry another thread is still attaching), and it builds a
+     * fresh map on every call. Call it once and hold the copy.
      *
      * @throws IllegalStateException if the declaring store is disposed.
      */
-    val entries: Map<K, S>
-        get() {
-            owner.checkNotDisposed()
-            val out = LinkedHashMap<K, S>()
-            for ((key, store) in entriesKeyed()) {
-                @Suppress("UNCHECKED_CAST")
-                out[key as K] = store as S
-            }
-            return out
+    fun entries(): Map<K, S> {
+        owner.checkNotDisposed()
+        val out = LinkedHashMap<K, S>()
+        for ((key, store) in entriesKeyed()) {
+            @Suppress("UNCHECKED_CAST")
+            out[key as K] = store as S
         }
+        return out
+    }
+
+    /**
+     * Dispose the live store under [key]: it leaves the branch, as any
+     * disposed keyed store does. `false` when there is none (never created,
+     * still inside its factory, or already disposed). Parks, as [get] does,
+     * while another thread finishes attaching it.
+     *
+     * @throws IllegalStateException if the declaring store is disposed.
+     */
+    fun dispose(key: K): Boolean {
+        owner.checkNotDisposed()
+        val store = lookupKeyed(key)?.takeUnless { it.isDisposed } ?: return false
+        store.dispose()
+        return true
+    }
+
+    /**
+     * Dispose every live store of the branch, in creation order (as
+     * [entries] lists them); a store created meanwhile stays.
+     *
+     * @throws IllegalStateException if the declaring store is disposed.
+     */
+    fun disposeAll() {
+        owner.checkNotDisposed()
+        for ((_, store) in entriesKeyed()) store.dispose()
+    }
 
     /** The live leaf under [key]; `null` on a closed registry, never a throw. */
     internal fun liveLeaf(key: Any): LeafNode? = registry.liveLeaf(this, key)

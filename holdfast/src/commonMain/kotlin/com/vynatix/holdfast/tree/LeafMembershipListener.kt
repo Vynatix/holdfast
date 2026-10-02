@@ -17,7 +17,7 @@ import com.vynatix.holdfast.StoreInternalApi
  *
  * [onAttached] runs once per store that joined the subtree, after it is
  * registered under its parent (so captures and listings can list it): a
- * `store { }`/`stores { }` child when it materializes, a keyed store after
+ * `store { }`/`group { }` child when it materializes, a keyed store after
  * its factory returned and before `KeyedBranch.get`/`entries`/`getOrCreate`
  * answer it on any other thread (those park until the announcement ends) —
  * and, when a store that already has children joins,

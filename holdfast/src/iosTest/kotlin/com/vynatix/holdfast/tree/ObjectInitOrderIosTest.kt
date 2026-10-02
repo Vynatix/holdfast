@@ -34,7 +34,7 @@ private object IosApp : Store<IosApp>() {
         iosChildConstructions++
         IosSettingsStore()
     }
-    val threads by stores<String, IosThreadStore> { IosThreadStore(it) }
+    val threads by keyed<String, IosThreadStore> { IosThreadStore(it) }
 }
 
 private object IosRefParent : Store<IosRefParent>() {
@@ -66,7 +66,7 @@ class ObjectInitOrderIosTest {
         val settings = IosApp.settings
         assertEquals(1, iosChildConstructions)
         assertEquals(0, settings.initializerRuns)
-        assertEquals(listOf("settings", "session-v2", "threads"), IosApp.tree.children.map { it.name })
+        assertEquals(listOf("settings", "session-v2", "threads"), IosApp.tree.children().map { it.name })
         assertEquals(2, iosChildConstructions)
     }
 

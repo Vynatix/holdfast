@@ -9,7 +9,7 @@ import com.vynatix.holdfast.displayName
 import com.vynatix.holdfast.platform.threadYield
 
 // The attach of one or more stores under a parent node — a `store { }`
-// child, a `stores { }` group's members, a keyed store — once their
+// child, a `group { }`'s members, a keyed store — once their
 // declaration produced them (`TreeMaterialize.kt`, `KeyedConstruction.kt`).
 // Phases, each a method below, in order:
 //

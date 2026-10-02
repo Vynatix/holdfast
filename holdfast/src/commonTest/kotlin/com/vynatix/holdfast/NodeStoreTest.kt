@@ -6,26 +6,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-// Dynamic store tree, PR M-1: every store is a Stateful whose owningStore is
-// itself, and NodeStore is the base an anonymous inline child is declared with.
+// NodeStore: the non-recursive base an anonymous inline child is declared
+// with, behind a plain consumer interface.
 
-private class StatefulPlainStore : Store<StatefulPlainStore>() {
-    val n by state { 0 }
-}
-
-private sealed class StatefulPing {
-    data object Sent : StatefulPing()
-}
-
-private class StatefulPingStore : EventfulStore<StatefulPingStore, StatefulPing>() {
-    val n by state { 0 }
-}
-
-/** A consumer interface over an inline child: its states, and the store that owns them. */
-private interface Draft : Stateful {
+/** A consumer interface over an inline child: its states and a writing method. */
+private interface Draft {
     val text: State<String>
 
     fun set(v: String)
@@ -44,23 +31,7 @@ private fun newDraft(): Draft =
         }
     }
 
-class StatefulTest {
-    @Test
-    fun aStatefulPlainStoreIsItsOwnOwningStore() {
-        val store = StatefulPlainStore()
-        assertSame(store, store.owningStore)
-        val asStateful: Stateful = store
-        assertSame(store, asStateful.owningStore)
-    }
-
-    @Test
-    fun anEventfulStoreIsItsOwnOwningStore() {
-        val store = StatefulPingStore()
-        assertSame(store, store.owningStore)
-        val asStateful: Stateful = store
-        assertSame(store, asStateful.owningStore)
-    }
-
+class NodeStoreTest {
     @Test
     fun anInlineChildRoundTripsThroughItsOwnMethod() {
         val draft = newDraft()
@@ -70,13 +41,12 @@ class StatefulTest {
     }
 
     @Test
-    fun anInlineChildIsWritableThroughOwningStoreFromOutside() {
+    fun anInlineChildIsWritableFromOutsideThroughACastToItsStore() {
         val draft = newDraft()
-        val result = draft.owningStore action { draft.text mutate "y" }
+        assertIs<NodeStore>(draft)
+        val result = (draft as NodeStore) action { draft.text mutate "y" }
         assertIs<TransactionResult.Success<*>>(result)
         assertEquals("y", draft.text.value)
-        assertIs<NodeStore>(draft.owningStore)
-        assertTrue(draft === draft.owningStore)
     }
 
     @Test
@@ -112,6 +82,6 @@ class StatefulTest {
         empty.dispose()
         assertTrue(empty.isDisposed)
         empty.dispose()
-        assertSame(empty, empty.owningStore)
+        assertTrue(empty.isDisposed)
     }
 }

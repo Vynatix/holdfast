@@ -42,8 +42,8 @@ private class KfIntStore(
 }
 
 private class KfApp : Store<KfApp>() {
-    val bySlice by stores<String, KfSlicedStore>(keyCodec = KfSlicingCodec) { KfSlicedStore() }
-    val byInt by stores<Int, KfIntStore>(keyCodec = KfIntKeyCodec) { KfIntStore(it) }
+    val bySlice by keyed<String, KfSlicedStore>(keyCodec = KfSlicingCodec) { KfSlicedStore() }
+    val byInt by keyed<Int, KfIntStore>(keyCodec = KfIntKeyCodec) { KfIntStore(it) }
 }
 
 /** A key codec's failure on decode is a `SnapshotFormatException` naming the branch, whatever the codec threw. */
