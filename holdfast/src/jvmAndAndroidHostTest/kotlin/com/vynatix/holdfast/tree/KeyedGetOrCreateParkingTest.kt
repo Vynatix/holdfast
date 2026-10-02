@@ -8,8 +8,10 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.completesWithin
 import com.vynatix.holdfast.daemon
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
@@ -33,15 +35,31 @@ private class PkCountingKeyCodec : StateCodec<Int> {
 
 private class PkStore(
     val id: Int,
-    root: PkRoot,
-) : Store<PkStore>(root.slow.at(id)) {
+) : Store<PkStore>() {
     val n by state { id }
 }
 
-private class PkRoot(
+/**
+ * The branch's factory is declared once and counts its runs, naming the
+ * thread of each ([runThreads]); it parks on [gate] when one is set, and
+ * fails after constructing its store while [failNext] is set (once).
+ */
+private class PkParent(
     codec: PkCountingKeyCodec,
-) : Root("pk") {
-    val slow by keyed<Int, PkStore>(keyCodec = codec)
+) : Store<PkParent>() {
+    val runThreads = ConcurrentLinkedQueue<String>()
+
+    @Volatile
+    var gate: CountDownLatch? = null
+    val failNext = AtomicBoolean(false)
+
+    val slow by stores<Int, PkStore>(keyCodec = codec) { id ->
+        runThreads += Thread.currentThread().name
+        gate?.await()
+        val built = PkStore(id)
+        check(!failNext.getAndSet(false)) { "refused after construction" }
+        built
+    }
 }
 
 private const val SAMPLE_MS = 500L
@@ -60,42 +78,32 @@ class KeyedGetOrCreateParkingTest {
     fun aGetOrCreateParksWhileTheKeyIsReservedButItsFactoryHasNotStarted() =
         completesWithin(30, "getOrCreate against a reserved key") {
             val codec = PkCountingKeyCodec()
-            val root = PkRoot(codec)
+            val parent = PkParent(codec)
+            val branch = parent.slow
             // The creator's window, held open: the key is reserved on this
             // thread but its factory has not started (`createKeyed` between
             // `reserveOrExisting` and `constructReserved`).
-            val (entry, reserved) = root.registry.reserveOrExisting(root.slow, 1, root.slow.leafNameFor(1))
+            val (entry, reserved) = branch.registry.reserveOrExisting(branch, 1, branch.leafNameFor(1))
             assertTrue(reserved)
             val encodesBefore = codec.encodes.get()
-            val waiterRuns = AtomicInteger()
             val result = AtomicReference<PkStore?>(null)
-            val waiter =
-                daemon("waiter") {
-                    result.set(
-                        root.slow.getOrCreate(1) {
-                            waiterRuns.incrementAndGet()
-                            PkStore(it, root)
-                        },
-                    )
-                }
+            val waiter = daemon("waiter") { result.set(branch.getOrCreate(1)) }
             val share = runnableShare(waiter)
             assertNull(result.get(), "the waiter returned before the key was constructed")
-            assertNull(root[root.slow, 1], "a reserved key has no live store")
+            assertNull(branch[1], "a reserved key has no live store")
             assertTrue(
                 share < MAX_RUNNABLE_SHARE,
                 "the waiting getOrCreate was runnable in ${(share * 100).toInt()}% of samples: it spins on the " +
                     "registry instead of parking on the construction lock",
             )
-            val creatorRuns = AtomicInteger()
-            val created =
-                root.slow.constructReserved(entry, 1) {
-                    creatorRuns.incrementAndGet()
-                    PkStore(it, root)
-                }
+            val created = branch.constructReserved(entry, 1)
             waiter.join()
             assertSame(created, result.get(), "the waiter gets the creator's instance")
-            assertEquals(1, creatorRuns.get())
-            assertEquals(0, waiterRuns.get(), "the waiter's factory never runs")
+            assertEquals(
+                listOf(Thread.currentThread().name),
+                parent.runThreads.toList(),
+                "the declared factory ran once, for the creator; never for the waiter",
+            )
             assertEquals(
                 1,
                 codec.encodes.get() - encodesBefore,
@@ -107,33 +115,15 @@ class KeyedGetOrCreateParkingTest {
     fun aGetOrCreateParksOnTheCreatorsFactoryAndSharesItsInstance() =
         completesWithin(30, "getOrCreate against a running factory") {
             val codec = PkCountingKeyCodec()
-            val root = PkRoot(codec)
+            val parent = PkParent(codec)
             val gate = CountDownLatch(1)
-            val creatorRuns = AtomicInteger()
+            parent.gate = gate
             val created = AtomicReference<PkStore?>(null)
-            val creator =
-                daemon("creator") {
-                    created.set(
-                        root.slow.create(2) {
-                            creatorRuns.incrementAndGet()
-                            gate.await()
-                            PkStore(it, root)
-                        },
-                    )
-                }
-            awaitUntil("the creator entering its factory") { creatorRuns.get() == 1 }
+            val creator = daemon("creator") { created.set(parent.slow.create(2)) }
+            awaitUntil("the creator entering its factory") { parent.runThreads.size == 1 }
             val encodesBefore = codec.encodes.get()
-            val waiterRuns = AtomicInteger()
             val result = AtomicReference<PkStore?>(null)
-            val waiter =
-                daemon("waiter") {
-                    result.set(
-                        root.slow.getOrCreate(2) {
-                            waiterRuns.incrementAndGet()
-                            PkStore(it, root)
-                        },
-                    )
-                }
+            val waiter = daemon("waiter") { result.set(parent.slow.getOrCreate(2)) }
             val share = runnableShare(waiter)
             assertNull(result.get(), "the waiter returned while the factory was still parked")
             assertTrue(share < MAX_RUNNABLE_SHARE, "runnable in ${(share * 100).toInt()}% of samples")
@@ -141,8 +131,7 @@ class KeyedGetOrCreateParkingTest {
             creator.join()
             waiter.join()
             assertSame(created.get(), result.get())
-            assertEquals(1, creatorRuns.get())
-            assertEquals(0, waiterRuns.get())
+            assertEquals(listOf("creator"), parent.runThreads.toList(), "the factory ran once, for the creator")
             assertEquals(1, codec.encodes.get() - encodesBefore, "named once for the whole wait")
         }
 
@@ -150,35 +139,15 @@ class KeyedGetOrCreateParkingTest {
     fun aGetOrCreateConstructsTheKeyItselfWhenTheCreatorsFactoryFails() =
         completesWithin(30, "getOrCreate after a failed create") {
             val codec = PkCountingKeyCodec()
-            val root = PkRoot(codec)
+            val parent = PkParent(codec)
             val gate = CountDownLatch(1)
-            val creatorRuns = AtomicInteger()
+            parent.gate = gate
+            parent.failNext.set(true)
             val creatorFailed = AtomicReference<Throwable?>(null)
-            val creator =
-                daemon("creator") {
-                    creatorFailed.set(
-                        runCatching {
-                            root.slow.create(3) { id ->
-                                creatorRuns.incrementAndGet()
-                                gate.await()
-                                PkStore(id, root)
-                                error("refused after construction")
-                            }
-                        }.exceptionOrNull(),
-                    )
-                }
-            awaitUntil("the creator entering its factory") { creatorRuns.get() == 1 }
-            val waiterRuns = AtomicInteger()
+            val creator = daemon("creator") { creatorFailed.set(runCatching { parent.slow.create(3) }.exceptionOrNull()) }
+            awaitUntil("the creator entering its factory") { parent.runThreads.size == 1 }
             val result = AtomicReference<PkStore?>(null)
-            val waiter =
-                daemon("waiter") {
-                    result.set(
-                        root.slow.getOrCreate(3) {
-                            waiterRuns.incrementAndGet()
-                            PkStore(it, root)
-                        },
-                    )
-                }
+            val waiter = daemon("waiter") { result.set(parent.slow.getOrCreate(3)) }
             val share = runnableShare(waiter)
             assertNull(result.get())
             assertTrue(share < MAX_RUNNABLE_SHARE, "runnable in ${(share * 100).toInt()}% of samples")
@@ -186,8 +155,12 @@ class KeyedGetOrCreateParkingTest {
             creator.join()
             waiter.join()
             assertTrue(creatorFailed.get()?.message?.contains("refused") == true, "${creatorFailed.get()}")
-            assertEquals(1, waiterRuns.get(), "the abandoned reservation releases its lock; the waiter constructs")
-            assertSame(result.get(), root[root.slow, 3])
+            assertEquals(
+                listOf("creator", "waiter"),
+                parent.runThreads.toList(),
+                "the abandoned reservation releases its lock; the waiter runs the factory itself",
+            )
+            assertSame(result.get(), parent.slow[3])
         }
 
     private companion object {

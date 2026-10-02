@@ -12,38 +12,66 @@ import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.derivedState
 import com.vynatix.holdfast.effect
+import com.vynatix.holdfast.internalAttachment
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-private class TmLeafStore : Store<TmLeafStore>() {
+private open class TmLeafStore : Store<TmLeafStore>() {
     val n by state { 0 }
 }
 
+/** The group's two leaves need distinct classes: a group pins its leaf names by exact class. */
+private class TmAStore : TmLeafStore()
+
+private class TmBStore : TmLeafStore()
+
 private class TmKeyedStore(
     id: String,
-    root: TmRoot,
-) : Store<TmKeyedStore>(root.keyed.at(id)) {
+) : Store<TmKeyedStore>() {
     val title by state { "t $id" }
 
     init {
-        // A transaction inside the factory bracket: before the store is attached.
+        // A transaction inside the factory: before the store is attached.
         action { title mutate "from init" }
     }
 }
 
-private class TmRoot : Root("tm") {
-    val a = TmLeafStore()
-    val b = TmLeafStore()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
-    val keyed by keyed<String, TmKeyedStore>()
+private class TmParent : Store<TmParent>() {
+    val own by state { 0 }
+    val pair by stores(names = mapOf(TmAStore::class to "a", TmBStore::class to "b")) { listOf(TmAStore(), TmBStore()) }
+    val keyed by stores<String, TmKeyedStore> { TmKeyedStore(it) }
 
-    fun lateBranch(): BranchDeclaration = branch(TmLeafStore()).named("late")
+    val a: TmLeafStore get() = pair.stores[0] as TmLeafStore
+    val b: TmLeafStore get() = pair.stores[1] as TmLeafStore
+
+    /** Only a property to hand `provideDelegate` for [lateChild]: its name is the late child's. */
+    val late: Int = 0
+
+    fun lateChild(): TmLeafStore =
+        store { TmLeafStore() }
+            .provideDelegate(this, TmParent::late)
+            .getValue(this, TmParent::late)
 }
+
+/** A mid-tree store: a store of its own, one child of its own. */
+private class TmMidStore : Store<TmMidStore>() {
+    val n by state { 0 }
+    val leaf by store(named = "deep") { TmLeafStore() }
+}
+
+private class TmGrandParent : Store<TmGrandParent>() {
+    val mid by store { TmMidStore() }
+    val side by store { TmLeafStore() }
+}
+
+/** The tree middleware [this] installed itself (`tree.middlewares` on its own handle). */
+private fun Store<*>.tmInstalled(): List<TreeMiddleware> = internalAttachment(treeMembershipKey)?.installed.orEmpty()
 
 /** Records every hook as `"<phase> <node>"`, with the frame id per event, and can veto. */
 private class Trace(
@@ -127,19 +155,26 @@ private class TmBridge : Bridge<Int> {
     }
 }
 
-/** T4: a root middleware sees every leaf transaction with its node, always outermost, on leaves attached now or later. */
+/**
+ * T4: a store's tree middleware sees every transaction of the store itself
+ * and of every store under it, with its node, always outermost, on stores
+ * attached now or later; a parent's ring wraps a child's.
+ */
 class TreeMiddlewareTest {
     @Test
-    fun aRootMiddlewareSeesEveryLeafTransactionWithItsNode() {
-        val root = TmRoot()
+    fun aParentsMiddlewareSeesEveryMemberTransactionWithItsNodeTheParentsOwnIncluded() {
+        val parent = TmParent()
         val trace = Trace()
-        root.middlewares(trace)
-        root.a action { n mutate 1 }
-        root.b action { n mutate 2 }
-        val k = root.keyed.create("k1") { TmKeyedStore(it, root) }
+        parent.tree.middlewares(trace)
+        parent action { own mutate 1 }
+        parent.a action { n mutate 1 }
+        parent.b action { n mutate 2 }
+        val k = parent.keyed.create("k1")
         k action { title mutate "x" }
         assertEquals(
             listOf(
+                "tree started TmParent",
+                "tree completed TmParent",
                 "tree started a",
                 "tree completed a",
                 "tree started b",
@@ -149,19 +184,20 @@ class TreeMiddlewareTest {
             ),
             trace.events,
         )
-        assertEquals(listOf<Store<*>>(root.a, root.a, root.b, root.b, k, k), trace.stores)
+        assertEquals(listOf<Store<*>>(parent, parent, parent.a, parent.a, parent.b, parent.b, k, k), trace.stores)
         assertTrue(trace.frameIds.all { it == null }, "plain actions carry no frame id")
     }
 
     @Test
     fun itIsOutermostRegardlessOfRegistrationOrderIncludingOnAKeyedStoreCreatedAfterInstall() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val a = parent.a
         val events = mutableListOf<String>()
-        root.a.middlewares(Consumer("before", events))
+        a.middlewares(Consumer("before", events))
         val trace = TraceInto(events)
-        root.middlewares(trace)
-        root.a.middlewares(Consumer("after", events))
-        root.a action {
+        parent.tree.middlewares(trace)
+        a.middlewares(Consumer("after", events))
+        a action {
             events += "body"
             n mutate 1
         }
@@ -170,7 +206,7 @@ class TreeMiddlewareTest {
             events,
         )
         events.clear()
-        val k = root.keyed.create("k") { TmKeyedStore(it, root) }
+        val k = parent.keyed.create("k")
         k.middlewares(Consumer("own", events))
         k action { events += "body" }
         assertEquals(listOf("tree started k", "own started", "body", "own completed", "tree completed k"), events)
@@ -178,104 +214,208 @@ class TreeMiddlewareTest {
 
     @Test
     fun ringOrderFollowsInstallerOrderAfterRemoveAndReinstall() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val tree = parent.tree
         val events = mutableListOf<String>()
         val x = TraceInto(events, "X")
         val y = TraceInto(events, "Y")
-        root.middlewares(x, y)
-        root.a action { }
+        tree.middlewares(x, y)
+        parent.a action { }
         assertEquals(listOf("Y started a", "X started a", "X completed a", "Y completed a"), events)
         events.clear()
-        assertTrue(root.removeMiddleware(x))
-        root.middlewares(x)
-        root.a action { }
+        assertTrue(tree.removeMiddleware(x))
+        tree.middlewares(x)
+        parent.a action { }
         assertEquals(listOf("X started a", "Y started a", "Y completed a", "X completed a"), events, "re-installed: outermost now")
-        assertEquals(listOf<TreeMiddleware>(y, x), root.treeMiddleware.installedMiddleware)
+        assertEquals(listOf<TreeMiddleware>(y, x), parent.tmInstalled())
     }
 
     @Test
-    fun itSeesErrorsThrownByLeafLocalMiddleware() {
-        val root = TmRoot()
+    fun theRootMostInstallerFiresStartedFirstAndAMidTreeInstallSitsInsideTheParentRing() {
+        val grand = TmGrandParent()
+        val mid = grand.mid
+        val deep = mid.leaf
         val events = mutableListOf<String>()
-        root.a.middlewares(Consumer("local", events, veto = true))
-        root.middlewares(TraceInto(events))
-        val result = root.a action { n mutate 1 }
+        mid.tree.middlewares(TraceInto(events, "M"))
+        grand.tree.middlewares(TraceInto(events, "G"))
+        deep action { }
+        assertEquals(
+            listOf("G started deep", "M started deep", "M completed deep", "G completed deep"),
+            events,
+            "the root-most installer is outermost, whatever the install order",
+        )
+        events.clear()
+        mid action { n mutate 1 }
+        assertEquals(
+            listOf("G started mid", "M started mid", "M completed mid", "G completed mid"),
+            events,
+            "the installing store is a member of its own ring",
+        )
+    }
+
+    @Test
+    fun aMidTreeInstallSeesOnlyItsSubtree() {
+        val grand = TmGrandParent()
+        val mid = grand.mid
+        val deep = mid.leaf
+        val side = grand.side
+        val events = mutableListOf<String>()
+        val midTrace = TraceInto(events, "M")
+        mid.tree.middlewares(midTrace)
+        side action { }
+        grand action { }
+        assertEquals(emptyList<String>(), events, "neither the parent nor a sibling is under the mid-tree store")
+        mid action { }
+        deep action { }
+        assertEquals(
+            listOf("M started mid", "M completed mid", "M started deep", "M completed deep"),
+            events,
+        )
+        assertTrue(side.treeRingAdapters().isEmpty(), "a sibling of the installer carries nothing")
+        assertTrue(grand.treeRingAdapters().isEmpty(), "the installer's parent carries nothing")
+        assertEquals(listOf<TreeMiddleware>(midTrace), deep.treeRingAdapters().map { it.middleware })
+    }
+
+    @Test
+    fun aMiddlewareInstalledOnAChildAndItsParentFiresOncePerTransactionAtTheParentsPosition() {
+        val grand = TmGrandParent()
+        val mid = grand.mid
+        val deep = mid.leaf
+        val events = mutableListOf<String>()
+        val shared = TraceInto(events, "X")
+        val inner = TraceInto(events, "Y")
+        mid.tree.middlewares(shared, inner)
+        grand.tree.middlewares(shared)
+        deep action { }
+        assertEquals(
+            listOf("X started deep", "Y started deep", "Y completed deep", "X completed deep"),
+            events,
+            "once, outermost: at the parent's place, wrapping the child's own Y",
+        )
+        assertEquals(listOf<TreeMiddleware>(inner, shared), deep.treeRingAdapters().map { it.middleware })
+        events.clear()
+        assertTrue(grand.tree.removeMiddleware(shared))
+        deep action { }
+        assertEquals(
+            listOf("Y started deep", "X started deep", "X completed deep", "Y completed deep"),
+            events,
+            "removed from the parent: back at the child's own place, still once",
+        )
+    }
+
+    @Test
+    fun removeMiddlewareOnADisposedInstallerAnswersFalse() {
+        val grand = TmGrandParent()
+        val mid = grand.mid
+        val deep = mid.leaf
+        val midTree = mid.tree
+        val trace = Trace()
+        midTree.middlewares(trace)
+        mid.dispose()
+        assertFalse(midTree.removeMiddleware(trace), "a disposed installer answers false, never throws")
+        assertFailsWith<IllegalStateException> { midTree.middlewares(trace) }
+        deep action { }
+        assertEquals(emptyList<String>(), trace.events, "its dispose retired the ring on the released child")
+    }
+
+    @Test
+    fun itSeesErrorsThrownByMemberLocalMiddleware() {
+        val parent = TmParent()
+        val a = parent.a
+        val events = mutableListOf<String>()
+        a.middlewares(Consumer("local", events, veto = true))
+        parent.tree.middlewares(TraceInto(events))
+        val result = a action { n mutate 1 }
         assertIs<TransactionResult.Error>(result)
         assertEquals(listOf("tree started a", "local started", "local completed", "local error", "tree error a"), events)
-        assertEquals(0, root.a.n.value)
+        assertEquals(0, a.n.value)
     }
 
     @Test
     fun itAppliesToStoresAttachedLater() {
-        val root = TmRoot()
+        val parent = TmParent()
         val trace = Trace()
-        root.middlewares(trace)
-        val late = root.lateBranch().provideDelegate(root, TmRoot::pair).getValue(root, TmRoot::pair)
-        val lateStore = late.stores.single()
-        lateStore action { }
-        assertEquals(listOf("tree started TmLeaf", "tree completed TmLeaf"), trace.events)
+        parent.tree.middlewares(trace)
+        val late = parent.lateChild()
+        late action { }
+        assertEquals(listOf("tree started late", "tree completed late"), trace.events)
     }
 
     @Test
     fun itSeesSavepointsImplicitMutateAndDerivedRecompute() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val a = parent.a
         val trace = Trace()
-        root.middlewares(trace)
-        root.a action {
+        parent.tree.middlewares(trace)
+        a action {
             n mutate 1
-            root.a action { n mutate 2 }
+            a action { n mutate 2 }
         }
         assertEquals(listOf("tree started a", "tree started a", "tree completed a", "tree completed a"), trace.events)
         trace.events.clear()
-        root.a { n mutate 3 }
+        a { n mutate 3 }
         assertEquals(listOf("tree started a", "tree completed a"), trace.events, "a bare mutate is a one-shot action")
         trace.events.clear()
-        val doubled = root.a.derivedState(root.a.n) { n.value * 2 }
+        val doubled = a.derivedState(a.n) { n.value * 2 }
         assertEquals(6, doubled.value)
-        root.a action { n mutate 4 }
+        a action { n mutate 4 }
         assertEquals(8, doubled.value)
         assertEquals(
             listOf("tree started a", "tree completed a", "tree started a", "tree completed a"),
             trace.events,
-            "the action, then the derived state's recompute on the same leaf",
+            "the action, then the derived state's recompute on the same store",
         )
         doubled.dispose()
     }
 
     @Test
     fun itSeesRestoreAndResetFramesWithNodesSharingOneFrameId() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val tree = parent.tree
         val trace = Trace()
-        root.middlewares(trace)
-        val before = root.snapshot()
-        root.a action { n mutate 1 }
+        tree.middlewares(trace)
+        val before = tree.snapshot()
+        parent.a action { n mutate 1 }
         trace.events.clear()
         trace.frameIds.clear()
-        root.restore(before).getOrThrow()
-        assertEquals(listOf("tree started a", "tree started b", "tree completed a", "tree completed b"), trace.events)
+        tree.restore(before).getOrThrow()
+        assertEquals(
+            listOf(
+                "tree started TmParent",
+                "tree started a",
+                "tree started b",
+                "tree completed TmParent",
+                "tree completed a",
+                "tree completed b",
+            ),
+            trace.events,
+            "the receiver is a frame participant like its children",
+        )
         val frame = trace.frameIds.distinct().single()
         assertNotNull(frame)
         assertTrue(frame.startsWith("atomic-"))
         trace.events.clear()
         trace.frameIds.clear()
-        root.reset(root.pair).getOrThrow()
+        tree.reset(parent.pair).getOrThrow()
         assertEquals(listOf("tree started a", "tree started b", "tree completed a", "tree completed b"), trace.events)
         assertEquals(1, trace.frameIds.distinct().size)
     }
 
     @Test
-    fun aCompletedThrowOnTheLastLeafRollsEveryLeafBackAndFiresTheTreeErrorHookForEach() {
-        val root = TmRoot()
+    fun aCompletedThrowOnTheLastMemberRollsEveryMemberBackAndFiresTheTreeErrorHookForEach() {
+        val parent = TmParent()
+        val a = parent.a
+        val b = parent.b
         val trace = Trace(vetoCompletedOf = "b")
-        root.middlewares(trace)
+        parent.tree.middlewares(trace)
         val result =
-            atomic(root.a, root.b) {
-                root.a { n mutate 1 }
-                root.b { n mutate 2 }
+            atomic(a, b) {
+                a { n mutate 1 }
+                b { n mutate 2 }
             }
         assertIs<TransactionResult.Error>(result)
-        assertEquals(0, root.a.n.value)
-        assertEquals(0, root.b.n.value)
+        assertEquals(0, a.n.value)
+        assertEquals(0, b.n.value)
         assertEquals(
             listOf("tree started a", "tree started b", "tree completed a", "tree completed b", "tree error b", "tree error a"),
             trace.events,
@@ -284,22 +424,23 @@ class TreeMiddlewareTest {
 
     @Test
     fun inboundBridgeWritesAreNeverSeen() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val a = parent.a
         val trace = Trace()
-        root.middlewares(trace)
+        parent.tree.middlewares(trace)
         val bridge = TmBridge()
-        root.a { n bridge bridge }
+        a { n bridge bridge }
         bridge.deliver(9)
-        assertEquals(9, root.a.n.value)
+        assertEquals(9, a.n.value)
         assertEquals(emptyList<String>(), trace.events)
     }
 
     @Test
     fun transactionsRunInsideAFactoryPrecedeAttachAndAreNotSeen() {
-        val root = TmRoot()
+        val parent = TmParent()
         val trace = Trace()
-        root.middlewares(trace)
-        val k = root.keyed.create("k") { TmKeyedStore(it, root) }
+        parent.tree.middlewares(trace)
+        val k = parent.keyed.create("k")
         assertEquals("from init", k.title.value)
         assertEquals(emptyList<String>(), trace.events)
         k action { title mutate "later" }
@@ -307,40 +448,46 @@ class TreeMiddlewareTest {
     }
 
     @Test
-    fun clearMiddlewareOnALeafKeepsTreeMiddleware() {
-        val root = TmRoot()
+    fun clearMiddlewareOnAMemberKeepsTreeMiddleware() {
+        val parent = TmParent()
+        val a = parent.a
         val events = mutableListOf<String>()
-        root.a.middlewares(Consumer("local", events))
-        root.middlewares(TraceInto(events))
-        root.a.clearMiddleware()
-        root.a action { }
+        a.middlewares(Consumer("local", events))
+        parent.tree.middlewares(TraceInto(events))
+        a.clearMiddleware()
+        a action { }
         assertEquals(listOf("tree started a", "tree completed a"), events)
     }
 
     @Test
-    fun removeMiddlewareStopsNewObservationsOnEveryLeafAndAnswersWhetherItWasInstalled() {
-        val root = TmRoot()
+    fun removeMiddlewareStopsNewObservationsOnEveryMemberAndAnswersWhetherItWasInstalled() {
+        val parent = TmParent()
+        val tree = parent.tree
         val trace = Trace()
-        root.middlewares(trace)
-        val k = root.keyed.create("k") { TmKeyedStore(it, root) }
-        assertTrue(root.removeMiddleware(trace))
-        assertTrue(!root.removeMiddleware(trace), "not installed any more")
-        root.a action { }
+        tree.middlewares(trace)
+        val k = parent.keyed.create("k")
+        assertTrue(tree.removeMiddleware(trace))
+        assertFalse(tree.removeMiddleware(trace), "not installed any more")
+        parent action { }
+        parent.a action { }
         k action { }
         assertEquals(emptyList<String>(), trace.events)
-        assertEquals(emptyList<TreeMiddleware>(), root.treeMiddleware.installedMiddleware)
-        assertTrue(root.treeMiddleware.adaptersOf(root.a).isEmpty())
+        assertEquals(emptyList<TreeMiddleware>(), parent.tmInstalled())
+        for (member in tree.stores()) assertTrue(member.treeRingAdapters().isEmpty(), "no adapter left on $member")
     }
 
     @Test
-    fun middlewaresInsideALeafActionAFrameBodyOrATreeHookThrowsWithoutDeadlock() {
-        val root = TmRoot()
+    fun middlewaresInsideAMemberActionAFrameBodyOrATreeHookThrowsWithoutDeadlock() {
+        val parent = TmParent()
+        val tree = parent.tree
+        val a = parent.a
+        val b = parent.b
         val trace = Trace()
         var fromAction: Throwable? = null
-        root.a.action { fromAction = runCatching { root.middlewares(trace) }.exceptionOrNull() }.getOrThrow()
-        assertContains(assertIs<IllegalStateException>(fromAction).message!!, "from inside a transaction of its leaf 'a'")
+        a.action { fromAction = runCatching { tree.middlewares(trace) }.exceptionOrNull() }.getOrThrow()
+        assertContains(assertIs<IllegalStateException>(fromAction).message!!, "from inside a transaction of its member 'a'")
         var fromFrame: Throwable? = null
-        atomic(root.b) { fromFrame = runCatching { root.middlewares(trace) }.exceptionOrNull() }.getOrThrow()
+        atomic(b) { fromFrame = runCatching { tree.middlewares(trace) }.exceptionOrNull() }.getOrThrow()
         assertContains(assertIs<IllegalStateException>(fromFrame).message!!, "atomic(...) frame")
         var fromHook: Throwable? = null
         val hooking =
@@ -349,72 +496,82 @@ class TreeMiddlewareTest {
                     node: StoreNode,
                     context: Middleware.MiddlewareContext<*>,
                 ) {
-                    fromHook = runCatching { root.removeMiddleware(this) }.exceptionOrNull()
+                    fromHook = runCatching { tree.removeMiddleware(this) }.exceptionOrNull()
                 }
             }
-        root.middlewares(hooking)
-        root.a.action { }.getOrThrow()
+        tree.middlewares(hooking)
+        a.action { }.getOrThrow()
         assertIs<IllegalStateException>(fromHook)
-        assertTrue(root.removeMiddleware(hooking))
+        assertTrue(tree.removeMiddleware(hooking))
         assertEquals(emptyList<String>(), trace.events)
     }
 
     @Test
-    fun aHookThrowingInStartedRollsBackTheLeafAction() {
-        val root = TmRoot()
+    fun aHookThrowingInStartedRollsBackTheMemberAction() {
+        val parent = TmParent()
+        val a = parent.a
+        val b = parent.b
         val trace = Trace(throwInStartedOf = "a")
-        root.middlewares(trace)
-        val result = root.a action { n mutate 1 }
+        parent.tree.middlewares(trace)
+        val result = a action { n mutate 1 }
         assertIs<TransactionResult.Error>(result)
         assertContains(result.exception.message!!, "started veto on a")
-        assertEquals(0, root.a.n.value)
+        assertEquals(0, a.n.value)
         assertEquals(listOf("tree started a", "tree error a"), trace.events)
-        root.b.action { n mutate 1 }.getOrThrow()
-        assertEquals(1, root.b.n.value, "the other leaf is unaffected")
+        b.action { n mutate 1 }.getOrThrow()
+        assertEquals(1, b.n.value, "the other member is unaffected")
     }
 
     @Test
     fun aThousandKeyedCreateAndDisposeCyclesLeaveNoAdapters() {
-        val root = TmRoot()
+        val parent = TmParent()
+        val tree = parent.tree
         val trace = Trace()
-        root.middlewares(trace)
-        val baseline = root.treeMiddleware.memberCount
+        tree.middlewares(trace)
+        val baseline = tree.stores()
+        assertTrue(baseline.all { it.treeRingAdapters().size == 1 }, "the receiver and both group members carry it")
         repeat(1_000) { i ->
-            val k = root.keyed.create("k$i") { TmKeyedStore(it, root) }
+            val k = parent.keyed.create("k$i")
             k action { title mutate "x" }
-            val adapters = root.treeMiddleware.adaptersOf(k)
+            val adapters = k.treeRingAdapters()
+            assertEquals(1, adapters.size)
             k.dispose()
             assertTrue(adapters.all { it.isRetired })
         }
-        assertEquals(baseline, root.treeMiddleware.memberCount)
+        assertEquals(baseline, tree.stores(), "every keyed store left with its dispose")
+        assertTrue(baseline.all { it.treeRingAdapters().size == 1 })
         assertEquals(2_000, trace.events.size)
     }
 
     @Test
-    fun theRootsOwnSettleTransactionsAreNeverSeen() {
-        val root = TmRoot()
+    fun theValuesOwnSettleTransactionsAreNeverSeen() {
+        val parent = TmParent()
+        val tree = parent.tree
         val trace = Trace()
-        root.middlewares(trace)
+        tree.middlewares(trace)
         var settles = 0
-        val watch = root.value effect { settles++ }
-        root.a action { n mutate 1 }
+        val watch = tree effect { settles++ }
+        parent.a action { n mutate 1 }
         assertEquals(2, settles)
         assertEquals(listOf("tree started a", "tree completed a"), trace.events)
         watch.dispose()
     }
 
     @Test
-    fun aRootsDisposeRemovesTheRingFromEveryLeafAndKeepsTheLeavesOwnMiddleware() {
-        val root = TmRoot()
+    fun aParentsDisposeRemovesItsRingFromEveryChildAndKeepsTheChildrensOwnMiddleware() {
+        val parent = TmParent()
+        val tree = parent.tree
+        val a = parent.a
         val events = mutableListOf<String>()
-        root.a.middlewares(Consumer("local", events))
+        a.middlewares(Consumer("local", events))
         val trace = TraceInto(events)
-        root.middlewares(trace)
-        root.dispose()
-        root.a action { }
+        tree.middlewares(trace)
+        parent.dispose()
+        a action { }
         assertEquals(listOf("local started", "local completed"), events)
-        assertTrue(!root.removeMiddleware(trace), "answers false on a disposed root")
-        assertFailsWith<IllegalStateException> { root.middlewares(trace) }
+        assertFalse(tree.removeMiddleware(trace), "answers false on a disposed store")
+        assertFailsWith<IllegalStateException> { tree.middlewares(trace) }
+        assertFailsWith<IllegalStateException> { parent.tree }
     }
 }
 

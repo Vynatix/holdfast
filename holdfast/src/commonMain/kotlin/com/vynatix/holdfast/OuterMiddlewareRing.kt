@@ -8,7 +8,7 @@ package com.vynatix.holdfast
 
 /**
  * One store's outer middleware ring: library-installed [Middleware] that
- * wraps every consumer-registered one (issue #21's `Root.middlewares`). Its
+ * wraps every consumer-registered one (issue #21's `tree.middlewares`). Its
  * own [StoreLock] keeps [set]/[remove]/[clear] internally consistent without
  * taking the store's `middlewareLock`. [Store.snapshotMiddleware] and the
  * private `Store.runMiddlewareChain` read [snapshot] and append it after the
@@ -50,10 +50,16 @@ internal class OuterMiddlewareRing<Self : Store<Self>> {
 
 /**
  * Replace this store's outer middleware ring with [middleware] (issue #21's
- * `Root.middlewares`; always outermost of the consumer-registered chain —
+ * `tree.middlewares`; always outermost of the consumer-registered chain —
  * see [Middleware]'s ordering KDoc and [Store.middlewares]). A whole-set
  * replace: install the full desired set each time to converge under
  * interleaving installs, rather than adding members one at a time.
+ *
+ * The store tree OWNS the whole ring of every store that has tree state:
+ * each ring sync (`tree.middlewares`, an attach under a store with tree
+ * middleware, an ancestor's dispose) replaces it with the adapters the
+ * store's ancestry wants, dropping anything else put there. Do not install
+ * here on a store that is, or may become, part of a store tree.
  *
  * @throws IllegalStateException if the store is disposed.
  */
@@ -71,7 +77,7 @@ fun <Self : Store<Self>> Self.internalSetOuterMiddleware(middleware: List<Middle
  * installed at teardown through it). Returns `false` on a disposed store,
  * without throwing — `dispose()` already cleared both lists, so there is
  * nothing to remove, and a caller unwinding a store that disposed
- * mid-teardown (issue #21's `Root.removeMiddleware`, the harness) must be
+ * mid-teardown (issue #21's `tree.removeMiddleware`, the harness) must be
  * able to tell "already gone" apart from "removed" without catching an
  * exception. Not gated by `checkNotDisposed()`, unlike most entrypoints —
  * see the CLAUDE.md exception list next to [Store.snapshotMiddleware].
@@ -96,17 +102,4 @@ internal fun Store<*>.setOuterMiddlewareUnchecked(middleware: List<Middleware<No
     checkNotDisposed()
     @Suppress("UNCHECKED_CAST")
     (outerMiddleware as OuterMiddlewareRing<Nothing>).set(middleware)
-}
-
-/**
- * [internalRemoveMiddleware]'s outer-ring half for a star-projected store:
- * issue #21's tree ring unwinds its own adapters by identity when its root
- * disposes, so a member another root's ring put there meanwhile is left in
- * place. `false` on a disposed store (its ring is already cleared), without
- * throwing, as [internalRemoveMiddleware].
- */
-internal fun Store<*>.removeOuterMiddlewareUnchecked(middleware: Middleware<Nothing>): Boolean {
-    if (isDisposed) return false
-    @Suppress("UNCHECKED_CAST")
-    return (outerMiddleware as OuterMiddlewareRing<Nothing>).remove(middleware)
 }

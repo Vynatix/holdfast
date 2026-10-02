@@ -5,7 +5,7 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 
 /**
- * One finding of `Root.verifyPersistedNames(node)` (T6): a name that
+ * One finding of `tree.verifyPersistedNames(node)` (T6): a name that
  * `encode()` writes and that the program's identifiers, not literals,
  * chose — so obfuscation or a rename would orphan what was persisted under
  * it — or a keyed branch whose leaves can never be written at all.
@@ -22,7 +22,7 @@ class NamingIssue internal constructor(
          * A persisted store — one with a `UserAuthored` state or family,
          * one that `is SchemaVersioned`, or one whose attachments report
          * `persistenceKeys` — sits at a leaf named by its class
-         * (`NameOrigin.ClassName`). Pin it: `branch(store).named(store, "...")`.
+         * (`NameOrigin.ClassName`). Pin it: `stores(names = mapOf(Store::class to "..."))`.
          */
         ClassDerivedNameOnPersistedStore,
 

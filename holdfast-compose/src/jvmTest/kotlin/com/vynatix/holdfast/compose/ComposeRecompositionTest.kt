@@ -8,8 +8,9 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.merged
-import com.vynatix.holdfast.tree.Root
 import com.vynatix.holdfast.tree.internalSettleCount
+import com.vynatix.holdfast.tree.stores
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,23 +82,23 @@ class ComposeRecompositionTest {
         }
 
     @Test
-    fun aRootValueRecomposesOnceForATwoStoreFrame() =
+    fun aTreeValueRecomposesOnceForATwoStoreFrame() =
         runTest {
-            val root = TreeRoot()
+            val parent = TreeParentStore()
             val ui = HeadlessComposition(this)
             var compositions = 0
             var rendered: Pair<Int?, Int?>? = null
             ui.setContent {
-                val tree = root.value.collectAsState()
+                val tree = parent.tree.collectAsState()
                 compositions++
-                rendered = tree.value[root.left.x] to tree.value[root.right.y]
+                rendered = tree.value[parent.left.x] to tree.value[parent.right.y]
             }
             assertEquals(1, compositions)
             assertEquals(0 to 0, rendered)
 
-            atomic(root.left, root.right) {
-                root.left { x mutate 1 }
-                root.right { y mutate 2 }
+            atomic(parent.left, parent.right) {
+                parent.left { x mutate 1 }
+                parent.right { y mutate 2 }
             }.getOrThrow()
             ui.settle()
 
@@ -107,14 +108,15 @@ class ComposeRecompositionTest {
         }
 
     @Test
-    fun theInitialCompositionReadBuildsAnUnreadRootsTree() =
+    fun theInitialCompositionReadBuildsAnUnreadTree() =
         runTest {
-            val root = TreeRoot()
-            assertEquals(0, root.internalSettleCount, "declaring the tree captured nothing")
+            val parent = TreeParentStore()
+            val tree = parent.tree
+            assertEquals(0, tree.internalSettleCount, "declaring the children captured nothing")
             val ui = HeadlessComposition(this)
             var rendered: Int? = null
-            ui.setContent { rendered = root.value.collectAsState().value[root.left.x] }
-            assertEquals(1, root.internalSettleCount, "the first composition read built the tree")
+            ui.setContent { rendered = tree.collectAsState().value[parent.left.x] }
+            assertEquals(1, tree.internalSettleCount, "the first composition read built the tree")
             assertEquals(0, rendered)
             ui.dispose()
         }
@@ -128,8 +130,8 @@ private class TreeRightStore : Store<TreeRightStore>() {
     val y by state { 0 }
 }
 
-private class TreeRoot : Root("compose") {
+private class TreeParentStore : Store<TreeParentStore>() {
     val left = TreeLeftStore()
     val right = TreeRightStore()
-    val pair by branch(left, right)
+    val pair by stores { listOf(left, right) }
 }

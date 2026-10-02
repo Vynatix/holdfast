@@ -14,8 +14,8 @@ import kotlin.time.Clock
 
 /**
  * The tree fixture's recorder: a [TreeMiddleware] the fixture installs
- * through `Root.middlewares` — outermost on every leaf, attached now or
- * later — that turns each hook into a [TreeEvent], buffered under a lock
+ * through `StoreTree.middlewares` — outermost on every member, attached now
+ * or later — that turns each hook into a [TreeEvent], buffered under a lock
  * with the same [Capture] policy as a store's recorder. Writes happen on the
  * transaction's thread; [snapshot] reads from any thread.
  */

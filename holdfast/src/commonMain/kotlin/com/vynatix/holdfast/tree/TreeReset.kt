@@ -3,13 +3,13 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
-import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.materializeDeclaredStates
 import com.vynatix.holdfast.stageResetOfDeclaredStates
 
-// `Root.reset(node)`: every live leaf of the subtree is reset in its own
+// `tree.reset(node)`: every live store of the subtree — the receiver's own
+// included when [node] is the receiver — is reset in its own
 // transaction of ONE frame (the `stageResetOfDeclaredStates` shape issue #20
 // PR 5 left for #21) — never-read states materialized before the frame,
 // initializers re-run in fresh-store order, output staged raw and only where
@@ -18,17 +18,17 @@ import com.vynatix.holdfast.stageResetOfDeclaredStates
 internal const val TREE_RESET_ID = "tree-reset"
 
 internal fun resetTree(
-    root: Root,
+    ownerNode: LeafNode,
     node: StoreNode,
 ): TransactionResult<TreeResetReport> {
-    root.checkNotDisposed()
-    root.requireOwn(node)
-    val targets = leavesUnder(root, node)
+    val owner = checkNotNull(ownerNode.store) { "${ownerNode.name}'s store disposed" }
+    owner.checkNotDisposed()
+    require(node === ownerNode || node.isUnder(ownerNode)) { "node '${node.name}' is not under '${ownerNode.name}'" }
     return treeFrame(
-        root = root,
+        owner = owner,
         id = TREE_RESET_ID,
-        attempt = "reset the subtree at '${node.name}' of root '${root.name}'",
-        targets = targets,
+        attempt = "reset the subtree at '${node.name}' under '${ownerNode.name}'",
+        targets = liveLeavesUnder(ownerNode, node),
         // Materialize outside every lock: a never-read state's initializer
         // must not run under the frame's locks. A failure is carried into the
         // frame, so the reset fails as one transaction there.
@@ -39,19 +39,4 @@ internal fun resetTree(
         },
         finish = { worked, skipped -> TreeResetReport(reset = worked.map { it.leaf }, skipped = skipped) },
     )
-}
-
-/** The live leaves of the subtree at [node] with their stores, in tree order, as of this call. */
-internal fun leavesUnder(
-    root: Root,
-    node: StoreNode,
-): List<Pair<LeafNode, Store<*>>> {
-    val out = ArrayList<Pair<LeafNode, Store<*>>>()
-
-    fun walk(shape: TreeShape) {
-        out.addAll(shape.leaves)
-        shape.children.forEach(::walk)
-    }
-    walk(root.registry.shapeOf(node))
-    return out
 }

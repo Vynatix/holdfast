@@ -1,4 +1,4 @@
-// Twin of GUIDE §17.9 (tree middleware). Shares the `Notes` root the §17.6
+// Twin of GUIDE §17.9 (tree middleware). Shares the `Notes` store the §17.6
 // twin declares; the test drives the block and asserts the output its
 // comments claim.
 @file:OptIn(ExperimentalStoreApi::class)
@@ -11,6 +11,7 @@ import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.snippets.capturePrintln
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
+import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -25,14 +26,15 @@ class Audit : TreeMiddleware() {
 
 fun auditTheTree() {
     val audit = Audit()
-    Notes.middlewares(audit)                                       // every leaf, now and later, outermost
-    val n4 = Notes.byId.create("n4", ::NoteStore)                  // attached after install: covered
-    Notes.prefsStore action { theme mutate "dark" }
-    atomic(Notes.prefsStore, n4) { n4 { body mutate "x" } }.getOrThrow()
-    println(audit.log)                                             // "[prefs alone, prefs in a frame, n4 in a frame]"
-    println(Notes.removeMiddleware(audit))                         // "true": no new observation from here on
+    Notes.tree.middlewares(audit)                                  // Notes and every store under it, now and later
+    val n4 = Notes.byId.create("n4")                               // attached after install: covered
+    Notes action { folder mutate "archive" }                       // the parent's own transactions too
+    Notes.prefs action { theme mutate "dark" }
+    atomic(Notes.prefs, n4) { n4 { body mutate "x" } }.getOrThrow()
+    println(audit.log)                                             // "[Notes alone, prefs alone, prefs in a frame, n4 in a frame]"
+    println(Notes.tree.removeMiddleware(audit))                    // "true": no new observation from here on
     n4.dispose()
-    Notes.reset()
+    Notes.tree.reset()
 }
 // DOC-SNIPPET-END
 
@@ -40,8 +42,9 @@ class GuideTreeMiddlewareTwin {
     @Test
     fun auditTheTreePrintsWhatItsCommentsClaim() {
         val printed = capturePrintln { auditTheTree() }
-        assertEquals(listOf("[prefs alone, prefs in a frame, n4 in a frame]", "true"), printed)
-        assertEquals("light", Notes.prefsStore.theme.value, "the twin leaves the tree reset")
-        assertEquals(emptyMap(), Notes.entries(Notes.byId))
+        assertEquals(listOf("[Notes alone, prefs alone, prefs in a frame, n4 in a frame]", "true"), printed)
+        assertEquals("light", Notes.prefs.theme.value, "the twin leaves the tree reset")
+        assertEquals("inbox", Notes.folder.value)
+        assertEquals(emptyMap(), Notes.byId.entries)
     }
 }

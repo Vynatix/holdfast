@@ -6,13 +6,14 @@ import com.vynatix.holdfast.EventfulStore
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
-import com.vynatix.holdfast.StoreMembership
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.internalAttachment
+import kotlin.reflect.KClass
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -25,12 +26,11 @@ private class KmSessionStore : Store<KmSessionStore>() {
 
 private open class KmThreadStore(
     val id: String,
-    root: KmRoot,
-) : Store<KmThreadStore>(root.threads.at(id)) {
+) : Store<KmThreadStore>() {
     val title by state { "thread $id" }
 
     init {
-        // Leaf code running inside the factory is ordinary store code.
+        // Store code running inside the factory is ordinary store code.
         action { title mutate "constructed $id" }
     }
 }
@@ -38,19 +38,13 @@ private open class KmThreadStore(
 /** No constructor-time action, so it can be created inside a Strict frame. */
 private class KmQuietStore(
     val id: String,
-    root: KmRoot,
-) : Store<KmQuietStore>(root.quiet.at(id)) {
+) : Store<KmQuietStore>() {
     val title by state { "quiet $id" }
 }
 
-private class KmTokenStore(
-    token: StoreMembership<KmTokenStore>,
-) : Store<KmTokenStore>(token)
-
 private class KmSubThreadStore(
     id: String,
-    root: KmRoot,
-) : KmThreadStore(id, root)
+) : KmThreadStore(id)
 
 private sealed class KmEvent {
     data object Pinged : KmEvent()
@@ -58,30 +52,62 @@ private sealed class KmEvent {
 
 private class KmEventfulStore(
     val id: String,
-    root: KmRoot,
-) : EventfulStore<KmEventfulStore, KmEvent>(root.eventful.at(id)) {
+) : EventfulStore<KmEventfulStore, KmEvent>() {
     val n by state { 0 }
 }
 
 private class KmThrowingStore(
     id: String,
-    root: KmRoot,
-) : Store<KmThrowingStore>(root.throwing.at(id)) {
+) : Store<KmThrowingStore>() {
     init {
         error("constructor of $id refused")
     }
 }
 
-private class KmRoot : Root("km") {
-    val session by branch(KmSessionStore())
-    val threads by keyed<String, KmThreadStore>(under = session)
-    val eventful by keyed<String, KmEventfulStore>()
-    val throwing by keyed<String, KmThrowingStore>()
-    val quiet by keyed<String, KmQuietStore>()
-    val tokens by keyed<String, KmTokenStore>()
+/** A keyed store that declares keyed children of its own. */
+private class KmFolderStore(
+    val id: String,
+) : Store<KmFolderStore>() {
+    val files by stores<String, KmQuietStore> { KmQuietStore(it) }
 }
 
-private class RecordingListener : LeafMembershipListener() {
+/**
+ * Each keyed branch's factory is declared once; a test that needs a key to
+ * build something else installs a per-key hook ([threadHooks]) the declared
+ * factory consults, and [threadRuns] counts every run of that factory.
+ */
+private class KmParent : Store<KmParent>() {
+    var threadRuns = 0
+    val threadHooks = HashMap<String, (String) -> KmThreadStore>()
+    var throwingRuns = 0
+
+    val session by store { KmSessionStore() }
+    val threads by stores<String, KmThreadStore> { id ->
+        threadRuns++
+        threadHooks[id]?.invoke(id) ?: KmThreadStore(id)
+    }
+    val eventful by stores<String, KmEventfulStore> { KmEventfulStore(it) }
+    val throwing by stores<String, KmThrowingStore> { id ->
+        throwingRuns++
+        KmThrowingStore(id)
+    }
+    val quiet by stores<String, KmQuietStore> { KmQuietStore(it) }
+    val folders by stores<String, KmFolderStore> { KmFolderStore(it) }
+
+    /**
+     * Declared as `stores<String, KmSubThreadStore>` while its factory builds
+     * plain [KmThreadStore]s: only an unchecked cast of the class literal
+     * gets there, which is what the factory's runtime class check is for.
+     */
+    @Suppress("UNCHECKED_CAST")
+    val wrongClass by keyedDeclaration(
+        String::class,
+        KmSubThreadStore::class as KClass<KmThreadStore>,
+        null,
+    ) { KmThreadStore(it) }
+}
+
+private class KmRecordingListener : LeafMembershipListener() {
     val events = ArrayList<String>()
 
     override fun onAttached(leaf: LeafNode) {
@@ -93,249 +119,201 @@ private class RecordingListener : LeafMembershipListener() {
     }
 }
 
-/** T3: keyed stores join through the factory bracket and leave on dispose. */
+/** T3: keyed stores are made by the branch's declared factory, join once it returned, and leave on dispose. */
 class KeyedMembershipTest {
     @Test
     fun createReturnsTheLiveStoreAndLookupIsNullAfterDispose() {
-        val root = KmRoot()
-        val t = root.threads.create("a") { KmThreadStore(it, root) }
-        val found: KmThreadStore? = root[root.threads, "a"]
+        val parent = KmParent()
+        val t = parent.threads.create("a")
+        val found: KmThreadStore? = parent.threads["a"]
         assertSame(t, found)
         assertEquals("constructed a", t.title.value)
-        assertEquals(mapOf("a" to t), root.entries(root.threads))
-        assertNotNull(root.nodeOf(t))
-        assertSame(root.threads, root.nodeOf(t)!!.parent)
-        assertEquals("a", root.nodeOf(t)!!.key)
+        assertEquals(mapOf("a" to t), parent.threads.entries)
+        val leaf = assertNotNull(parent.tree.nodeOf(t))
+        assertSame(parent.threads, leaf.parent)
+        assertEquals("a", leaf.key)
+        assertSame(leaf, t.tree.node)
 
         t.dispose()
-        assertNull(root[root.threads, "a"])
-        assertNull(root.nodeOf(t))
-        assertTrue(root.entries(root.threads).isEmpty())
+        assertNull(parent.threads["a"])
+        assertNull(parent.tree.nodeOf(t))
+        assertTrue(parent.threads.entries.isEmpty())
+        assertEquals("a", leaf.name, "a disposed store's node keeps the place it had")
     }
 
     @Test
-    fun atOutsideCreateThrowsATeachingError() {
-        val root = KmRoot()
-        val error = assertFailsWith<IllegalStateException> { KmThreadStore("bare", root) }
-        assertTrue("threads.at(bare)" in error.message!!, error.message)
-        assertTrue("create" in error.message!!, error.message)
-        assertNull(root[root.threads, "bare"])
+    fun aFactoryReturningAStoreThatAlreadyHasAParentFailsAndLeavesNoEntry() {
+        val parent = KmParent()
+        val other = KmParent()
+        val foreign = other.threads.create("f")
+        parent.threadHooks["f"] = { foreign }
+        val error = assertFailsWith<IllegalStateException> { parent.threads.create("f") }
+        val message = assertNotNull(error.message)
+        assertTrue("KmThreadStore already belongs to KmParent/threads" in message, message)
+        assertTrue("a store has one parent" in message, message)
+        assertNull(parent.threads["f"])
+        assertTrue(parent.threads.entries.isEmpty())
+        assertSame(foreign, other.threads["f"])
+        assertSame(other.threads, foreign.tree.parent, "the store stays where it was")
     }
 
     @Test
-    fun aFactoryConstructingAnotherKeyFailsAndLeavesNoEntry() {
-        val root = KmRoot()
-        val error = assertFailsWith<IllegalStateException> { root.threads.create("x") { KmThreadStore("y", root) } }
-        assertTrue("threads.at(y)" in error.message!!, error.message)
-        assertNull(root[root.threads, "x"])
-        assertNull(root[root.threads, "y"])
-        assertTrue(root.entries(root.threads).isEmpty())
+    fun aFactoryReturningADisposedStoreFailsAndLeavesNoEntry() {
+        val parent = KmParent()
+        parent.threadHooks["dead"] = { KmThreadStore(it).apply { dispose() } }
+        val error = assertFailsWith<IllegalStateException> { parent.threads.create("dead") }
+        assertTrue("returned a disposed store" in error.message!!, error.message)
+        assertNull(parent.threads["dead"])
     }
 
     @Test
-    fun aFactoryReturningAForeignInstanceFailsAndLeavesNoEntry() {
-        val root = KmRoot()
-        val other = KmRoot()
-        val foreign = other.threads.create("f") { KmThreadStore(it, other) }
-        val error = assertFailsWith<IllegalStateException> { root.threads.create("f") { foreign } }
-        assertTrue("did not take" in error.message!!, error.message)
-        assertNull(root[root.threads, "f"])
-        assertSame(foreign, other[other.threads, "f"])
-    }
-
-    @Test
-    fun aThrowingInitializerLeavesNoEntryAndARetrySucceeds() {
-        val root = KmRoot()
-        val error = assertFailsWith<IllegalStateException> { root.throwing.create("t") { KmThrowingStore(it, root) } }
+    fun aThrowingConstructorLeavesNoEntryAndARetryRunsTheFactoryAgain() {
+        val parent = KmParent()
+        val error = assertFailsWith<IllegalStateException> { parent.throwing.create("t") }
         assertEquals("constructor of t refused", error.message)
-        assertNull(root[root.throwing, "t"])
-        assertTrue(root.entries(root.throwing).isEmpty())
+        assertNull(parent.throwing["t"])
+        assertTrue(parent.throwing.entries.isEmpty())
+        assertEquals(1, parent.throwingRuns)
 
         // The key is free again: a retry runs the factory once more.
-        var attempts = 0
-        assertFailsWith<IllegalStateException> {
-            root.throwing.create("t") {
-                attempts++
-                KmThrowingStore(it, root)
-            }
-        }
-        assertEquals(1, attempts)
+        assertFailsWith<IllegalStateException> { parent.throwing.create("t") }
+        assertEquals(2, parent.throwingRuns)
         // And a well-behaved store on another branch is unaffected.
-        val t = root.threads.create("fine") { KmThreadStore(it, root) }
-        assertSame(t, root[root.threads, "fine"])
+        val t = parent.threads.create("fine")
+        assertSame(t, parent.threads["fine"])
     }
 
     @Test
-    fun anAbandonedStoreIsDisposed() {
-        val root = KmRoot()
+    fun aStoreAFailingFactoryBuiltIsLeftAloneAndTheTreeHoldsNoReferenceToIt() {
+        val parent = KmParent()
         var leaked: KmThreadStore? = null
-        assertFailsWith<IllegalStateException> {
-            root.threads.create("leak") { id ->
-                val s = KmThreadStore(id, root)
-                leaked = s
-                error("factory failed after constructing")
-            }
+        parent.threadHooks["leak"] = { id ->
+            leaked = KmThreadStore(id)
+            error("factory failed after constructing")
         }
-        assertTrue(leaked!!.isDisposed, "the store the failed factory constructed must be disposed")
-        assertNull(leaked!!.internalAttachment(treeMembershipKey))
-        assertNull(root[root.threads, "leak"])
+        assertFailsWith<IllegalStateException> { parent.threads.create("leak") }
+        val built = assertNotNull(leaked)
+        assertFalse(built.isDisposed, "the tree disposes nothing: the store a failing factory built is the factory's own")
+        assertNull(built.internalAttachment(treeMembershipKey), "the tree never reached the store")
+        assertNull(parent.threads["leak"])
+        assertTrue(parent.tree.stores().none { it === built })
     }
 
     @Test
     fun duplicateKeysFailAtCreate() {
-        val root = KmRoot()
-        root.threads.create("d") { KmThreadStore(it, root) }
-        val error = assertFailsWith<IllegalStateException> { root.threads.create("d") { KmThreadStore(it, root) } }
+        val parent = KmParent()
+        parent.threads.create("d")
+        val error = assertFailsWith<IllegalStateException> { parent.threads.create("d") }
         assertTrue("already exists" in error.message!!, error.message)
         assertTrue("getOrCreate" in error.message!!, error.message)
+        assertEquals(1, parent.threadRuns, "a refused create runs no factory")
     }
 
     @Test
     fun disposeFromInsideTheStoresOwnActionStillDetaches() {
-        val root = KmRoot()
-        val listener = RecordingListener()
-        root.internalAddMembershipListener(listener)
-        val t = root.threads.create("self") { KmThreadStore(it, root) }
+        val parent = KmParent()
+        val listener = KmRecordingListener()
+        parent.internalAddMembershipListener(listener)
+        val t = parent.threads.create("self")
         val result = t action { dispose() }
         assertIs<TransactionResult.Success<*>>(result)
-        assertNull(root[root.threads, "self"])
+        assertNull(parent.threads["self"])
         assertEquals(listOf("attached:self", "detached:self"), listener.events)
     }
 
     @Test
-    fun anEventfulStoreAttachesThroughTheMirroredConstructor() {
-        val root = KmRoot()
-        val e = root.eventful.create("e") { KmEventfulStore(it, root) }
-        assertSame(e, root[root.eventful, "e"])
+    fun anEventfulStoreIsAKeyedStoreLikeAnyOther() {
+        val parent = KmParent()
+        val e = parent.eventful.create("e")
+        assertSame(e, parent.eventful["e"])
         e action {
             n mutate 1
             emit(KmEvent.Pinged)
         }
         assertEquals(1, e.n.value)
+        assertSame(parent.eventful, e.tree.parent)
     }
 
     @Test
     fun theWrongStoreClassIsRejectedNamingBothClasses() {
-        val root = KmRoot()
-
-        class Impostor(
-            token: StoreMembership<Impostor>,
-        ) : Store<Impostor>(token)
-
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.threads.create("i") {
-                    @Suppress("UNCHECKED_CAST")
-                    Impostor(root.threads.at(it) as StoreMembership<Impostor>) as KmThreadStore
-                }
-            }
-        assertTrue("KmThreadStore" in error.message!! && "Impostor" in error.message!!, error.message)
-        assertNull(root[root.threads, "i"])
+        val parent = KmParent()
+        val error = assertFailsWith<IllegalStateException> { parent.wrongClass.create("i") }
+        val message = assertNotNull(error.message)
+        assertTrue("KmSubThreadStore" in message && "returned KmThreadStore" in message, message)
+        assertNull(parent.wrongClass["i"])
     }
 
     @Test
     fun aSubclassOfTheDeclaredTypeIsAccepted() {
-        val root = KmRoot()
-        val sub = root.threads.create("sub") { KmSubThreadStore(it, root) }
-        assertSame(sub, root[root.threads, "sub"])
-        assertIs<KmSubThreadStore>(root[root.threads, "sub"])
-    }
-
-    @Test
-    fun theTokenIsSingleUse() {
-        val root = KmRoot()
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.tokens.create("twice") {
-                    val token = root.tokens.at(it)
-                    KmTokenStore(token)
-                    KmTokenStore(token)
-                }
-            }
-        assertTrue("already used" in error.message!!, error.message)
-        assertNull(root[root.tokens, "twice"])
-    }
-
-    @Test
-    fun aTokenTakenByASecondStoreAfterTheFirstBoundIsRefused() {
-        val root = KmRoot()
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.tokens.create("second") {
-                    val first = KmTokenStore(root.tokens.at(it))
-                    KmTokenStore(root.tokens.at(it))
-                    first
-                }
-            }
-        assertTrue("already called" in error.message!!, error.message)
-        assertNull(root[root.tokens, "second"])
-    }
-
-    @Test
-    fun atCalledTwiceInsideOneCreateThrows() {
-        val root = KmRoot()
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.threads.create("two") {
-                    root.threads.at(it)
-                    KmThreadStore(it, root)
-                }
-            }
-        assertTrue("already called" in error.message!!, error.message)
-        assertNull(root[root.threads, "two"])
+        val parent = KmParent()
+        parent.threadHooks["sub"] = { KmSubThreadStore(it) }
+        val sub = parent.threads.create("sub")
+        assertSame(sub, parent.threads["sub"])
+        assertIs<KmSubThreadStore>(parent.threads["sub"])
     }
 
     @Test
     fun aNestedCreateInsideAFactoryAttachesTheInnerStoreFirst() {
-        val root = KmRoot()
-        val listener = RecordingListener()
-        root.internalAddMembershipListener(listener)
-        val outer =
-            root.threads.create("outer") { id ->
-                root.threads.create("inner") { KmThreadStore(it, root) }
-                KmThreadStore(id, root)
-            }
+        val parent = KmParent()
+        val listener = KmRecordingListener()
+        parent.internalAddMembershipListener(listener)
+        parent.threadHooks["outer"] = { id ->
+            parent.threads.create("inner")
+            KmThreadStore(id)
+        }
+        val outer = parent.threads.create("outer")
         assertEquals(listOf("attached:inner", "attached:outer"), listener.events)
-        assertSame(outer, root[root.threads, "outer"])
-        assertNotNull(root[root.threads, "inner"])
+        assertSame(outer, parent.threads["outer"])
+        assertNotNull(parent.threads["inner"])
     }
 
     @Test
-    fun bareNestedConstructionInsideAFactoryFailsAndTheOuterCreateCleansUp() {
-        val root = KmRoot()
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.threads.create("outer") { id ->
-                    KmThreadStore("stray", root)
-                    KmThreadStore(id, root)
-                }
-            }
-        assertTrue("threads.at(stray)" in error.message!!, error.message)
-        assertNull(root[root.threads, "outer"])
-        assertNull(root[root.threads, "stray"])
-        assertTrue(root.entries(root.threads).isEmpty())
+    fun aKeyedStoresOwnKeyedChildrenJoinTheParentsSubtree() {
+        val parent = KmParent()
+        parent.session
+        val listener = KmRecordingListener()
+        parent.internalAddMembershipListener(listener)
+        val folder = parent.folders.create("docs")
+        val file = folder.files.create("readme")
+        assertEquals(listOf("attached:docs", "attached:readme"), listener.events)
+        assertSame(folder.files, parent.tree.nodeOf(file)?.parent)
+        assertTrue(file in parent.tree.stores(parent.folders))
+        folder.dispose()
+        assertEquals(
+            listOf("attached:docs", "attached:readme", "detached:docs", "detached:readme"),
+            listener.events,
+            "the folder's dispose releases its file and the parent hears both leave",
+        )
+        assertFalse(file.isDisposed, "the tree disposes nothing")
+        assertNull(file.tree.parent, "the released file is a subtree root")
+        assertEquals("KmQuiet", file.tree.node.name, "named by its class again")
+        assertTrue(parent.tree.stores().none { it === file })
     }
 
     @Test
-    fun createAndAtOnADisposedRootThrow() {
-        val root = KmRoot()
-        root.dispose()
-        assertTrue("disposed" in assertFailsWith<IllegalStateException> { root.threads.create("x") { KmThreadStore(it, root) } }.message!!)
-        assertTrue("disposed" in assertFailsWith<IllegalStateException> { root.threads.at("x") }.message!!)
+    fun createGetOrCreateAndLookupsOnADisposedParentThrow() {
+        val parent = KmParent()
+        val threads = parent.threads
+        parent.dispose()
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.create("x") }.message!!)
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.getOrCreate("x") }.message!!)
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads["x"] }.message!!)
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { threads.entries }.message!!)
+        assertTrue("disposed" in assertFailsWith<IllegalStateException> { parent.threads }.message!!)
+        assertEquals(0, parent.threadRuns)
     }
 
     @Test
     fun attachAndDetachReachTheListenerOncePerStoreAndNeverForAbandonedStores() {
-        val root = KmRoot()
-        val listener = RecordingListener()
-        root.internalAddMembershipListener(listener)
-        val a = root.threads.create("a") { KmThreadStore(it, root) }
-        runCatching {
-            root.threads.create("bad") { id ->
-                KmThreadStore(id, root)
-                error("no")
-            }
+        val parent = KmParent()
+        val listener = KmRecordingListener()
+        parent.internalAddMembershipListener(listener)
+        val a = parent.threads.create("a")
+        parent.threadHooks["bad"] = { id ->
+            KmThreadStore(id)
+            error("no")
         }
+        assertFailsWith<IllegalStateException> { parent.threads.create("bad") }
         a.dispose()
         a.dispose()
         assertEquals(listOf("attached:a", "detached:a"), listener.events)
@@ -343,69 +321,59 @@ class KeyedMembershipTest {
 
     @Test
     fun createInsideAStrictAtomicBodyAttachesWithoutOpeningATransaction() {
-        val root = KmRoot()
-        val session = root.session.stores.single() as KmSessionStore
+        val parent = KmParent()
+        val session = parent.session
         val result =
             atomic(session) {
                 session { token mutate "t" }
-                root.quiet.create("in-frame") { KmQuietStore(it, root) }
+                parent.quiet.create("in-frame")
             }
         assertIs<TransactionResult.Success<*>>(result)
-        val q = root[root.quiet, "in-frame"]
-        assertNotNull(q)
+        val q = assertNotNull(parent.quiet["in-frame"])
         assertEquals("quiet in-frame", q.title.value)
         assertEquals("t", session.token.value)
     }
 
     @Test
     fun entriesAreTypedAndOrderedByCreation() {
-        val root = KmRoot()
-        val b = root.threads.create("b") { KmThreadStore(it, root) }
-        val a = root.threads.create("a") { KmThreadStore(it, root) }
-        val entries: Map<String, KmThreadStore> = root.entries(root.threads)
+        val parent = KmParent()
+        val b = parent.threads.create("b")
+        val a = parent.threads.create("a")
+        val entries: Map<String, KmThreadStore> = parent.threads.entries
         assertEquals(listOf("b", "a"), entries.keys.toList())
         assertEquals(listOf(b, a), entries.values.toList())
     }
 
     @Test
     fun getOrCreateReturnsTheExistingStoreWithoutRunningTheFactory() {
-        val root = KmRoot()
-        var runs = 0
-        val first =
-            root.threads.getOrCreate("g") {
-                runs++
-                KmThreadStore(it, root)
-            }
-        val second =
-            root.threads.getOrCreate("g") {
-                runs++
-                KmThreadStore(it, root)
-            }
+        val parent = KmParent()
+        val first = parent.threads.getOrCreate("g")
+        val second = parent.threads.getOrCreate("g")
         assertSame(first, second)
-        assertEquals(1, runs)
+        assertEquals(1, parent.threadRuns)
     }
 
     @Test
     fun aSameThreadGetOrCreateCycleThrows() {
-        val root = KmRoot()
-        val error =
-            assertFailsWith<IllegalStateException> {
-                root.threads.getOrCreate("c") { id ->
-                    root.threads.getOrCreate("c") { KmThreadStore(it, root) }
-                    KmThreadStore(id, root)
-                }
-            }
+        val parent = KmParent()
+        parent.threadHooks["c"] = { id ->
+            parent.threads.getOrCreate("c")
+            KmThreadStore(id)
+        }
+        val error = assertFailsWith<IllegalStateException> { parent.threads.getOrCreate("c") }
         assertTrue("cycle" in error.message!!, error.message)
-        assertNull(root[root.threads, "c"])
+        assertNull(parent.threads["c"])
+        assertTrue(parent.threads.entries.isEmpty())
     }
 
     @Test
     fun aKeyedLeafIsNamedByItsKeyAndNeverPinned() {
-        val root = KmRoot()
-        val t = root.threads.create("k1") { KmThreadStore(it, root) }
-        val leaf = root.nodeOf(t)!!
+        val parent = KmParent()
+        val t = parent.threads.create("k1")
+        val leaf = assertNotNull(parent.tree.nodeOf(t))
         assertEquals("k1", leaf.name)
         assertEquals(NameOrigin.Key, leaf.nameOrigin)
-        assertEquals("km/session/threads/k1", leaf.path())
+        assertEquals(listOf("threads", "k1"), leaf.pathUnder(parent.tree.node))
+        assertEquals("LeafNode(KmParent/threads/k1)", leaf.toString())
     }
 }

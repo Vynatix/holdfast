@@ -20,7 +20,7 @@ private const val JOIN_MS = 10_000L
  * `CaptureStats.retries` counts every listing or cut a capture had to run
  * again — the cut retried on an open write bracket (or a moved stamp) as
  * much as the listing retried for an entry that came to life — which is
- * what `Root.internalCutRetryCount` reports.
+ * what `StoreTree.internalCutRetryCount` reports.
  */
 class CutRetryCountTest {
     @Test

@@ -18,33 +18,45 @@ internal fun treeEquals(
     a === b ||
         (
             a.scope === b.scope &&
-                sameNode(a.node, b.node) &&
+                sameNode(a, b) &&
                 a.leaf == b.leaf &&
                 a.children.size == b.children.size &&
                 a.children.indices.all { treeEquals(a.children[it], b.children[it]) }
         )
 
 internal fun treeHash(tree: TreeSnapshot): Int {
-    var hash = tree.node.name.hashCode() * HASH_PRIME + tree.scope.hashCode()
+    var hash = tree.name.hashCode() * HASH_PRIME + tree.scope.hashCode()
     hash = hash * HASH_PRIME + (tree.leaf?.hashCode() ?: 0)
     for (child in tree.children) hash = hash * HASH_PRIME + treeHash(child)
     return hash
 }
 
+/**
+ * The encodable projections of [a] and [b] are equal. At the top only the
+ * kinds must match: the captured node's own name is never written (`path`
+ * locates it), so a decoded top may carry another name than the capture's.
+ */
 internal fun treeEqualsEncodable(
+    a: TreeSnapshot,
+    b: TreeSnapshot,
+    includeRemote: Boolean,
+): Boolean = kindOf(a.node) == kindOf(b.node) && sameEncodableBody(a, b, includeRemote)
+
+private fun sameEncodableBody(
     a: TreeSnapshot,
     b: TreeSnapshot,
     includeRemote: Boolean,
 ): Boolean {
     val childrenA = a.encodableChildren()
     val childrenB = b.encodableChildren()
-    return sameNode(a.node, b.node) &&
-        sameLeafBody(a, b, includeRemote) &&
+    return sameLeafBody(a, b, includeRemote) &&
         childrenA.size == childrenB.size &&
-        childrenA.indices.all { treeEqualsEncodable(childrenA[it], childrenB[it], includeRemote) }
+        childrenA.indices.all {
+            sameNode(childrenA[it], childrenB[it]) && sameEncodableBody(childrenA[it], childrenB[it], includeRemote)
+        }
 }
 
-private val encodedChildOrder = compareBy<TreeSnapshot>({ it.node.name }, { kindOf(it.node) })
+private val encodedChildOrder = compareBy<TreeSnapshot>({ it.name }, { kindOf(it.node) })
 
 /**
  * The children `encode()` writes, by name as it writes them (a capture lists
@@ -76,8 +88,8 @@ private fun TreeSnapshot.isEncodable(): Boolean {
 }
 
 private fun sameNode(
-    a: StoreNode,
-    b: StoreNode,
-): Boolean = a.name == b.name && kindOf(a) == kindOf(b)
+    a: TreeSnapshot,
+    b: TreeSnapshot,
+): Boolean = a.name == b.name && kindOf(a.node) == kindOf(b.node)
 
 private const val HASH_PRIME = 31

@@ -57,8 +57,9 @@ private fun followersOf(store: Store<*>): Int = store.internalAttachment(STORE_E
 /**
  * Store-level derivation edges (issue #20 plan PR 15, D21): a derived state
  * that follows whole stores, added and removed at runtime — what issue #21's
- * `Root.value` recomputes on, over keyed branches that attach and detach. It
- * settles like any derived state: once per outermost entry or frame.
+ * `tree` value (`StoreTree`) recomputes on, over the stores that join and
+ * leave a subtree. It settles like any derived state: once per outermost
+ * entry or frame.
  */
 class DynamicDerivationTest {
     private val disposables = mutableListOf<Disposable>()

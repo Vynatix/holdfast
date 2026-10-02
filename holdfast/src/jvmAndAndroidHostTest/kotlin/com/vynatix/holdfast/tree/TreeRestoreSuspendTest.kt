@@ -30,25 +30,25 @@ private class SusRightStore : Store<SusRightStore>() {
     val m by state { 0 }
 }
 
-private class SusRoot : Root("sus") {
+private class SusApp : Store<SusApp>() {
     val left = SusLeftStore()
     val right = SusRightStore()
-    val pair by branch(left, right)
+    val pair by stores { listOf(left, right) }
 }
 
-/** `Root.restore`/`Root.reset` and suspending entries: refused inside, waited out from outside. */
+/** `tree.restore`/`tree.reset` and suspending entries: refused inside, waited out from outside. */
 class TreeRestoreSuspendTest {
     @Test
     fun restoreAndResetInsideASuspendingEntryFailFastInsteadOfSpinning() {
-        val root = SusRoot()
+        val root = SusApp()
         root.left action { n mutate 7 }
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         root.left action { n mutate 8 }
         val refused = mutableListOf<Pair<String, Throwable?>>()
 
         fun attempt(where: String) {
-            refused += "restore/$where" to runCatching { root.restore(tree) }.exceptionOrNull()
-            refused += "reset/$where" to runCatching { root.reset() }.exceptionOrNull()
+            refused += "restore/$where" to runCatching { root.tree.restore(tree) }.exceptionOrNull()
+            refused += "reset/$where" to runCatching { root.tree.reset() }.exceptionOrNull()
         }
 
         completesWithin(30, "restore/reset inside suspending entries") {
@@ -76,10 +76,10 @@ class TreeRestoreSuspendTest {
 
     @Test
     fun aRestoreWhileAForeignSuspendActionHoldsTheSerializerWaitsThenCommits() {
-        val root = SusRoot()
+        val root = SusApp()
         root.left action { n mutate 7 }
         root.right action { m mutate 3 }
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         root.left action { n mutate 8 }
 
         val holding = CountDownLatch(1)
@@ -101,7 +101,7 @@ class TreeRestoreSuspendTest {
                     Thread {
                         outcome.set(
                             runCatching {
-                                root.restore(tree).getOrThrow()
+                                root.tree.restore(tree).getOrThrow()
                                 Unit
                             },
                         )

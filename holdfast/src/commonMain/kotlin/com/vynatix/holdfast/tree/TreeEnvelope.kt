@@ -10,26 +10,30 @@ import com.vynatix.holdfast.writeStoreBody
 
 // The tree wire format, `holdfast.tree` v1 (issue #21 decision U9):
 //
-//   {"format":"holdfast.tree","v":1,"scope":"All","path":["settings"],
-//    "tree":{"kind":"branch","children":{"Settings":{"kind":"leaf","store":<store body>},
-//                                        "threads":{"kind":"keyed","entries":{"t1":<store body>}}}},
-//    "skipped":[["settings","notes"]]}
+//   {"format":"holdfast.tree","v":1,"scope":"All","path":[],
+//    "tree":{"kind":"leaf","store":<receiver body>,
+//            "children":{"settings":{"kind":"leaf","store":<body>},
+//                        "session":{"kind":"branch","children":{"Profile":{"kind":"leaf","store":<body>}}},
+//                        "threads":{"kind":"keyed","entries":{"42":{"kind":"leaf","store":<body>}}}}},
+//    "skipped":[["notes"]]}
 //
 // Canonical: no whitespace, children by name and entries by encoded key in
-// sorted order. `path` locates the captured node from the root (a keyed
-// leaf's last segment is its encoded key). Every store body is the
-// `holdfast.store` v1 body of issue #20 R1, embedded verbatim, so a leaf's
-// text is byte-identical to that store's own `encode()`; a leaf that
-// captured nothing in its scope (only ever the captured node itself) is
-// written without a `store` member. A keyed branch without a key codec is
-// never encoded: as a child it is left out, as the captured node itself it
-// is written with no entries, and either way its root-relative path is
-// listed under `skipped`; a capture under such a branch has no writable
-// path and is refused. Decoding resolves tree paths only: leaf bodies stay
-// name-keyed decoded StoreSnapshots (so `migrate` and the RestorePolicy
-// run per leaf at restore time), a keyed entry with no live store becomes a
-// pending key, and a path this root does not declare lands in
-// `unresolvedPaths`.
+// sorted order. Every node is uniform: a `leaf` (a store's node) may carry
+// `store` (omitted when nothing was captured) and `children` (omitted when
+// empty, so a childless leaf is byte-identical to the shape without
+// children); a `branch` always has `children`; a `keyed` branch always has
+// `entries`, whose values are leaf nodes. `path` locates the captured node
+// from the receiver — the store whose `tree` took the capture, whose own
+// name is never written (a keyed leaf's segment is its encoded key) — and
+// `skipped` paths are relative to the receiver too. Every store body is the
+// `holdfast.store` v1 body of issue #20 R1, embedded verbatim, so a store's
+// text is byte-identical to that store's own `encode()`. A keyed branch
+// without a key codec is never encoded: as a child it is left out, as the
+// captured node itself it is written with no entries, and either way its
+// path is listed under `skipped`; a capture under such a branch has no
+// writable path and is refused. Names are the names AS CAPTURED
+// (`TreeSnapshot.name`), so a kept capture encodes the structure it was
+// taken from whatever disposed since. Decoding is `TreeDecode.kt`.
 
 internal const val TREE_SNAPSHOT_FORMAT = "holdfast.tree"
 internal const val TREE_SNAPSHOT_VERSION = 1
@@ -39,7 +43,7 @@ internal fun encodeTree(
     includeRemote: Boolean,
 ): String {
     if (tree.scope === SnapshotScope.UserAuthored) refuseClassDerivedLeaves(tree)
-    val path = pathFromRoot(tree.node)
+    val path = pathBelow(tree)
     val skipped = ArrayList<List<String>>()
     val writer = SnapshotJsonWriter()
     writer.beginObject()
@@ -61,39 +65,47 @@ internal fun encodeTree(
     return writer.toString()
 }
 
+/**
+ * Refuse a store node of the capture — other than the receiver, whose name
+ * is never written — that captured something and is named by its store's
+ * class (as captured): a rename or obfuscation would orphan what was
+ * persisted under it.
+ */
 private fun refuseClassDerivedLeaves(tree: TreeSnapshot) {
-    if (tree.isLeaf && tree.node.nameOrigin == NameOrigin.ClassName) {
+    val index = tree.index
+    val classNamed = tree.hasStore && tree.node !== index.ownerNode && index.originOf(tree.node) == NameOrigin.ClassName
+    if (classNamed) {
+        val parentName = index.parentOf[tree.node]?.let(index::nameOf)
         error(
-            "Cannot encode a UserAuthored tree capture: leaf '${tree.node.name}' under '${tree.node.parent?.name}' " +
-                "is named by its store's class, which a rename or obfuscation would change and orphan what was " +
-                "persisted under it; pin it with branch(...).named(store, \"...\")",
+            "Cannot encode a UserAuthored tree capture: leaf '${tree.name}' under '$parentName' is named by its " +
+                "store's class, which a rename or obfuscation would change and orphan what was persisted under " +
+                "it; pin it with stores(names = mapOf(Store::class to \"...\"))",
         )
     }
     for (child in tree.children) refuseClassDerivedLeaves(child)
 }
 
 /**
- * The names from the root's first child down to [node]; empty for the root
- * itself. A node under a keyed branch without a key codec has no writable
- * path: its segment would be the key's `toString()`, which no decode can
- * read back and which may leak an arbitrary object's text.
+ * The captured names from the receiver's child down to [tree]'s node; empty
+ * for the receiver itself. A node under a keyed branch without a key codec
+ * has no writable path: its segment would be the key's `toString()`, which
+ * no decode can read back and which may leak an arbitrary object's text.
  *
  * @throws IllegalStateException for a node under a keyed branch without a key codec.
  */
-private fun pathFromRoot(node: StoreNode): List<String> {
-    val names = ArrayList<String>()
-    var current: StoreNode? = node
-    while (current != null && current !is Root) {
-        val parent = current.parent
+private fun pathBelow(tree: TreeSnapshot): List<String> {
+    val index = tree.index
+    var current: StoreNode = tree.node
+    while (current !== index.ownerNode) {
+        val parent = index.parentOf[current] ?: break
         check(parent !is KeyedBranch<*, *> || parent.keyCodec != null) {
-            "Cannot encode a tree capture under keyed branch '${parent?.name}' of root '${node.root.name}': " +
-                "the branch has no key codec, so no path can spell the captured node's key; " +
-                "declare it with keyed(keyCodec = ...)"
+            "Cannot encode a tree capture under keyed branch '${index.nameOf(parent)}' of " +
+                "'${index.ownerNode.name}': the branch has no key codec, so no path can spell the captured " +
+                "node's key; declare it with stores<K, S>(keyCodec = ...)"
         }
-        names.add(current.name)
         current = parent
     }
-    return names.asReversed()
+    return index.pathOf(tree.node)
 }
 
 private fun SnapshotJsonWriter.writeStrings(strings: List<String>) {
@@ -112,15 +124,18 @@ private fun SnapshotJsonWriter.writeNode(
     name("kind")
     value(kindOf(tree.node))
     when (val node = tree.node) {
-        is LeafNode -> writeLeaf(tree, includeRemote)
+        is LeafNode -> {
+            writeStore(tree, includeRemote)
+            if (tree.children.isNotEmpty()) writeChildren(tree, includeRemote, skipped, path)
+        }
         is KeyedBranch<*, *> -> writeEntries(tree, node, includeRemote, skipped, path)
-        is Root, is Branch -> writeChildren(tree, includeRemote, skipped, path)
+        is Branch -> writeChildren(tree, includeRemote, skipped, path)
     }
     endObject()
 }
 
-/** A leaf's store body; a leaf that captured nothing (only ever the captured node itself) gets no `store` member. */
-private fun SnapshotJsonWriter.writeLeaf(
+/** A store node's body; one that captured nothing in its scope gets no `store` member. */
+private fun SnapshotJsonWriter.writeStore(
     tree: TreeSnapshot,
     includeRemote: Boolean,
 ) {
@@ -142,9 +157,9 @@ private fun SnapshotJsonWriter.writeEntries(
     if (branch.keyCodec == null) {
         skipped += path
     } else {
-        for (child in tree.children.sortedBy { it.node.name }) {
-            name(child.node.name)
-            writeStoreBody(checkNotNull(child.leaf).content.toBody(includeRemote))
+        for (child in tree.children.sortedBy { it.name }) {
+            name(child.name)
+            writeNode(child, includeRemote, skipped, path + child.name)
         }
     }
     endObject()
@@ -159,18 +174,18 @@ private fun SnapshotJsonWriter.writeChildren(
     name("children")
     beginObject()
     val seen = HashSet<String>()
-    for (child in tree.children.sortedBy { it.node.name }) {
-        val childPath = path + child.node.name
+    for (child in tree.children.sortedBy { it.name }) {
+        val childPath = path + child.name
         val keyed = child.node as? KeyedBranch<*, *>
         if (keyed != null && keyed.keyCodec == null) {
             skipped += childPath
             continue
         }
-        check(seen.add(child.node.name)) {
-            "Cannot encode the tree of root '${tree.node.root.name}': '${tree.node.name}' has two children named " +
-                "'${child.node.name}' (a leaf and a branch); pin one of them"
+        check(seen.add(child.name)) {
+            "Cannot encode the tree under '${tree.index.ownerNode.name}': '${tree.name}' has two children named " +
+                "'${child.name}'; pin one of them"
         }
-        name(child.node.name)
+        name(child.name)
         writeNode(child, includeRemote, skipped, childPath)
     }
     endObject()

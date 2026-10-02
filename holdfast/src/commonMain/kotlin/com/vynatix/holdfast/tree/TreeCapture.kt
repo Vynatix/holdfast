@@ -10,50 +10,57 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreSnapshot
 import com.vynatix.holdfast.captureConsistent
 
-// `Root.snapshot(node, scope)` (issue #21 decision U10): copy the subtree's
-// shape and the whole tree's membership under ONE take of the registry lock,
-// release, then take ONE consistent cut over every live leaf through
-// `captureConsistent` — never `atomic(*leaves)`, which holds serializers and
-// transaction locks, fails nested lock order, deadlocks from observers and
-// spins from inside a `suspendAction` body. Membership is decided by that
-// listing (`TreeIndex.memberKeys`): a member outside the captured subtree,
-// or one the cut then missed because it disposed meanwhile, reads `Absent`.
+// `tree.snapshot(node, scope)` (issue #21 decision U10): list the subtree's
+// shape and the receiver's membership in ONE seqlock-validated walk (one
+// registry lock at a time, `TreeWalk.kt`), then take ONE consistent cut over
+// every live store through `captureConsistent` — never `atomic(*stores)`,
+// which holds serializers and transaction locks, fails nested lock order,
+// deadlocks from observers and spins from inside a `suspendAction` body.
+// Membership is decided by that listing (`TreeIndex.memberKeys`): a store
+// under the receiver outside the captured subtree, or one the cut then
+// missed because it disposed meanwhile, reads `Absent`. The listed structure
+// (parents and names, from the receiver down) is frozen into the capture.
 
 /**
- * Capture the subtree at [node] in [scope]. Materializes every never-read
- * declared state the scope captures (their initializers run, outside every
- * tree lock), excludes keyed entries still under construction, skips a
- * leaf disposed concurrently (the capture is retried without it), and under
- * `SnapshotScope.UserAuthored` prunes leaves and branches with nothing
+ * Capture the subtree at [node] — [ownerNode] or a node under it — in
+ * [scope]. Materializes every never-read declared state the scope captures
+ * (their initializers run, outside every tree lock) but no child
+ * declaration (it runs inside host transactions and derived computes),
+ * excludes keyed entries still under construction, skips a store disposed
+ * concurrently (the capture is retried without it), and under
+ * `SnapshotScope.UserAuthored` prunes store nodes and branches with nothing
  * captured — the requested [node] itself is always returned. With
- * [previous], a capture in the same scope, a leaf whose cut stamp has not
- * moved reuses that capture's `StoreSnapshot` by reference (`CutStamp`:
- * `Root.value` recaptures only the leaves that changed); [stats] counts
- * what the cut did.
+ * [previous], a capture in the same scope, a store whose cut stamp has not
+ * moved reuses that capture's `StoreSnapshot` by reference (`CutStamp`: the
+ * tree value recaptures only the stores that changed); [stats] counts what
+ * the cut did.
  *
- * @throws IllegalStateException if the root is disposed, or as `snapshot()`
- *   does (a throwing or cyclic initializer, a schema version below 1).
- * @throws IllegalArgumentException if [node] belongs to another root.
+ * @throws IllegalStateException if [ownerNode]'s store is disposed, or as
+ *   `snapshot()` does (a throwing or cyclic initializer, a schema version
+ *   below 1).
+ * @throws IllegalArgumentException if [node] is not under [ownerNode].
  */
 internal fun captureTree(
-    root: Root,
+    ownerNode: LeafNode,
     node: StoreNode,
     scope: SnapshotScope,
     previous: TreeSnapshot? = null,
     stats: CaptureStats? = null,
 ): TreeSnapshot {
-    root.checkNotDisposed()
-    root.requireOwn(node)
+    val owner = checkNotNull(ownerNode.store) { "${ownerNode.name}'s store disposed" }
+    owner.checkNotDisposed()
+    require(node === ownerNode || node.isUnder(ownerNode)) { "node '${node.name}' is not under '${ownerNode.name}'" }
     val reusable = previous?.takeIf { it.scope === scope }
     while (true) {
-        val listing = root.registry.listingOf(node)
+        val listing = listingOf(ownerNode, node, stats = stats)
         val stores = listing.shape.stores().filter { !it.isDisposed }
         val known = reusable?.let { last -> stores.map { last.index.byStoreKey[it.lockOrderKey]?.leaf } }
         val captures = captureOrRetry(stores, scope, known, stats) ?: continue
         val byStoreKey = HashMap<Long, StoreSnapshot>(stores.size)
         for ((i, store) in stores.withIndex()) byStoreKey[store.lockOrderKey] = captures[i]
-        val index = TreeIndex(listing.memberKeys)
-        return checkNotNull(buildTree(listing.shape, scope, byStoreKey, index, top = true))
+        val index = TreeIndex(listing.memberKeys, ownerNode)
+        index.recordChain(listing.chain)
+        return checkNotNull(TreeBuilder(scope, byStoreKey, index).build(listing.shape, top = true))
     }
 }
 
@@ -72,49 +79,31 @@ private fun captureOrRetry(
     }
 }
 
-private fun buildTree(
-    shape: TreeShape,
-    scope: SnapshotScope,
-    byStoreKey: Map<Long, StoreSnapshot>,
-    index: TreeIndex,
-    top: Boolean,
-): TreeSnapshot? {
-    val prune = scope === SnapshotScope.UserAuthored
-    val node = shape.node
-    if (node is LeafNode) {
-        val capture = leafCapture(node, shape.leaves.singleOrNull()?.second, scope, byStoreKey, index, prune)
-        // The requested node is always returned: a leaf whose store is gone,
-        // or that captured nothing in this scope, comes back empty.
-        return capture ?: if (top) emptyLeaf(node, scope, index) else null
-    }
-    val children = ArrayList<TreeSnapshot>()
-    for ((leaf, store) in shape.leaves) {
-        leafCapture(leaf, store, scope, byStoreKey, index, prune)?.let(children::add)
-    }
-    for (child in shape.children) {
-        buildTree(child, scope, byStoreKey, index, top = false)?.let(children::add)
-    }
-    val pruned = prune && !top && children.isEmpty()
-    return if (pruned) null else TreeSnapshot(node, children, scope, leaf = null, storeKey = 0L, index = index)
-}
+/** Builds a capture bottom-up over one listed shape: every node uniform, a store node with its children. */
+private class TreeBuilder(
+    private val scope: SnapshotScope,
+    private val byStoreKey: Map<Long, StoreSnapshot>,
+    private val index: TreeIndex,
+) {
+    private val prune = scope === SnapshotScope.UserAuthored
 
-private fun leafCapture(
-    leaf: LeafNode,
-    store: Store<*>?,
-    scope: SnapshotScope,
-    byStoreKey: Map<Long, StoreSnapshot>,
-    index: TreeIndex,
-    prune: Boolean,
-): TreeSnapshot? {
-    val capture = store?.let { byStoreKey[it.lockOrderKey] }
-    val pruned = capture == null || (prune && capture.stateNames.isEmpty())
-    if (pruned) return null
-    return TreeSnapshot(leaf, emptyList(), scope, capture, checkNotNull(store).lockOrderKey, index)
+    fun build(
+        shape: TreeShape,
+        top: Boolean,
+    ): TreeSnapshot? {
+        val captured = shape.store?.let { byStoreKey[it.lockOrderKey] }
+        // A listed store that disposed before the cut is left out with its
+        // subtree, as a listing taken a moment later would have; the
+        // requested node itself is always returned.
+        val disposedSinceListing = shape.store != null && captured == null
+        val capture = captured?.takeIf { !(prune && it.stateNames.isEmpty()) }
+        val children = if (disposedSinceListing) emptyList() else shape.children.mapNotNull { build(it, top = false) }
+        val pruned = prune && capture == null && children.isEmpty()
+        if (!top && (disposedSinceListing || pruned)) return null
+        // A store node that captured nothing keeps its store's key (a disposed
+        // store's states read Absent); a branch has none.
+        val storeKey = shape.store?.lockOrderKey ?: (shape.node as? LeafNode)?.storeKey ?: 0L
+        index.origins[shape.node] = shape.node.nameOrigin
+        return TreeSnapshot(shape.node, shape.name, children, scope, capture, storeKey, index)
+    }
 }
-
-/** The capture of a requested leaf that holds no `StoreSnapshot`; its states read `Absent`. */
-private fun emptyLeaf(
-    node: LeafNode,
-    scope: SnapshotScope,
-    index: TreeIndex,
-): TreeSnapshot = TreeSnapshot(node, emptyList(), scope, leaf = null, storeKey = node.storeKey, index = index)

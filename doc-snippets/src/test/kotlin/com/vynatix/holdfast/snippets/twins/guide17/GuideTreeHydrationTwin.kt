@@ -1,6 +1,6 @@
-// Twin of GUIDE §17.11 (hydrating a tree). Self-contained: its own root,
-// since hydration needs stores with hydrators. The test drives the block
-// and asserts the output its comments claim.
+// Twin of GUIDE §17.11 (hydrating a tree). Self-contained: its own parent
+// store, since hydration needs stores with hydrators. The test drives the
+// block and asserts the output its comments claim.
 @file:OptIn(ExperimentalStoreApi::class)
 
 package com.vynatix.holdfast.snippets.twins.guide17
@@ -11,7 +11,8 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.coroutines.hydrateAll
 import com.vynatix.holdfast.coroutines.hydrator
 import com.vynatix.holdfast.snippets.capturePrintln
-import com.vynatix.holdfast.tree.Root
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -29,20 +30,19 @@ class SettingsOnlyStore : Store<SettingsOnlyStore>() {
     val theme by state { "light" }
 }
 
-object Feeds : Root("feeds") {
-    val news = FeedStore { listOf("headline") }
-    val sports = FeedStore { error("offline") }
-    val settings = SettingsOnlyStore()
-    val all by branch(news, sports, settings).named(news, "news").named(sports, "sports").named(settings, "settings")
+object Feeds : Store<Feeds>() {
+    val news by store { FeedStore { listOf("headline") } }
+    val sports by store { FeedStore { error("offline") } }
+    val settings by store { SettingsOnlyStore() }
 }
 
 suspend fun hydrateTheTree() {
-    val report = Feeds.hydrateAll()                                      // every leaf's hydrator, seeds in lock order
-    println(report.entries.map { "${it.node.name}: ${it.outcome}" })   // "[news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]"
-    println(report.isHealthy to report.failed.map { it.node.name })    // "(false, [sports])"
-    println(Feeds.news.items.value)                                    // "[headline]"
-    println(Feeds.sports.items.value)                                  // "[cached]": the seed stood, the refresh failed
-    println(Feeds.hydrateAll(Feeds.all).failed.map { it.node.name })   // "[sports]": idempotent for news, a retry for sports
+    val report = Feeds.tree.hydrateAll()                                 // the parent, then every child, in lock order
+    println(report.entries.map { "${it.node.name}: ${it.outcome}" })     // "[Feeds: NoHydrator, news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]"
+    println(report.isHealthy to report.failed.map { it.node.name })      // "(false, [sports])"
+    println(Feeds.news.items.value)                                      // "[headline]"
+    println(Feeds.sports.items.value)                                    // "[cached]": the seed stood, the refresh failed
+    println(Feeds.tree.hydrateAll().failed.map { it.node.name })         // "[sports]": idempotent for news, a retry for sports
 }
 // DOC-SNIPPET-END
 
@@ -52,7 +52,8 @@ class GuideTreeHydrationTwin {
         val printed = capturePrintln { runBlocking { hydrateTheTree() } }
         assertEquals(
             listOf(
-                "[news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]",
+                "[Feeds: NoHydrator, news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), " +
+                    "settings: NoHydrator]",
                 "(false, [sports])",
                 "[headline]",
                 "[cached]",

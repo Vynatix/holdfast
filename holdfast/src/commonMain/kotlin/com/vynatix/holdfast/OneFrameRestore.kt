@@ -7,7 +7,7 @@ package com.vynatix.holdfast
 // by captureConsistent(stores) — encoded and decoded or not (an encoded one
 // as its encodable projection) — goes back with
 // restoreInOneFrame(snapshots), all of it or none of it, which is what issue
-// #21's `Root.restore(tree)` builds on. Internal: #21 owns the public API.
+// #21's `tree.restore` builds on. Internal: #21 owns the public API.
 //
 // Why it refuses to nest. An `atomic` frame nested in an enclosing entry on
 // its thread is not one frame (Atomic.kt, "Nesting"): a store the enclosing

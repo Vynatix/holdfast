@@ -7,7 +7,7 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.StoreInternalApi
 
 /**
- * Middleware over a whole tree (`Root.middlewares`): the same three hooks as
+ * Middleware over a whole tree (`tree.middlewares`): the same three hooks as
  * a store's [Middleware], each with the [StoreNode] of the leaf whose
  * transaction it is — every transaction of every leaf, attached now or
  * later, on the blocking and the suspending paths alike, always outermost
@@ -17,7 +17,7 @@ import com.vynatix.holdfast.StoreInternalApi
  * `onTransactionStarted` or `onTransactionCompleted` aborts that leaf's
  * transaction as a store middleware's throw does — inside a frame, the whole
  * frame. Inbound bridge writes, a keyed store's transactions before its
- * factory returned, and the root's own value settles are never seen.
+ * factory returned, and a tree value's own settles are never seen.
  *
  * The `@StoreInternalApi` `invokeOn*` members are how the tree's adapters
  * (and `:holdfast-testing`'s recorder) reach the protected hooks.

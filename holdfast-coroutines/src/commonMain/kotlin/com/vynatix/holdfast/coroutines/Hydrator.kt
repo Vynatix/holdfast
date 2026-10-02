@@ -304,8 +304,9 @@ fun Store<*>.hydratorOrNull(): Hydrator<*>? {
  * failure is thrown once all have run, the others added to it as suppressed.
  * A cancellation stops at once.
  *
- * Until issue #21's tree brings `hydrateAll()`, this is how an app hydrates
- * several stores at boot.
+ * This hydrates an explicit list of stores; for a store and its declared
+ * children, `store.tree.hydrateAll()` drives the whole subtree and reports
+ * each store's outcome.
  *
  * Experimental (issue #20, R8).
  */

@@ -66,7 +66,7 @@ class StoreTestScope internal constructor(
         }
     private val barriers = BarrierRegistry()
 
-    /** The tracked trees (`trackTree`), unwound at teardown after the leaf handles. */
+    /** The tracked trees (`track(tree)`), unwound at teardown after the store handles. */
     internal val treeFixtures = TreeFixtures()
     private val openTransactions = OpenTransactionRegistry()
     private val awaitings = AwaitingRegistry()
@@ -170,11 +170,12 @@ class StoreTestScope internal constructor(
      * removes every tracked handle's entries from the global
      * [PendingErrorRegistry], restores each tracked store's clock binding
      * (`Store.bindClock`) to what it was when the store was first tracked,
-     * unwinds each tracked tree (`trackTree`: its membership listener
-     * disposed, the tree reset as one frame with the tree recorder still
-     * installed — skipped when opted out or the root is disposed, and when a
-     * leaf is still held by an entry teardown cannot wait out after it
-     * re-probed the leaves for a bounded time, about a second of real time,
+     * unwinds each tracked tree (`track(tree)`: its membership listener
+     * disposed, the receiver and its subtree reset as one frame with the
+     * tree recorder still installed — skipped when opted out or the receiver
+     * is disposed, and when a store is still held by an entry teardown
+     * cannot wait out after it re-probed the members for a bounded time,
+     * about a second of real time,
      * so a transient holder is waited out but a `suspendAction` body parked
      * in un-joined work is not — then that recorder removed), and clears
      * the handle registry. When [bodyAlreadyFailed] is `false`, also

@@ -19,8 +19,8 @@ fun rememberDisposable(make: () -> Disposable): Disposable
 
 `collectAsState` accepts any observable state: a declared state
 (`val x by state { … }`), a `derived` state, core's experimental
-`derivedState`/`merged` states, or a tree root's `App.value`
-(`App.value.collectAsState()`, experimental: one recomposition per settle
+`derivedState`/`merged` states, or a store's tree value
+(`App.tree.collectAsState()`, experimental: one recomposition per settle
 of the tree, so a two-store frame recomposes once). A commit that recomputes a merged value
 recomposes its readers once, and one that leaves the value as it was does
 not recompose them. A `computed { }` state has no commits to observe, so

@@ -42,7 +42,7 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>   // base { }; refresh { } adopt { }
 fun Store<*>.hydratorOrNull(): Hydrator<*>?
 suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
-suspend fun Root.hydrateAll(node: StoreNode = this, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport
+suspend fun StoreTree.hydrateAll(node: StoreNode = this.node, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport
 class Hydrator<V : Store<V>> {
     val state: State<Hydration>                      // Detached / Seeded / Hydrated / Failed(cause)
     val current: Hydration
@@ -58,17 +58,19 @@ fun overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int = 8192)
 class OverlayException : IllegalStateException       // what the overlay reports; val key: String
 ```
 
-`Root.hydrateAll(node)` (experimental, issue #21) hydrates a typed tree: every
-live leaf under `node`, in `lockOrderKey` order, has its hydrator `hydrate`d
-(on `scope`, else its own `Store.scope`) so every seed has committed and every
-refresh is launched before the next leaf's turn; then each is `awaitSettled`
-in the same order, the refreshes running concurrently. The `HydrateAllReport`
-holds one entry per leaf — the `Hydration` it settled to, `NoHydrator`, or
-`Disposed` — with `failed`, `skipped` and `isHealthy`; a leaf's failure (a
-throwing `base { }`, a rejecting middleware, a failed refresh) is reported,
-never thrown. Inside an action, frame or suspending body of any store it fails
-before touching a leaf; a cancellation propagates while the refreshes already
-launched keep running.
+`store.tree.hydrateAll(node)` (experimental, issue #21) hydrates a store tree:
+every live store of the subtree at `node` — the store's own hydrator included
+when `node` is its own, the default — is listed after its declared children are
+materialized and, in `lockOrderKey` order (the parent first whenever it was
+constructed before its children, as children built on first use are), has its hydrator `hydrate`d (on `scope`, else its own
+`Store.scope`) so every seed has committed and every refresh is launched before
+the next store's turn; then each is `awaitSettled` in the same order, the
+refreshes running concurrently. The `HydrateAllReport` holds one entry per
+store — the `Hydration` it settled to, `NoHydrator`, or `Disposed` — with
+`failed`, `skipped` and `isHealthy`; a store's failure (a throwing `base { }`, a
+rejecting middleware, a failed refresh) is reported, never thrown. Inside an
+action, frame or suspending body of any store it fails before touching a store;
+a cancellation propagates while the refreshes already launched keep running.
 
 `asStateFlow`'s `scope` parameter defaults to the owning store's
 `Store.scope` (per-store override → `bindToScope` binding →
