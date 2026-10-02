@@ -170,19 +170,20 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.getOrCreateKeyed(
 
 /**
  * The leaf name for [key] through the branch's key codec (`toString()`
- * without one), computed once per `create`/`getOrCreate`. A refusal is
- * rethrown with the branch context every other tree error carries — the root
- * and branch names only, never the key or the codec's own message, which may
- * quote it (so the codec's exception is not attached either).
+ * without one), computed once per `create`/`getOrCreate`. A refusal —
+ * whatever exception the codec or `toString()` threw: a lookup table's
+ * `Map.getValue` throws a `NoSuchElementException` quoting the key, and a
+ * `ClassCastException` or `NullPointerException` may — is rethrown with the
+ * branch context every other tree error carries: the root and branch names
+ * only, never the key or the codec's own message, which may quote it (so
+ * the codec's exception is not attached either).
  */
 private fun <K : Any> KeyedBranch<K, *>.leafNameOrRefuse(key: K): String =
     try {
         leafNameFor(key)
-    } catch (failure: IllegalArgumentException) {
-        keyNamingError(failure)
-    } catch (failure: IllegalStateException) {
-        keyNamingError(failure)
-    } catch (failure: UnsupportedOperationException) {
+    } catch (
+        @Suppress("TooGenericExceptionCaught") failure: Exception, // Whatever naming throws may quote the key.
+    ) {
         keyNamingError(failure)
     }
 

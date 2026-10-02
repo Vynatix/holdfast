@@ -63,6 +63,15 @@ internal class RootValue(
     /** Attach (`true`) and detach events that arrived before the node existed; replayed once it does. */
     private var pendingEdges: MutableList<Pair<Store<*>, Boolean>>? = ArrayList()
 
+    /**
+     * Set by [dispose], under [edgeLock]: a membership event delivered after
+     * it is refused. One can be — its fanout listed [listener] before
+     * `registry.close()` dropped the listeners (a keyed `create` whose attach
+     * fanout the dispose overtook: its promotion then fails and its `abandon`
+     * tells an empty listener list) — and a disposed root must hold no store.
+     */
+    private var disposed = false
+
     private val listener =
         object : LeafMembershipListener() {
             override fun onAttached(leaf: LeafNode) {
@@ -91,18 +100,24 @@ internal class RootValue(
     ) {
         val node =
             synchronized(edgeLock) {
+                // Disposed: nothing is recorded, nothing is followed, from now on.
+                if (disposed) return
                 bookkeeping()
-                if (store == null) return
-                val pending = pendingEdges
-                if (pending != null) {
-                    // Before the node exists: a leave cancels the leaf's pending
-                    // join (and holds no reference to a store that is gone).
-                    if (added) pending += store to true else pending.removeAll { it.first === store }
-                    return
-                }
-                nodeRef.value
+                if (store != null) nodeOrRecord(store, added) else null
             }
         if (node != null && store != null) applyEdge(node, store, added)
+    }
+
+    /** Under [edgeLock]: the node to apply the edge to, or `null` once it was recorded for the node's replay. */
+    private fun nodeOrRecord(
+        store: Store<*>,
+        added: Boolean,
+    ): DerivedStateNode<TreeSnapshot>? {
+        val pending = pendingEdges ?: return nodeRef.value
+        // Before the node exists: a leave cancels the leaf's pending
+        // join (and holds no reference to a store that is gone).
+        if (added) pending += store to true else pending.removeAll { it.first === store }
+        return null
     }
 
     private fun applyEdge(
@@ -199,18 +214,21 @@ internal class RootValue(
     /**
      * `Root.dispose()`: stop following, drop the value's observers, dispose
      * the host, and hold no leaf store — the registry told no `onDetached`
-     * for them, and one disposed later is never heard of here. The last
-     * tree stays readable (its leaf captures keep what their reuse needs).
+     * for them, one disposed later is never heard of here, and a membership
+     * event still in flight (see [disposed]) is refused. The last tree stays
+     * readable (its leaf captures keep what their reuse needs).
      */
     fun dispose() {
+        // First, so that no event lands in the bookkeeping once it is cleared.
+        synchronized(edgeLock) {
+            disposed = true
+            leafStores.clear()
+            pendingEdges = null
+        }
         val node = nodeRef.value
         node?.dispose()
         node?.backing?.shutdownSilently()
         host.dispose()
-        synchronized(edgeLock) {
-            leafStores.clear()
-            pendingEdges = null
-        }
     }
 }
 
