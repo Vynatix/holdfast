@@ -7,6 +7,7 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.tree.KeyedDisposal
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
 import com.vynatix.holdfast.tree.store
@@ -37,8 +38,8 @@ private class SmFeedStore(
 private class SmParent(
     remote: suspend () -> List<String> = { listOf("fetched") },
 ) : Store<SmParent>() {
-    val a by store { SmLeafStore() }
-    val b by store { SmLeafStore() }
+    val a by store(onParentDispose = KeyedDisposal.Release) { SmLeafStore() }
+    val b by store(onParentDispose = KeyedDisposal.Release) { SmLeafStore() }
     val feed by store { SmFeedStore(remote) }
 }
 

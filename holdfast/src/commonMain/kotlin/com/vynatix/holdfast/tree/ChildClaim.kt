@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
 import com.vynatix.holdfast.platform.currentThreadId
@@ -76,10 +77,11 @@ internal fun claimOrJoin(
 ): Any? {
     var answer: Any? = null
     var won = false
+    val owned = ownedBy(entry, candidate, built)
     while (answer == null && !won) {
         val seen =
             entry.registry.lock.withLock {
-                seenLocked(entry).also { if (it == Seen.Free) claimLocked(entry, candidate) }
+                seenLocked(entry).also { if (it == Seen.Free) claimLocked(entry, candidate, owned) }
             }
         when (seen) {
             is Seen.Produced -> answer = seen.child
@@ -98,12 +100,29 @@ internal fun claimOrJoin(
 private fun claimLocked(
     entry: ChildEntry,
     candidate: Candidate,
+    owned: List<Store<*>>,
 ) {
     check(entry.attachLock.tryAcquire()) { "${entry.label}: a free entry's attach lock was held" }
+    entry.owned = owned
     entry.attachingThreadId = currentThreadId()
     entry.attaching = candidate.produced
     entry.phase = ChildEntry.Phase.Constructing
     entry.node = candidate.node
+}
+
+/**
+ * The stores of [candidate] that [entry] will own once its claim wins: those
+ * its run built on this thread, when the declaration disposes with its
+ * owner. A store that existed before the run (a shared one the lambda
+ * returned) is never owned, and neither is one a racing thread built meanwhile.
+ */
+private fun ownedBy(
+    entry: ChildEntry,
+    candidate: Candidate,
+    built: RunBuilt,
+): List<Store<*>> {
+    if (entry.onParentDispose != KeyedDisposal.Dispose) return emptyList()
+    return candidate.stores.filter(built::builtDuringRun)
 }
 
 /**

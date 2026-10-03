@@ -27,12 +27,12 @@ private class TreeValueAncestryLeafStore : Store<TreeValueAncestryLeafStore>() {
 /** A mid-tree store: a child of a parent, with a child of its own. */
 private class TreeValueAncestryMidStore : Store<TreeValueAncestryMidStore>() {
     val m by state { 0 }
-    val leaf by store { TreeValueAncestryLeafStore() }
+    val leaf by store(onParentDispose = KeyedDisposal.Release) { TreeValueAncestryLeafStore() }
 }
 
 private class TreeValueAncestryTopStore : Store<TreeValueAncestryTopStore>() {
     val g by state { 0 }
-    val mid by store { TreeValueAncestryMidStore() }
+    val mid by store(onParentDispose = KeyedDisposal.Release) { TreeValueAncestryMidStore() }
 }
 
 /** Grafts whatever [next] holds — a store whose own subtree may already be materialized — under a key. */
@@ -44,7 +44,7 @@ private class TreeValueAncestryGraftStore : Store<TreeValueAncestryGraftStore>()
 /** Runs [onDisposed] from its `onDispose()`: after it is disposed, before its tree dispose ran. */
 private class TreeValueAncestryDisposingChildStore : Store<TreeValueAncestryDisposingChildStore>() {
     var onDisposed: () -> Unit = {}
-    val leaf by store { TreeValueAncestryLeafStore() }
+    val leaf by store(onParentDispose = KeyedDisposal.Release) { TreeValueAncestryLeafStore() }
 
     override fun onDispose() {
         onDisposed()
@@ -52,11 +52,11 @@ private class TreeValueAncestryDisposingChildStore : Store<TreeValueAncestryDisp
 }
 
 private class TreeValueAncestryMiddleStore : Store<TreeValueAncestryMiddleStore>() {
-    val child by store { TreeValueAncestryDisposingChildStore() }
+    val child by store(onParentDispose = KeyedDisposal.Release) { TreeValueAncestryDisposingChildStore() }
 }
 
 private class TreeValueAncestryGrandStore : Store<TreeValueAncestryGrandStore>() {
-    val middle by store { TreeValueAncestryMiddleStore() }
+    val middle by store(onParentDispose = KeyedDisposal.Release) { TreeValueAncestryMiddleStore() }
 }
 
 /** Declares, as its child, a store another parent releases during the test. */

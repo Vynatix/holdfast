@@ -27,7 +27,7 @@ private class DisposedKeyedStore(
 
 private class DisposedProbeParent : Store<DisposedProbeParent>() {
     val n by state { 0 }
-    val leaf by store { DisposedLeafStore() }
+    val leaf by store(onParentDispose = KeyedDisposal.Release) { DisposedLeafStore() }
     val keyed by keyed<String, DisposedKeyedStore> { DisposedKeyedStore(it) }
 
     /** The probe's node, read before it is disposed. */

@@ -16,8 +16,10 @@ import kotlinx.atomicfu.locks.synchronized
 // its `transactionLock`). The store leaves its parent; its children are
 // released as subtree roots and keep working; every ancestor's listeners
 // hear each leaf that left their subtree; the rings are re-synced; the
-// store's own tree value stops. Last, the keyed stores the store's keyed
-// branches OWN (`KeyedDisposal.Dispose`, the default) are disposed — never
+// store's own tree value stops. Last, the child stores the store's
+// declarations OWN (`KeyedDisposal.Dispose`, the default: every store a
+// keyed factory built, and each `store { }` child or `group { }` member its
+// winning lambda run built, `ChildEntry.owned`) are disposed — never
 // under a tree lock and never inside a step: through the settle scope open
 // on this thread (so inside an action or frame they dispose when that entry
 // settles, after it released every lock), else handed to the post-commit
@@ -50,7 +52,7 @@ internal class StoreDetach(
     private var released: List<LeafNode> = emptyList()
     private var descendants: Map<LeafNode, List<LeafNode>> = emptyMap()
 
-    /** The released keyed stores whose branch owns them (`KeyedDisposal.Dispose`): disposed last (step 9). */
+    /** The released child stores their declaration owns (`KeyedDisposal.Dispose`): disposed last (step 9). */
     private var owned: List<Store<*>> = emptyList()
 
     fun run() {
@@ -66,8 +68,8 @@ internal class StoreDetach(
         step("dispose the tree value") { disposeValue() }
         step("re-sync the released subtrees' middleware") { resyncReleased() }
         node.attachment = null
-        // Step 9: the keyed stores this store's branches owned, each already a released subtree root.
-        step("dispose the owned keyed stores") { if (owned.isNotEmpty()) OwnedKeyedDisposeTask(owned).dispatch(store) }
+        // Step 9: the child stores this store's declarations owned, each already a released subtree root.
+        step("dispose the owned child stores") { if (owned.isNotEmpty()) OwnedChildDisposeTask(owned).dispatch(store) }
         reportFailures()
     }
 
@@ -112,7 +114,14 @@ internal class StoreDetach(
             endBumps(targets)
         }
         val registry = attachment.registry
-        owned = released.mapNotNull { child -> child.store?.takeIf { child.isOwnedByKeyedBranchOf(registry) } }
+        // Read after the close: no claim can change an entry's `owned` any more.
+        val ownedByDeclarations = registry.declaredEntries().flatMap { it.owned }
+        owned =
+            released.mapNotNull { child ->
+                child.store?.takeIf { store ->
+                    child.isOwnedByKeyedBranchOf(registry) || ownedByDeclarations.any { it === store }
+                }
+            }
         descendants =
             released.associateWith { child ->
                 runCatching {
@@ -231,11 +240,11 @@ private fun LeafNode.isOwnedByKeyedBranchOf(registry: ChildRegistry): Boolean {
 }
 
 /**
- * The keyed stores a disposed store's branches owned, disposed once — when
- * the settle scope the parent's dispose ran in settles, or by whoever runs
- * it directly. `Store.dispose()` never throws and is idempotent.
+ * The child stores a disposed store's declarations owned, disposed once —
+ * when the settle scope the parent's dispose ran in settles, or by whoever
+ * runs it directly. `Store.dispose()` never throws and is idempotent.
  */
-internal class OwnedKeyedDisposeTask(
+internal class OwnedChildDisposeTask(
     private val stores: List<Store<*>>,
 ) : SettleTask {
     override val settleRank: Int get() = 0

@@ -88,10 +88,9 @@ internal fun storesOf(produced: Any?): List<Store<*>> =
 /** Run the lambda (the entry was free to claim when this began), then claim and attach, or join the winner. */
 private fun materializeRacing(entry: ChildEntry): Any {
     entry.owner.checkNotDisposed()
-    val built = RunBuilt.mark()
     // Phase 1: the lambda, holding nothing of the tree's; marked on this thread only.
     val pins = GroupScope()
-    val output = InitializerGraph.Process.runMarked(entry) { entry.runLambda(pins) }
+    val (output, built) = RunBuilt.during { InitializerGraph.Process.runMarked(entry) { entry.runLambda(pins) } }
     var prepared = false
     val candidate =
         try {
@@ -153,6 +152,7 @@ private fun attachClaimed(
             if (!reachedLive && entry.phase == ChildEntry.Phase.Constructing) {
                 entry.phase = ChildEntry.Phase.Declared
                 entry.node = null
+                entry.owned = emptyList()
             }
             entry.attachingThreadId = null
             entry.attaching = null

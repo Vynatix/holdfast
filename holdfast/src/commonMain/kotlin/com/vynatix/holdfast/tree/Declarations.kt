@@ -60,6 +60,7 @@ internal class KeyedSpec<K : Any, S : Store<S>>
 class StoreDeclaration<S : Any> internal constructor(
     private val declaring: Store<*>,
     private val named: String?,
+    private val onParentDispose: KeyedDisposal,
     private val child: () -> S,
 ) : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, S>> {
     override fun provideDelegate(
@@ -69,7 +70,7 @@ class StoreDeclaration<S : Any> internal constructor(
         val origin = if (named != null) NameOrigin.Pinned else NameOrigin.Property
         val entry =
             declareChild(declaring, thisRef, property) { attachment ->
-                ChildEntry(attachment, named ?: property.name, origin, ChildEntry.Kind.Store, child)
+                ChildEntry(attachment, named ?: property.name, origin, ChildEntry.Kind.Store, child, onParentDispose)
             }
         return ReadOnlyProperty { _, _ ->
             thisRef.checkNotDisposed()
@@ -90,6 +91,7 @@ class StoreDeclaration<S : Any> internal constructor(
 class GroupDeclaration internal constructor(
     private val declaring: Store<*>,
     private val named: String?,
+    private val onParentDispose: KeyedDisposal,
     private val members: GroupScope.() -> List<Store<*>>,
 ) : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, Branch>> {
     override fun provideDelegate(
@@ -99,7 +101,7 @@ class GroupDeclaration internal constructor(
         val origin = if (named != null) NameOrigin.Pinned else NameOrigin.Property
         val entry =
             declareChild(declaring, thisRef, property) { attachment ->
-                ChildEntry(attachment, named ?: property.name, origin, ChildEntry.Kind.Group, members)
+                ChildEntry(attachment, named ?: property.name, origin, ChildEntry.Kind.Group, members, onParentDispose)
             }
         return ReadOnlyProperty { _, _ ->
             thisRef.checkNotDisposed()

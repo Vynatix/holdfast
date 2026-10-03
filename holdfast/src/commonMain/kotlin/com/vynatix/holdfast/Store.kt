@@ -21,12 +21,15 @@ import kotlin.uuid.Uuid
 private val storeLockOrderKeyGen = atomic(0L)
 
 /**
- * The [Store.lockOrderKey] of the store constructed last in this process.
- * Read before running user code that may build stores (a tree child lambda,
- * a keyed factory): a store it returns whose key is greater was constructed
- * during that run.
+ * The next [Store.lockOrderKey], noted in every construction log open on
+ * this thread ([ConstructionLog]): how the tree tells the stores a child
+ * lambda or keyed factory built apart from those that existed before it ran.
  */
-internal fun lastStoreLockOrderKey(): Long = storeLockOrderKeyGen.value
+private fun nextStoreLockOrderKey(): Long {
+    val key = storeLockOrderKeyGen.incrementAndGet()
+    ConstructionLog.noteConstructed(key)
+    return key
+}
 
 /**
  * One store's middleware hooks, pre-bound to a frame root transaction. Handed
@@ -103,7 +106,7 @@ abstract class Store<Self : Store<Self>> {
      * deadlock-safe global ordering across any combination of vaults.
      */
     @StoreInternalApi
-    val lockOrderKey: Long = storeLockOrderKeyGen.incrementAndGet()
+    val lockOrderKey: Long = nextStoreLockOrderKey()
 
     /**
      * Volatile backing field for the scope bound via [bindToScope]. `null` until the

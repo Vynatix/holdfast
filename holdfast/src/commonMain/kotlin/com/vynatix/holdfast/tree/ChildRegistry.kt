@@ -71,6 +71,12 @@ internal class ChildEntry(
     val kind: Kind,
     /** `() -> Any` for [Kind.Store]; `GroupScope.() -> List<Store<*>>` for [Kind.Group]; unused for [Kind.Keyed]. */
     val lambda: Any,
+    /**
+     * For [Kind.Store]/[Kind.Group]: whether the owner's dispose disposes the
+     * stores the winning run built ([owned]) or only releases them. A keyed
+     * branch keeps its own (`KeyedBranch.onParentDispose`).
+     */
+    val onParentDispose: KeyedDisposal = KeyedDisposal.Release,
 ) : CycleStep {
     /** The declaring store, captured while it is live (its tree state drops it on dispose). */
     val owner: Store<*> = checkNotNull(ownerAttachment.storeRef) { "a child declared on a disposed store" }
@@ -118,6 +124,17 @@ internal class ChildEntry(
     /** What the delegate answers — the child (`S`), the [Branch] or the [KeyedBranch] — written LAST. */
     @kotlin.concurrent.Volatile
     var produced: Any? = null
+
+    /**
+     * The stores the claiming run built on its own thread ([RunBuilt]) —
+     * the child, or the group members it constructed — when
+     * [onParentDispose] is [KeyedDisposal.Dispose]; empty otherwise. Written
+     * by the claim under the registry lock, cleared there when the claim
+     * fails back to Declared; never cleared by [ChildRegistry.close], so the
+     * owner's dispose reads it after closing (step 9 of `StoreDetach`).
+     */
+    @kotlin.concurrent.Volatile
+    var owned: List<Store<*>> = emptyList()
 
     /** [node] while the child is attached: what path resolution and listings read. */
     val liveNode: StoreNode? get() = node.takeIf { phase == Phase.Live }

@@ -18,11 +18,11 @@ private class RcLeafStore : Store<RcLeafStore>() {
 /** A mid-tree store: one child of its own. */
 private class RcMidStore : Store<RcMidStore>() {
     val n by state { 0 }
-    val leaf by store(named = "a") { RcLeafStore() }
+    val leaf by store(named = "a", onParentDispose = KeyedDisposal.Release) { RcLeafStore() }
 }
 
 private class RcRingParent : Store<RcRingParent>() {
-    val mid by store { RcMidStore() }
+    val mid by store(onParentDispose = KeyedDisposal.Release) { RcMidStore() }
 }
 
 /** A consumer middleware of the leaf itself: never part of any tree ring. */

@@ -44,7 +44,7 @@ private class TmKeyedStore(
 
 private class TmParent : Store<TmParent>() {
     val own by state { 0 }
-    val pair by group { listOf(TmAStore() named "a", TmBStore() named "b") }
+    val pair by group(onParentDispose = KeyedDisposal.Release) { listOf(TmAStore() named "a", TmBStore() named "b") }
     val keyed by keyed<String, TmKeyedStore> { TmKeyedStore(it) }
 
     val a: TmLeafStore get() = pair.stores[0] as TmLeafStore
@@ -62,12 +62,12 @@ private class TmParent : Store<TmParent>() {
 /** A mid-tree store: a store of its own, one child of its own. */
 private class TmMidStore : Store<TmMidStore>() {
     val n by state { 0 }
-    val leaf by store(named = "deep") { TmLeafStore() }
+    val leaf by store(named = "deep", onParentDispose = KeyedDisposal.Release) { TmLeafStore() }
 }
 
 private class TmGrandParent : Store<TmGrandParent>() {
-    val mid by store { TmMidStore() }
-    val side by store { TmLeafStore() }
+    val mid by store(onParentDispose = KeyedDisposal.Release) { TmMidStore() }
+    val side by store(onParentDispose = KeyedDisposal.Release) { TmLeafStore() }
 }
 
 /** The tree middleware [this] installed itself (`tree.middlewares` on its own handle). */

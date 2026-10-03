@@ -54,8 +54,8 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.raceToAttach(
  * else holds.
  */
 internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.runFactory(key: K): Pair<S, RunBuilt> {
-    val built = RunBuilt.mark()
-    val produced = InitializerGraph.Process.runMarked(KeyedStep(this, key)) { factory(key) }
+    val (produced, built) =
+        RunBuilt.during { InitializerGraph.Process.runMarked(KeyedStep(this, key)) { factory(key) } }
     var verified = false
     try {
         check(storeClass.isInstance(produced)) {

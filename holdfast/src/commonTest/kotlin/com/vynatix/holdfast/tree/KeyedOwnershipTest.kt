@@ -68,18 +68,14 @@ class KeyedOwnershipTest {
     }
 
     @Test
-    fun storeAndGroupChildrenAreStillReleasedNotDisposed() {
+    fun storeAndGroupChildrenTheirLambdasBuiltAreDisposedLikeKeyedStores() {
         val parent = KoParent()
         val child = parent.child
         val member = parent.members.stores.single()
         parent.owned.create("a")
         parent.dispose()
-        assertFalse(child.isDisposed, "a store { } child is released")
-        assertFalse(member.isDisposed, "a group member is released")
-        assertNull(child.tree.parent)
-        assertNull(member.tree.parent)
-        child.dispose()
-        member.dispose()
+        assertTrue(child.isDisposed, "a store { } child its lambda built is disposed")
+        assertTrue(member.isDisposed, "so is a group member its lambda built")
     }
 
     @Test

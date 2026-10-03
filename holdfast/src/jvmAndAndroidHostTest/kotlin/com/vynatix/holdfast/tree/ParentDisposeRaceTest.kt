@@ -23,18 +23,18 @@ private class PdrDeepStore : Store<PdrDeepStore>() {
 }
 
 private class PdrMidStore : Store<PdrMidStore>() {
-    val deep by store { PdrDeepStore() }
+    val deep by store(onParentDispose = KeyedDisposal.Release) { PdrDeepStore() }
 
     /** Created after the value above was seeded: a deep attach the value hears announced. */
     val late by keyed<Int, PdrDeepStore> { PdrDeepStore() }
 }
 
 private class PdrGrandStore : Store<PdrGrandStore>() {
-    val mid by store { PdrMidStore() }
+    val mid by store(onParentDispose = KeyedDisposal.Release) { PdrMidStore() }
 }
 
 private class PdrTopStore : Store<PdrTopStore>() {
-    val grand by store { PdrGrandStore() }
+    val grand by store(onParentDispose = KeyedDisposal.Release) { PdrGrandStore() }
 }
 
 /** Counts every `onDetached` per leaf, by node identity. */

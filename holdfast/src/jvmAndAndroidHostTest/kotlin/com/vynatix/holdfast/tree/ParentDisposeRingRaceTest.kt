@@ -19,8 +19,8 @@ private class RrLeafStore : Store<RrLeafStore>() {
 }
 
 private class RrParent : Store<RrParent>() {
-    val a by store { RrLeafStore() }
-    val b by store { RrLeafStore() }
+    val a by store(onParentDispose = KeyedDisposal.Release) { RrLeafStore() }
+    val b by store(onParentDispose = KeyedDisposal.Release) { RrLeafStore() }
 }
 
 /** A store that declares, as its child, a store another parent just released. */
@@ -40,11 +40,11 @@ private class RrMiddleStore : Store<RrMiddleStore>() {
 }
 
 private class RrDisposing : Store<RrDisposing>() {
-    val middle by store { RrMiddleStore() }
+    val middle by store(onParentDispose = KeyedDisposal.Release) { RrMiddleStore() }
 }
 
 private class RrTop : Store<RrTop>() {
-    val disposing by store { RrDisposing() }
+    val disposing by store(onParentDispose = KeyedDisposal.Release) { RrDisposing() }
 }
 
 private class RrTrace : TreeMiddleware() {

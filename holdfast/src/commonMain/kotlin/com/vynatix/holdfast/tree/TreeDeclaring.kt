@@ -22,9 +22,11 @@ import com.vynatix.holdfast.StoreInternalApi
 //
 // A store has one parent: a second declaration of a store that already has
 // one fails when it materializes, naming both parents. Disposing a store
-// releases its `store { }` and `group { }` children as subtree roots; its
-// keyed branches dispose the stores their factories built (unless declared
-// with `onParentDispose = KeyedDisposal.Release`).
+// disposes the children its declarations BUILT — the store a `store { }`
+// lambda constructed, the stores a `group { }` lambda constructed, every
+// store a keyed factory built — and releases the rest (a store that existed
+// before the lambda ran) as subtree roots; any declaration can opt out with
+// `onParentDispose = KeyedDisposal.Release`.
 
 /**
  * Declare one child of this store: `val settings by store { SettingsStore() }`.
@@ -45,6 +47,17 @@ import com.vynatix.holdfast.StoreInternalApi
  * (the lambda never runs again), so a disposed child stays reachable, and
  * uncollectable, for as long as the parent is. Released children of a
  * disposed parent, and keyed stores, hold no such reference.
+ *
+ * When this store disposes, [onParentDispose] decides what happens to the
+ * child: [KeyedDisposal.Dispose] (the default) disposes it when the lambda
+ * BUILT it — constructed it on the reading thread while it ran, e.g.
+ * `store { SettingsStore() }` or an inline `object : NodeStore()` — and
+ * releases it as a subtree root that keeps working when it existed before
+ * the lambda ran (`store { sharedSettings }`); [KeyedDisposal.Release]
+ * always releases it. The dispose happens where an owned keyed store's
+ * does: when the entry this store's dispose ran in settles, never under a
+ * lock of the tree. A lambda that builds the child on another thread hands
+ * over a store it did not build here: it is released, never disposed.
  *
  * The lambda is ordinary code run on the READING thread, holding no lock or
  * latch of the tree's — only what that thread already holds. So:
@@ -75,10 +88,11 @@ import com.vynatix.holdfast.StoreInternalApi
 @ExperimentalStoreApi
 fun <S : Any> Store<*>.store(
     named: String? = null,
+    onParentDispose: KeyedDisposal = KeyedDisposal.Dispose,
     child: () -> S,
 ): StoreDeclaration<S> {
     require(named == null || named.isNotEmpty()) { "a pinned child name must not be empty" }
-    return StoreDeclaration(this, named, child)
+    return StoreDeclaration(this, named, onParentDispose, child)
 }
 
 /**
@@ -93,8 +107,11 @@ fun <S : Any> Store<*>.store(
  * property (`NameOrigin.Property`; `verifyPersistedNames` flags it when a
  * store under it persists).
  *
- * Disposing this store RELEASES the group's stores as subtree roots (they
- * keep working); compare [keyed], whose stores are disposed with it.
+ * When this store disposes, [onParentDispose] decides: [KeyedDisposal.Dispose]
+ * (the default) disposes each listed store the lambda BUILT (constructed on
+ * the reading thread while it ran) and releases each one that existed before
+ * as a subtree root that keeps working; [KeyedDisposal.Release] releases
+ * them all. See [store].
  *
  * The lambda is ordinary code run on the READING thread, holding no lock or
  * latch of the tree's — only what that thread already holds. So:
@@ -125,10 +142,11 @@ fun <S : Any> Store<*>.store(
 @ExperimentalStoreApi
 fun Store<*>.group(
     named: String? = null,
+    onParentDispose: KeyedDisposal = KeyedDisposal.Dispose,
     members: GroupScope.() -> List<Store<*>>,
 ): GroupDeclaration {
     require(named == null || named.isNotEmpty()) { "a pinned group name must not be empty" }
-    return GroupDeclaration(this, named, members)
+    return GroupDeclaration(this, named, onParentDispose, members)
 }
 
 /**
@@ -175,15 +193,20 @@ internal fun <K : Any, S : Store<S>> Store<*>.keyedDeclaration(spec: KeyedSpec<K
 }
 
 /**
- * What a keyed branch's stores become when the store declaring the branch
- * disposes ([keyed]'s `onParentDispose`).
+ * What a declaration's child stores become when the store declaring them
+ * disposes (the `onParentDispose` of [keyed], [store] and [group]).
  */
 @ExperimentalStoreApi
 enum class KeyedDisposal {
-    /** Dispose every live store of the branch: the branch's factory built each one. The default. */
+    /**
+     * Dispose the stores the declaration built: every live store of a keyed
+     * branch (its factory built each one); a `store { }` child or a
+     * `group { }` member its lambda constructed. A store that existed before
+     * the lambda ran is released instead. The default.
+     */
     Dispose,
 
-    /** Release every live store of the branch as a subtree root that keeps working. */
+    /** Release every live store of the declaration as a subtree root that keeps working. */
     Release,
 }
 

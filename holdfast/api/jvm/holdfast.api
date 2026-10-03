@@ -1066,11 +1066,11 @@ public final class com/vynatix/holdfast/tree/TreeAccessKt {
 }
 
 public final class com/vynatix/holdfast/tree/TreeDeclaringKt {
-	public static final fun group (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
-	public static synthetic fun group$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
+	public static final fun group (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lcom/vynatix/holdfast/tree/KeyedDisposal;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
+	public static synthetic fun group$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lcom/vynatix/holdfast/tree/KeyedDisposal;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/GroupDeclaration;
 	public static final fun keyedDeclaration (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/tree/KeyedSpec;)Lcom/vynatix/holdfast/tree/KeyedDeclaration;
-	public static final fun store (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
-	public static synthetic fun store$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
+	public static final fun store (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lcom/vynatix/holdfast/tree/KeyedDisposal;Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
+	public static synthetic fun store$default (Lcom/vynatix/holdfast/Store;Ljava/lang/String;Lcom/vynatix/holdfast/tree/KeyedDisposal;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lcom/vynatix/holdfast/tree/StoreDeclaration;
 }
 
 public abstract interface class com/vynatix/holdfast/tree/TreeIdentified {

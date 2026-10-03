@@ -12,6 +12,7 @@ import com.vynatix.holdfast.testing.concurrency.parallel
 import com.vynatix.holdfast.testing.matcher.shouldBeError
 import com.vynatix.holdfast.testing.matcher.shouldCommitTogether
 import com.vynatix.holdfast.testing.matcher.shouldNotCommitTogether
+import com.vynatix.holdfast.tree.KeyedDisposal
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
 import com.vynatix.holdfast.tree.group
@@ -57,7 +58,7 @@ private class FxPlainStore : Store<FxPlainStore>() {
 }
 
 private class FxMidStore : Store<FxMidStore>() {
-    val leaf by store { FxPlainStore() }
+    val leaf by store(onParentDispose = KeyedDisposal.Release) { FxPlainStore() }
 }
 
 private class FxRoot : Store<FxRoot>() {
