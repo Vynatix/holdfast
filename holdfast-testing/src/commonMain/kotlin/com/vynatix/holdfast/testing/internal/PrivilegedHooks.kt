@@ -21,7 +21,6 @@ import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.tags
 import com.vynatix.holdfast.tree.LeafMembershipListener
 import com.vynatix.holdfast.tree.LeafNode
-import com.vynatix.holdfast.tree.Root
 import com.vynatix.holdfast.tree.internalAddMembershipListener
 import kotlin.time.Clock
 
@@ -345,17 +344,20 @@ internal object PrivilegedHooks {
     ): Boolean = store.internalRemoveMiddleware(middleware)
 
     /**
-     * Hear of every store that joins [root] from now on (the tree fixture's
-     * auto-tracking): [onAttached] runs once per joining store, under the
-     * attaching caller's locks, so it may only record and track — never open
-     * an action, frame, reset or restore.
+     * Hear of every store that joins [store]'s subtree from now on (the tree
+     * fixture's auto-tracking; maps onto core's
+     * `Store<*>.internalAddMembershipListener`): [onAttached] runs once per
+     * joining store — a `store { }` child read for the first time, a group,
+     * a keyed store created, a subtree grafted — under the attaching
+     * caller's locks, so it may only record and track — never open an
+     * action, frame, reset or restore, nor materialize a child.
      */
     @OptIn(ExperimentalStoreApi::class)
     fun addMembershipListener(
-        root: Root,
+        store: Store<*>,
         onAttached: (LeafNode) -> Unit,
     ): Disposable =
-        root.internalAddMembershipListener(
+        store.internalAddMembershipListener(
             object : LeafMembershipListener() {
                 override fun onAttached(leaf: LeafNode) = onAttached(leaf)
             },

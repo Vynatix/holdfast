@@ -94,6 +94,14 @@ class StoreLock {
         return tryAcquire()
     }
 
+    /**
+     * Whether the calling thread holds this lock right now (at any depth).
+     * On wasmJs, where every caller reports thread id `0`, this reads `true`
+     * whenever the lock is held — correct there, as that target is
+     * single-threaded.
+     */
+    internal fun isHeldByCurrentThread(): Boolean = locked && ownerThreadId == currentThreadId()
+
     fun release() {
         val currentThreadId = currentThreadId()
         check(locked && ownerThreadId == currentThreadId) {

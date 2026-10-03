@@ -7,9 +7,10 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
-import com.vynatix.holdfast.tree.Root
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.TreeMiddleware
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -33,14 +34,12 @@ private class SmFeedStore(
         }
 }
 
-private class SmRoot(
+private class SmParent(
     remote: suspend () -> List<String> = { listOf("fetched") },
-) : Root("sm") {
-    val a = SmLeafStore()
-    val b = SmLeafStore()
-    val feed = SmFeedStore(remote)
-    val pair by branch(a, b).named(a, "a").named(b, "b")
-    val feeds by branch(feed).named(feed, "feed")
+) : Store<SmParent>() {
+    val a by store { SmLeafStore() }
+    val b by store { SmLeafStore() }
+    val feed by store { SmFeedStore(remote) }
 }
 
 private class SmTrace(
@@ -77,13 +76,14 @@ class TreeMiddlewareSuspendTest {
     @Test
     fun theTraceIsIdenticalAcrossActionAndSuspendAction() =
         runBlocking {
-            val root = SmRoot()
+            val parent = SmParent()
+            val a = parent.a
             val trace = SmTrace()
-            root.middlewares(trace)
-            root.a action { n mutate 1 }
+            parent.tree.middlewares(trace)
+            a action { n mutate 1 }
             val blocking = trace.events.toList()
             trace.events.clear()
-            root.a
+            a
                 .suspendAction {
                     n mutate 2
                     yield()
@@ -95,24 +95,28 @@ class TreeMiddlewareSuspendTest {
     @Test
     fun aHookThrowIsIsolatedOnTheSuspendPath() =
         runBlocking {
-            val root = SmRoot()
+            val parent = SmParent()
+            val a = parent.a
             val trace = SmTrace(throwInStarted = true)
-            root.middlewares(trace)
-            root.a.suspendAction { n mutate 5 }.getOrThrow()
-            assertEquals(5, root.a.n.value, "a run-caught hook does not abort the suspending body")
+            parent.tree.middlewares(trace)
+            a.suspendAction { n mutate 5 }.getOrThrow()
+            assertEquals(5, a.n.value, "a run-caught hook does not abort the suspending body")
             assertEquals(listOf("started a", "completed a"), trace.events)
         }
 
     @Test
     fun removeAndDisposeDuringAParkedSuspendActionStillDeliverTheTerminalHook() =
         runBlocking {
-            val root = SmRoot()
+            val parent = SmParent()
+            val tree = parent.tree
+            val a = parent.a
+            val b = parent.b
             val trace = SmTrace()
-            root.middlewares(trace)
+            tree.middlewares(trace)
             val gate = CompletableDeferred<Unit>()
             val parked =
                 launch {
-                    root.a
+                    a
                         .suspendAction {
                             gate.await()
                             n mutate 1
@@ -120,38 +124,44 @@ class TreeMiddlewareSuspendTest {
                 }
             yield()
             assertEquals(listOf("started a"), trace.events)
-            assertTrue(root.removeMiddleware(trace), "a suspending holder is not a blocking owner: removal is allowed")
+            assertTrue(tree.removeMiddleware(trace), "a suspending holder is not a blocking owner: removal is allowed")
             gate.complete(Unit)
             parked.join()
             assertEquals(listOf("started a", "completed a"), trace.events)
 
             val second = SmTrace()
-            root.middlewares(second)
+            tree.middlewares(second)
             val gate2 = CompletableDeferred<Unit>()
             val parked2 =
                 launch {
-                    root.b
+                    b
                         .suspendAction {
                             gate2.await()
                             n mutate 1
                         }.getOrThrow()
                 }
             yield()
-            root.dispose()
+            parent.dispose()
             gate2.complete(Unit)
             parked2.join()
-            assertEquals(listOf("started b", "completed b"), second.events, "the observation it started still ends after dispose")
+            // The terminal hook still reaches the released child's node, whose
+            // name the parent's dispose reset to its class-derived one.
+            assertEquals(listOf("started b", "completed SmLeaf"), second.events, "the observation it started still ends after dispose")
+            b action { }
+            assertEquals(2, second.events.size, "the parent's dispose retired its ring on the released child")
         }
 
     @Test
     fun suspendAtomicRootsAndInFrameSuspendActionSavepointsAreSeen() =
         runBlocking {
-            val root = SmRoot()
+            val parent = SmParent()
+            val a = parent.a
+            val b = parent.b
             val trace = SmTrace()
-            root.middlewares(trace)
-            suspendAtomic(root.a, root.b) {
-                root.a { n mutate 1 }
-                root.b.suspendAction { n mutate 2 }.getOrThrow()
+            parent.tree.middlewares(trace)
+            suspendAtomic(a, b) {
+                a { n mutate 1 }
+                b.suspendAction { n mutate 2 }.getOrThrow()
             }.getOrThrow()
             assertEquals(
                 listOf("started a", "started b", "started b", "completed b", "completed a", "completed b"),
@@ -163,13 +173,14 @@ class TreeMiddlewareSuspendTest {
     @Test
     fun hydrationSeedAndAdoptAreSeenWithTheirNode() =
         runBlocking {
-            val root = SmRoot()
+            val parent = SmParent()
+            val feed = parent.feed
             val trace = SmTrace()
-            root.middlewares(trace)
-            root.feed.hydration.hydrate(this)
-            root.feed.hydration.awaitSettled()
-            assertEquals(listOf("fetched"), root.feed.items.value)
+            parent.tree.middlewares(trace)
+            feed.hydration.hydrate(this)
+            feed.hydration.awaitSettled()
+            assertEquals(listOf("fetched"), feed.items.value)
             assertTrue(trace.events.count { it == "started feed" } >= 2, "the seed and the adopt: ${trace.events}")
-            assertTrue(trace.events.none { "a" == it.substringAfter(' ') || "b" == it.substringAfter(' ') })
+            assertTrue(trace.events.all { it.substringAfter(' ') == "feed" }, "no other member ran anything: ${trace.events}")
         }
 }

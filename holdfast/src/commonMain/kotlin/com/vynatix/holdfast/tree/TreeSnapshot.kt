@@ -9,12 +9,13 @@ import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreSnapshot
+import com.vynatix.holdfast.internalAttachment
 import com.vynatix.holdfast.observableBacking
 
 /**
- * One consistent capture of a subtree (`Root.snapshot(node, scope)`): the
- * tree of nodes as of the capture, with a [StoreSnapshot] at every live
- * leaf, all read from ONE lock-free cut across the leaves — a commit or an
+ * One consistent capture of a subtree (`store.tree.snapshot(node, scope)`):
+ * the tree of nodes as of the capture, with a [StoreSnapshot] at every live
+ * store, all read from ONE lock-free cut across the stores — a commit or an
  * `atomic`/`suspendAtomic` frame applying while it was taken is seen whole
  * or not at all, never a mix (`captureConsistent`, the cut issue #20 R9
  * built for this; a participant a frame joined as a savepoint applies with
@@ -24,16 +25,23 @@ import com.vynatix.holdfast.observableBacking
  * thread.
  *
  * Reads are by identity: [get] with a node gives the subtree's capture,
- * [get]/[entry] with a state give that state's value as the leaf's
+ * [get]/[entry] with a state give that state's value as the store's
  * [StoreSnapshot] would (`null`/`Redacted` for a `Secret` state outside
  * `SnapshotScope.Raw`), for a store still in the tree, or one since
  * disposed, whose capture this tree holds. Membership is decided when the
  * capture is taken: a state of a store outside the captured subtree reads
- * `null` (`Absent`) — a member of the root then, disposed since or not, or
- * one that joined since and is a member now; one of a store that never
- * belonged to this root, or that no store declared, throws. A subtree
- * taken with [get] is scoped the same way: it reads only what lies under
- * its own node, even though the whole capture it came from holds more.
+ * `null` (`Absent`) — one anywhere under the receiver (the store whose
+ * `tree` took it) then, disposed since or not, or one that joined since;
+ * one of the receiver's ancestor, of an unrelated store, or that no store
+ * declared, throws. A subtree taken with [get] is scoped the same way: it
+ * reads only what lies under its own node, even though the whole capture
+ * it came from holds more.
+ *
+ * A capture keeps the structure it was taken from: [name], the nodes'
+ * parents and [get] read the structure AS CAPTURED, so a kept snapshot
+ * reads, encodes and reports the same paths whatever disposed since (a
+ * store whose parent disposed becomes a class-named subtree root on its
+ * live node, never in a capture).
  *
  * Equality is full value equality — names, structure, scope and every
  * leaf's [StoreSnapshot] value equality, `Secret`, `Remote` and codec-less
@@ -45,7 +53,17 @@ import com.vynatix.holdfast.observableBacking
 class TreeSnapshot internal constructor(
     /** The node this capture is of: the subtree's top. */
     val node: StoreNode,
-    /** The captures of the live children, in tree order (a branch's leaves, then what is declared under it). */
+    /**
+     * The node's name when this capture was taken, or the decoded segment;
+     * `node.name` can differ once an ancestor disposed and the node became a
+     * subtree root.
+     */
+    val name: String,
+    /**
+     * The captures of the live children, in tree order: a store's declared
+     * children in declaration order, a group's members, a keyed branch's
+     * entries in creation order.
+     */
     val children: List<TreeSnapshot>,
     /** The scope the capture was taken in. */
     val scope: SnapshotScope,
@@ -53,7 +71,7 @@ class TreeSnapshot internal constructor(
     internal val storeKey: Long,
     internal val index: TreeIndex,
     /**
-     * Tree paths a decoded text named that this root does not declare — a
+     * Tree paths a decoded text named that the receiver does not declare — a
      * diagnostic naming nodes, the one place the tree hands out strings.
      * Empty for a capture.
      */
@@ -61,24 +79,38 @@ class TreeSnapshot internal constructor(
 ) {
     init {
         index.register(this)
+        for (child in children) index.parentOf[child.node] = node
     }
 
-    /** Whether [node] is a [LeafNode], so this capture holds one store's [StoreSnapshot]. */
-    val isLeaf: Boolean get() = node is LeafNode
+    /** Whether this capture holds one store's [StoreSnapshot] (a store node that captured something). */
+    val hasStore: Boolean get() = leaf != null
 
-    /** The capture of the subtree at [node], or `null` when [node] does not lie under this capture's own node. */
-    operator fun get(node: StoreNode): TreeSnapshot? = index.byNode[node]?.takeIf { node.isUnder(this.node) }
+    /** Whether this capture has no children. */
+    val isLeaf: Boolean get() = children.isEmpty()
+
+    /**
+     * The capture of the subtree at [node], or `null` when [node] does not
+     * lie under this capture's own node in the captured structure.
+     */
+    operator fun get(node: StoreNode): TreeSnapshot? {
+        val capture = index.byNode[node] ?: return null
+        return capture.takeIf { index.isUnderCaptured(node, this.node) }
+    }
 
     /**
      * [state]'s captured value: `Present` as the leaf's [StoreSnapshot.entry]
      * reads it, `Redacted` for a `Secret` state outside `SnapshotScope.Raw`,
      * `Absent` for a state this capture holds no value for — including one
-     * of a store outside the captured subtree: a member of the root when the
-     * capture was taken (disposed since or not), or one that is a member now.
+     * of a store outside the captured subtree: one under the receiver when
+     * the capture was taken (disposed since or not), or one under it now.
      *
      * @throws IllegalArgumentException for a state no store declared (a
-     *   `computed { }`, a `derivedState`), or one of a store that was not a
-     *   member of this root when the capture was taken and is not one now.
+     *   `computed { }`, a `derivedState`), or one of a store that was not
+     *   under the receiver when the capture was taken and is not now —
+     *   while the receiver is live. Once the receiver is disposed (its
+     *   children released, so "under it now" no longer means anything),
+     *   such a read answers `Absent` instead, as does one of a store that
+     *   joined the receiver's subtree since the capture.
      */
     fun <T : Any> entry(state: State<T>): SnapshotEntry<T> {
         val declaration = state.observableBacking()?.declaration
@@ -93,19 +125,22 @@ class TreeSnapshot internal constructor(
             // The store sits at a leaf of this capture: it reads inside this
             // subtree (disposed since or not), and is Absent outside it.
             leafCapture != null -> {
-                val capture = leafCapture.leaf?.takeIf { leafCapture.node.isUnder(node) }
+                val capture = leafCapture.leaf?.takeIf { index.isUnderCaptured(leafCapture.node, node) }
                 capture?.entry(state) ?: SnapshotEntry.Absent
             }
-            // A member of the root when the capture was taken, outside the
-            // captured subtree: Absent, whether or not it has disposed since
-            // (the registry no longer knows a disposed one; the capture does).
+            // Under the receiver when the capture was taken, outside the
+            // captured subtree: Absent, whether or not it has disposed since.
             storeKey in index.memberKeys -> SnapshotEntry.Absent
-            // A store the capture never listed: one read under the registry
-            // lock — a member now (joined since), or a root disposing
-            // meanwhile, answers Absent, never a throw.
+            // A store the capture never listed: under the receiver now (joined
+            // since), or the receiver disposed meanwhile, answers Absent; a
+            // slot read, which never throws.
             else -> {
-                require(node.root.registry.isMemberOrClosed(store)) {
-                    "${declaration.qualifiedName} belongs to a store that is not a member of root '${node.root.name}'"
+                // Live links first, then the receiver's state: the receiver's
+                // dispose flips isDisposed before it releases any child, so a
+                // child read as "not under" here is seen with the owner gone.
+                val underNow = store.isUnderNow(index.ownerNode)
+                require(underNow || index.ownerNode.store?.isDisposed != false) {
+                    "${declaration.qualifiedName} belongs to a store that is not under '${index.ownerNode.name}'"
                 }
                 SnapshotEntry.Absent
             }
@@ -124,7 +159,7 @@ class TreeSnapshot internal constructor(
      * (a decoded keyed leaf answers its own branch's).
      */
     fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K> {
-        if (!branch.isUnder(node) && !node.isUnder(branch)) return emptySet()
+        if (!index.isUnderCaptured(branch, node) && !index.isUnderCaptured(node, branch)) return emptySet()
         @Suppress("UNCHECKED_CAST")
         return (index.pendingKeys[branch] ?: emptySet()) as Set<K>
     }
@@ -134,17 +169,18 @@ class TreeSnapshot internal constructor(
 
     /**
      * The `holdfast.tree` v1 wire text of this capture: the subtree's path
-     * from its root, the node structure by name, and at every leaf its
+     * from the receiver (whose own name is never written), the node
+     * structure by name, and at every store node its
      * store's `holdfast.store` v1 body verbatim (`StoreSnapshot.encode()`:
      * a `Secret` state is written `null`, a codec-less state and a `Remote`
      * one unless [includeRemote] are left out). A keyed branch without a
      * key codec is left out and listed under `skipped`. Under
-     * `SnapshotScope.UserAuthored` a leaf named by its class refuses (T6:
+     * `SnapshotScope.UserAuthored` a group leaf named by its class refuses (T6:
      * that name would change with the class; pin it), and a capture under a
      * keyed branch without a key codec refuses (its path would have to
      * spell the key). The text nests at most 64 container levels — two per
      * branch level plus a leaf's body, about 28 branch levels — the cap the
-     * snapshot writer and reader share with [Root.decode]. Runs the leaves'
+     * snapshot writer and reader share with `StoreTree.decode`. Runs the leaves'
      * codecs, no other user code.
      *
      * @throws IllegalStateException for a class-named leaf under
@@ -170,5 +206,11 @@ class TreeSnapshot internal constructor(
     override fun hashCode(): Int = treeHash(this)
 
     /** Names only, never a value. */
-    override fun toString(): String = "TreeSnapshot(${node.name}: ${children.joinToString { it.node.name }})"
+    override fun toString(): String = "TreeSnapshot($name: ${children.joinToString { it.name }})"
+}
+
+/** Whether this store sits at [ownerNode] or under it now, over the live links (a slot read: never throws). */
+private fun Store<*>.isUnderNow(ownerNode: LeafNode): Boolean {
+    val node = internalAttachment(treeMembershipKey)?.node ?: return false
+    return node.isUnder(ownerNode)
 }

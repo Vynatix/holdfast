@@ -7,7 +7,7 @@ import kotlinx.atomicfu.locks.synchronized
 
 // Store-level derivation edges (issue #20 plan PR 15, decision D21): a derived
 // state that follows whole stores, not listed states — what issue #21's
-// `Root.value` recomputes on, over branches whose stores attach and detach at
+// the store tree's value (`StoreTree`) recomputes on, over branches whose stores attach and detach at
 // runtime. `DerivedStateNode.addSourceStore(store)` adds an edge: from then
 // on, every change of that store recomputes the node, settling once per
 // outermost entry (SettleScope.kt) like any source change — so a two-store

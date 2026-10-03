@@ -194,26 +194,58 @@ internal fun computeWriteMessage(
         "sources explain, and it commits in a transaction of its own right after the compute returns. Fix: " +
         "make the write in the action that changes the sources, or compute that value as a derived state too."
 
-internal fun sameThreadCycleMessage(decl: StateDeclaration<*>): String {
-    val stack = NoWriteRegion.stack()
-    val from = stack.indexOf(decl)
-    val chain = (if (from >= 0) stack.subList(from, stack.size) else listOf(decl)) + decl
-    return "State initializer cycle: ${chain.render()}. Each initializer reads the next state before its own " +
-        "value exists, so no order of evaluation can finish. Break the cycle: give one of these states an " +
-        "initial value that does not read the others, and compute the rest from it (computed { } or derived(...))."
+/**
+ * The cycle message for [latched], which this thread already runs — holding
+ * its latch, marked through `InitializerGraph.runMarked`, or (a state
+ * `reset()` re-runs) re-running it. Rendered from the steps this thread runs
+ * ([MaterializingStack]), else — for a reset re-run, which neither holds nor
+ * marks — from its stack of running initializers. Keeps the
+ * "State initializer cycle" wording when every element is a state
+ * declaration; a chain through tree child declarations is a
+ * "Materialization cycle".
+ */
+internal fun sameThreadCycleMessage(latched: CycleStep): String {
+    val held = MaterializingStack.stack()
+    val stack: List<CycleStep> = if (held.any { it == latched }) held else NoWriteRegion.stack()
+    val from = stack.indexOfFirst { it == latched }
+    val chain = (if (from >= 0) stack.subList(from, stack.size) else listOf(latched)) + latched
+    if (chain.all { it is StateDeclaration<*> }) {
+        return "State initializer cycle: ${chain.render()}. Each initializer reads the next state before its own " +
+            "value exists, so no order of evaluation can finish. Break the cycle: give one of these states an " +
+            "initial value that does not read the others, and compute the rest from it (computed { } or derived(...))."
+    }
+    return "Materialization cycle: ${chain.render()}. Each step needs the next one before its own result " +
+        "exists, so no order of evaluation can finish. Break the cycle: a state initializer must not read a " +
+        "child store it is materialized by, and a child declaration's lambda must not read the declaration " +
+        "itself (directly or through a state initializer)."
 }
 
-internal fun crossThreadCycleMessage(cycle: List<StateDeclaration<*>>): String {
+internal fun crossThreadCycleMessage(cycle: List<Latched>): String {
     val mine = cycle.last()
-    val stack = NoWriteRegion.stack()
-    val from = stack.indexOf(mine)
-    val here = if (from >= 0) stack.subList(from, stack.size) else listOf(mine)
+    val stack = MaterializingStack.stack()
+    val from = stack.indexOfFirst { it == mine }
+    val here: List<CycleStep> = if (from >= 0) stack.subList(from, stack.size) else listOf(mine)
     val chain = here + cycle
-    return "State initializer cycle across threads: ${chain.render()}. This thread is initializing " +
-        "${here.last().qualifiedName} and needs ${cycle.first().qualifiedName}, which another thread is " +
-        "initializing and which needs ${mine.qualifiedName} — waiting would deadlock both threads. Break the " +
-        "cycle: give one of these states an initial value that does not read the others, and compute the rest " +
-        "from it (computed { } or derived(...))."
+    if (chain.all { it is StateDeclaration<*> }) {
+        return "State initializer cycle across threads: ${chain.render()}. This thread is initializing " +
+            "${here.last().nameForCycle()} and needs ${cycle.first().nameForCycle()}, which another thread is " +
+            "initializing and which needs ${mine.nameForCycle()} — waiting would deadlock both threads. Break the " +
+            "cycle: give one of these states an initial value that does not read the others, and compute the rest " +
+            "from it (computed { } or derived(...))."
+    }
+    return "Materialization cycle across threads: ${chain.render()}. This thread is running " +
+        "${here.last().describeForCycle()} and needs ${cycle.first().describeForCycle()}, which another thread is " +
+        "running and which needs ${mine.describeForCycle()} — waiting would deadlock both threads. Break the " +
+        "cycle: a state initializer must not read a child store it is materialized by, and a child declaration's " +
+        "lambda must not read the declaration itself (directly or through a state initializer)."
 }
 
-private fun List<StateDeclaration<*>>.render(): String = joinToString(" → ") { it.qualifiedName }
+/** A state declaration by its qualified name (the historical wording); anything else by its own description. */
+private fun CycleStep.nameForCycle(): String = (this as? StateDeclaration<*>)?.qualifiedName ?: describeForCycle()
+
+private fun List<CycleStep>.render(): String =
+    if (all { it is StateDeclaration<*> }) {
+        joinToString(" → ") { it.nameForCycle() }
+    } else {
+        joinToString(" → ") { it.describeForCycle() }
+    }

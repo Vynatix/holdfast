@@ -1,17 +1,20 @@
-@file:OptIn(ExperimentalStoreApi::class)
+@file:OptIn(ExperimentalStoreApi::class, StoreInternalApi::class)
 
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.completesWithin
 import com.vynatix.holdfast.daemon
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 private class ObjSettingsStore : Store<ObjSettingsStore>() {
@@ -22,101 +25,149 @@ private class ObjSettingsStore : Store<ObjSettingsStore>() {
     }
 }
 
-/** The documented shape: an `object` root with per-object leaves. Built on first access. */
-private object ObjApp : Root("app") {
-    val settings by branch(ObjSettingsStore())
-    val session by branch(ObjSettingsStore()).named("session")
+private class ObjThreadStore(
+    val id: String,
+) : Store<ObjThreadStore>()
+
+/** How many child stores [ObjApp]'s declarations constructed. */
+private val objChildConstructions = AtomicInteger()
+
+/** The documented shape: an `object` parent whose children are built on first need. */
+private object ObjApp : Store<ObjApp>() {
+    val settings by store {
+        objChildConstructions.incrementAndGet()
+        ObjSettingsStore()
+    }
+    val session by store(named = "session-v2") {
+        objChildConstructions.incrementAndGet()
+        ObjSettingsStore()
+    }
+    val threads by keyed<String, ObjThreadStore> { ObjThreadStore(it) }
 }
 
-// A forward `under` reference — `val inner by branch(x, under = outer)` above
-// `val outer by branch(y)` — does not compile ("Variable 'outer' must be
-// initialized"), on the JVM and on Kotlin/Native alike, so no runtime test
-// pins it: declare `under` targets textually above their users.
+/** A child object that reads its PARENT (never the parent's delegate for itself) while it initializes. */
+private object ObjRefParent : Store<ObjRefParent>() {
+    val leaf by store { ObjRefLeaf }
+}
+
+private object ObjRefLeaf : Store<ObjRefLeaf>() {
+    val n by state { 0 }
+    val parentName: String = ObjRefParent.tree.node.name
+}
+
+/** A child object that reads the parent's delegate FOR ITSELF while it initializes: a materialization cycle. */
+private object ObjSelfApp : Store<ObjSelfApp>() {
+    val settings by store { ObjSelfLeaf }
+}
+
+private object ObjSelfLeaf : Store<ObjSelfLeaf>() {
+    val back: Store<*> = ObjSelfApp.settings
+}
 
 private val doubleListed = ObjSettingsStore()
 
-private object ObjDoubleListing : Root() {
-    val a by branch(doubleListed)
-    val b by branch(doubleListed)
+private object ObjDoubleListing : Store<ObjDoubleListing>() {
+    val a by store { doubleListed }
+    val b by store { doubleListed }
 }
 
-/** A leaf `object` that reads its root's delegate while its own class initializes. */
-private object ObjRootOfSelfTouching : Root("self") {
-    val leaf by branch(ObjSelfTouching)
-}
-
-private object ObjSelfTouching : Store<ObjSelfTouching>() {
-    val n by state { 0 }
-    val parentBranch: Branch = ObjRootOfSelfTouching.leaf
-}
-
-private val slowRootGate = CountDownLatch(1)
+private val slowParentGate = CountDownLatch(1)
 
 /** Parks inside its initializer until the test releases it. */
-private object ObjSlowRoot : Root("slow") {
-    val leaf by branch(ObjSettingsStore())
+private object ObjSlowParent : Store<ObjSlowParent>() {
+    val leaf by store { ObjSettingsStore() }
 
     init {
-        slowRootGate.await()
+        slowParentGate.await()
     }
 }
 
-/** A leaf object whose initializer needs the root: initialized on another thread, it waits for the root's initializer. */
+/** A child object whose initializer needs the parent: initialized on another thread, it waits for the parent's initializer. */
 private object ObjLateLeaf : Store<ObjLateLeaf>() {
     val n by state { 0 }
-    val rootName: String = ObjSlowRoot.name
+    val parentName: String = ObjSlowParent.tree.node.name
 }
 
-/** Object roots follow JVM class-initialization rules; the tree adds nothing to them, so these pin what a consumer sees. */
+/**
+ * Object parents follow JVM class-initialization rules; the tree adds
+ * nothing to them but its lazy child declarations, so these pin what a
+ * consumer sees. Each object is touched by one test only (an object's
+ * initialization happens once per process).
+ */
 class ObjectInitOrderTest {
     @Test
-    fun anObjectRootBuildsItsTreeOnFirstAccessAndRunsNoLeafInitializer() {
-        val settingsStore = ObjApp.settings.stores.single() as ObjSettingsStore
-        assertEquals(0, settingsStore.initializerRuns)
-        assertEquals(listOf("settings", "session"), ObjApp.nodes.filter { it is Branch }.map { it.name })
-        assertEquals("app", ObjApp.name)
+    fun anObjectParentDeclaresItsChildrenOnFirstAccessAndRunsNoChildCode() {
+        // Declared, not materialized: the registry lists only the keyed branch, and no child was constructed.
+        val registry = ObjApp.treeAttachment().registry
+        assertEquals(listOf<StoreNode>(ObjApp.threads), registry.liveChildNodes())
+        assertEquals(0, objChildConstructions.get())
+
+        val settings = ObjApp.settings
+        assertEquals(1, objChildConstructions.get(), "reading a delegate materializes that child only")
+        assertEquals(0, settings.initializerRuns, "materializing a child runs none of its state initializers")
+        assertEquals(listOf("settings", "threads"), registry.liveChildNodes().map { it.name })
+
+        // `children` materializes every declared child that has not run yet.
+        assertEquals(listOf("settings", "session-v2", "threads"), ObjApp.tree.children().map { it.name })
+        assertEquals(2, objChildConstructions.get())
+        assertEquals("ObjApp", ObjApp.tree.node.name)
     }
 
     @Test
-    fun aDoubleListingPoisonsTheObjectForTheProcess() {
-        val first = assertFailsWith<ExceptionInInitializerError> { ObjDoubleListing.a }
-        assertIs<IllegalStateException>(first.cause)
-        assertFailsWith<NoClassDefFoundError> { ObjDoubleListing.b }
+    fun aLeafObjectReferencingItsParentDuringInitIsFine() {
+        val leaf = ObjRefParent.leaf
+        assertSame(ObjRefLeaf, leaf)
+        assertEquals("ObjRefParent", ObjRefLeaf.parentName)
+        assertSame(ObjRefParent.tree.node, ObjRefLeaf.tree.parent)
+        assertEquals("leaf", ObjRefLeaf.tree.node.name)
     }
 
     @Test
-    fun aLeafObjectTouchingItsRootsDelegateDuringItsOwnInitializationFails() {
-        // Root first: its delegate lists the leaf object, whose initializer reads
-        // the root's delegate back — a class-init cycle the JVM resolves by
-        // handing the leaf a half-initialized root, whose delegate is null.
-        val error = assertFailsWith<ExceptionInInitializerError> { ObjRootOfSelfTouching.leaf }
-        assertIs<NullPointerException>(error.cause)
+    fun aLeafObjectReadingItsOwnDelegateOnTheParentFailsWhenTheParentIsTouchedFirst() {
+        // The parent first: its delegate's lambda initializes the leaf object, whose
+        // initializer reads that same delegate back — the latch the lambda runs under.
+        val error = assertFailsWith<ExceptionInInitializerError> { ObjSelfApp.settings }
+        val cause = assertIs<IllegalStateException>(error.cause)
+        assertTrue("child declaration 'ObjSelfApp.settings'" in cause.message!!, cause.message)
+        // The JVM poisons the leaf object for the process.
+        assertFailsWith<NoClassDefFoundError> { ObjSelfLeaf }
     }
 
     @Test
-    fun aLeafObjectInitializedOnAnotherThreadWhileTheRootInitializesCompletesOnlyWhenTheRootDoes() =
-        completesWithin(20, "a leaf object racing its root's initialization") {
-            val rootStarted = CountDownLatch(1)
-            val rootThread =
-                daemon("root-init") {
-                    rootStarted.countDown()
-                    ObjSlowRoot.leaf
+    fun aDoubleListingFailsTheSecondReadWithoutPoisoningTheObject() {
+        assertSame(doubleListed, ObjDoubleListing.a)
+        val error = assertFailsWith<IllegalStateException> { ObjDoubleListing.b }
+        assertTrue("already belongs to ObjDoubleListing/a" in error.message!!, error.message)
+        assertTrue("cannot also be declared under ObjDoubleListing/b" in error.message!!, error.message)
+        // A refusal at materialization, not at class initialization: the object keeps working.
+        assertSame(doubleListed, ObjDoubleListing.a)
+        assertFailsWith<IllegalStateException> { ObjDoubleListing.b }
+    }
+
+    @Test
+    fun aLeafObjectInitializedOnAnotherThreadWhileTheParentInitializesCompletesOnlyWhenTheParentDoes() =
+        completesWithin(20, "a leaf object racing its parent's initialization") {
+            val parentStarted = CountDownLatch(1)
+            val parentThread =
+                daemon("parent-init") {
+                    parentStarted.countDown()
+                    ObjSlowParent.leaf
                 }
-            rootStarted.await()
+            parentStarted.await()
             Thread.sleep(100)
             val leafDone = CountDownLatch(1)
             val leafThread =
                 daemon("leaf-init") {
-                    ObjLateLeaf.rootName
+                    ObjLateLeaf.parentName
                     leafDone.countDown()
                 }
-            // The JVM holds the leaf thread on the root's class-init lock.
-            assertTrue(!leafDone.await(300, TimeUnit.MILLISECONDS), "the leaf's initializer must wait for the root's")
-            assertTrue(rootThread.isAlive, "the root is still parked in its initializer")
-            slowRootGate.countDown()
-            rootThread.join()
-            assertTrue(leafDone.await(5, TimeUnit.SECONDS), "the leaf completes once the root has")
+            // The JVM holds the leaf thread on the parent's class-init lock.
+            assertTrue(!leafDone.await(300, TimeUnit.MILLISECONDS), "the leaf's initializer must wait for the parent's")
+            assertTrue(parentThread.isAlive, "the parent is still parked in its initializer")
+            slowParentGate.countDown()
+            parentThread.join()
+            assertTrue(leafDone.await(5, TimeUnit.SECONDS), "the leaf completes once the parent has")
             leafThread.join()
-            assertEquals("slow", ObjLateLeaf.rootName)
+            assertEquals("ObjSlowParent", ObjLateLeaf.parentName)
         }
 }

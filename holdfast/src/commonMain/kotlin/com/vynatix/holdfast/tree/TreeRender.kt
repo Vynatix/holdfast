@@ -6,8 +6,8 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StoreInternalApi
 
 /**
- * `TreeSnapshot.render()`: one line per node — name, kind, name origin —
- * with each leaf's values under it as its `StoreSnapshot.render()` prints
+ * `TreeSnapshot.render()`: one line per node — name (as captured), kind,
+ * name origin — with each store node's values under it, then its children, as its `StoreSnapshot.render()` prints
  * them (so a `Secret` value is `<redacted>`). Layout may change; for logs.
  */
 internal fun renderTree(tree: TreeSnapshot): String {
@@ -22,12 +22,12 @@ private fun renderNode(
     out: StringBuilder,
 ) {
     val indent = "  ".repeat(depth)
-    out.append('\n').append(indent).append(tree.node.name)
+    out.append('\n').append(indent).append(tree.name)
     out
         .append(" (")
         .append(kindOf(tree.node))
         .append(", ")
-        .append(originText(tree.node.nameOrigin))
+        .append(originText(tree.index.originOf(tree.node)))
         .append(')')
     tree.leaf
         ?.render()
@@ -39,7 +39,6 @@ private fun renderNode(
 
 internal fun kindOf(node: StoreNode): String =
     when (node) {
-        is Root -> "root"
         is Branch -> "branch"
         is KeyedBranch<*, *> -> "keyed"
         is LeafNode -> "leaf"

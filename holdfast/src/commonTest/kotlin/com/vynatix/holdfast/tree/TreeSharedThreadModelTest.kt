@@ -25,10 +25,10 @@ private class SharedCycle : Store<SharedCycle>() {
     val b: State<Int> by state<Int> { a.value + 1 }
 }
 
-private class SharedRoot : Root() {
+private class SharedApp : Store<SharedApp>() {
     val left = SharedLeft()
     val right = SharedRight()
-    val pair by branch(left, right)
+    val pair by group { listOf(left, right) }
 }
 
 /**
@@ -39,27 +39,28 @@ private class SharedRoot : Root() {
  */
 class TreeSharedThreadModelTest {
     @Test
-    fun aRootValueSettlesUnderTheSharedThreadIdModel() {
+    fun aTreeValueSettlesUnderTheSharedThreadIdModel() {
         val graph = InitializerGraph { 0L }
-        val root = SharedRoot()
+        val root = SharedApp()
         root.left.right = root.right
         root.left.initializerGraph = graph
         root.right.initializerGraph = graph
-        assertEquals(11, root.value.value[root.left.x])
+        val tree = root.tree
+        assertEquals(11, tree.value[root.left.x])
         root.right action { y mutate 20 }
-        assertEquals(20, root.value.value[root.right.y])
-        assertEquals(2, root.internalSettleCount)
+        assertEquals(20, tree.value[root.right.y])
+        assertEquals(2, tree.internalSettleCount, "the seed, then the one commit")
         assertEquals(0, graph.waitingCount)
     }
 
     @Test
     fun aCaptureUnderTheSharedThreadIdModelMaterializesAcrossStoresWithoutAFalseCycle() {
         val graph = InitializerGraph { 0L }
-        val root = SharedRoot()
+        val root = SharedApp()
         root.left.right = root.right
         root.left.initializerGraph = graph
         root.right.initializerGraph = graph
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         assertEquals(11, tree[root.left.x])
         assertEquals(10, tree[root.right.y])
         assertEquals(0, graph.waitingCount)
@@ -69,13 +70,13 @@ class TreeSharedThreadModelTest {
     fun aGenuineCycleStillThrowsInsteadOfHangingTheCapture() {
         val graph = InitializerGraph { 0L }
 
-        class CycleRoot : Root() {
+        class CycleApp : Store<CycleApp>() {
             val cycle = SharedCycle()
-            val leaf by branch(cycle)
+            val leaf by group { listOf(cycle) }
         }
-        val root = CycleRoot()
+        val root = CycleApp()
         root.cycle.initializerGraph = graph
-        assertFailsWith<IllegalStateException> { root.snapshot() }
+        assertFailsWith<IllegalStateException> { root.tree.snapshot() }
         assertEquals(0, graph.waitingCount)
     }
 }

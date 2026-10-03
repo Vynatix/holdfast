@@ -9,17 +9,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.TimeSource
 
-private class PerfLeafStore(
-    id: Int,
-    root: PerfRoot,
-) : Store<PerfLeafStore>(root.leaves.at(id)) {
+private class PerfLeafStore : Store<PerfLeafStore>() {
     val a by state { 0 }
     val b by state { "" }
     val c by state { 0L }
 }
 
-private class PerfRoot : Root() {
-    val leaves by keyed<Int, PerfLeafStore>()
+private class PerfApp : Store<PerfApp>() {
+    val leaves by keyed<Int, PerfLeafStore> { PerfLeafStore() }
 }
 
 private const val LEAVES = 16
@@ -36,12 +33,17 @@ private const val BUDGET_MS = 5_000L
 class TreeSnapshotPerformanceTest {
     @Test
     fun aThousandCapturesOfSixteenLeavesStayUnderBudget() {
-        val root = PerfRoot()
-        repeat(LEAVES) { i -> root.leaves.create(i) { PerfLeafStore(it, root) } }
-        root.snapshot()
+        val root = PerfApp()
+        repeat(LEAVES) { i -> root.leaves.create(i) }
+        root.tree.snapshot()
         val started = TimeSource.Monotonic.markNow()
         var captured = 0
-        repeat(CAPTURES) { captured += root.snapshot().children.size }
+        repeat(CAPTURES) {
+            captured +=
+                root.tree
+                    .snapshot()
+                    .children.size
+        }
         val elapsedMs = started.elapsedNow().inWholeMilliseconds
         assertEquals(CAPTURES, captured, "each capture holds the keyed branch")
         assertTrue(elapsedMs < BUDGET_MS, "$CAPTURES captures of $LEAVES leaves took ${elapsedMs}ms; budget ${BUDGET_MS}ms exceeded")

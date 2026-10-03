@@ -47,16 +47,16 @@ private class RsVaultStore : Store<RsVaultStore>() {
 
 private class RsThreadStore(
     id: String,
-    root: RsRoot,
-) : Store<RsThreadStore>(root.threads.at(id)) {
+) : Store<RsThreadStore>() {
     val title by state(codec = StringCodec) { "thread $id" }
 }
 
-private class RsRoot : Root("rs") {
+/** The receiver: named `Rs` by its class (minus `Store`), with no states of its own. */
+private class RsStore : Store<RsStore>() {
     val profile = RsProfileStore()
     val vault = RsVaultStore()
-    val main by branch(profile, vault)
-    val threads by keyed<String, RsThreadStore>()
+    val main by group { listOf(profile, vault) }
+    val threads by keyed<String, RsThreadStore> { RsThreadStore(it) }
 }
 
 /** Declares [RsProfileStore.visits] as text: its encoded leaf is corrupt for an RsProfileStore. */
@@ -65,17 +65,21 @@ private class RsProfileAsText : Store<RsProfileAsText>() {
     val visits by state(codec = StringCodec) { "many" }
 }
 
-private class RsProfileAsTextRoot : Root("rs") {
+/** Identified as `Rs`, the receiver identity of [RsStore] (its node name), so its texts decode there. */
+private class RsProfileAsTextApp :
+    Store<RsProfileAsTextApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "Rs"
+
     val profile = RsProfileAsText()
     val vault = RsVaultStore()
-    val main by branch(profile, vault).named(profile, "RsProfile")
-    val threads by keyed<String, RsThreadStore2>()
+    val main by group { listOf(profile named "RsProfile", vault) }
+    val threads by keyed<String, RsThreadStore2> { RsThreadStore2(it) }
 }
 
 private class RsThreadStore2(
     id: String,
-    root: RsProfileAsTextRoot,
-) : Store<RsThreadStore2>(root.threads.at(id)) {
+) : Store<RsThreadStore2>() {
     val title by state(codec = StringCodec) { "thread $id" }
 }
 
@@ -121,16 +125,23 @@ private class RsVersionedV1Store : Store<RsVersionedV1Store>() {
     val n by state(codec = IntCodec) { 0 }
 }
 
-private class RsVersionedRoot : Root("versioned") {
-    val a = RsVersionedStore()
-    val b = RsVersionedStore()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
+/** Two stores of one class: one pinned, the other as a `store { }` child, so neither name comes from the class. */
+private class RsVersionedApp :
+    Store<RsVersionedApp>(),
+    TreeIdentified {
+    override val treeId: String get() = "versioned-app"
+
+    val a by store { RsVersionedStore() }
+    val b by store { RsVersionedStore() }
 }
 
-private class RsVersionedV1Root : Root("versioned") {
-    val a = RsVersionedV1Store()
-    val b = RsVersionedV1Store()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
+private class RsVersionedV1App :
+    Store<RsVersionedV1App>(),
+    TreeIdentified {
+    override val treeId: String get() = "versioned-app"
+
+    val a by store { RsVersionedV1Store() }
+    val b by store { RsVersionedV1Store() }
 }
 
 /** A leaf whose `onTransactionStarted` disposes [victim], a participant whose frame root is already open. */
@@ -142,44 +153,44 @@ private class RsDisposingMiddleware<V : Store<V>>(
     }
 }
 
-/** T4 restore, T5: `Root.restore` puts a tree back as one frame, addressed by node. */
+/** T4 restore, T5: `tree.restore` puts a tree back as one frame, addressed by node. */
 class TreeRestoreTest {
-    private fun filled(): RsRoot {
-        val root = RsRoot()
+    private fun filled(): RsStore {
+        val root = RsStore()
         root.profile action {
             name mutate "ada"
             visits mutate 7
             secret mutate "s1"
         }
         root.vault action { pin mutate "4921" }
-        root.threads.create("t1") { RsThreadStore(it, root) } action { title mutate "first" }
+        root.threads.create("t1") action { title mutate "first" }
         return root
     }
 
     @Test
     fun aCapturedTreeRestoresInPlaceAsUndoInOneFrameWithOneTransactionPerLeaf() {
         val root = filled()
-        val before = root.snapshot()
+        val before = root.tree.snapshot()
         root.profile action { visits mutate 99 }
         root.vault action { pin mutate "0000" }
-        root[root.threads, "t1"]!! action { title mutate "changed" }
+        root.threads["t1"]!! action { title mutate "changed" }
         val profileLog = RsFrameLog<RsProfileStore>().also { root.profile.middlewares(it) }
         val vaultLog = RsFrameLog<RsVaultStore>().also { root.vault.middlewares(it) }
 
-        val result = root.restore(before)
+        val result = root.tree.restore(before)
         val report = assertIs<TransactionResult.Success<TreeRestoreReport>>(result).value
 
         assertEquals(7, root.profile.visits.value)
         assertEquals("4921", root.vault.pin.value)
-        assertEquals("first", root[root.threads, "t1"]!!.title.value)
-        assertEquals(before, root.snapshot(), "the tree holds the captured cut again, Secret included")
+        assertEquals("first", root.threads["t1"]!!.title.value)
+        assertEquals(before, root.tree.snapshot(), "the tree holds the captured cut again, Secret included")
         val frame = profileLog.completed.single()
         assertNotNull(frame)
         assertTrue(frame.startsWith("atomic-"), "each leaf's transaction is a root of the frame")
         assertEquals(listOf<String?>(frame), vaultLog.completed, "one frame id across the leaves")
         assertEquals(profileLog.started.single().first, vaultLog.started.single().first, "the frame's transaction id, shared")
-        assertEquals(3, report.perNode.size)
-        assertEquals(setOf("name", "visits", "secret"), report.perNode.getValue(root.nodeOf(root.profile)!!).restored)
+        assertEquals(4, report.perNode.size, "the receiver, both group leaves and the keyed leaf")
+        assertEquals(setOf("name", "visits", "secret"), report.perNode.getValue(root.tree.nodeOf(root.profile)!!).restored)
         assertEquals(emptyList<StoreNode>(), report.skipped)
         assertEquals(emptyList<StoreNode>(), report.rebound)
         assertEquals(frame, result.transaction.frameId)
@@ -189,32 +200,32 @@ class TreeRestoreTest {
     fun anEncryptedLeafRoundTripsWithoutDoubleEncryption() {
         val root = filled()
         val cipherText = root.vault.snapshot().rawValues["pin"]
-        val captured = root.snapshot()
+        val captured = root.tree.snapshot()
         root.vault action { pin mutate "0000" }
-        root.restore(captured).getOrThrow()
+        root.tree.restore(captured).getOrThrow()
         assertEquals("4921", root.vault.pin.value, "decrypting once yields the plaintext")
         assertEquals(cipherText, root.vault.snapshot().rawValues["pin"], "the ciphertext went back as captured")
 
-        val decoded = root.decode(captured.encode())
+        val decoded = root.tree.decode(captured.encode())
         root.vault action { pin mutate "1111" }
-        root.restore(decoded).getOrThrow()
+        root.tree.restore(decoded).getOrThrow()
         assertEquals("4921", root.vault.pin.value)
         assertEquals(cipherText, root.vault.snapshot().rawValues["pin"])
     }
 
     @Test
     fun oneCorruptLeafRollsEveryLeafBack() {
-        val source = RsProfileAsTextRoot()
+        val source = RsProfileAsTextApp()
         source.profile action { name mutate "ada" }
         source.vault action { pin mutate "4921" }
-        source.threads.create("t1") { RsThreadStore2(it, source) }
-        val text = source.snapshot().encode()
+        source.threads.create("t1")
+        val text = source.tree.snapshot().encode()
 
         val target = filled()
-        val decoded = target.decode(text)
+        val decoded = target.tree.decode(text)
         assertEquals(emptyList<List<String>>(), decoded.unresolvedPaths, "the same names: every path resolves")
         val vaultLog = RsFrameLog<RsVaultStore>().also { target.vault.middlewares(it) }
-        val result = target.restore(decoded)
+        val result = target.tree.restore(decoded)
 
         assertIs<TransactionResult.Error>(result)
         assertEquals(TransactionStatus.RolledBack, result.transaction.status)
@@ -228,17 +239,17 @@ class TreeRestoreTest {
     @Test
     fun nestingInsideAnActionOrAFrameIsRefusedWithATeachingMessage() {
         val root = filled()
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         var fromAction: Throwable? = null
-        root.profile.action { fromAction = runCatching { root.restore(tree) }.exceptionOrNull() }.getOrThrow()
+        root.profile.action { fromAction = runCatching { root.tree.restore(tree) }.exceptionOrNull() }.getOrThrow()
         val actionMessage = assertIs<IllegalStateException>(fromAction).message!!
         assertContains(actionMessage, "one outermost frame")
-        assertContains(actionMessage, "restore the tree of root 'rs'")
+        assertContains(actionMessage, "restore the tree under 'Rs'")
         var fromFrame: Throwable? = null
-        atomic(root.vault) { fromFrame = runCatching { root.restore(tree) }.exceptionOrNull() }.getOrThrow()
+        atomic(root.vault) { fromFrame = runCatching { root.tree.restore(tree) }.exceptionOrNull() }.getOrThrow()
         assertContains(assertIs<IllegalStateException>(fromFrame).message!!, "Call it from outside every entry")
         var fromObserver: Throwable? = null
-        val watch = root.profile.visits effect { if (this == 1) fromObserver = runCatching { root.restore(tree) }.exceptionOrNull() }
+        val watch = root.profile.visits effect { if (this == 1) fromObserver = runCatching { root.tree.restore(tree) }.exceptionOrNull() }
         root.profile action { visits mutate 1 }
         watch.dispose()
         assertIs<IllegalStateException>(fromObserver)
@@ -246,33 +257,41 @@ class TreeRestoreTest {
     }
 
     @Test
-    fun aTreeFromAnotherRootFailsFast() {
+    fun aTreeFromAnotherParentFailsFast() {
         val root = filled()
         val other = filled()
-        val failure = assertFailsWith<IllegalArgumentException> { root.restore(other.snapshot()) }
-        assertContains(failure.message!!, "captured from root 'rs'")
+        val failure = assertFailsWith<IllegalArgumentException> { root.tree.restore(other.tree.snapshot()) }
+        assertContains(failure.message!!, "captured under 'Rs'")
+        assertContains(failure.message!!, "restore it through the store it was captured from")
+        val t1 = root.threads["t1"]!!
+        val fromChild = assertFailsWith<IllegalArgumentException> { t1.tree.restore(root.tree.snapshot()) }
+        assertContains(fromChild.message!!, "is not under this store ('t1')", message = "a parent's capture is not under its child")
     }
 
     @Test
     fun aDisposedKeyedLeafIsSkippedUnderIgnoreUnknownAndFailsUnderStrict() {
         val root = filled()
-        val tree = root.snapshot()
-        val t1 = root[root.threads, "t1"]!!
-        val t1Leaf = root.nodeOf(t1)!!
+        val tree = root.tree.snapshot()
+        val t1 = root.threads["t1"]!!
+        val t1Leaf = root.tree.nodeOf(t1)!!
         t1.dispose()
         root.profile action { visits mutate 1 }
 
-        val report = root.restore(tree).getOrThrow()
+        val report = root.tree.restore(tree).getOrThrow()
         assertEquals(listOf(t1Leaf), report.skipped)
         assertEquals(7, root.profile.visits.value, "the live leaves were restored")
-        assertEquals(2, report.perNode.size)
+        assertEquals(3, report.perNode.size, "the receiver and both group leaves")
 
         root.profile action { visits mutate 2 }
-        val strict = root.restore(tree, RestorePolicy.Strict)
+        val strict = root.tree.restore(tree, RestorePolicy.Strict)
         assertIs<TransactionResult.Error>(strict)
         val rejected = assertIs<RestoreRejectedException>(strict.exception)
-        assertEquals("rs", rejected.message!!.substringAfter("Cannot restore ").substringBefore(" under"))
-        assertEquals(listOf("threads/t1"), rejected.issues.map { it.stateName }, "root-relative, like unresolvedPaths")
+        assertEquals("Rs", rejected.message!!.substringAfter("Cannot restore ").substringBefore(" under"))
+        assertEquals(
+            listOf("threads/t1"),
+            rejected.issues.map { it.stateName },
+            "receiver-relative and as captured, like unresolvedPaths",
+        )
         assertEquals(2, root.profile.visits.value, "nothing was touched")
         assertEquals(TransactionStatus.RolledBack, strict.transaction.status)
     }
@@ -280,59 +299,78 @@ class TreeRestoreTest {
     @Test
     fun strictFailsOnUnresolvedPaths() {
         val root = filled()
-        val text = root.snapshot().encode().replace(""""threads":""", """"other":{"kind":"branch","children":{}},"threads":""")
-        val decoded = root.decode(text)
+        val text =
+            root.tree
+                .snapshot()
+                .encode()
+                .replace(""""threads":""", """"other":{"kind":"branch","children":{}},"threads":""")
+        val decoded = root.tree.decode(text)
         assertEquals(listOf(listOf("other")), decoded.unresolvedPaths)
         root.profile action { visits mutate 3 }
-        val strict = root.restore(decoded, RestorePolicy.Strict)
+        val strict = root.tree.restore(decoded, RestorePolicy.Strict)
         assertIs<TransactionResult.Error>(strict)
         assertEquals(listOf("other"), assertIs<RestoreRejectedException>(strict.exception).issues.map { it.stateName })
         assertEquals(3, root.profile.visits.value)
-        root.restore(decoded).getOrThrow()
+        root.tree.restore(decoded).getOrThrow()
         assertEquals(7, root.profile.visits.value, "IgnoreUnknown tolerates the path")
     }
 
     @Test
     fun aCapturedTreeReachesARecreatedKeyedStoreAndReportsRebound() {
         val root = filled()
-        val tree = root.snapshot()
-        root[root.threads, "t1"]!!.dispose()
-        val recreated = root.threads.create("t1") { RsThreadStore(it, root) }
+        val tree = root.tree.snapshot()
+        root.threads["t1"]!!.dispose()
+        val recreated = root.threads.create("t1")
         assertEquals("thread t1", recreated.title.value)
-        val report = root.restore(tree).getOrThrow()
+        val report = root.tree.restore(tree).getOrThrow()
         assertEquals("first", recreated.title.value)
-        assertEquals(listOf(root.nodeOf(recreated)!!), report.rebound)
+        assertEquals(listOf(root.tree.nodeOf(recreated)!!), report.rebound)
         assertEquals(emptyList<StoreNode>(), report.skipped)
-        assertTrue(root.nodeOf(recreated)!! in report.perNode.keys)
+        assertTrue(root.tree.nodeOf(recreated)!! in report.perNode.keys)
+    }
+
+    @Test
+    fun aKeyedStoresCaptureTakenThroughItsParentRestoresThroughItsOwnTree() {
+        val root = RsStore()
+        val thread = root.threads.create("1")
+        thread action { title mutate "a" }
+        val captured = root.tree.snapshot(root.tree.nodeOf(thread)!!)
+        thread action { title mutate "b" }
+
+        val report = thread.tree.restore(captured, RestorePolicy.Strict).getOrThrow()
+
+        assertEquals("a", thread.title.value, "the receiver's own capture restores")
+        assertEquals(listOf<StoreNode>(thread.tree.node), report.perNode.keys.toList())
+        assertEquals(emptyList<StoreNode>(), report.skipped)
     }
 
     @Test
     fun theProcessDeathIdiomRecreatesPendingKeysThenRestores() {
         val source = filled()
-        source.threads.create("t2") { RsThreadStore(it, source) } action { title mutate "second" }
-        val text = source.snapshot().encode()
+        source.threads.create("t2") action { title mutate "second" }
+        val text = source.tree.snapshot().encode()
 
-        val app = RsRoot()
-        val tree = app.decode(text)
+        val app = RsStore()
+        val tree = app.tree.decode(text)
         assertEquals(setOf("t1", "t2"), tree.pendingKeys(app.threads))
-        tree.pendingKeys(app.threads).forEach { app.threads.create(it) { id -> RsThreadStore(id, app) } }
-        val report = app.restore(tree, RestorePolicy.Strict).getOrThrow()
-        assertEquals("first", app[app.threads, "t1"]!!.title.value)
-        assertEquals("second", app[app.threads, "t2"]!!.title.value)
+        tree.pendingKeys(app.threads).forEach { app.threads.create(it) }
+        val report = app.tree.restore(tree, RestorePolicy.Strict).getOrThrow()
+        assertEquals("first", app.threads["t1"]!!.title.value)
+        assertEquals("second", app.threads["t2"]!!.title.value)
         assertEquals("ada", app.profile.name.value)
         assertEquals(emptyList<StoreNode>(), report.skipped)
         assertEquals(emptyList<StoreNode>(), report.rebound, "a pending key's store was created before the restore, never rebound")
-        assertEquals(4, report.perNode.size)
+        assertEquals(5, report.perNode.size, "the receiver, both group leaves and both keyed leaves")
     }
 
     @Test
     fun migrateRunsPerLeafOnADecodedTree() {
-        val v1 = RsVersionedV1Root()
+        val v1 = RsVersionedV1App()
         v1.a action { n mutate 5 }
         v1.b action { n mutate 6 }
-        val text = v1.snapshot().encode()
-        val v2 = RsVersionedRoot()
-        v2.restore(v2.decode(text), RestorePolicy.Strict).getOrThrow()
+        val text = v1.tree.snapshot().encode()
+        val v2 = RsVersionedApp()
+        v2.tree.restore(v2.tree.decode(text), RestorePolicy.Strict).getOrThrow()
         assertEquals(listOf(1), v2.a.migrated)
         assertEquals(listOf(1), v2.b.migrated)
         assertEquals(5, v2.a.count.value)
@@ -342,34 +380,34 @@ class TreeRestoreTest {
     @Test
     fun aDecodedTreeLeavesSecretsUntouchedWhileACapturedAllTreeRestoresThemLosslessly() {
         val root = filled()
-        val captured = root.snapshot()
-        val decoded = root.decode(captured.encode())
+        val captured = root.tree.snapshot()
+        val decoded = root.tree.decode(captured.encode())
         root.profile action { secret mutate "s2" }
 
-        root.restore(decoded).getOrThrow()
+        root.tree.restore(decoded).getOrThrow()
         assertEquals("s2", root.profile.secret.value, "encoded as null: kept")
         assertTrue(
             "secret" in
-                root
+                root.tree
                     .restore(decoded)
                     .getOrThrow()
                     .perNode
-                    .getValue(root.nodeOf(root.profile)!!)
+                    .getValue(root.tree.nodeOf(root.profile)!!)
                     .kept,
         )
 
-        root.restore(captured).getOrThrow()
+        root.tree.restore(captured).getOrThrow()
         assertEquals("s1", root.profile.secret.value, "a capture holds the raw value")
         assertSame(Redacted, captured.entry(root.profile.secret), "and still never shows it")
-        assertEquals(captured, root.snapshot())
+        assertEquals(captured, root.tree.snapshot())
     }
 
     @Test
     fun anEmptySubtreeReturnsSuccessCarryingASyntheticCommittedTransaction() {
-        val root = RsRoot()
-        val tree = root.snapshot(root.threads)
+        val root = RsStore()
+        val tree = root.tree.snapshot(root.threads)
         assertEquals(emptyList<TreeSnapshot>(), tree.children)
-        val result = root.restore(tree)
+        val result = root.tree.restore(tree)
         val success = assertIs<TransactionResult.Success<TreeRestoreReport>>(result)
         assertEquals(TransactionStatus.Committed, success.transaction.status)
         assertEquals("tree-restore", success.transaction.id)
@@ -380,57 +418,79 @@ class TreeRestoreTest {
     @Test
     fun aLeafDisposedAfterLockAcquisitionIsSkippedAndReported() {
         val root = filled()
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         root.profile action { visits mutate 1 }
         root.vault action { pin mutate "0000" }
         // The profile's root opens first (lower lock-order key); the vault's
         // started hook then disposes it, after its lock and root are held.
         assertTrue(root.profile.lockOrderKey < root.vault.lockOrderKey)
         root.vault.middlewares(RsDisposingMiddleware(root.profile))
-        val profileLeaf = root.nodeOf(root.profile)!!
+        val profileLeaf = root.tree.nodeOf(root.profile)!!
 
-        val report = root.restore(tree).getOrThrow()
+        val report = root.tree.restore(tree).getOrThrow()
 
         assertTrue(root.profile.isDisposed)
         assertEquals(listOf(profileLeaf), report.skipped)
         assertFalse(profileLeaf in report.perNode.keys)
         assertEquals("4921", root.vault.pin.value, "the rest of the frame committed")
-        assertNull(root.nodeOf(root.profile), "the disposed leaf left the tree")
+        assertNull(root.tree.nodeOf(root.profile), "the disposed leaf left the tree")
     }
 
     @Test
     fun aSterileRestoreResetsRemoteStatesInEveryLeaf() {
-        val root = RsSterileRoot()
+        val root = RsSterileApp()
         root.a action {
             local mutate "x"
             remote mutate "r1"
         }
-        val tree = root.snapshot()
+        val tree = root.tree.snapshot()
         root.a action {
             local mutate "y"
             remote mutate "r2"
         }
-        val report = root.restore(tree, sterile = true).getOrThrow()
+        val report = root.tree.restore(tree, sterile = true).getOrThrow()
         assertEquals("x", root.a.local.value)
         assertEquals("r0", root.a.remote.value, "Remote goes back to its initial value")
-        assertEquals(setOf("remote"), report.perNode.getValue(root.nodeOf(root.a)!!).sterilized)
+        assertEquals(setOf("remote"), report.perNode.getValue(root.tree.nodeOf(root.a)!!).sterilized)
     }
 
     @Test
     fun restoreUnderUserAuthoredScopeTouchesOnlyTaggedStates() {
-        val root = RsSterileRoot()
+        val root = RsSterileApp()
         root.a action {
             local mutate "x"
             authored mutate "typed"
         }
-        val tree = root.snapshot(scope = SnapshotScope.UserAuthored)
+        val tree = root.tree.snapshot(scope = SnapshotScope.UserAuthored)
         root.a action {
             local mutate "y"
             authored mutate "retyped"
         }
-        root.restore(tree).getOrThrow()
+        root.tree.restore(tree).getOrThrow()
         assertEquals("y", root.a.local.value, "not captured, so kept")
         assertEquals("typed", root.a.authored.value)
+    }
+
+    @Test
+    fun aParentsOwnStatesAreCapturedAndRestoredWithItsChildren() {
+        val parent = RsParentStore()
+        parent action { open mutate "thread-1" }
+        parent.child action { authored mutate "typed" }
+        val tree = parent.tree.snapshot(scope = SnapshotScope.UserAuthored)
+        assertEquals("thread-1", tree[parent.open], "the receiver's own state is in its capture")
+        assertEquals("typed", tree[parent.child.authored])
+
+        parent action { open mutate "thread-2" }
+        parent.child action { authored mutate "retyped" }
+        val decoded = parent.tree.decode(tree.encode())
+        val report = parent.tree.restore(decoded, RestorePolicy.Strict).getOrThrow()
+        assertEquals("thread-1", parent.open.value)
+        assertEquals("typed", parent.child.authored.value)
+        assertEquals(listOf<StoreNode>(parent.tree.node, parent.tree.nodeOf(parent.child)!!), report.perNode.keys.toList())
+
+        parent.tree.reset().getOrThrow()
+        assertEquals("none", parent.open.value, "a reset of the receiver's subtree resets its own states too")
+        assertEquals("a0", parent.child.authored.value)
     }
 }
 
@@ -440,7 +500,13 @@ private class RsSterileStore : Store<RsSterileStore>() {
     val authored by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "a0" }
 }
 
-private class RsSterileRoot : Root("sterile") {
+private class RsSterileApp : Store<RsSterileApp>() {
     val a = RsSterileStore()
-    val leaf by branch(a).named(a, "a")
+    val leaf by group { listOf(a named "a") }
+}
+
+/** A parent with states of its own: they are captured and restored with its children's. */
+private class RsParentStore : Store<RsParentStore>() {
+    val open by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "none" }
+    val child by store { RsSterileStore() }
 }

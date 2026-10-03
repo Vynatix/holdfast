@@ -130,7 +130,9 @@ jobs:
         run: ./gradlew publishToMavenLocal
         working-directory: hallmark-dep
 
-      - name: iOS sim arm64 and JVM tests
+      # The apiChecks validate the iOS klib ABI slices, which a Linux host
+      # cannot dump (holdfast-testing's klib dump is hand-edited there).
+      - name: iOS sim arm64 and JVM tests, iOS ABI check
         run: |
           ./gradlew \
             -Pholdfast.includeHallmark=true \
@@ -140,6 +142,7 @@ jobs:
             :holdfast-testing:iosSimulatorArm64Test :holdfast-testing:jvmTest \
             :holdfast-hallmark:iosSimulatorArm64Test :holdfast-hallmark:jvmTest \
             :holdfast-hallmark-coroutines:iosSimulatorArm64Test :holdfast-hallmark-coroutines:jvmTest \
+            :holdfast:apiCheck :holdfast-coroutines:apiCheck :holdfast-testing:apiCheck :holdfast-compose:apiCheck \
             --continue --stacktrace
 
       # A Kotlin/Native test failure reaches the console as "AssertionError at

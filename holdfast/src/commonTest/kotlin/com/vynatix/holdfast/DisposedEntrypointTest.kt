@@ -122,11 +122,13 @@ class DisposedEntrypointTest {
             // Lock-free reads of the attachment slot, which dispose() empties.
             Entrypoint("internalAttachment (null)") { p, _ -> check(p.internalAttachment(probeAttachmentKey) == null) },
             Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },
-            // dispose() already emptied the slot; nothing to detach.
+            // dispose() already emptied the slot; nothing to detach. (Kept for
+            // companion attachments: the tree no longer detaches — a store's
+            // tree state lives for the store's whole life.)
             Entrypoint("internalDetach (null)") { p, _ -> check(p.internalDetach(probeAttachmentKey) == null) },
             // Documented no-check exception next to snapshotMiddleware(): a
-            // caller unwinding a store that disposed mid-teardown (issue
-            // #21's Root.removeMiddleware) must tell "already gone" apart
+            // caller unwinding a store that disposed mid-teardown (the
+            // harness removing its recorder) must tell "already gone" apart
             // from "removed" without catching.
             Entrypoint("internalRemoveMiddleware (false)") { p, _ ->
                 check(!p.internalRemoveMiddleware(object : Middleware<DisposedProbe>() {}))

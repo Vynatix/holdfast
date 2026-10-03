@@ -80,7 +80,7 @@ private fun tryReadCut(
  * bracket, so the snapshots hold every participant of any frame whose
  * participants all applied as top-level roots (an outermost frame, or a nested
  * one sharing no store with its enclosing entry) either before it or after
- * it, never a mix — the multi-store cut issue #21's `Root` snapshot builds on.
+ * it, never a mix — the multi-store cut issue #21's tree snapshot builds on.
  * A participant joined as a savepoint of an enclosing transaction applies with
  * that transaction instead (see the note at the top of this file). Its write
  * half is [restoreInOneFrame] (OneFrameRestore.kt), which puts such a cut back
@@ -128,7 +128,7 @@ internal fun captureConsistent(
 
 /**
  * What one cut read of a store, kept on its capture so a later cut can
- * reuse that capture unchanged (issue #21's `Root.value`, which recaptures
+ * reuse that capture unchanged (issue #21's store-tree value, which recaptures
  * only the leaves that moved): the scope and schema, the states the cut
  * listed with each one's `writesEnded` counter as the cut read it, and the
  * keyed state families it listed. Every assignment of a committed value

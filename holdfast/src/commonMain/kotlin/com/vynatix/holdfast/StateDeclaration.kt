@@ -110,16 +110,21 @@ internal class StateDeclaration<T : Any>(
     val tags: Set<StateTag> = emptySet(),
     /** The family and key of a [StateKind.Keyed] entry; `null` for every other kind. */
     val keyed: KeyedEntry? = null,
-) : DeclarationSite {
+) : DeclarationSite,
+    Latched {
     /** The live state, or `null` until materialized (and again after `removeState`/`clearStates`/`dispose`). */
     @kotlin.concurrent.Volatile
     var materialized: MutableState<T>? = null
 
     /** Held by the thread running [initializer]; waiters block on it. */
-    val latch = SynchronousMutex()
+    override val latch = SynchronousMutex()
 
     /** The thread holding [latch], or [NO_LATCH_OWNER]. Guarded by the store's [InitializerGraph]. */
-    var latchOwner: Long = NO_LATCH_OWNER
+    override var latchOwner: Long = NO_LATCH_OWNER
+
+    override fun describeForCycle(): String = "state initializer '$qualifiedName'"
+
+    override fun checkMayRun() = store.checkNotDisposed()
 
     /**
      * How deep in a chain of derived states this state sits: 0 for a state

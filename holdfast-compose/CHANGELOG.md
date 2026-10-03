@@ -9,12 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **`State<T>.collectAsState()`** — `collectAsState` for a state read
-  without its store at hand: any observable state, and a tree root's
-  `App.value` (issue #21 PR 21-5, experimental in core), which recomposes
-  its readers once per settle of the tree — a two-store frame recomposes
-  once. The existing `store.collectAsState(state)` delegates to it.
-  `ComposeRecompositionTest` pins both, and that the first composition read
-  builds an unread root's tree.
+  without its store at hand: any observable state, and a store's tree
+  value — `App.tree`, a `State<TreeSnapshot>` (issue #21 PR 21-5,
+  experimental in core) — which recomposes its readers once per settle of
+  the tree: a two-store frame recomposes once. The existing
+  `store.collectAsState(state)` delegates to it. `ComposeRecompositionTest`
+  pins both, and that the first composition read builds an unread tree's
+  value.
 - **`collectAsState` over core's derived states** (issue #20, R6): a
   `derivedState`/`merged` state observes through `effect` like a declared
   one, so `collectAsState` accepts it unchanged. `jvmTest` gains

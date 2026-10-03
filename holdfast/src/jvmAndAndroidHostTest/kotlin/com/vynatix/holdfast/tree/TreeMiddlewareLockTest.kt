@@ -8,6 +8,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.completesWithin
 import com.vynatix.holdfast.daemon
+import com.vynatix.holdfast.internalAttachment
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -23,18 +24,19 @@ private class LkLeafStore : Store<LkLeafStore>() {
 }
 
 private class LkKeyedStore(
-    id: Int,
-    root: LkRoot,
-) : Store<LkKeyedStore>(root.keyed.at(id)) {
+    val id: Int,
+) : Store<LkKeyedStore>() {
     val n by state { 0 }
 }
 
-private class LkRoot : Root("lk") {
-    val a = LkLeafStore()
-    val b = LkLeafStore()
-    val pair by branch(a, b).named(a, "a").named(b, "b")
-    val keyed by keyed<Int, LkKeyedStore>()
+private class LkParent : Store<LkParent>() {
+    val a by store { LkLeafStore() }
+    val b by store { LkLeafStore() }
+    val keyed by keyed<Int, LkKeyedStore> { LkKeyedStore(it) }
 }
+
+/** The tree middleware [store] installed itself (`tree.middlewares` on its own handle). */
+private fun Store<*>.installedTreeMiddleware(): List<TreeMiddleware> = internalAttachment(treeMembershipKey)?.installed.orEmpty()
 
 /** Thread-safe: counts started and terminal hooks per transaction. */
 private class CountingMiddleware : TreeMiddleware() {
@@ -85,60 +87,65 @@ private class Recording : TreeMiddleware() {
     }
 }
 
-/** The tree ring against concurrent leaf actions, creates and disposes: never a deadlock, never a lost terminal. */
+/** The tree ring against concurrent member actions, creates and disposes: never a deadlock, never a lost terminal. */
 class TreeMiddlewareLockTest {
     @Test
-    fun installCompletesWhileALeafActionIsInFlightAndDoesNotRetroApply() =
-        completesWithin(30, "install beside an in-flight leaf action") {
-            val root = LkRoot()
+    fun installCompletesWhileAMemberActionIsInFlightAndDoesNotRetroApply() =
+        completesWithin(30, "install beside an in-flight member action") {
+            val parent = LkParent()
+            val a = parent.a
             val inside = CountDownLatch(1)
             val release = CountDownLatch(1)
             val worker =
                 daemon("in-flight") {
-                    root.a action {
+                    a action {
                         inside.countDown()
                         release.await()
                     }
                 }
             assertTrue(inside.await(10, TimeUnit.SECONDS))
             val recording = Recording()
-            root.middlewares(recording)
+            parent.tree.middlewares(recording)
             assertEquals(emptyList<String>(), recording.events.toList(), "installed, without waiting for the action")
             release.countDown()
             worker.join()
             assertEquals(emptyList<String>(), recording.events.toList(), "the in-flight action's chain was snapshotted before")
-            root.a action { }
+            a action { }
             assertEquals(listOf("started a", "completed a"), recording.events.toList())
         }
 
     @Test
     fun removeDuringAParkedBlockingActionStillDeliversCompleted() =
-        completesWithin(30, "remove beside a parked leaf action") {
-            val root = LkRoot()
+        completesWithin(30, "remove beside a parked member action") {
+            val parent = LkParent()
+            val a = parent.a
             val recording = Recording()
-            root.middlewares(recording)
+            parent.tree.middlewares(recording)
             val inside = CountDownLatch(1)
             val release = CountDownLatch(1)
             val worker =
                 daemon("parked") {
-                    root.a action {
+                    a action {
                         inside.countDown()
                         release.await()
                     }
                 }
             assertTrue(inside.await(10, TimeUnit.SECONDS))
-            assertTrue(root.removeMiddleware(recording))
+            assertTrue(parent.tree.removeMiddleware(recording))
             release.countDown()
             worker.join()
             assertEquals(listOf("started a", "completed a"), recording.events.toList())
-            root.a action { }
+            a action { }
             assertEquals(2, recording.events.size, "nothing new after the removal")
         }
 
     @Test
     fun concurrentCreateDisposeInstallAndRemoveLeaveTheRingConsistent() =
         completesWithin(120, "ring stress") {
-            val root = LkRoot()
+            val parent = LkParent()
+            val tree = parent.tree
+            val a = parent.a
+            val b = parent.b
             val failures = ConcurrentLinkedQueue<Throwable>()
             val stop = AtomicBoolean(false)
             val middlewares = List(3) { CountingMiddleware() }
@@ -146,9 +153,9 @@ class TreeMiddlewareLockTest {
                 daemon("churn", failures) {
                     var i = 0
                     while (!stop.get()) {
-                        val k = root.keyed.create(i) { LkKeyedStore(it, root) }
+                        val k = parent.keyed.create(i)
                         k action { n mutate 1 }
-                        root.a action { n mutate i }
+                        a action { n mutate i }
                         k.dispose()
                         i++
                     }
@@ -158,14 +165,14 @@ class TreeMiddlewareLockTest {
                 daemon("installer", failures) {
                     repeat(200) { round ->
                         val m = middlewares[round % middlewares.size]
-                        root.middlewares(m)
-                        root.b action { n mutate round }
-                        val held = listOf(root.a, root.b).flatMap { root.treeMiddleware.adaptersOf(it) }.filter { it.middleware === m }
-                        root.removeMiddleware(m)
+                        tree.middlewares(m)
+                        b action { n mutate round }
+                        val held = listOf(parent, a, b).flatMap { it.treeRingAdapters() }.filter { it.middleware === m }
+                        tree.removeMiddleware(m)
                         // Once removal returned: its adapters are retired (no new observation starts) and off every ring.
                         if (held.any { !it.isRetired }) staleAdapters.incrementAndGet()
-                        for (leaf in listOf(root.a, root.b)) {
-                            if (root.treeMiddleware.adaptersOf(leaf).any { it.middleware === m }) staleAdapters.incrementAndGet()
+                        for (member in listOf(parent, a, b)) {
+                            if (member.treeRingAdapters().any { it.middleware === m }) staleAdapters.incrementAndGet()
                         }
                     }
                 }
@@ -177,20 +184,23 @@ class TreeMiddlewareLockTest {
             for (m in middlewares) {
                 for ((key, count) in m.started) assertEquals(count, m.terminal[key], "every started has its terminal: $key")
             }
-            assertEquals(2, root.treeMiddleware.memberCount, "the two branch leaves only")
-            root.middlewares(middlewares[0], middlewares[1])
-            assertEquals(listOf(middlewares[0], middlewares[1]), root.treeMiddleware.adaptersOf(root.a).map { it.middleware })
-            assertEquals(root.treeMiddleware.installedMiddleware, root.treeMiddleware.adaptersOf(root.b).map { it.middleware })
+            assertEquals(listOf<Store<*>>(parent, a, b), tree.stores(), "every keyed store left with its dispose")
+            assertTrue(listOf(parent, a, b).all { it.treeRingAdapters().isEmpty() }, "nothing installed, nothing on a ring")
+            tree.middlewares(middlewares[0], middlewares[1])
+            assertEquals(listOf<TreeMiddleware>(middlewares[0], middlewares[1]), parent.installedTreeMiddleware())
+            for (member in listOf(parent, a, b)) {
+                assertEquals(parent.installedTreeMiddleware(), member.treeRingAdapters().map { it.middleware })
+            }
         }
 
     @Test
-    fun aKeyedStoreCreatedInsideAnotherLeafsActionAttachesWithoutDeadlock() =
+    fun aKeyedStoreCreatedInsideAnotherMembersActionAttachesWithoutDeadlock() =
         completesWithin(30, "create inside an action under the ring") {
-            val root = LkRoot()
+            val parent = LkParent()
             val recording = Recording()
-            root.middlewares(recording)
+            parent.tree.middlewares(recording)
             var k: LkKeyedStore? = null
-            root.a action { k = root.keyed.create(1) { LkKeyedStore(it, root) } }
+            parent.a action { k = parent.keyed.create(1) }
             k!! action { n mutate 1 }
             assertEquals(listOf("started a", "completed a", "started 1", "completed 1"), recording.events.toList())
         }
@@ -198,9 +208,9 @@ class TreeMiddlewareLockTest {
     @Test
     fun disposeFromInsideItsOwnActionWhileInstallFansOutDoesNotDeadlock() =
         completesWithin(30, "dispose inside an action during install") {
-            val root = LkRoot()
+            val parent = LkParent()
             val recording = Recording()
-            val k = root.keyed.create(1) { LkKeyedStore(it, root) }
+            val k = parent.keyed.create(1)
             val inside = CountDownLatch(1)
             val installed = CountDownLatch(1)
             val worker =
@@ -212,32 +222,35 @@ class TreeMiddlewareLockTest {
                     }
                 }
             assertTrue(inside.await(10, TimeUnit.SECONDS))
-            root.middlewares(recording)
+            parent.tree.middlewares(recording)
             installed.countDown()
             worker.join()
             assertTrue(k.isDisposed)
-            assertEquals(2, root.treeMiddleware.memberCount)
-            root.a action { }
+            assertEquals(listOf<Store<*>>(parent, parent.a, parent.b), parent.tree.stores())
+            parent.a action { }
             assertEquals(listOf("started a", "completed a"), recording.events.toList())
         }
 
     @Test
-    fun aTreeHookCallingRootSnapshotFromUnderALeafLockDoesNotDeadlock() =
+    fun aTreeHookCallingSnapshotFromUnderAMemberLockDoesNotDeadlock() =
         completesWithin(30, "snapshot from a tree hook") {
-            val root = LkRoot()
+            val parent = LkParent()
+            val a = parent.a
+            val b = parent.b
+            val tree = parent.tree
             var seen: Int? = null
-            root.middlewares(
+            tree.middlewares(
                 object : TreeMiddleware() {
                     override fun onTransactionCompleted(
                         node: StoreNode,
                         context: Middleware.MiddlewareContext<*>,
                     ) {
-                        seen = root.snapshot()[root.b.n]
+                        seen = tree.snapshot()[b.n]
                     }
                 },
             )
-            val other = daemon("other") { repeat(200) { root.b action { n mutate it } } }
-            repeat(200) { root.a action { n mutate it } }
+            val other = daemon("other") { repeat(200) { b action { n mutate it } } }
+            repeat(200) { a action { n mutate it } }
             other.join()
             assertTrue(seen != null)
         }

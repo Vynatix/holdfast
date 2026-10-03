@@ -11,56 +11,63 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private class GcThreadStore(
-    id: Int,
-    root: GcRoot,
-) : Store<GcThreadStore>(root.threads.at(id)) {
+    val id: Int,
+) : Store<GcThreadStore>() {
     val n by state { 0 }
 }
 
-private class GcRoot : Root() {
-    val threads by keyed<Int, GcThreadStore>()
+/** [failingKey]'s factory run builds its store, then throws: the reservation is abandoned. */
+private class GcParent : Store<GcParent>() {
+    var failingKey: Int? = null
+    var built: WeakReference<GcThreadStore>? = null
+    val threads by keyed<Int, GcThreadStore> { id ->
+        val store = GcThreadStore(id)
+        if (id == failingKey) {
+            built = WeakReference(store)
+            error("abandon")
+        }
+        store
+    }
 }
 
 /**
- * T3: a keyed store that left the tree — disposed, or abandoned by a failing
- * factory — is collectable. The wait is `awaitCollected` (`GcSupport.kt`):
- * a bounded poll under allocation pressure, never `System.runFinalization()`.
+ * T3: a keyed store that left the tree — disposed, or built by a factory
+ * that then failed (the tree never took it, and disposes nothing) — is
+ * collectable while its parent lives. The wait is `awaitCollected`
+ * (`GcSupport.kt`): a bounded poll under allocation pressure, never
+ * `System.runFinalization()`.
  */
 class KeyedStoreGcTest {
     @Test
     fun aDisposedKeyedStoreIsCollectable() {
-        val root = GcRoot()
-        val ref = createDisposeAndForget(root)
+        val parent = GcParent()
+        val ref = createDisposeAndForget(parent)
         assertTrue(awaitCollected(ref), "a disposed keyed store was not collected within the budget")
-        assertNull(ref.get(), "the root must not keep a disposed keyed store reachable")
+        assertNull(ref.get(), "the parent must not keep a disposed keyed store reachable")
+        assertTrue(parent.threads.entries().isEmpty())
     }
 
     /** A frame of its own, so no interpreter-local slot of the test method keeps the store alive. */
-    private fun createDisposeAndForget(root: GcRoot): WeakReference<GcThreadStore> {
-        val store = root.threads.create(1) { GcThreadStore(it, root) }
+    private fun createDisposeAndForget(parent: GcParent): WeakReference<GcThreadStore> {
+        val store = parent.threads.create(1)
         store action { n mutate 1 }
         store.dispose()
         return WeakReference(store)
     }
 
     @Test
-    fun anAbandonedKeyedStoreIsCollectable() {
-        val root = GcRoot()
-        val ref = createAbandonAndForget(root)
-        assertTrue(awaitCollected(ref), "an abandoned keyed store was not collected within the budget")
-        assertNull(ref.get(), "the root must not keep an abandoned keyed store reachable")
+    fun aStoreAFailingFactoryBuiltIsCollectableTheTreeHoldsNoReferenceToIt() {
+        val parent = GcParent()
+        val ref = createAbandonAndForget(parent)
+        assertTrue(awaitCollected(ref), "a store its failing factory built was not collected within the budget")
+        assertNull(ref.get(), "the tree must hold no reference to a store it never attached")
+        assertNull(parent.threads[2])
     }
 
     /** A frame of its own, like [createDisposeAndForget]: the factory's store leaves only through the weak reference. */
-    private fun createAbandonAndForget(root: GcRoot): WeakReference<GcThreadStore> {
-        var ref: WeakReference<GcThreadStore>? = null
-        runCatching {
-            root.threads.create(2) { id ->
-                val s = GcThreadStore(id, root)
-                ref = WeakReference(s)
-                error("abandon")
-            }
-        }
-        return checkNotNull(ref) { "the factory ran" }
+    private fun createAbandonAndForget(parent: GcParent): WeakReference<GcThreadStore> {
+        parent.failingKey = 2
+        runCatching { parent.threads.create(2) }
+        return checkNotNull(parent.built) { "the factory ran" }
     }
 }

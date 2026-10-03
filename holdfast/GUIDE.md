@@ -31,7 +31,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 14. [The 1.1 Surface](#14-the-11-surface) — snapshot/restore, derived, atomic, encryption, FileSystemKvStore, suspendAction
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
-17. [The typed state tree (experimental)](#17-the-typed-state-tree-experimental) — declaring a root, keyed stores through `create`, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
+17. [The store tree (experimental)](#17-the-store-tree-experimental) — declaring children with `store { }`/`group { }`/`keyed { }`, keyed stores through a declared factory, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
 
 ---
 
@@ -430,9 +430,10 @@ for cross-middleware communication.
 consumer-registered list. Library-installed middleware lives in a separate
 outer ring that is always outermost of everything registered here —
 `clearMiddleware()` never reaches it, and only `dispose()` tears it down
-alongside the list above (§13). The typed tree's `App.middlewares(...)`
-(§17.9, experimental) installs there: a `TreeMiddleware` sees every leaf's
-transactions with the leaf's node, on every leaf attached now or later.
+alongside the list above (§13). The store tree's `App.tree.middlewares(...)`
+(§17.9, experimental) installs there: a `TreeMiddleware` sees every
+transaction of `App` and of every store of its subtree, attached now or
+later, with that store's node.
 
 ### 4.7 `invoke { … }` — Context block
 
@@ -1046,8 +1047,11 @@ cd.dispose()
 | `MutableState.value` read | `stateLock` (per state) | yes | Plus optional pending-write peek if owner thread |
 | `MutableState.observe / dispose` | `observersLock` (per state) | yes | Snapshot then fire — observer callback NOT under lock |
 | `MutableState.bridge =` | `bridgeLock` (per state) | yes | Calls `observe` on the bridge inside |
-| `Root.branch(...)`/`keyed()` declaration, `KeyedBranch.create` promotion, `Root.get`/`entries`/`children`/`nodeOf` | tree registry lock (per root) | yes | A leaf lock: taken after a leaf's `transactionLock` (a store disposing from inside its own action detaches under it) and after an entry's construction lock, and never held while calling into a store — callers copy, release, then touch stores (§17) |
-| `KeyedBranch.create`/`getOrCreate` factory | per-entry construction lock | yes | Held across the factory and the attach fanout; a `getOrCreate` on another thread parks on it, a same-thread re-entry is a cycle error; a detach waits on it briefly so a listener hears Attached before Detached (§17.2) |
+| `store { }`/`group { }`/`keyed { }` declaration, a child's registration when it attaches, `KeyedBranch.create` registration, a store's detach and its dispose's release of its children, `tree.children()`/`stores`/`nodeOf`, `KeyedBranch.get`/`entries()`, every subtree listing | child registry lock (per store) | yes | Taken after any store's `transactionLock` (a store disposing from inside its own action detaches from its parent's registry under it) and after a keyed entry's construction lock. One at a time: a listing takes a parent's, releases it, then a child's. Nothing is taken under it, and no store, lambda or listener is called while it is held — callers copy, release, then touch stores (§17) |
+| First read of a `store { }`/`group { }` child (materialization) | none while the lambda runs (a per-thread mark only); the declaration's attach lock across attach phases 3–7 | the mark: no — re-entering it on the same thread is a cycle, which throws | The lambda runs holding no lock or latch of the tree's — only what the reading thread already holds — and racing first reads may each run it. The first to claim the declaration holds its attach lock across the attach (no user code there); another reader parks on it, then takes the winner's child |
+| Linking a child to its parent; releasing a disposed parent's children | tree structure lock (one per process) | yes | Held only for the parent link, the cycle check, the node's fields and the ancestor chain: never with a child registry lock, never across a lambda, a factory, a listener or a middleware sync |
+| `KeyedBranch.create`/`getOrCreate` factory | none while the factory runs (a per-thread mark only); the per-entry construction lock across the attach | yes | Held only by the creator whose store claimed the key, from the claim through the attach (no user code there); a lookup or losing `getOrCreate` on another thread parks on it. A same-thread re-entry of the factory for its own key is a cycle error (§17.2) |
+| `tree.middlewares(...)`/`removeMiddleware` and the ring sync of a store that attaches or detaches | a store's tree install lock, then each member's sync lock in turn | yes | The install lock guards only the installing store's own list; a member's sync lock is taken alone, never nested with another's or under a registry lock, and holds that member's outer middleware ring lock while it replaces the ring (§17.9) |
 
 ### 10.2 Lock ordering
 
@@ -1085,22 +1089,31 @@ write, action and frame from inside one, so it never needs a lock to its
 left. Initializers waiting for each other's latches in a cycle — on one
 thread or across threads — are detected and throw instead of deadlocking.
 
-**The tree's host lock** (§17.8). A root's `value` is hosted on a private
-store of its own; that store's `transactionLock` — the host lock — is taken
-only by a settle of the value: a top-level action on the host that runs
-after the entry being settled has released every store lock it took, or
-inline where a change reaches the tree outside any entry. Nothing takes the
-host lock under a leaf's lock: a read of `value` takes no lock at all (it
-reads the value's backing, or takes a fresh lock-free capture when a leaf
-has just joined or left), and inside an open entry it never opens a
-transaction on the host. A settle that finds the host busy hands its
-recompute to the host's holder and returns; it never waits. A `value`
-observer runs under the host lock, so an action it opens on a leaf nests
-host → leaf, the one direction the graph allows — and it is an ordinary
-observer: one that writes to a store another thread is committing carries
-the cross-store hazard every observer does. A bridge attached to a leaf's
-state that replays a value at attach (an inbound write under that state's
-`bridgeLock`) queues the tree's recompute like any inbound write; outside
+**The tree's host locks** (§17.8). Every store's `tree` handle hosts its
+value on a private store of its own, created lazily with the value — on the
+first read or observation of that store's `tree.value`, never by
+`snapshot()`, `stores`, `middlewares`, `track(tree)` or `hydrateAll` — so
+one host per value in use. That store's `transactionLock` — a host
+lock — is taken only by a settle of the value and by the host's dispose. A
+settle is a top-level action on the host that runs after the entry being
+settled has released every store lock it took, or inline where a change
+reaches the subtree outside any entry. Nothing takes a host lock under
+another store's lock: a read of the value takes no lock at all (it reads
+the value's backing, or takes a fresh lock-free capture when a store has
+just joined or left), and inside an open entry it never opens a transaction
+on the host. A settle that finds the host busy hands its recompute to the
+host's holder and returns; it never waits. The host's dispose, when its
+store is disposed, is inline only from a dispose outside every entry and
+every lock of that store (and inside a `:holdfast-testing` open-transaction
+body, which holds none); from inside an entry it runs when that entry
+settles, and from inside an action holding the store's lock after that
+action releases it. A value observer runs under its host lock, so an
+action it opens on a store of the subtree nests host → store, the one
+direction the graph allows — and it is an ordinary observer: one that
+writes to a store another thread is committing carries the cross-store
+hazard every observer does. A bridge attached to a state of the subtree
+that replays a value at attach (an inbound write under that state's
+`bridgeLock`) queues the value's recompute like any inbound write; outside
 an entry the recompute runs inline there, so a bridge whose replay must not
 run tree observers should be attached from inside an action, where the
 recompute waits for the settle.
@@ -1220,10 +1233,10 @@ never T1's pending writes.
 
 ### 11.6 Testing a tree
 
-`trackTree(root)` (§17.10, experimental) tracks every leaf of a typed
-tree, keyed stores created mid-test included, records every leaf
-transaction with its node into one tree timeline, and resets the tree at
-teardown so the next test finds the initial values.
+`track(store.tree)` (§17.10, experimental) tracks a store and every store
+of its subtree, keyed stores created mid-test included, records every
+transaction with its node into one tree timeline, and resets the store and
+its subtree at teardown so the next test finds the initial values.
 
 ## 12. Common Pitfalls
 
@@ -1254,6 +1267,8 @@ teardown so the next test finds the initial values.
 ## 13. API Reference
 
 ### `Store<Self>`
+
+The self-typed base every store extends (`class CounterStore : Store<CounterStore>()`; `EventfulStore<Self, E>` adds `events`/`emit`). `NodeStore` *(experimental)* is the non-recursive base for an anonymous inline child (`object : NodeStore(), Draft { override val text by state { "" } }`), since `object : Store<X>()` cannot be written without a name; code holding only the consumer interface writes through the interface's own methods, or casts to the store: `(draft as NodeStore) action { draft.text mutate "x" }` (§17.1).
 
 | Member | Signature | Description |
 |---|---|---|
@@ -1358,7 +1373,7 @@ open class Middleware<V : Store<V>> {
     protected open fun onTransactionError(context: MiddlewareContext<V>, error: Throwable) {}
 }
 
-// Over a typed tree (§17.9, experimental): the same three hooks with the leaf's node.
+// Over a store tree (§17.9, experimental): the same three hooks with the store's node.
 @ExperimentalStoreApi abstract class TreeMiddleware {
     protected open fun onTransactionStarted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
     protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
@@ -1393,7 +1408,7 @@ capability is independently usable; pick the ones you need.
 
 ### 14.1 `Store.snapshot()` / `Store.restore(snapshot)`
 
-> A tree of stores is captured as one consistent cut through `Root.snapshot(node, scope)` (§17.5), put back or reset as one frame through `Root.restore(tree)`/`Root.reset(node)` (§17.6), and carried as text through `TreeSnapshot.encode()`/`Root.decode(text)` (§17.7) — all experimental.
+> A store and its children are captured as one consistent cut through `store.tree.snapshot(node, scope)` (§17.5), put back or reset as one frame through `store.tree.restore(tree)`/`store.tree.reset(node)` (§17.6), and carried as text through `TreeSnapshot.encode()`/`store.tree.decode(text)` (§17.7) — all experimental.
 
 ```kotlin
 class StoreSnapshot internal constructor(…) {
@@ -1601,8 +1616,9 @@ Drop-in. Order in `holdfast.middlewares(...)` matters — the LAST argument
 is the outermost middleware (its `onTransactionStarted` runs first; its
 `onTransactionError` runs last). Place logging/audit middleware LAST so
 it sees errors thrown by validation middleware placed earlier. A
-`TreeMiddleware` installed through a root (§17.9) is outermost of all of
-these on every leaf, whatever the order of registration.
+`TreeMiddleware` installed through a store's `tree` (§17.9) is outermost of
+all of these on that store and every store under it, whatever the order of
+registration.
 
 `ProfilingMiddleware` profiles every transaction: monotonic-clock duration
 (body + inner middleware; commit fanout is excluded), outcome, savepoint and
@@ -1677,7 +1693,7 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(key: String, codec: Codec<T>, s
 fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>
 fun Store<*>.hydratorOrNull(): Hydrator<*>?
 suspend fun hydrateEach(vararg hydrators: Hydrator<*>)
-suspend fun Root.hydrateAll(node: StoreNode = this, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport   // §17.11
+suspend fun StoreTree.hydrateAll(node: StoreNode = this.node, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport   // §17.11
 class Hydrator<V : Store<V>> {                       // state / current / hydrate / invalidate / stageInvalidate / awaitSettled
     suspend fun hydrate(scope: CoroutineScope = …)   // defaults to the store's Store.scope
     val overlayKey: String?                          // the persisted overlay's key (§16.8)
@@ -2259,9 +2275,9 @@ that roll back get `onTransactionError`.
   deadlocking on the suspend mutex — use `mutate`/`update` or
   `suspendAction { }` inside a suspending body. Inside `suspendAtomic`, a
   participant's `suspendAction { }` joins the frame as a savepoint.
-- `Root.restore(tree)` and `Root.reset(node)` (§17.6) are each ONE
-  outermost `atomic` over the subtree's live leaves — the write half of
-  `Root.snapshot`'s cut — and refuse to run inside an action, a frame, a
+- `tree.restore(capture)` and `tree.reset(node)` (§17.6) are each ONE
+  outermost `atomic` over the subtree's live stores — the write half of
+  `tree.snapshot`'s cut — and refuse to run inside an action, a frame, a
   `suspendAction`/`suspendAtomic` body, a commit's fanout or a derived
   state's recompute (a nested frame is not one frame: the stores the
   enclosing entry holds would join as savepoints and apply with it, the
@@ -2271,8 +2287,8 @@ that roll back get `onTransactionError`.
 
 Per-store middleware already sees every frame root (correlate the N
 per-store transactions of one frame via `Transaction.frameId`); over a
-typed tree, one `TreeMiddleware` (§17.9) sees every root of a frame with
-its leaf's node and the shared `frameId`. For app-level audit/telemetry
+store tree, one `TreeMiddleware` (§17.9) sees every root of a frame with
+its store's node and the shared `frameId`. For app-level audit/telemetry
 that wants the frame as ONE event, register a `FrameObserver`
 (experimental — `@ExperimentalStoreApi`):
 
@@ -3248,7 +3264,7 @@ fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>   
 @ExperimentalStoreApi
 fun Store<*>.hydratorOrNull(): Hydrator<*>?
 @ExperimentalStoreApi
-suspend fun hydrateEach(vararg hydrators: Hydrator<*>)       // in order; until #21's hydrateAll()
+suspend fun hydrateEach(vararg hydrators: Hydrator<*>)       // in order; a whole subtree: tree.hydrateAll() (§17.11)
 
 @ExperimentalStoreApi
 class HydrationSpec<V : Store<V>> {
@@ -3451,8 +3467,8 @@ fun sessionExpired(app: AppStore, history: HistoryStore, profile: ProfileStore):
   `hydratorOrNull()` finds the one it has, on any `Store<*>`. `hydrateEach(a, b, …)` hydrates
   several, in order, each on its store's scope — every seed committed and
   every refresh launched when it returns — carrying on past a failure and
-  throwing the first once all have run. Issue #21's tree brings
-  `hydrateAll()`.
+  throwing the first once all have run. `store.tree.hydrateAll()` (§17.11)
+  hydrates a store and its whole subtree with one report.
 - **`awaitSettled()`** waits until no refresh is in flight and returns the
   phase then — `Hydrated`, `Failed`, or `Detached` (never hydrated, or
   invalidated meanwhile) — reading committed phases only. The one exception
@@ -3616,235 +3632,419 @@ Where the overlay stands decides both directions:
   caller is cancelled.
 - **The key is pinned.** It never derives from the store's class or state
   names, so renaming either cannot orphan a blob. `overlayKey` returns it,
-  and so does the hydrator's store attachment for issue #21's self-check,
-  which will find two stores persisted under one key.
+  and so does the hydrator's store attachment (`persistenceKeys`), which
+  the store tree's persisted-name self-check reads (§17.7).
 - **Dispose.** After `dispose()`, `clearOverlay()` throws
   `IllegalStateException` like the other entrypoints, and `overlayKey` keeps
   answering.
 
-## 17. The typed state tree (experimental)
+## 17. The store tree (experimental)
 
-Issue #21 gives an app one typed root over its stores: branches are
-delegate-named properties, keyed stores join through a factory bracket, and
-everything is addressed by node and state identity — strings appear only in
-`encode()` and `render()`. A root is not a `Store`: the leaves keep their own
-actions, middleware and locks; the tree adds membership, consistent captures,
-subtree restore and reset, a per-frame `value`, tree middleware, a test
-fixture and hydration over them. Everything in this chapter is
-`@ExperimentalStoreApi`: every root subclass, keyed store class and call
-site opts in (`@OptIn(ExperimentalStoreApi::class)`, or the module-wide
+Issue #21 lets a store declare other stores as its children, next to its
+states: `val settings by store { SettingsStore() }` beside
+`val theme by state { "light" }`. A parent is an ordinary store — it has
+states, actions, middleware and a hydrator of its own — and every child
+keeps its own actions, middleware and locks. Any store's `tree` is its view
+of the subtree under it, and the tree adds what a single store cannot do
+alone: consistent captures of a subtree, restore and reset over a subtree
+as one frame, a text format, a value kept current, tree middleware, a test
+fixture and hydration. Everything is addressed by node and state identity;
+strings appear only in `encode()` and `render()`. Everything in this
+chapter is `@ExperimentalStoreApi`: every declaring store and call site
+opts in (`@OptIn(ExperimentalStoreApi::class)`, or the module-wide
 `-opt-in=com.vynatix.holdfast.ExperimentalStoreApi` compiler flag, which
 the examples below assume).
 
-### 17.1 Declaring a root
+### 17.1 Declaring children
 
 ```kotlin
 class SettingsStore : Store<SettingsStore>() {
     val theme by state { "light" }
 }
 
-class SessionStore : Store<SessionStore>() {
-    val user by state { "" }
+class SignInStore : Store<SignInStore>() {
+    val email by state { "" }
 }
 
-// The class header takes the branch's token; the store can only be built
-// through `create`/`getOrCreate` on the branch it belongs to.
-class ThreadStore(val id: String) : Store<ThreadStore>(App.threads.at(id)) {
+class ProfileStore : Store<ProfileStore>() {
+    val bio by state { "" }
+}
+
+class ThreadStore(val id: String) : Store<ThreadStore>() {       // an ordinary store: no token, no tree argument
     val title by state { "thread $id" }
 }
 
-object App : Root("app") {
-    val settings by branch(SettingsStore())
-    val session by branch(SessionStore()).named("session")
-    val threads by keyed<String, ThreadStore>(under = session)   // targets declared above their users
+interface Draft {                                                // the typed face of an inline child: a plain interface
+    val text: State<String>
+
+    fun edit(value: String)
+}
+
+object App : Store<App>() {
+    val openThreads by state { emptySet<String>() }                         // a parent is a store: it has states
+    val settings by store { SettingsStore() }                              // one child, node "settings"
+    val session by group { listOf(SignInStore() named "sign-in", ProfileStore()) }   // leaves "sign-in" (pinned), "Profile"
+    val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) }    // keyed: the factory is declared once
+    val draft by store<Draft> {                                            // the type argument is required
+        object : NodeStore(), Draft {
+            override val text by state { "" }
+
+            override fun edit(value: String) {
+                text mutate value
+            }
+        }
+    }
 }
 
 fun useTheTree() {
-    val t1 = App.threads.create("t1", ::ThreadStore)          // live once create returns
-    val again = App.threads.getOrCreate("t1", ::ThreadStore)   // the same store, factory not run
-    println(again === t1)                                       // "true"
-    println(App.nodeOf(t1)?.name)                               // "t1"
-    println(App.children(App.session).size)                     // "2": SessionStore, then t1
-    println(runCatching { ThreadStore("bare") }.isFailure)      // "true": at(id) is valid only inside create
-    t1.dispose()                                                // leaves the tree
-    println(App[App.threads, "t1"])                             // "null"
+    println(App.tree.children().map { it.name })            // "[settings, session, threads, draft]": the lambdas run now
+    val t1 = App.threads.create("t1")                         // runs the factory; live once create returns
+    println(App.threads.getOrCreate("t1") === t1)             // "true": the same store, the factory not run again
+    println(App.tree.nodeOf(t1)?.name)                        // "t1"
+    println(App.tree.stores(App.session).size)                // "2": sign-in, then Profile
+    App.draft.edit("hi")                                      // an inline child, written through its own method
+    println(App.draft.text.value)                             // "hi"
+    println(App.tree.nodeOf(ThreadStore("bare")))             // "null": built outside the factory, it is in no tree
+    t1.dispose()                                              // leaves the tree
+    println(App.threads["t1"])                                // "null"
 }
 ```
 
-- **A branch registers at declaration.** `val settings by branch(a, b)`
-  attaches each listed store to the root when the property binds — inside
-  an `object`'s initializer — and runs no leaf code: no state initializer,
-  no capture. A store belongs to one branch of one root: listing it under a
-  second branch, or in a second root, fails fast naming both. So does
-  listing a disposed store.
-- **Nesting is `under`.** `branch(..., under = session)` and
-  `keyed<K, S>(under = session)` declare beneath a branch of the same root
-  (another root's branch is refused). Declare targets textually above their
-  users: a forward reference (`under = later`) does not compile.
-- **Names come from the program, or from pins.** A branch is named by its
-  property, a root by its constructor argument else its class, a branch
-  leaf by its store's class minus `Store` (`SettingsStore` → `Settings`),
-  a keyed leaf by its key's encoding. Pins are literals at the declaration:
-  `Root("app")`, `branch(x).named("prefs")` for the branch,
-  `branch(x, y).named(y, "profile")` for a leaf. Two leaves of one branch
-  with the same class, or a class with no simple name (anonymous, local),
-  need a pin; sibling branch names must be unique. `StoreNode.nameOrigin`
-  records where a name came from — `Property`, `ClassName`, `Key` or
-  `Pinned` — which the persisted-name self-check reads (§17.7).
-- **Lookups take nodes and stores, never strings.** `App.children(node)`
-  lists the live stores under a node in tree order (a branch's listed
-  stores, then what is declared under it; a keyed branch's in creation
-  order), `App.nodeOf(store)` finds a store's leaf, `App[branch, key]` and
-  `App.entries(branch)` the keyed ones, `App.nodes` every node in
-  pre-order. None of them runs leaf code.
+- **Declared at construction, built on first use.** A `store { }` or
+  `group { }` declaration registers a child entry when the property binds
+  — in the parent's constructor, or an `object`'s initializer — and runs
+  nothing. The lambda runs on the property's first read, or when a
+  tree operation needs the subtree (`tree.children()`, `stores`, `nodeOf`,
+  `snapshot`, `restore`, `reset`, `decode`, `verifyPersistedNames`,
+  `middlewares`, the first read of the tree's value, `hydrateAll`,
+  `track(tree)`). `children()` runs the child declarations if they have not
+  run yet; materializing a child runs no state initializer by itself — but
+  once a tree value at or above the child is in use (read or observed),
+  the settle that follows the attach captures the new store, which
+  materializes its never-read states as `snapshot()` does (§17.8).
+  Concurrent first reads may EACH run the lambda: the first result to
+  attach wins, every reader gets that one store, and each other run's
+  stores — those built during that run that nothing else holds — are
+  disposed, never attached or announced. A lambda that throws leaves the
+  child unbuilt, and the next read runs it again. A keyed branch exists
+  from its declaration on; its factory runs per key (§17.2).
+- **What a child can be.** `store { }` must produce a store: a store
+  class, or an inline `object : NodeStore(), Draft { … }` behind a plain
+  consumer interface. Anything else fails the first read ("store { } must
+  produce a Store; an inline child is object : NodeStore(),
+  YourInterface { … }"). An inline child needs the type argument
+  (`store<Draft> { … }`); without it the anonymous object's type would have
+  to escape the property, and the declaration does not compile. From
+  outside, write it through the interface's own methods (`App.draft.edit(…)`)
+  or cast it to its store: `(App.draft as NodeStore) action { App.draft.text
+  mutate "x" }`. Inside the object, its own `action { }` has the
+  `NodeStore` as receiver and the `@StoreActionDsl` marker hides the
+  object's members behind it, so a method that writes inside an action
+  names the object explicitly: `val self = this; action { self.text mutate
+  v }`. `group { }` lists stores; `keyed<K, S> { }` declares a keyed branch
+  (§17.2).
+- **One parent per store, and no cycles.** A store hangs under one parent.
+  Declaring a store that already has a parent fails when the second
+  declaration materializes, naming both parents ("… already belongs to
+  App/settings; it cannot also be declared under Other/prefs — a store has
+  one parent"); the first stays attached. A declaration that would make a
+  store its own ancestor fails naming the path; so does a child lambda
+  that returns a disposed store, and a group that lists a store twice or
+  lists a disposed one. A failure before the child attaches leaves nothing
+  attached, and the next read retries; when it comes after the lambda
+  returned, the stores that run built (and nothing else holds) are
+  disposed — a store that existed before the run never is.
+- **Names come from the program, or from pins.** A `store { }` child, a
+  `group { }` and a `keyed { }` branch are named by their property
+  (`NameOrigin.Property`) or by a `named =` pin — `store(named =
+  "prefs-v2") { … }`, `group(named = "session") { … }`, `keyed<K, S>(named
+  = "threads") { … }` (`Pinned`). A group's leaves are named by their class
+  minus `Store` (`ClassName`: `ProfileStore` → `Profile`) unless the
+  lambda pins one: `SignInStore() named "sign-in"` (`Pinned`; `named` is an
+  infix on the group lambda's receiver, pins that one instance and answers
+  it, so pinned and plain stores mix in one list). A keyed leaf is named by
+  its key's encoding (`Key`). A store with no parent — a `tree`'s receiver
+  that nobody declared, or a subtree root — is named by its class (`App`).
+  Sibling names must be unique, which the declaration checks when the
+  property binds; two group leaves with one name — two stores of the same
+  class, or of two classes whose simple names collide — or a listed class
+  without a simple name (anonymous, local) need a pin ("… pin one of them
+  with named"). `StoreNode.nameOrigin` records where a name came from; the
+  persisted-name self-check reads it (§17.7).
+- **Lookups take nodes and stores, never strings.** `App.tree.children()`
+  lists the declared children in declaration order (each `store { }`
+  child's `LeafNode`, each group's `Branch`, each keyed `KeyedBranch`, with
+  or without entries); `App.tree.stores(node)` the live stores of the
+  subtree at a node, in tree order (the receiver first when the node is its
+  own); `App.tree.nodeOf(store)` a store's node when it is the receiver or
+  under it; `App.threads[key]` and `App.threads.entries()` the keyed ones.
+  Any store's own node is `store.tree.node`, and `store.tree.parent` is the
+  node it hangs under (`null` for a subtree root). A `tree` member given a
+  node outside the receiver's subtree throws `IllegalArgumentException`.
+- **Cycles throw, they never deadlock.** A child lambda (and a keyed
+  factory) runs holding NO lock or latch: the reading thread only marks it
+  as running. A lambda that needs the property it is building on the same
+  thread — directly, or through a state initializer, another child or a
+  keyed factory — is a cycle and throws ("Materialization cycle: …",
+  naming every declaration, factory and initializer in order). Across
+  threads nothing waits on a lambda, so a mutual need cannot hang: each
+  thread runs the other declaration's lambda itself and meets its own
+  mark. State initializers keep their latch (and their cross-thread cycle
+  report).
+- **The lambda is ordinary code, run on the reading thread.** It holds
+  nothing of the tree's — only what that thread already holds — so a
+  child's constructor may run actions on any store (the parent included),
+  register effects and install middleware, even while another thread
+  reads the same child from inside one of the parent's actions. Inside an
+  action the lambda runs IN that action: it sees the action's uncommitted
+  writes. Attaching is structural, not transactional: a rollback of that
+  action does not undo it. A child first read inside a state initializer,
+  a `migrate` or a derived state's compute inherits that no-write region:
+  a constructor that opens an action or writes fails there (the
+  declaration stays retryable) — first-read such children outside that
+  code. Because racing first reads may each run it, keep side effects
+  other than building the child out of it.
 
-### 17.2 Keyed stores: `create`, `getOrCreate`, and why a bare `ThreadStore(id)` throws
+### 17.2 Keyed stores: the factory is declared once
 
-A keyed store's class header takes `App.threads.at(id)`: a
-`StoreMembership<ThreadStore>` token that only the `:holdfast` module can
-mint, valid only inside the factory of a `create`/`getOrCreate` for that
-branch and key, on the thread running it. Outside one — a bare
-`ThreadStore(id)` anywhere, a factory constructing another key, a factory
-constructing on another thread — `at` throws a teaching error, and nothing
-is left behind. That is the deliberate ergonomics/soundness trade
-(decision U2): the tree never discovers stores by side effect.
+`val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) }`
+declares a keyed branch with its factory. `App.threads.create(id)` runs the
+factory for a key and attaches the store it returns; `getOrCreate(id)`
+answers the live store for the key, or creates it. The store class is an
+ordinary store — no token, no constructor argument for the tree — and a
+`ThreadStore(id)` constructed anywhere else is simply in no tree.
 
-- **Liveness is the factory bracket.** The store is *live* — found by
-  `App[branch, key]`, `entries`, `children`, captures, `value`, reset and
-  tree middleware — only once the factory has returned the very instance
-  that took the token and `create` has verified it. Until then it is
-  invisible to every other thread; a racing `create` for the same key fails
-  with "already exists" (use `getOrCreate` to share), a `getOrCreate` on
-  another thread parks until the construction ends, and one from inside
-  the factory constructing that key is a cycle error.
-- **A failing factory leaves nothing.** A throwing constructor or factory,
-  a factory that returns a different instance, one that returns a disposed
-  store, or one that took `at` for another key: the reservation is
-  dropped, the store the factory did construct is disposed, no listener
-  hears of it, and a retry runs the factory again.
-- **Leaf code inside the factory is ordinary store code.** An `init`
-  block may run an `action` on the new store; inside a Strict `atomic`
-  frame it may not (the new store is not enrolled), exactly as outside a
-  tree. A factory may itself `create` another keyed store; the inner one
-  attaches first.
-- **Nothing in the tree opens a transaction.** `create`, `at`, lookups and
-  `dispose` take only the tree's own leaf locks (§10.1), so they work from
-  inside actions, frames and observers.
+- **Liveness is the attach.** A keyed store is live — found by
+  `threads[key]`, `entries()`, `tree.stores`, captures, the value, reset and
+  tree middleware — once the factory has returned it and it attached.
+  The factory runs on the calling thread holding no lock of the tree's
+  (like a child lambda, §17.1: inside an action it sees that action's
+  uncommitted writes, and a rollback does not undo the attach), so racing
+  creators of one key may each run it: the first store to claim the key
+  wins, `getOrCreate` on every other thread returns that store, a racing
+  `create` fails with "already exists" (use `getOrCreate` to share one),
+  and each loser disposes the store its own run built — never attached,
+  never announced. A factory that needs its own key again on the same
+  thread is a cycle error. The winner's attach ends only after it has
+  synced the new store's tree middleware and told the membership
+  listeners, so `threads[key]`, `entries()` and `getOrCreate` on another
+  thread never hand out a store those do not cover yet (they park for
+  that moment, which runs no user code); a listing (`tree.stores`, a
+  capture) may include it from its registration on, a moment earlier.
+- **A failing factory leaves no entry.** A throwing factory leaves no
+  entry and no listener hears of it; whatever it built before throwing is
+  its own. A factory that returns a store of another class, a disposed
+  store, or a store that already has a parent — or whose parent disposed
+  meanwhile — fails the call, and the store that run built is disposed
+  (never a store that existed before the run, nor one another parent
+  holds). Either way a retry runs the factory again.
+- **Factory code is ordinary store code.** A constructor may run an
+  `action` on the new store; inside a Strict `atomic` frame it may not (the
+  new store is not enrolled), exactly as outside a tree. A factory may
+  itself `create` another keyed store; the inner one attaches first.
+- **A create racing the parent's dispose.** If the parent is disposed after
+  the new store attached, `create` still returns it, live and detached: a
+  subtree root (§17.3). Only a dispose that lands before the attach fails
+  the `create` ("… disposed").
+- **Keys.** `String` keys get a key codec by default; pass one for other
+  key types (`keyed<Long, ThreadStore>(keyCodec = LongCodec) { … }`).
+  Without one the branch works but is never encoded (§17.7). A key codec
+  that throws fails `create`/`getOrCreate` with an `IllegalStateException`
+  naming the parent and the branch, never the key.
+- **Nothing in the tree opens a transaction.** `create`, lookups,
+  materialization and `dispose` take only the tree's own locks (§10.1),
+  and none of them is held while a factory or child lambda runs, so they
+  work from inside actions, frames and observers. `threads[key]`,
+  `entries()` and `tree.children()` are not plain field reads: they may
+  park for a moment (another thread finishing an attach), and `children()`
+  runs the child lambdas not run yet.
+- **Disposing keyed stores.** `App.threads.dispose(id)` disposes the live
+  store under a key (`false` when there is none) and `disposeAll()` every
+  live one; a disposed keyed store leaves the branch either way.
 
 ### 17.3 Dispose and detach
 
-A live keyed store leaves the tree when it is disposed — including from
-inside its own action — and `App[branch, key]`/`nodeOf` answer `null` from
-then on; its `LeafNode` keeps identifying the place in captures and
-timelines taken while it was live. A branch store that is disposed leaves
-the same way (the branch still lists it in `stores`). `Root.dispose()`
-detaches every leaf and drops every listener without disposing a store:
-the leaves keep working on their own, disposing one later no longer
-reaches the root, and every tree entrypoint on the root throws
-`IllegalStateException("root … disposed")`. It is idempotent and never
-waits on a leaf's transaction lock. A thousand create/dispose cycles leave
-no entry, listener bookkeeping, observer or middleware behind.
+Disposing a store detaches it from its parent and releases its
+`store { }` and `group { }` children as subtree roots; its keyed branches
+dispose the stores their factories built, unless declared with
+`onParentDispose = KeyedDisposal.Release`.
 
-### 17.4 Declaration rules, `object` roots and test hygiene
+- **A disposed child leaves its parent.** `threads[key]` and `nodeOf`
+  answer `null` from then on; a group keeps listing the store in
+  `Branch.stores` but no longer attaches it; a `store { }` property is a
+  stable `val`: it keeps answering the disposed store (the lambda never
+  runs again), so that instance stays reachable — and uncollectable — for
+  as long as the parent is, while a disposed keyed store and a released
+  child hold no such reference and can be collected. The child's
+  `LeafNode` keeps the place it had — parent, name and key — so captures
+  and test timelines taken while it was live still identify it. This
+  holds when the child is disposed from inside its own action too.
+- **A disposed parent releases its `store { }` and `group { }` children.**
+  Each such direct child becomes a subtree root and keeps working: its
+  store, states, own children and own middleware stay; its `tree.parent`
+  is `null` and its name is its class-derived one again. The parent's
+  listeners, value and tree middleware stop covering it — a child keeps the
+  middleware its remaining ancestors installed. A released child can be
+  declared under another parent; a disposed store never can. The lambdas
+  that built these children may have handed out or shared what they
+  built, so the tree does not assume it owns them.
+- **A disposed parent disposes its keyed stores.** Every store of a keyed
+  branch was built by the branch's factory, so the branch owns it: when
+  the declaring store disposes, each live keyed store is first released
+  like any child, then disposed — never under a lock of the tree's: inside
+  an action or frame when that entry settles (after it released every
+  lock, so a parent disposed from inside its own action never deadlocks on
+  its children), else right after the parent's dispose. Declare a branch
+  with `keyed<K, S>(onParentDispose = KeyedDisposal.Release) { … }` to
+  release its stores as subtree roots instead.
+- **After `dispose()`.** `store.tree` throws, and so does every member of a
+  `StoreTree` handle taken before, except `node` and `parent` (the place
+  the store had), `removeMiddleware` (`false`) and the value, which answers
+  the last tree when it was read before the dispose. The parent's child
+  properties throw too. A thousand keyed create/dispose cycles leave no
+  entry, listener bookkeeping, observer or middleware behind.
 
-- `object App : Root()` is the documented shape: the tree is built on the
-  object's first access, under the platform's class-initialization rules.
-  On the JVM a throwing declaration (a double listing, say) poisons the
-  object for the process, and a leaf `object` whose initializer reads its
-  root's delegate while the root is initializing fails; Kotlin/Native
-  reports such failures differently. Tests use class roots
-  (`class TestRoot : Root()`) with per-instance class stores, one root per
-  test, so nothing leaks between tests.
-- A root subclass, a keyed store class and every call site need the
-  experimental opt-in; prefer the module-wide `-opt-in` flag over
+### 17.4 Declaration rules, `object` stores and test hygiene
+
+- **`object` stores.** `object App : Store<App>()` is the natural shape
+  for an app's top store: its declarations register on the object's first
+  access and no child code runs then. A child may be an `object` too
+  (`store { SettingsStore }`), under one rule: a child object may reference
+  its parent, never the parent's delegate for itself. With
+  `object SelfApp : Store<SelfApp>() { val settings by store { SelfLeaf } }`
+  and `object SelfLeaf : Store<SelfLeaf>() { val back = SelfApp.settings }`,
+  reading `SelfApp.settings` first is a cycle — on the JVM an
+  `ExceptionInInitializerError` whose cause names the child declaration
+  `SelfApp.settings`, after which `SelfLeaf` is unusable for the process —
+  and touching `SelfLeaf` first attaches a half-initialized object, because
+  the JVM publishes an object's instance before its property initializers
+  run. Reading anything else of the parent (`SelfApp.tree.node.name`) is
+  fine. On the JVM a declaration that throws (two siblings with one name)
+  poisons the object for the process; Kotlin/Native reports such failures
+  differently.
+- **Declare through the store itself.** A `store`/`group`/`keyed` call made on one
+  store and delegated from another store's property fails when the
+  property binds.
+- **Tests.** Use per-instance class stores
+  (`class TestApp : Store<TestApp>() { val settings by store { SettingsStore() } }`),
+  one parent per test, so nothing leaks between tests: an `object` keeps
+  its children, keyed entries and states for the whole process.
+- **Opt-in.** A declaring store, a keyed store class and every call site
+  need the experimental opt-in; prefer the module-wide `-opt-in` flag over
   per-site annotations.
-- The tree's `@StoreInternalApi` seam is `LeafMembershipListener`
-  (`Root.internalAddMembershipListener`): library machinery hears
-  `onAttached` once per store that joins (a keyed store's after its
-  factory returned, strictly before `App[branch, key]` answers it) and
-  `onDetached` once per store that leaves, never for a store whose
-  construction failed, and never for the root's own `dispose()`. A
-  callback runs under whatever locks the attaching or disposing caller
-  holds and may only mark and schedule — never open an action, frame,
-  `reset` or `restore`.
+- **For library code** (`@StoreInternalApi`): a `LeafMembershipListener`
+  added through `store.internalAddMembershipListener(listener)` hears
+  `onAttached(leaf)` for every store that joins the store's subtree, at any
+  depth (a keyed store's after its factory returned, before `threads[key]`
+  answers it on any other thread), and `onDetached(leaf)` for every store
+  that leaves it —
+  `leaf.store` is `null` when that store itself was disposed, and still set
+  when an ancestor between them was. `onDetached` never precedes the
+  matching `onAttached` and is never sent for a store whose construction
+  failed, but a deep descendant can hear it twice when two disposes race,
+  so it must be idempotent. A callback runs under whatever locks the
+  attaching or disposing caller holds and may only mark and schedule:
+  never open an action, frame, `reset` or `restore`, materialize a child,
+  or re-adopt the store it is told about.
 
 ### 17.5 Tree snapshots and typed reads
 
-`App.snapshot(node = App, scope = SnapshotScope.All)` captures a subtree as
-ONE consistent cut across its live leaves and returns a `TreeSnapshot`:
-the nodes as of the capture, with a `StoreSnapshot` (§14.1, §16.2) at every
-leaf. Reads are by identity, never by name.
+`App.tree.snapshot(node = App.tree.node, scope = SnapshotScope.All)`
+captures the subtree at a node — the store there, if any, and every live
+store under it — as ONE consistent cut and returns a `TreeSnapshot`: the
+nodes as of the capture, with a `StoreSnapshot` (§14.1, §16.2) for every
+store. A parent's own states are captured with its children's. Reads are by
+identity, never by name.
 
 ```kotlin
 fun readTheTree() {
-    val t2 = App.threads.create("t2", ::ThreadStore)
+    val t2 = App.threads.create("t2")
     val title = t2.title
     t2 action { title mutate "hello" }
-    val tree = App.snapshot()                                  // one consistent cut across every live leaf
+    val tree = App.tree.snapshot()                             // one consistent cut: App and every live store under it
     val read: String? = tree[title]                            // typed by the state; null outside the capture
     println(read)                                              // "hello"
-    println(tree[App.threads]?.children?.map { it.node.name }) // "[t2]"
-    println(App.snapshot(App.threads)[title] == read)          // "true": a subtree capture
-    println(tree == App.snapshot())                            // "true": value equality
+    println(tree[App.threads]?.children?.map { it.name })      // "[t2]"
+    println(App.tree.snapshot(App.threads)[title] == read)     // "true": a subtree capture
+    println(tree[App.openThreads])                             // "[]": the parent's own state
+    println(tree == App.tree.snapshot())                       // "true": value equality
     t2.dispose()
     println(tree[title])                                       // "hello": the capture outlives the store
 }
 ```
 
-- **Consistency (T4).** Every leaf is read from one lock-free cut
+- **Consistency (T4).** Every store is read from one lock-free cut
   (`captureConsistent`, §15.3): a commit, or an `atomic`/`suspendAtomic`
   frame applying while the capture runs, is seen whole or not at all —
   never one participant's new value with another's old one, and never a
-  single store half-applied. The capture takes no leaf's transaction lock
+  single store half-applied. The capture takes no store's transaction lock
   and blocks no writer: it retries while a write bracket is open, so it
   returns from inside an observer, a middleware hook, a frame body holding
   higher keys, or while a `suspendAction` body is parked holding the
-  serializer. On a committing thread it reads committed values, not the
-  action's pending writes (an observer, running after the apply pass, sees
-  the new values; `onTransactionCompleted`, running before it, the old).
-  A leaf disposed while the capture runs is left out; a keyed store still
-  inside its factory is never included. Never-read declared states are
-  materialized first, as `Store.snapshot()` does. What it is NOT:
-  `atomic(*leaves)` — that would hold every serializer and transaction
-  lock, fail nested lock order and deadlock from observers. Pinned gaps:
-  a participant a frame joined as a savepoint applies with its enclosing
-  transaction, so user-composed mixed nesting can still tear (issue #20
-  amendment (d)); a legacy `derived` backing may lag inside a cut.
+  serializer. The subtree's shape is listed the same way: one registry
+  lock at a time, retried while a child attaches or detaches anywhere
+  under the receiver. On a committing thread the capture reads committed
+  values, not the action's pending writes (an observer, running after the
+  apply pass, sees the new values; `onTransactionCompleted`, running before
+  it, the old). A store disposed while the capture runs is left out; a
+  keyed store still inside its factory is never included. Never-read
+  declared states are materialized first, as `Store.snapshot()` does. What
+  it is NOT: `atomic(*stores)` — that would hold every serializer and
+  transaction lock, fail nested lock order and deadlock from observers.
+  Pinned gaps: a participant a frame joined as a savepoint applies with its
+  enclosing transaction, so user-composed mixed nesting can still tear
+  (issue #20 amendment (d)); a legacy `derived` backing may lag inside a
+  cut.
 - **Typed reads (T5).** `tree[state]` has the state's type and returns
-  `null` for `Absent` (a state of a store outside the captured subtree)
-  or `Redacted` (a `Secret` state outside `SnapshotScope.Raw`);
-  `tree.entry(state)` tells them apart. A state of a store that never
-  belonged to the root, or one no store declared (a `computed { }`, a
-  `derivedState`), throws `IllegalArgumentException`. The capture holds
-  the leaf's `StoreSnapshot`, so it keeps reading after the store is
-  disposed — hold the `State` reference, since the store's own delegate
-  is gated after `dispose()`. `tree[node]` is the subtree's capture, or
-  `null` outside it; `tree.children`, `tree.node`, `tree.isLeaf` and
-  `tree.scope` walk it. `App.value` (§17.8) keeps such a capture current
-  as a `State<TreeSnapshot>`.
+  `null` for `Absent` or `Redacted` (a `Secret` state outside
+  `SnapshotScope.Raw`); `tree.entry(state)` tells them apart. Membership is
+  the receiver's subtree when the capture was taken: a state of a store
+  that was anywhere under the receiver then reads `Absent` from a capture
+  of a node that does not hold it, even after that store was disposed; a
+  state of a store that was not under the receiver — an ancestor of the
+  receiver, an unrelated store — or one no store declared (a
+  `computed { }`, a `derivedState`) throws `IllegalArgumentException`.
+  Two cases read `Absent` instead of throwing: a state of a store that
+  joined the receiver's subtree after the capture, and — once the receiver
+  itself is disposed — a state of any store the capture never listed. The
+  capture holds each store's `StoreSnapshot`, so it keeps reading after the
+  store is disposed — hold the `State` reference, since a disposed store's
+  own delegates are gated. `tree[node]` is the subtree's capture, or `null`
+  outside it; `tree.children`, `tree.node`, `tree.name`, `tree.hasStore`
+  (a store was captured at the node), `tree.isLeaf` (no children) and
+  `tree.scope` walk it. The tree's value (§17.8) keeps such a capture
+  current.
+- **A kept capture keeps the structure it captured.** `tree.name` is the
+  node's name when the capture was taken. A node's live `name` can change
+  afterwards — a store whose parent is disposed becomes a subtree root and
+  takes its class-derived name again — but reads, `render()`, `encode()`,
+  equality and restore reports all use the captured names and parent links.
 - **Scopes.** `SnapshotScope.Raw` lets `Secret` values read; `UserAuthored`
-  captures exactly the tagged states and prunes leaves and branches with
+  captures exactly the tagged states and prunes stores and groups with
   nothing captured (the requested node itself is always returned);
   `render()` and `toString()` never show a `Secret` value in any scope.
 - **Equality.** `equals`/`hashCode` are full value equality over names,
-  structure, scope and every leaf's values — `Secret`, `Remote` and
+  structure, scope and every store's values — `Secret`, `Remote` and
   codec-less states included — so a `distinct` consumer never drops a
   Secret-only change. `equalsEncodable(other, includeRemote = false)` is
-  the round-trip contract with `decode(encode())` (§17.7): it
-  ignores `Secret` values, `Remote` states unless included, codec-less
-  states and keyed branches without a key codec. Both compare captures of
-  the same or of different roots by name and structure.
+  the round-trip contract with `decode(encode())` (§17.7): it ignores
+  `Secret` values, `Remote` states unless included, codec-less states and
+  keyed branches without a key codec. Both compare captures by name and
+  structure, so captures taken through two instances of one class compare
+  (the top node's name is not compared by `equalsEncodable`, which never
+  writes it).
 
 ### 17.6 Restore and reset over a subtree
 
-`App.restore(tree, policy, sterile)` puts a `TreeSnapshot` back into the
-stores at its nodes NOW, and `App.reset(node)` re-runs the initializers of
-every live leaf under a node — each as ONE frame over the subtree's leaves
-(decision U10): every leaf is planned or materialized first, outside every
-lock, then staged into its root of one outermost `atomic`, so the leaves
-apply in one write bracket and an observer sees the whole subtree restored
-or reset, never half of it. Both return the frame's `TransactionResult`
-carrying a report, and both refuse to nest (§15.4).
+`App.tree.restore(tree, policy, sterile)` puts a `TreeSnapshot` back into
+the stores at its nodes NOW, and `App.tree.reset(node)` re-runs the
+initializers of every live store of the subtree at a node — the receiver's
+own states included when the node is its own — each as ONE frame over the
+subtree's stores (decision U10): every store is planned or materialized
+first, outside every lock, then staged into its root of one outermost
+`atomic`, so the stores apply in one write bracket and an observer sees the
+whole subtree restored or reset, never half of it. Both return the frame's
+`TransactionResult` carrying a report, and both refuse to nest (§15.4).
 
 ```kotlin
 class PrefsStore : Store<PrefsStore>() {
@@ -3852,241 +4052,320 @@ class PrefsStore : Store<PrefsStore>() {
     val etag by state(codec = StringCodec, tags = setOf(StateTag.Remote)) { "" }
 }
 
-class NoteStore(val id: String) : Store<NoteStore>(Notes.byId.at(id)) {
+class NoteStore(val id: String) : Store<NoteStore>() {
     val body by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "" }
 }
 
-object Notes : Root("notes") {
-    val prefsStore = PrefsStore()
-    val prefs by branch(prefsStore).named(prefsStore, "prefs")   // pinned: this leaf is persisted (§17.7)
-    val byId by keyed<String, NoteStore>()
+object Notes : Store<Notes>(), TreeIdentified {
+    override val treeId get() = "notes"                                    // the receiver's identity in encode(): survives a class rename
+    val folder by state(codec = StringCodec, tags = setOf(StateTag.UserAuthored)) { "inbox" }   // the parent's own state
+    val prefs by store(named = "prefs") { PrefsStore() }                   // node "prefs", pinned: survives a property rename
+    val byId by keyed<String, NoteStore>(named = "byId") { id -> NoteStore(id) }
 }
 
 fun undoAndResetTheTree() {
-    val n1 = Notes.byId.create("n1", ::NoteStore)
+    val n1 = Notes.byId.create("n1")
     n1 action { body mutate "draft" }
-    val before = Notes.snapshot()                                  // one consistent cut
-    Notes.prefsStore action { theme mutate "dark" }
+    val before = Notes.tree.snapshot()                             // one consistent cut: Notes, prefs, n1
+    Notes action { folder mutate "archive" }
+    Notes.prefs action { theme mutate "dark" }
     n1 action { body mutate "final" }
 
-    val report = Notes.restore(before).getOrThrow()                // one frame over both leaves
-    println(Notes.prefsStore.theme.value)                          // "light"
+    val report = Notes.tree.restore(before).getOrThrow()           // one frame over all three
+    println(Notes.folder.value)                                    // "inbox": the parent is restored with its children
+    println(Notes.prefs.theme.value)                               // "light"
     println(n1.body.value)                                         // "draft"
-    println(report.perNode.keys.map { it.name })                   // "[prefs, n1]"
+    println(report.perNode.keys.map { it.name })                   // "[Notes, prefs, n1]"
 
-    Notes.prefsStore action { theme mutate "dark" }
-    Notes.reset(Notes.byId).getOrThrow()                           // only the keyed subtree
+    Notes.prefs action { theme mutate "dark" }
+    Notes.tree.reset(Notes.byId).getOrThrow()                      // only the keyed subtree
     println(n1.body.value == "")                                   // "true": back to its initializer
-    println(Notes.prefsStore.theme.value)                          // "dark": outside the subtree, untouched
-    Notes.reset().getOrThrow()                                     // the whole tree
-    println(Notes.prefsStore.theme.value)                          // "light"
+    println(Notes.prefs.theme.value)                               // "dark": outside the subtree, untouched
+    Notes.tree.reset().getOrThrow()                                // the parent and its whole subtree
+    println(Notes.prefs.theme.value)                               // "light"
     n1.dispose()
 }
 ```
 
-- **Restore is addressed by node, resolved at restore time.** A branch
-  leaf's capture goes to the store at that leaf; a keyed leaf's to
+- **Restore is addressed by node, resolved at restore time.** A captured
+  store's place is its node: the receiver's own capture goes back into the
+  receiver, a child's into the store at that node, and a keyed store's into
   whichever store lives under its key *today* — the captured instance, or
-  one created since under the same key (listed in `report.rebound`); a
-  capture with no live store at its place (a keyed store since disposed)
-  is skipped and listed in `report.skipped`. `report.perNode` holds each
-  restored leaf's `RestoreReport` (§16.2: `restored`, `kept`, `issues`,
-  `sterilized`), `report.issues` flattens them. Under
-  `RestorePolicy.Strict` a skipped leaf or an unresolved decoded path
-  (§17.7) fails the restore before any leaf is touched, with a
-  `RestoreRejectedException` naming the paths; under `IgnoreUnknown` (the
-  default) they are tolerated. `sterile = true` restores every leaf
-  sterile (its `Remote` states reset, §16.4). Everything `Store.restore`
-  does per store — the schema check and `migrate` (§16.3), codec decoding,
-  the policy, never re-running `Transformer.set` (an encrypted state goes
-  back as its captured ciphertext) — happens per leaf, before the frame
-  opens; a failing plan or a refused write fails the whole frame and
-  nothing is written. A capture taken in `SnapshotScope.All` restores a
-  `Secret` state losslessly (it holds the raw value); a decoded text never
-  has one (encoded as `null`, so the state is `kept`). A tree captured from
-  another root is refused.
-- **Reset is the subtree's initializers, in one frame.** Every live leaf
-  under `node` — the whole tree by default — is reset as `Store.reset()`
-  resets one store (§16.1): never-read states are materialized before the
-  frame, initializers re-run in fresh-store order inside it, output is
-  staged raw and only where it differs, so observers fire once per changed
-  state and never for the rest; each leaf's attachments hear
-  `onStoreReset` inside the frame. A leaf's throwing initializer fails the
-  whole frame. `report.reset` lists the leaves reset, `report.skipped`
-  those disposed after the reset began. An empty subtree (a keyed branch
-  with no store) returns `Success` carrying a synthetic, already committed
-  transaction that no store or middleware saw.
-- **One frame, one transaction per leaf.** Each leaf's middleware sees one
-  root transaction whose `frameId` is shared across the subtree
+  one created since under the same key (listed in `report.rebound`). A
+  capture with no live store at its place (a keyed store since disposed, a
+  child that left the receiver's subtree) is skipped and listed in
+  `report.skipped`. `report.perNode` holds each restored store's
+  `RestoreReport` (§16.2: `restored`, `kept`, `issues`, `sterilized`) in
+  tree order, `report.issues` flattens them. Under `RestorePolicy.Strict` a
+  skipped store or an unresolved decoded path (§17.7) fails the restore
+  before any store is touched, with a `RestoreRejectedException` naming the
+  paths, relative to the receiver and as captured (`threads/t1`); under
+  `IgnoreUnknown` (the default) they are tolerated. `sterile = true`
+  restores every store sterile (its `Remote` states reset, §16.4).
+  Everything `Store.restore` does per store — the schema check and
+  `migrate` (§16.3), codec decoding, the policy, never re-running
+  `Transformer.set` (an encrypted state goes back as its captured
+  ciphertext) — happens per store, before the frame opens; a failing plan
+  or a refused write fails the whole frame and nothing is written. A
+  capture taken in `SnapshotScope.All` restores a `Secret` state losslessly
+  (it holds the raw value); a decoded text never has one (encoded as
+  `null`, so the state is `kept`).
+- **Restore through the store it was captured from.** A capture whose node
+  is not in the receiver's subtree is refused with an
+  `IllegalArgumentException` ("the tree was captured under 'Notes' and its
+  node … is not under this store …"): a capture of a child taken through
+  the parent's `tree` restores through any `tree` whose subtree holds that
+  child, but a capture through one instance never restores into another
+  instance of the same class.
+- **Reset is the subtree's initializers, in one frame.** Every live store
+  of the subtree at `node` is reset as `Store.reset()` resets one store
+  (§16.1): never-read states are materialized before the frame,
+  initializers re-run in fresh-store order inside it, output is staged raw
+  and only where it differs, so observers fire once per changed state and
+  never for the rest; each store's attachments hear `onStoreReset` inside
+  the frame (a hydrator goes back to `Detached`). A throwing initializer
+  fails the whole frame. `report.reset` lists the stores reset,
+  `report.skipped` those disposed after the reset began. An empty subtree
+  (a keyed branch with no store) returns `Success` carrying a synthetic,
+  already committed transaction that no store or middleware saw.
+- **One frame, one transaction per store.** Each store's middleware sees
+  one root transaction whose `frameId` is shared across the subtree
   (`atomic-…`), the id `restore`/`reset` return as the result's
-  `transaction`. A leaf disposed after the frame took its lock is skipped
+  `transaction`. A store disposed after the frame took its lock is skipped
   and reported; the rest commit.
 
 ### 17.7 Encoding, names and the persisted-name self-check
 
 `tree.encode(includeRemote = false)` writes a `TreeSnapshot` as a
-`holdfast.tree` v1 text and `App.decode(text)` reads one back, addressed by
-this root's nodes. Names appear here and in `render()` only: the structure
-is written by node name, and every leaf carries its store's own
-`holdfast.store` v1 body (§16.2) verbatim — the same bytes
+`holdfast.tree` v1 text and `App.tree.decode(text)` reads one back,
+addressed by the receiver's subtree as declared now. Names appear here and
+in `render()` only: the structure is written by node name, and every store
+carries its own `holdfast.store` v1 body (§16.2) verbatim — the same bytes
 `store.snapshot().encode()` writes, so a blob persisted per store stays
 readable, and a `Secret` state is `null`, a codec-less state absent, a
-`Remote` one absent unless included. A keyed branch's entries are written
-under their keys through the branch's `keyCodec` (defaulted for `String`
-keys); a keyed branch without one is left out and listed under `skipped` —
-also when that branch is the node captured (written with no entries), while a
-capture *under* such a branch refuses to encode, since its path would have to
-spell the key. A capture of one keyed leaf round-trips: its path ends in the
-encoded key, which `decode` resolves through the branch's `keyCodec` to the
-live store, or to a pending leaf (`pendingKeys`) when none is live; a key codec
-that throws, or two entries decoding to one key, fail `decode` with a
-`SnapshotFormatException` naming the branch, never the key. An empty leaf
-capture — a leaf with nothing tagged under `UserAuthored`, or a disposed store
-— is written `{"kind":"leaf"}` with no body and reads back as `Absent`. The
-text nests at most 64 container levels, about 28 branch levels.
+`Remote` one absent unless included.
 
 ```kotlin
 fun persistTheTree(): String {
-    val n2 = Notes.byId.create("n2", ::NoteStore)
+    val n2 = Notes.byId.create("n2")
     n2 action { body mutate "remember me" }
-    Notes.prefsStore action { theme mutate "dark" }
-    println(Notes.verifyPersistedNames())                                    // "[]": every persisted leaf is pinned or keyed
-    val text = Notes.snapshot(scope = SnapshotScope.UserAuthored).encode()   // names for structure; each leaf its store's body
+    Notes.prefs action { theme mutate "dark" }
+    println(Notes.tree.verifyPersistedNames())                                    // "[]": Notes has a tree id, prefs and byId pins, n2 its key
+    val text = Notes.tree.snapshot(scope = SnapshotScope.UserAuthored).encode()   // names for structure; each store its own body
     n2.dispose()
     return text
 }
 
 fun rehydrateTheTree(text: String) {
-    val tree = Notes.decode(text)                                            // resolves nodes; runs no store code
-    println(tree.pendingKeys(Notes.byId))                                    // "[n2]": a body with no live store yet
-    tree.pendingKeys(Notes.byId).forEach { Notes.byId.create(it, ::NoteStore) }   // the process-death idiom
-    val report = Notes.restore(tree, RestorePolicy.Strict).getOrThrow()
-    println(Notes[Notes.byId, "n2"]?.body?.value)                            // "remember me"
-    println(report.unresolvedPaths)                                          // "[]"
-    Notes[Notes.byId, "n2"]?.dispose()
-    Notes.reset()
+    val tree = Notes.tree.decode(text)                                            // resolves nodes; runs no store code
+    println(tree.pendingKeys(Notes.byId))                                         // "[n2]": a body with no live store yet
+    tree.pendingKeys(Notes.byId).forEach { Notes.byId.create(it) }                // the process-death idiom
+    val report = Notes.tree.restore(tree, RestorePolicy.Strict).getOrThrow()
+    println(Notes.byId["n2"]?.body?.value)                                        // "remember me"
+    println(report.unresolvedPaths)                                               // "[]"
+    Notes.byId["n2"]?.dispose()
+    Notes.tree.reset()
 }
 ```
 
+- **The wire shape.** Every node is uniform: a store's node is a `leaf`
+  that may carry `store` (its body; omitted when nothing was captured) and
+  `children` (omitted when empty), a group a `branch` with `children`, a
+  keyed branch a `keyed` node whose `entries` are leaf nodes under their
+  encoded keys — so a keyed store's own children are written under it:
+  `{"format":"holdfast.tree","v":1,"receiver":"notes","scope":"UserAuthored",
+  "path":[],"tree":{"kind":"leaf","store":{…},"children":{"byId":{"kind":
+  "keyed","entries":{"n2":{"kind":"leaf","store":{…}}}},"prefs":{"kind":
+  "leaf","store":{…}}}},"skipped":[]}`. The receiver's node is anonymous:
+  `path` (the captured node) and `skipped` are relative to it, and it is
+  identified once, by `receiver` (below). Children are sorted by name and entries by encoded key. A keyed
+  branch's entries go through its `keyCodec`; a branch without one is left
+  out and listed under `skipped` — also when that branch is the node
+  captured (written with no entries) — while a capture *under* such a
+  branch refuses to encode, since its path would have to spell the key. An
+  empty capture of a store — nothing tagged under `UserAuthored`, or a
+  disposed store — is written `{"kind":"leaf"}` with no body and reads back
+  as `Absent`. The text nests at most 64 container levels (about 28 levels
+  of stores).
+- **The receiver's identity.** `receiver` is the receiver store's
+  `TreeIdentified.treeId` when it implements `TreeIdentified` (an
+  interface the store class implements, like `SchemaVersioned`), else its
+  node name — a child's property name or pin, a top-level store's class
+  name minus `Store`. `decode` refuses a text whose `receiver` differs from
+  the decoding receiver's identity, computed the same way, with a
+  `SnapshotFormatException` naming both ("captured under 'notes', decoding
+  under 'Settings'"), so a text captured through one store's `tree` never
+  lands in another store's subtree. A child pinned with `named =` decodes
+  under the same pin through any parent; a top-level store with no tree id
+  is exposed to class renames — R8 obfuscation included — so give a
+  persisting top-level store a `TreeIdentified` id.
 - **Decode resolves paths, retains bodies.** `decode` reads the envelope
-  once and matches each named node against the tree as declared now: a
-  path this root does not declare (a renamed branch, a leaf whose class
-  was renamed) lands in `tree.unresolvedPaths` — the one place the tree
-  hands out strings, a diagnostic — instead of failing, while an unknown
-  *state* name inside a leaf body is that leaf's `RestoreIssue` at
-  restore, as for a single store (§16.2). A keyed entry with no live store
-  under its key becomes a typed pending key (`tree.pendingKeys(branch)`):
-  create those stores, then restore — the process-death idiom above. Leaf
-  bodies stay name-keyed text until the restore, so `migrate` (§16.3) runs
-  per leaf then, in the reading store's version. A text that is not a
-  `holdfast.tree` v1 envelope, or a key its codec cannot decode, throws
-  `SnapshotFormatException`; no exception quotes a value or a key.
+  once and matches each named node against the receiver's subtree as
+  declared now (materializing declared children first): a path the subtree
+  does not declare — a renamed property, a group leaf whose class was
+  renamed, the children of a store that is disposed or has no live store —
+  lands in `tree.unresolvedPaths` (the one place the tree hands out
+  strings, a diagnostic) instead of failing, while an unknown *state* name
+  inside a body is that store's `RestoreIssue` at restore, as for a single
+  store (§16.2). A keyed entry with a body and no live store under its key
+  becomes a typed pending key (`tree.pendingKeys(branch)`): create those
+  stores, then restore — the process-death idiom above. A pending store's
+  own children cannot resolve until it exists (an unresolvable keyed child
+  lists one path per encoded entry, `["threads","42","replies","7"]`), so
+  create nested keyed
+  stores before `decode` to restore them under `Strict`; under
+  `IgnoreUnknown` the parent's body restores and its children are skipped.
+  Bodies stay name-keyed text until the restore, so `migrate` (§16.3) runs
+  per store then, in the reading store's version. A text that is not a
+  `holdfast.tree` v1 envelope, one captured under another receiver, a key
+  its codec cannot decode, or two entries decoding to one key throw
+  `SnapshotFormatException` naming the branch (or both receivers); no
+  exception quotes a value or a key.
   `decode(encode(tree)).equalsEncodable(tree)` is the round-trip contract;
   full `equals` fails whenever a `Secret`, `Remote` or codec-less value
   exists, since the text never carried it.
-- **Persisted names must be pinned (T6).** A class-derived leaf name
+- **Persisted names must be stable (T6).** A class-derived name
   (`NameOrigin.ClassName`) changes under obfuscation or a rename and
   orphans what was persisted under it, so `encode()` under
-  `SnapshotScope.UserAuthored` — the persistence scope — fails fast on
-  one; `All` and `Raw` write it (an in-memory undo or a debug dump does
-  not outlive the class). Keyed leaves are named by key and never pinned.
-  `App.verifyPersistedNames(node = App)` is the self-check to run in a
-  test: it lists every persisted store — one declaring a `UserAuthored`
-  state or keyed family, one that `is SchemaVersioned`, or one whose
-  attachments report `persistenceKeys` (the overlay's, §16.8) — sitting at
-  a class-named leaf (`NamingIssue.Kind.ClassDerivedNameOnPersistedStore`:
-  pin it with `branch(store).named(store, "…")`), and every keyed branch
+  `SnapshotScope.UserAuthored` — the persistence scope — fails fast on a
+  captured group leaf named by its class; `All` and `Raw` write it (an
+  in-memory undo or a debug dump does not outlive the class). The receiver
+  is exempt from that refusal (its node name is never a path segment; see
+  `receiver` above). A property name (`NameOrigin.Property`) is no safer
+  under obfuscation or a property rename, but `encode()` writes it: pin it
+  with `named =` before renaming the property.
+  `App.tree.verifyPersistedNames(node)` is the self-check to run in a test.
+  A store is persisted when it declares a `UserAuthored` state or keyed
+  family, `is SchemaVersioned`, or has attachments reporting
+  `persistenceKeys` (the overlay's, §16.8). The check lists every persisted
+  store at a class-named group leaf
+  (`NamingIssue.Kind.ClassDerivedNameOnPersistedStore`: pin it in the group
+  lambda, `SignInStore() named "sign-in"`); every `store { }` child,
+  `group { }` and `keyed { }` branch named by its property with a persisted
+  store at or under it (`PropertyDerivedNameOnPersistedSubtree`: pin it
+  with `store(named = …)`, `group(named = …)` or `keyed(named = …)` — a
+  `store { }` child is flagged like a branch, since its property name is
+  the same rename hazard); the receiver, when it is a top-level store
+  identified by its class name — no `TreeIdentified` — and the checked
+  subtree persists (`ReceiverNameIsClassDerived`); and every keyed branch
   declared without a key codec (`KeyedBranchNotEncodable`, empty or not).
   It reads declarations only and runs no initializer.
 
 ### 17.8 The tree value, settling and consistent cuts
 
-`App.value` is the whole tree as ONE consistent capture, kept current: a
-`State<TreeSnapshot>` recomputed once per outermost entry that changes the
-tree, after every lock that entry took is released, and published only when
-the tree differs. Observe it like any state.
+`App.tree` is itself a `State<TreeSnapshot>`: the receiver's subtree as ONE
+consistent capture, kept current — recomputed once per outermost entry
+that changes the subtree, after every lock that entry took is released, and
+published only when the capture differs. Observe it like any state;
+`tree.snapshot()` is a fresh cut instead.
 
 ```kotlin
 fun watchTheTree() {
     var settles = 0
-    val watch = Notes.value effect { settles++ }                       // fires once now, with the current tree
-    val n3 = Notes.byId.create("n3", ::NoteStore)                      // a leaf joined: one settle
-    atomic(Notes.prefsStore, n3) {                                     // one frame over two leaves: one settle
-        Notes.prefsStore { theme mutate "dark" }
+    val watch = Notes.tree effect { settles++ }                         // fires once now, with the current tree
+    val n3 = Notes.byId.create("n3")                                    // a store joined: one settle
+    atomic(Notes.prefs, n3) {                                           // one frame over two stores: one settle
+        Notes.prefs { theme mutate "dark" }
         n3 { body mutate "hi" }
     }.getOrThrow()
-    println(settles)                                                   // "3": the subscription, the join, the frame
-    val tree = Notes.value.value
-    println(tree[Notes.prefsStore.theme] to tree[n3.body])             // "(dark, hi)": never one without the other
-    println(tree == Notes.snapshot())                                  // "true"
+    println(settles)                                                    // "3": the subscription, the join, the frame
+    val tree = Notes.tree.value
+    println(tree[Notes.prefs.theme] to tree[n3.body])                   // "(dark, hi)": never one without the other
+    println(tree == Notes.tree.snapshot())                              // "true"
     watch.dispose()
     n3.dispose()
-    Notes.reset()
+    Notes.tree.reset()
 }
 ```
 
-- **Once per outermost entry (T4).** `value` is a derived state over
-  every leaf store as a whole (§16.5's machinery, following stores rather
-  than listed states): a commit that changes a leaf, an eviction, an
-  inbound bridge write, a keyed entry coming to life, a `removeState`, a
-  leaf joining or leaving each queue one recompute into the settle scope
-  of the entry on this thread, and the outermost `action`, `atomic`,
-  `suspendAction`, `suspendAtomic`, `restore` or `reset` runs it once when
-  it has released everything — nested actions and nested same-flavour
-  frames settle with it. The recompute is one lock-free capture
-  (§17.5), so a two-store frame is seen whole; it commits on the root's
-  private host store, whose lock is the host lock of §10.2, and the
-  `distinct` backing publishes only a tree that differs (full value
-  equality, so a `Secret`-only change is a change). Outside any entry — a
-  keyed `create`, a bridge replay, a `removeState` at top level — the
-  recompute runs inline, so the next read is current. A commit that a
-  `distinct` state deduplicated changes nothing and recomputes nothing; a
-  rollback recomputes nothing.
-- **Only the leaves that moved are recaptured.** A settle reuses the
-  previous tree's capture of every leaf whose cut stamp has not moved —
+- **Once per outermost entry (T4).** The value is a derived state over the
+  receiver and every live store of its subtree as wholes (§16.5's
+  machinery, following stores rather than listed states): a commit that
+  changes one of them, an eviction, an inbound bridge write, a keyed entry
+  coming to life, a `removeState`, a store joining or leaving at any depth
+  each queue one recompute into the settle scope of the entry on this
+  thread, and the outermost `action`, `atomic`, `suspendAction`,
+  `suspendAtomic`, `restore` or `reset` runs it once when it has released
+  everything — nested actions and nested same-flavour frames settle with
+  it. The recompute is one lock-free capture (§17.5), so a two-store frame
+  is seen whole; it commits on a private host store, whose lock is the host
+  lock of §10.2, and the `distinct` backing publishes only a tree that
+  differs (full value equality, so a `Secret`-only change is a change).
+  Outside any entry — a keyed `create`, a bridge replay, a `removeState` at
+  top level — the recompute runs inline, so the next read is current. A
+  commit that a `distinct` state deduplicated changes nothing and
+  recomputes nothing; a rollback recomputes nothing.
+- **Only the stores that moved are recaptured.** A settle reuses the
+  previous tree's capture of every store whose cut stamp has not moved —
   the states one cut listed and each one's write counter — so a commit on
-  one leaf of sixteen reads one leaf, and the other fifteen captures are
+  one store of sixteen reads one store, and the other fifteen captures are
   shared by reference; a frame recaptures every participant it wrote; a
-  keyed entry, a dropped state or a bridge write recaptures its leaf. The
+  keyed entry, a dropped state or a bridge write recaptures its store. The
   reads still form one cut: a reused capture is validated under the same
-  window the changed leaves are read in.
+  window the changed stores are read in.
+- **Every store has its own value; each costs what it follows.** Any
+  store's `tree` is a value over that store's subtree. A value costs
+  nothing until it is read or observed: no host store, no listener, no
+  capture — structural calls (`snapshot()`, `stores`, `middlewares`,
+  `track(tree)`, `hydrateAll`) build none of it. Once it is read, it
+  follows every store of its subtree: each materialized ancestor value
+  recomputes once per outermost entry that commits below it, and each such
+  recompute lists that ancestor's whole subtree and checks every store's
+  cut stamp — O(subtree) per ancestor even when one store moved — then
+  recaptures the stores whose stamp moved. So a commit under a chain of d
+  ancestors whose values are all read costs O(N·d) for a subtree of N
+  stores, and a store under D materialized values is recaptured D times
+  per commit: captures are reused per value through its previous tree,
+  never across values. Read or observe the value of the store whose
+  subtree you need, not one at every level of a deep tree.
 - **When a read is fresh.** The first read or observation builds the
-  tree (never-read initializers run then; declaring a tree runs no leaf
-  code, and registering a branch takes no capture). A read inside a leaf's
-  commit fanout is the tree before that commit — the settle comes after
-  the fanout — while `snapshot()` there is after it. A read while a leaf
-  has just joined or left, inside an action, frame or observer, is a fresh
-  capture that is not committed, so the code that created a keyed store
-  sees it in `value` at once; outside any entry such a read settles first,
-  handing off — never waiting — if the host is busy. A read never opens a
-  transaction on the host inside an entry, and never takes a leaf's lock.
-- **Observers are ordinary observers.** A `value` observer runs in the
-  host's commit fanout, under the host lock and no leaf lock: a leaf's
+  value (materializing declared children, and running never-read
+  initializers; declaring children runs no child code). Attaching a child
+  takes no capture by itself, but every value in use at or above it
+  settles after the attach and captures the new store — running its
+  never-read initializers then. A read inside a store's commit fanout is the tree
+  before that commit — the settle comes after the fanout — while
+  `snapshot()` there is after it. A read while a store has just joined or
+  left, inside an action, frame or observer, is a fresh capture that is
+  not committed, so the code that created a keyed store sees it in the
+  value at once; outside any entry such a read settles first, handing off
+  — never waiting — if the host is busy. A read never opens a transaction
+  on the host inside an entry, and never takes a store's lock.
+- **Observers are ordinary observers.** A value observer runs in the
+  host's commit fanout, under the host lock and no other store's lock: an
   action on another thread proceeds while it runs, and an action it opens
-  on a leaf commits normally and settles the value again afterwards, never
-  re-entrantly; a throwing one reaches `App.uncaughtObserverHandler`
-  (else the platform log), as does a failing recompute. `App.scope`
-  (`bindToScope`, or a getter override, else `Store.defaultScope`) is what
-  `App.value.asStateFlow()` defaults to; `App.value.asFlow()` emits one
-  tree per settle; `App.value.collectAsState()` (`:holdfast-compose`)
-  recomposes once per settle. The settle's transaction runs on the host,
-  which no tree middleware (§17.9) sees.
-- **Dispose.** A keyed store's `dispose()` or a leaf's `removeState` reach
-  the value like a commit (once per entry). `App.dispose()` stops the
-  value following the leaves, drops its observers, disposes the host, and
-  leaves the last tree readable; a first read after it throws. A thousand
-  keyed create/dispose cycles leave no edge, observer or leaf behind.
-- **For library code** (`@StoreInternalApi`): `internalSettleCount`,
-  `internalCaptureCount` (leaf captures, so reuse shows), and
-  `internalCutRetryCount`; `internalHost()` (the host store, never a member
-  of the tree) and `internalSettleNow()` (run a queued recompute now,
-  outside every entry).
+  on a store of the subtree commits normally and settles the value again
+  afterwards, never re-entrantly; a throwing one — and a failing recompute
+  — reaches the receiver's `uncaughtObserverHandler` (else the platform
+  log). The receiver's `scope` is what `App.tree.asStateFlow()` defaults
+  to; `App.tree.asFlow()` emits one tree per settle;
+  `App.tree.collectAsState()` (`:holdfast-compose`) recomposes once per
+  settle. The settle's transaction runs on the host, which no tree
+  middleware (§17.9) sees.
+- **Dispose.** A child's `dispose()` or `removeState` reaches the value like
+  a commit (once per entry). Disposing the receiver stops its value
+  following the subtree, drops the value's observers and leaves the last
+  tree readable through a handle taken before; the host is disposed once
+  the receiver's dispose is past every lock of the receiver's — after the
+  entry it ran in settles, or after the action holding the receiver's lock
+  releases it, else inline. A first read of a value never read before the
+  dispose throws. A thousand keyed create/dispose cycles leave no edge,
+  observer or store behind.
+- **For library code** (`@StoreInternalApi`, on the handle, so they keep
+  answering after the receiver is disposed): `internalSettleCount`,
+  `internalCaptureCount` (store captures, so reuse shows; the first settle
+  captures the receiver too) and `internalCutRetryCount`; `internalHost()`
+  (the host store, never a member of any tree, created lazily with the
+  value — this call creates it too, so a test can install host middleware
+  before the first read) and `internalSettleNow()` (run a queued recompute
+  now, outside every entry).
 
 ### 17.9 Tree middleware
 
-`App.middlewares(vararg TreeMiddleware)` installs middleware over the whole
-tree: every leaf attached now or later, always outermost of the leaf's own
-`middlewares(...)`, with the leaf's node in every hook.
+`App.tree.middlewares(vararg TreeMiddleware)` installs middleware over the
+receiver and every store of its subtree — attached now or later — always
+outermost of each store's own `middlewares(...)`, with the store's node in
+every hook.
 
 ```kotlin
 class Audit : TreeMiddleware() {
@@ -4099,123 +4378,141 @@ class Audit : TreeMiddleware() {
 
 fun auditTheTree() {
     val audit = Audit()
-    Notes.middlewares(audit)                                       // every leaf, now and later, outermost
-    val n4 = Notes.byId.create("n4", ::NoteStore)                  // attached after install: covered
-    Notes.prefsStore action { theme mutate "dark" }
-    atomic(Notes.prefsStore, n4) { n4 { body mutate "x" } }.getOrThrow()
-    println(audit.log)                                             // "[prefs alone, prefs in a frame, n4 in a frame]"
-    println(Notes.removeMiddleware(audit))                         // "true": no new observation from here on
+    Notes.tree.middlewares(audit)                                  // Notes and every store under it, now and later
+    val n4 = Notes.byId.create("n4")                               // attached after install: covered
+    Notes action { folder mutate "archive" }                       // the parent's own transactions too
+    Notes.prefs action { theme mutate "dark" }
+    atomic(Notes.prefs, n4) { n4 { body mutate "x" } }.getOrThrow()
+    println(audit.log)                                             // "[Notes alone, prefs alone, prefs in a frame, n4 in a frame]"
+    println(Notes.tree.removeMiddleware(audit))                    // "true": no new observation from here on
     n4.dispose()
-    Notes.reset()
+    Notes.tree.reset()
 }
 ```
 
-- **What it sees (T4).** Every transaction of every leaf: top-level
-  actions, savepoints (nested actions), the one-shot action a bare
-  `mutate` synthesizes, a derived state's recompute on the leaf, each root
-  of an `atomic`/`suspendAtomic` frame — `Root.restore`/`reset` included —
-  with the frame's shared `frameId`, and the suspending path
-  (`suspendAction`, a hydrator's seed and adopt) with the same trace as
-  the blocking one. What it never sees: inbound bridge writes (they bypass
-  middleware), a keyed store's transactions before its factory returned
-  (it is not attached yet), and the root's own `value` settles (the host is
-  no member). Each hook receives the leaf's `MiddlewareContext` — the
-  store, the transaction, the per-transaction `metadata` map — so a tree
-  middleware can do what a store middleware does, node by node.
-- **Outermost, in installer order.** On every leaf the tree's ring wraps
-  the leaf's consumer-registered chain, whatever the order of
-  registration, and a leaf's `clearMiddleware()` never reaches it; among
-  the installed tree middleware the last argument is outermost, and one
-  installed again moves to the outermost place. Throwing in `started` or
-  `completed` aborts that leaf's transaction as a store middleware's throw
-  does — a `completed` throw on the last root of a frame rolls every root
-  back, and the tree error hook fires for each — while on the suspending
-  path a hook's throw is isolated, as for store middleware there.
+- **What it sees (T4).** Every transaction of every store of the subtree,
+  the receiver's own included: top-level actions, savepoints (nested
+  actions), the one-shot action a bare `mutate` synthesizes, a derived
+  state's recompute on the store, each root of an `atomic`/`suspendAtomic`
+  frame — `tree.restore`/`reset` included — with the frame's shared
+  `frameId`, and the suspending path (`suspendAction`, a hydrator's seed
+  and adopt) with the same trace as the blocking one. What it never sees:
+  inbound bridge writes (they bypass middleware), a keyed store's
+  transactions before its factory returned (it is not attached yet), and
+  the value's settles (the host is no member). Each hook receives the
+  store's `MiddlewareContext` — the store, the transaction, the
+  per-transaction `metadata` map — so a tree middleware can do what a store
+  middleware does, node by node.
+- **Outermost, ancestors outside.** On every store the tree's ring wraps
+  the store's consumer-registered chain, whatever the order of
+  registration, and a store's `clearMiddleware()` never reaches it. A
+  store's ring is what it and each of its ancestors installed through
+  their `tree`s: its own innermost, the top-most ancestor's outermost (its
+  `started` fires first), and among one store's installs the last argument
+  is outermost, one installed again moving to the outermost place. A
+  middleware installed on a child and on its parent fires once per
+  transaction, at the parent's place. An install on a store mid-tree
+  covers that store's subtree only. Throwing in `started` or `completed`
+  aborts that store's transaction as a store middleware's throw does — a
+  `completed` throw on the last root of a frame rolls every root back, and
+  the tree error hook fires for each — while on the suspending path a
+  hook's throw is isolated, as for store middleware there.
 - **Install and remove from outside.** `middlewares`/`removeMiddleware`
-  throw inside an `atomic` frame, a transaction of any leaf (an action
-  body, a hook, an observer) or a `suspendAction`/`suspendAtomic` body of
-  any leaf: the chain is snapshotted per transaction, so an install never
-  applies to an in-flight action and never waits for one. The suspending
-  check is conservative: a suspending body resumes on any thread, so the
-  guard's probe is the settle scope its entry carries across dispatch, and
-  that cannot tell the holder's body from another entry on the same
-  thread — from inside any entry on the calling thread (an action or an
-  observer of an unrelated store, say) while a leaf is held by a parked
-  suspending body the call is refused too, naming the held leaf; from
-  outside every entry it is allowed beside a parked holder and does not
-  reach it. On iOS a nested `withContext` on another dispatcher inside the
-  body replaces the carrier of that scope, so the refusal is not
-  guaranteed in that section.
-  `removeMiddleware` returns whether it was installed; no new observation
-  starts once it returns, and an observation it started still gets its
-  terminal hook (a parked action or `suspendAction` included). A leaf that
-  leaves takes its adapters with it — a thousand keyed create/dispose
-  cycles leave nothing behind — and `App.dispose()` removes the ring from
-  every leaf, each keeping its own middleware; `removeMiddleware` on a
-  disposed root answers `false` rather than throwing, so teardown code can
-  unwind a root disposed meanwhile.
+  throw inside an `atomic` frame, a transaction of any store of the
+  subtree (an action body, a hook, an observer) or a
+  `suspendAction`/`suspendAtomic` body of one: the chain is snapshotted per
+  transaction, so an install never applies to an in-flight action and
+  never waits for one. The suspending check is conservative: a suspending
+  body resumes on any thread, so the guard's probe is the settle scope its
+  entry carries across dispatch, and that cannot tell the holder's body
+  from another entry on the same thread — from inside any entry on the
+  calling thread (an action or an observer of an unrelated store, say)
+  while a store of the subtree is held by a parked suspending body the call
+  is refused too, naming the held store; from outside every entry it is
+  allowed beside a parked holder and does not reach it. On iOS a nested
+  `withContext` on another dispatcher inside the body replaces the carrier
+  of that scope, so the refusal is not guaranteed in that section.
+  `removeMiddleware` returns whether it was installed through this
+  receiver; no new observation starts once it returns, and an observation
+  it started still gets its terminal hook (a parked action or
+  `suspendAction` included). A store that leaves takes its adapters with
+  it — a thousand keyed create/dispose cycles leave nothing behind — and a
+  child its parent's dispose releases keeps only what it and its remaining
+  ancestors installed. Disposing the receiver removes what it installed
+  from every store of its subtree; `removeMiddleware` on a disposed
+  receiver answers `false` rather than throwing, so teardown code can
+  unwind a store disposed meanwhile.
 
 ### 17.10 Testing a tree
 
-`:holdfast-testing`'s `trackTree(root)` (§11.6) tracks every leaf of a
-root — the ones attached now and every keyed store created later — as a
-`StoreHandle`, and records every leaf transaction with its node into one
-tree timeline.
+`:holdfast-testing`'s `track(tree)` (§11.6) tracks the receiver and every
+store of its subtree — the ones attached now and every store that joins
+later — as `StoreHandle`s, and records every transaction with its node
+into one tree timeline.
 
 ```kotlin
 fun testTheTree() =
     storeTest {
-        val tree = trackTree(Notes)                                   // every leaf, now and later; reset at teardown
-        val n5 = Notes.byId.create("n5", ::NoteStore)                 // tracked as it joins
-        atomic(Notes.prefsStore, n5) {
-            Notes.prefsStore { theme mutate "dark" }
+        val tree = track(Notes.tree)                                  // Notes and every store under it; reset at teardown
+        val n5 = Notes.byId.create("n5")                              // tracked as it joins
+        atomic(Notes, Notes.prefs, n5) {                              // the parent's own state in the same frame
+            Notes { folder mutate "archive" }
+            Notes.prefs { theme mutate "dark" }
             n5 { body mutate "hi" }
         }.getOrThrow()
-        println(tree.timeline.map { "${it.phase} ${it.node.name}" }) // "[Started prefs, Started n5, Completed prefs, Completed n5]"
-        println(tree.shouldCommitTogether(Notes) == tree.committedFrameIds(Notes).single())   // "true": one frame over both
-        println(tree.handle(n5).transactions.size)                    // "2": the leaf's own timeline, started and committed
+        println(tree.timeline.map { "${it.phase} ${it.node.name}" }) // "[Started Notes, Started prefs, Started n5, Completed Notes, Completed prefs, Completed n5]"
+        println(tree.shouldCommitTogether(Notes.tree.node) == tree.committedFrameIds(Notes.tree.node).single())   // "true": one frame over all three
+        println(tree.handle(n5).transactions.size)                    // "2": the store's own timeline, started and committed
         n5.dispose()
-        println(tree.events(Notes.byId).size)                         // "2": a disposed leaf's events stay under its branch
+        println(tree.events(Notes.byId).size)                         // "2": a disposed store's events stay under its branch
     }
 ```
 
 - **Handles.** `tree.handle(store)` is the same handle `track(store)`
   answers, with the tree's `Capture` mode; `tree.group(node)` groups the
-  live leaves under a node for the cross-store matchers (§15.6);
-  `tree.consumeAllPendingErrors()` consumes every leaf handle's pending
-  `TransactionResult.Error`s.
+  live stores of a subtree for the cross-store matchers (§15.6);
+  `tree.consumeAllPendingErrors()` consumes every member handle's pending
+  `TransactionResult.Error`s. `tree.root` is the receiver store.
 - **The tree timeline.** `TreeEvent(node, store, phase, transaction, cause,
   timestamp)`, in observation order across the tree; `events(node)` narrows
-  to a subtree; `committedFrameIds(node)` lists the frames committed under
-  a node (a frame vetoed on its last participant committed nowhere);
-  `shouldCommitTogether(node)`/`shouldNotCommitTogether(node)` judge a
-  subtree's frames from those events. A `Secret` never reaches a tree
-  event.
-- **Teardown.** The leaf recorders come off, then, unless
-  `resetAtTeardown = false`, the tree is reset as one frame so the next
-  test finds the initial values — with the tree middleware still installed,
-  so a vetoed reset fails the test naming the leaf and the veto (unless the
-  body already failed); a leaf disposed in the body is skipped — and then
-  that middleware comes off. Every middleware the test installed on a leaf
-  or the root stays. A leaf still held when teardown runs (a
-  `suspendAction` body parked in un-joined work, a thread inside an
-  action) is re-probed for about a second of real time — a transient
-  holder, such as an in-flight `suspendDerived` recompute on `Store.scope`,
-  is waited out and the reset runs — and one still held after that skips
-  the whole tree's reset and FAILS the test, naming the tree and the leaf:
-  a silent skip would leak the body's values into the next test, and
-  waiting longer would hang the test thread, the only one able to resume a
-  parked body. Join such work before the body ends, or opt out with
-  `resetAtTeardown = false` for a test that deliberately parks it. The
-  root is never disposed. `trackTree` is
-  idempotent by root identity and throws on a disposed root, or from inside
-  a leaf's action or an `atomic` frame (a refused call leaves nothing
-  behind).
+  to the subtree at a node (a store's own events and its descendants'),
+  judged by where each event's store sat when the event was recorded — a
+  store released since (its parent disposed) keeps its earlier events
+  under its former ancestors;
+  `committedFrameIds(node)` lists the frames committed in that subtree (a
+  frame vetoed on its last participant committed nowhere);
+  `shouldCommitTogether(node)`/`shouldNotCommitTogether(node)` judge
+  whether one frame spanned every live store of the subtree, each judged by
+  its own events — a parent that took no part in a frame does not count as
+  committing with its children. A `Secret` never reaches a tree event.
+- **Teardown.** The store recorders come off, then, unless
+  `resetAtTeardown = false`, the receiver and its subtree are reset as one
+  frame — the RECEIVER'S OWN STATES included, not only its descendants',
+  and every hydrator in it, the receiver's too, back to `Detached` — so the
+  next test finds the initial values. The tree middleware is still installed then, so a vetoed
+  reset fails the test naming the store and the veto (unless the body
+  already failed); a store disposed in the body is skipped; then that
+  middleware comes off. Every middleware the test installed stays. A store
+  still held when teardown runs (a `suspendAction` body parked in un-joined
+  work, a thread inside an action) is re-probed for about a second of real
+  time — a transient holder, such as an in-flight `suspendDerived`
+  recompute on `Store.scope`, is waited out and the reset runs — and one
+  still held after that skips the whole tree's reset and FAILS the test,
+  naming the tree and the store: a silent skip would leak the body's values
+  into the next test, and waiting longer would hang the test thread, the
+  only one able to resume a parked body. Join such work before the body
+  ends, or opt out with `track(tree, resetAtTeardown = false)` for a test
+  that deliberately parks it. A child lambda that throws when teardown
+  lists the subtree fails the test as a reset failure. No store is ever
+  disposed. `track(tree)` is idempotent by receiver and throws on a
+  disposed store, or from inside a member's action or an `atomic` frame (a
+  refused call leaves nothing behind).
 
 ### 17.11 Hydrating a tree
 
-`:holdfast-coroutines`' `App.hydrateAll(node = App)` (§14.8, §16.7) drives
-every leaf's hydrator under a node and reports how each settled.
+`:holdfast-coroutines`' `App.tree.hydrateAll(node = App.tree.node)`
+(§14.8, §16.7) drives the hydrator of every store of a subtree — the
+parent's own included — and reports how each settled.
 
 ```kotlin
 class FeedStore(private val remote: suspend () -> List<String>) : Store<FeedStore>() {
@@ -4230,99 +4527,100 @@ class SettingsOnlyStore : Store<SettingsOnlyStore>() {
     val theme by state { "light" }
 }
 
-object Feeds : Root("feeds") {
-    val news = FeedStore { listOf("headline") }
-    val sports = FeedStore { error("offline") }
-    val settings = SettingsOnlyStore()
-    val all by branch(news, sports, settings).named(news, "news").named(sports, "sports").named(settings, "settings")
+object Feeds : Store<Feeds>() {
+    val news by store { FeedStore { listOf("headline") } }
+    val sports by store { FeedStore { error("offline") } }
+    val settings by store { SettingsOnlyStore() }
 }
 
 suspend fun hydrateTheTree() {
-    val report = Feeds.hydrateAll()                                      // every leaf's hydrator, seeds in lock order
-    println(report.entries.map { "${it.node.name}: ${it.outcome}" })   // "[news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]"
-    println(report.isHealthy to report.failed.map { it.node.name })    // "(false, [sports])"
-    println(Feeds.news.items.value)                                    // "[headline]"
-    println(Feeds.sports.items.value)                                  // "[cached]": the seed stood, the refresh failed
-    println(Feeds.hydrateAll(Feeds.all).failed.map { it.node.name })   // "[sports]": idempotent for news, a retry for sports
+    val report = Feeds.tree.hydrateAll()                                 // the parent, then every child, in lock order
+    println(report.entries.map { "${it.node.name}: ${it.outcome}" })     // "[Feeds: NoHydrator, news: Ran(Hydrated), sports: Ran(Failed(cause=java.lang.IllegalStateException: offline)), settings: NoHydrator]"
+    println(report.isHealthy to report.failed.map { it.node.name })      // "(false, [sports])"
+    println(Feeds.news.items.value)                                      // "[headline]"
+    println(Feeds.sports.items.value)                                    // "[cached]": the seed stood, the refresh failed
+    println(Feeds.tree.hydrateAll().failed.map { it.node.name })         // "[sports]": idempotent for news, a retry for sports
 }
 ```
 
-- **What it drives.** Every live leaf under the node, in `lockOrderKey`
-  order: each hydrator's `hydrate()` (on the given scope, else its store's
-  `Store.scope`) has committed its seed and launched its refresh before the
-  next leaf's turn; then each is awaited in the same order (`awaitSettled =
-  false` reports the phase after the seed instead), so the refreshes run
-  concurrently. A leaf without a hydrator is `NoHydrator`, one disposed
-  meanwhile `Disposed`; a leaf whose seed or refresh failed is
-  `Ran(Failed(cause))` — reported, never thrown, and the other leaves still
-  hydrate. A hydrated leaf's hydrator does nothing, so the call is
-  idempotent; a failed one retries its refresh, as `Hydrator.hydrate` does.
+- **What it drives.** Every live store of the subtree at the node — the
+  receiver's own when the node is its own, which sorts first whenever the
+  receiver was constructed before its children (always, for children
+  built on first use) — in `lockOrderKey` order, after materializing
+  declared children: each hydrator's `hydrate()` (on the given scope, else
+  its store's `Store.scope`) has committed its seed and launched its
+  refresh before the next store's turn; then each is awaited in the same
+  order (`awaitSettled = false` reports the phase after the seed instead),
+  so the refreshes run concurrently. A store without a hydrator is
+  `NoHydrator`, one disposed meanwhile `Disposed`; a store whose seed or
+  refresh failed is `Ran(Failed(cause))` — reported, never thrown, and the
+  other stores still hydrate. A hydrated store's hydrator does nothing, so
+  the call is idempotent; a failed one retries its refresh, as
+  `Hydrator.hydrate` does. The receiver's entry is named by its class
+  (`Feeds`), since nobody declared it.
 - **Where it may run.** Outside every entry: inside an action, an `atomic`
   frame, a `suspendAction` or `suspendAtomic` body of any store it fails
-  before touching a leaf, for the reasons `Hydrator.hydrate` gives (§16.7).
-  A cancellation propagates at once; the refreshes already launched keep
-  running on their scopes. The report names nodes and outcomes, never a
-  value.
+  before touching a store — before the listing materializes a single
+  child — for the reasons `Hydrator.hydrate` gives (§16.7). The subtree is
+  listed once, each store with its node. It throws on a disposed receiver and on a node outside the
+  receiver's subtree. A cancellation propagates at once; the refreshes
+  already launched keep running on their scopes. The report names nodes
+  and outcomes, never a value.
 
 ### 17.12 API reference
 
 ```kotlin
-sealed interface StoreNode { val root: Root; val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
-enum class NameOrigin { Property, ClassName, Key, Pinned }
-abstract class Root(name: String? = null) : StoreNode {
-    val isDisposed: Boolean; val nodes: List<StoreNode>
-    protected fun branch(vararg stores: Store<*>, under: Branch? = null): BranchDeclaration
-    protected inline fun <reified K : Any, reified S : Store<S>> keyed(under: Branch? = null, keyCodec: StateCodec<K>? = null): KeyedDeclaration<K, S>
-    fun children(node: StoreNode): List<Store<*>>
-    operator fun <K : Any, S : Store<S>> get(branch: KeyedBranch<K, S>, key: K): S?
-    fun <K : Any, S : Store<S>> entries(branch: KeyedBranch<K, S>): Map<K, S>
+// Declarations, beside state { } (com.vynatix.holdfast.tree)
+fun <S : Any> Store<*>.store(named: String? = null, child: () -> S): StoreDeclaration<S>     // `by`: S; the lambda must produce a Store
+fun Store<*>.group(named: String? = null, members: GroupScope.() -> List<Store<*>>): GroupDeclaration   // `by`: Branch
+inline fun <reified K : Any, reified S : Store<S>> Store<*>.keyed(keyCodec: StateCodec<K>? = null, named: String? = null, onParentDispose: KeyedDisposal = KeyedDisposal.Dispose, noinline factory: (K) -> S): KeyedDeclaration<K, S>   // `by`: KeyedBranch<K, S>
+class GroupScope { infix fun <S : Store<*>> S.named(name: String): S }   // pins one listed store's leaf name
+enum class KeyedDisposal { Dispose, Release }               // what a keyed branch's stores become when its declaring store disposes
+interface TreeIdentified { val treeId: String }             // a store's receiver identity in encode()/decode()
+class StoreDeclaration<S : Any> : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, S>>
+class GroupDeclaration : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, Branch>>
+class KeyedDeclaration<K : Any, S : Store<S>> : PropertyDelegateProvider<Store<*>, ReadOnlyProperty<Store<*>, KeyedBranch<K, S>>>
+
+// The handle
+val Store<*>.tree: StoreTree
+sealed interface StoreTree : State<TreeSnapshot> {            // value: the subtree, settled once per outermost entry
+    val node: LeafNode
+    val parent: StoreNode?
+    fun children(): List<StoreNode>                           // materializes declared children first
+    fun stores(node: StoreNode = this.node): List<Store<*>>
     fun nodeOf(store: Store<*>): LeafNode?
-    fun dispose()
-}
-class Branch : StoreNode { val stores: List<Store<*>>; fun leafName(store: Store<*>): String }
-class KeyedBranch<K : Any, S : Store<S>> : StoreNode {
-    val keyClass: KClass<K>; val storeClass: KClass<S>; val keyCodec: StateCodec<K>?
-    fun at(key: K): StoreMembership<S>
-    fun create(key: K, factory: (K) -> S): S
-    fun getOrCreate(key: K, factory: (K) -> S): S
-}
-class LeafNode : StoreNode { val store: Store<*>?; val key: Any? }
-abstract class Root {
-    fun snapshot(node: StoreNode = this, scope: SnapshotScope = SnapshotScope.All): TreeSnapshot
+    fun snapshot(node: StoreNode = this.node, scope: SnapshotScope = SnapshotScope.All): TreeSnapshot
     fun restore(tree: TreeSnapshot, policy: RestorePolicy = RestorePolicy.IgnoreUnknown, sterile: Boolean = false): TransactionResult<TreeRestoreReport>
-    fun reset(node: StoreNode = this): TransactionResult<TreeResetReport>
-    fun decode(text: String): TreeSnapshot
-    fun verifyPersistedNames(node: StoreNode = this): List<NamingIssue>
-    val value: State<TreeSnapshot>          // one consistent capture, settled once per outermost entry
-    open val scope: CoroutineScope; fun bindToScope(scope: CoroutineScope)
-    var uncaughtObserverHandler: ((Throwable) -> Unit)?
-    fun middlewares(vararg middleware: TreeMiddleware)      // every leaf, now and later; outermost; last argument outermost
-    fun removeMiddleware(middleware: TreeMiddleware): Boolean
+    fun reset(node: StoreNode = this.node): TransactionResult<TreeResetReport>
+    fun decode(text: String): TreeSnapshot                   // refuses a text captured under another receiver
+    fun verifyPersistedNames(node: StoreNode = this.node): List<NamingIssue>
+    fun middlewares(vararg middleware: TreeMiddleware)        // the receiver and its subtree, now and later; outermost
+    fun removeMiddleware(middleware: TreeMiddleware): Boolean  // false on a disposed receiver
 }
-abstract class TreeMiddleware {
-    protected open fun onTransactionStarted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
-    protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}   // before commit
-    protected open fun onTransactionError(node: StoreNode, context: Middleware.MiddlewareContext<*>, error: Throwable) {}
+
+// Nodes
+sealed interface StoreNode { val name: String; val parent: StoreNode?; val nameOrigin: NameOrigin; fun isUnder(node: StoreNode): Boolean }
+enum class NameOrigin { Property, ClassName, Key, Pinned }
+class LeafNode : StoreNode { val store: Store<*>?; val key: Any? }
+class Branch : StoreNode { override val parent: LeafNode; val stores: List<Store<*>>; fun leafName(store: Store<*>): String }
+class KeyedBranch<K : Any, S : Store<S>> : StoreNode {
+    override val parent: LeafNode
+    val keyClass: KClass<K>; val storeClass: KClass<S>; val keyCodec: StateCodec<K>?; val onParentDispose: KeyedDisposal
+    fun create(key: K): S
+    fun getOrCreate(key: K): S
+    operator fun get(key: K): S?                              // may park while another thread finishes an attach
+    fun entries(): Map<K, S>
+    fun dispose(key: K): Boolean                              // false when no live store under key
+    fun disposeAll()
 }
-// :holdfast-coroutines (§17.11)
-suspend fun Root.hydrateAll(node: StoreNode = this, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport
-class HydrateAllReport { val entries: List<Entry>; val failed: List<Entry>; val skipped: List<Entry>; val isHealthy: Boolean
-    class Entry { val node: StoreNode; val store: Store<*>; val outcome: Outcome }
-    sealed class Outcome { class Ran(val hydration: Hydration); object NoHydrator; object Disposed } }
-// :holdfast-testing (§17.10)
-fun StoreTestScope.trackTree(root: Root, capture: Capture = Capture.All, resetAtTeardown: Boolean = true): TreeHandle
-class TreeHandle { val root: Root; val captureMode: Capture; val timeline: List<TreeEvent>; fun events(node: StoreNode): List<TreeEvent>
-    fun <S : Store<S>> handle(store: S): StoreHandle<S>; fun group(node: StoreNode): StoreHandleGroup
-    fun committedFrameIds(node: StoreNode): List<String>; fun consumeAllPendingErrors() }
-data class TreeEvent(val node: StoreNode, val store: Store<*>, val phase: Phase, val transaction: Transaction, val cause: Throwable?, val timestamp: Long) { enum class Phase { Started, Completed, Errored } }
-fun TreeHandle.shouldCommitTogether(node: StoreNode): String; fun TreeHandle.shouldNotCommitTogether(node: StoreNode)
-@StoreInternalApi val Root.internalSettleCount: Long; val Root.internalCaptureCount: Long; val Root.internalCutRetryCount: Long
-@StoreInternalApi fun Root.internalHost(): Store<*>; fun Root.internalSettleNow(): TreeSnapshot
+
+// Captures
 class TreeSnapshot {
-    val node: StoreNode; val children: List<TreeSnapshot>; val scope: SnapshotScope; val isLeaf: Boolean
-    val unresolvedPaths: List<List<String>>          // decode diagnostic; empty for a capture
+    val node: StoreNode; val name: String; val children: List<TreeSnapshot>; val scope: SnapshotScope
+    val hasStore: Boolean; val isLeaf: Boolean            // isLeaf: no children
+    val unresolvedPaths: List<List<String>>               // decode diagnostic; empty for a capture
     operator fun get(node: StoreNode): TreeSnapshot?
-    operator fun <T : Any> get(state: State<T>): T?  // null = Absent or Redacted
+    operator fun <T : Any> get(state: State<T>): T?       // null = Absent or Redacted
     fun <T : Any> entry(state: State<T>): SnapshotEntry<T>
     fun <K : Any, S : Store<S>> pendingKeys(branch: KeyedBranch<K, S>): Set<K>
     fun render(): String
@@ -4332,11 +4630,34 @@ class TreeSnapshot {
 }
 class TreeRestoreReport { val perNode: Map<StoreNode, RestoreReport>; val skipped: List<StoreNode>; val rebound: List<StoreNode>; val unresolvedPaths: List<List<String>>; val issues: List<RestoreIssue> }
 class TreeResetReport { val reset: List<StoreNode>; val skipped: List<StoreNode> }
-class NamingIssue { val node: StoreNode; val kind: Kind; val message: String; enum class Kind { ClassDerivedNameOnPersistedStore, KeyedBranchNotEncodable } }
-class BranchDeclaration { fun named(store: Store<*>, name: String): BranchDeclaration; fun named(name: String): BranchDeclaration }
-class KeyedDeclaration<K : Any, S : Store<S>>
-@StoreInternalApi abstract class LeafMembershipListener { open fun onAttached(leaf: LeafNode) {}; open fun onDetached(leaf: LeafNode) {} }
-@StoreInternalApi fun Root.internalAddMembershipListener(listener: LeafMembershipListener): Disposable
+class NamingIssue { val node: StoreNode; val kind: Kind; val message: String; enum class Kind { ClassDerivedNameOnPersistedStore, PropertyDerivedNameOnPersistedSubtree, ReceiverNameIsClassDerived, KeyedBranchNotEncodable } }
+
+// Middleware
+abstract class TreeMiddleware {
+    protected open fun onTransactionStarted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}
+    protected open fun onTransactionCompleted(node: StoreNode, context: Middleware.MiddlewareContext<*>) {}   // before commit
+    protected open fun onTransactionError(node: StoreNode, context: Middleware.MiddlewareContext<*>, error: Throwable) {}
+}
+
+// @StoreInternalApi
+val StoreTree.internalSettleCount: Long; val StoreTree.internalCaptureCount: Long; val StoreTree.internalCutRetryCount: Long
+fun StoreTree.internalHost(): Store<*>; fun StoreTree.internalSettleNow(): TreeSnapshot
+abstract class LeafMembershipListener { open fun onAttached(leaf: LeafNode) {}; open fun onDetached(leaf: LeafNode) {} }
+fun Store<*>.internalAddMembershipListener(listener: LeafMembershipListener): Disposable
+
+// :holdfast-coroutines (§17.11)
+suspend fun StoreTree.hydrateAll(node: StoreNode = this.node, scope: CoroutineScope? = null, awaitSettled: Boolean = true): HydrateAllReport
+class HydrateAllReport { val entries: List<Entry>; val failed: List<Entry>; val skipped: List<Entry>; val isHealthy: Boolean
+    class Entry { val node: StoreNode; val store: Store<*>; val outcome: Outcome }
+    sealed class Outcome { class Ran(val hydration: Hydration); object NoHydrator; object Disposed } }
+
+// :holdfast-testing (§17.10)
+fun StoreTestScope.track(tree: StoreTree, capture: Capture = Capture.All, resetAtTeardown: Boolean = true): TreeHandle
+class TreeHandle { val tree: StoreTree; val root: Store<*>; val captureMode: Capture; val timeline: List<TreeEvent>
+    fun events(node: StoreNode): List<TreeEvent>; fun <S : Store<S>> handle(store: S): StoreHandle<S>; fun group(node: StoreNode): StoreHandleGroup
+    fun committedFrameIds(node: StoreNode): List<String>; fun consumeAllPendingErrors() }
+data class TreeEvent(val node: StoreNode, val store: Store<*>, val phase: Phase, val transaction: Transaction, val cause: Throwable?, val timestamp: Long) { enum class Phase { Started, Completed, Errored } }
+fun TreeHandle.shouldCommitTogether(node: StoreNode): String; fun TreeHandle.shouldNotCommitTogether(node: StoreNode)
 ```
 
 ---
@@ -4426,19 +4747,19 @@ val hydration = v.hydrator {
 hydration.hydrate(scope); hydration.awaitSettled()    // Detached → Seeded → Hydrated
 hydration.invalidate()                                // back to Detached
 
-// Typed tree (exp., §17): the root names its branches by property; leaves are unchanged stores.
-object App : Root("app") {
-    val session by branch(v, other).named(v, "v")                     // leaf name: class minus "Store", or pinned
-    val threads by keyed<String, ThreadStore>(under = session, keyCodec = StringCodec)
+// Store tree (exp., §17): a store declares its children next to its states; children are ordinary stores.
+object App : Store<App>() {
+    val settings by store { SettingsStore() }                         // one child, named by the property; built on first read
+    val session by group { listOf(v named "v", other) }                // a group: leaf pinned with named, else class minus "Store"
+    val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) }        // keyed: the factory is declared once
 }
-class ThreadStore(id: String) : Store<ThreadStore>(App.threads.at(id))
-val t = App.threads.create("t1") { ThreadStore(it) }                 // live once the factory returns; t.dispose() leaves
-val tree = App.snapshot(App.session)                                 // one lock-free consistent cut; tree[v.x]: Int?
-App.restore(tree); App.reset(App.session)                            // one outermost frame over the subtree, each
-App.decode(tree.encode()); App.verifyPersistedNames()                // names exist only here; pin every persisted leaf
-App.value                                                            // State<TreeSnapshot>, settled once per outermost entry
-App.middlewares(MyTreeMiddleware()); App.hydrateAll()                // every leaf, now and later (hydrateAll: holdfast-coroutines)
+val t = App.threads.create("t1")                                     // live once the factory returns; t.dispose() leaves
+val tree = App.tree.snapshot(App.session)                            // one lock-free consistent cut; tree[v.x]: Int?
+App.tree.restore(tree); App.tree.reset(App.session)                  // one outermost frame over the subtree, each
+App.tree.decode(tree.encode()); App.tree.verifyPersistedNames()      // names exist only here; pin every persisted name
+App.tree.value                                                       // the tree is a State<TreeSnapshot>, settled once per outermost entry
+App.tree.middlewares(MyTreeMiddleware()); App.tree.hydrateAll()      // App and every store under it (hydrateAll: holdfast-coroutines)
 
-// Cleanup.
+// Cleanup. Disposing App releases its store/group children as subtree roots and disposes its keyed stores.
 sub.dispose(); sub2.dispose(); total.dispose(); shown.dispose(); d.dispose(); v.dispose(); App.dispose()
 ```

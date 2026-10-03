@@ -8,32 +8,45 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Issue #21 review (PR #24).** `Root.hydrateAll` no longer throws when a
-  leaf is disposed after its `hydrate()` — before or while its
+- **Issue #21 review (PR #24).** `StoreTree.hydrateAll` does not throw when
+  a store is disposed after its `hydrate()` — before or while its
   `awaitSettled()` runs, or before its phase is read when not awaiting —
-  nor reports a leaf disposed during its own `hydrate()` as
-  `Ran(Failed(IllegalStateException))`: every such leaf is
+  nor report a store disposed during its own `hydrate()` as
+  `Ran(Failed(IllegalStateException))`: every such store is
   `Outcome.Disposed`, which `isHealthy` ignores; cancellation still
-  propagates. `HydrateAllReport.Entry.node` of a disposed leaf is the
-  `LeafNode` it sat at when listed, no longer the queried root or branch.
+  propagates. `HydrateAllReport.Entry.node` of a disposed store is the
+  `LeafNode` it sat at when listed, never the queried node.
+- **Issue #21 review (PR #25).** `hydrateAll` refuses a call from inside an
+  entry BEFORE the listing materializes any declared child (it used to
+  run the child lambdas first), lists the subtree once with each store's
+  node (`@StoreInternalApi StoreTree.internalLeaves`, instead of one
+  `nodeOf` walk per store), and reports a store whose `hydratorOrNull()`
+  throws as `Disposed` only when it is disposed — anything else is
+  `Ran(Failed(thrown))`, never `NoHydrator`.
 
 ### Added
 
-- **`Root.hydrateAll(node, scope, awaitSettled)`** (experimental, issue #21
-  plan PR 21-8): hydrate every live leaf of a typed tree's subtree in
-  `lockOrderKey` order — each hydrator `hydrate`d on `scope` (else its
-  store's `Store.scope`), every seed committed and every refresh launched
-  before the next leaf's turn, then each `awaitSettled` in the same order so
-  the refreshes run concurrently — and report per leaf in a
-  `HydrateAllReport` (`Entry(node, store, outcome)`; `Outcome.Ran(hydration)`,
-  `NoHydrator`, `Disposed`; `failed`, `skipped`, `isHealthy`). A leaf's
-  failure — a throwing `base { }`, a rejecting middleware, a failed refresh
-  — is reported as `Hydration.Failed`, never thrown; a hydrated leaf's
-  hydrator does nothing, so the call is idempotent. Refused before any leaf
-  is touched from inside an action, `atomic` frame, `suspendAction` or
+- **`StoreTree.hydrateAll(node, scope, awaitSettled)`** (experimental,
+  issue #21 plan PR 21-8): hydrate every live store of the subtree at
+  `node` of a store's `tree` — the receiver's own hydrator included when
+  `node` is its own (the default) — after the inside-an-entry refusal,
+  materializing declared children through one listing,
+  in `lockOrderKey` order (the receiver first whenever it was constructed
+  before its children, as children built on first use always are): each
+  hydrator `hydrate`d on `scope` (else its store's `Store.scope`), every
+  seed committed and every refresh launched before the next store's turn,
+  then each `awaitSettled` in the same order so the refreshes run
+  concurrently — and report per store in a `HydrateAllReport`
+  (`Entry(node, store, outcome)`; `Outcome.Ran(hydration)`, `NoHydrator`,
+  `Disposed`; `failed`, `skipped`, `isHealthy`). A store's failure — a
+  throwing `base { }`, a rejecting middleware, a failed refresh — is
+  reported as `Hydration.Failed`, never thrown; a hydrated store's hydrator
+  does nothing, so the call is idempotent. Refused before any store is
+  touched from inside an action, `atomic` frame, `suspendAction` or
   `suspendAtomic` body of any store, as `Hydrator.hydrate` is; a
   cancellation propagates at once while the refreshes already launched keep
-  running. Throws on a disposed root or a node of another root.
+  running. Throws `IllegalStateException` on a disposed receiver and
+  `IllegalArgumentException` for a node outside its subtree.
 - **Persisted `UserAuthored` overlay** (experimental, issue #20, R8 and R3;
   plan PR 14): `overlay(kv: SuspendingKvStore, key: String, sizeLimit: Int =
   8192)` in a hydrator's spec persists what the user authored — the store's
@@ -192,13 +205,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     captures or writes (`reset()` only detaches it), and that every store
     write entrypoint refuses.
     `current`, `awaitSettled()` (waits until no refresh is in flight), and
-    `hydrateEach(vararg)` until issue #21's `hydrateAll()`. After `dispose()`
+    `hydrateEach(vararg)` (issue #21's `tree.hydrateAll()`, above, covers a
+    whole subtree). After `dispose()`
     the entrypoints throw, a refresh in flight is cancelled and never adopted,
     and `state` keeps its last value.
   - Deviations from #20's sketch (plan deviation 8): `hydrate { }:
     State<Hydration>` became `hydrator { }: Hydrator<V>`, `Failed(cause: Any)`
     became `Failed(cause: Throwable)`, `reset()` detaches too, and
-    `hydrateAll()` waits for #21. The persisted overlay is its own entry,
+    `hydrateAll()` came with #21's store tree (`StoreTree.hydrateAll`). The persisted overlay is its own entry,
     above.
   `HydrationLifecycleTest`, `HydrationInvalidateTest`,
   `HydrationAdoptPolicyTest`, `HydrationFanoutFailureTest`,

@@ -288,8 +288,8 @@ public final class com/vynatix/holdfast/testing/TreeEvent$Phase : java/lang/Enum
 }
 
 public final class com/vynatix/holdfast/testing/TreeFixtureKt {
-	public static final fun trackTree (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/testing/Capture;Z)Lcom/vynatix/holdfast/testing/TreeHandle;
-	public static synthetic fun trackTree$default (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/Root;Lcom/vynatix/holdfast/testing/Capture;ZILjava/lang/Object;)Lcom/vynatix/holdfast/testing/TreeHandle;
+	public static final fun track (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/testing/Capture;Z)Lcom/vynatix/holdfast/testing/TreeHandle;
+	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/testing/Capture;ZILjava/lang/Object;)Lcom/vynatix/holdfast/testing/TreeHandle;
 }
 
 public final class com/vynatix/holdfast/testing/TreeHandle {
@@ -297,8 +297,9 @@ public final class com/vynatix/holdfast/testing/TreeHandle {
 	public final fun consumeAllPendingErrors ()V
 	public final fun events (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
 	public final fun getCaptureMode ()Lcom/vynatix/holdfast/testing/Capture;
-	public final fun getRoot ()Lcom/vynatix/holdfast/tree/Root;
+	public final fun getRoot ()Lcom/vynatix/holdfast/Store;
 	public final fun getTimeline ()Ljava/util/List;
+	public final fun getTree ()Lcom/vynatix/holdfast/tree/StoreTree;
 	public final fun group (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;
 	public final fun handle (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/testing/StoreHandle;
 	public fun toString ()Ljava/lang/String;

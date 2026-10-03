@@ -30,18 +30,15 @@ private class CutRightStore : Store<CutRightStore>() {
     val y by state { 0 }
 }
 
-private class CutKeyedStore(
-    id: Int,
-    root: CutRoot,
-) : Store<CutKeyedStore>(root.keyed.at(id)) {
+private class CutKeyedStore : Store<CutKeyedStore>() {
     val n by state { 0 }
 }
 
-private class CutRoot : Root("cut") {
+private class CutApp : Store<CutApp>() {
     val left = CutLeftStore()
     val right = CutRightStore()
-    val pair by branch(left, right)
-    val keyed by keyed<Int, CutKeyedStore>()
+    val pair by group { listOf(left, right) }
+    val keyed by keyed<Int, CutKeyedStore> { CutKeyedStore() }
 }
 
 private const val FRAMES = 3_000
@@ -118,7 +115,7 @@ class TreeCutConcurrencyTest {
     @Test
     fun aTwoStateSingleStoreCommitIsNeverCapturedHalfApplied() =
         completesWithin(120, "captures during two-state commits") {
-            val root = CutRoot()
+            val root = CutApp()
             val mixes = ConcurrentLinkedQueue<String>()
             val failures = ConcurrentLinkedQueue<Throwable>()
             val cuts = AtomicInteger()
@@ -130,7 +127,7 @@ class TreeCutConcurrencyTest {
                     daemon("reader", failures) {
                         start.await()
                         while (!done.get()) {
-                            val tree = root.snapshot(root.nodeOf(root.left)!!)
+                            val tree = root.tree.snapshot(root.tree.nodeOf(root.left)!!)
                             val a = tree[root.left.x]
                             val b = tree[root.left.x2]
                             if (a != b) mixes += "x=$a x2=$b"
@@ -166,7 +163,7 @@ class TreeCutConcurrencyTest {
     @Test
     fun aCaptureWhileASuspendActionBodyIsParkedHoldingTheSerializerReturns() =
         completesWithin(30, "a capture during a parked suspendAction") {
-            val root = CutRoot()
+            val root = CutApp()
             val parked = CountDownLatch(1)
             val release = CountDownLatch(1)
             val body =
@@ -180,17 +177,17 @@ class TreeCutConcurrencyTest {
                     }
                 }
             parked.await()
-            val tree = root.snapshot()
+            val tree = root.tree.snapshot()
             assertEquals(0, tree[root.left.x], "the parked body's write is not committed yet")
             release.countDown()
             body.join()
-            assertEquals(1, root.snapshot()[root.left.x])
+            assertEquals(1, root.tree.snapshot()[root.left.x])
         }
 
     @Test
     fun aCaptureRacingKeyedCreateAndDisposeNeverThrows() =
         completesWithin(60, "captures racing keyed churn") {
-            val root = CutRoot()
+            val root = CutApp()
             val done = AtomicBoolean(false)
             val failures = ConcurrentLinkedQueue<Throwable>()
             val cuts = AtomicInteger()
@@ -201,7 +198,7 @@ class TreeCutConcurrencyTest {
                     daemon("reader", failures) {
                         start.await()
                         while (!done.get()) {
-                            val tree = root.snapshot()
+                            val tree = root.tree.snapshot()
                             for (child in tree[root.keyed]!!.children) checkNotNull(child.leaf)
                             cuts.incrementAndGet()
                         }
@@ -211,7 +208,7 @@ class TreeCutConcurrencyTest {
                         start.await()
                         while (moreRounds(rounds.get(), CHURN_ROUNDS, MAX_CHURN_ROUNDS, cuts, done, reader)) {
                             val i = rounds.getAndIncrement()
-                            val s = root.keyed.create(i) { CutKeyedStore(it, root) }
+                            val s = root.keyed.create(i)
                             s action { n mutate i }
                             s.dispose()
                         }
@@ -224,27 +221,34 @@ class TreeCutConcurrencyTest {
                 assertTrue(!churner.isAlive && !reader.isAlive, "both threads finished")
                 assertTrue(cuts.get() >= MIN_CUTS, "the reader took ${cuts.get()} cuts")
                 assertTrue(rounds.get() >= CHURN_ROUNDS, "the churner ran ${rounds.get()} rounds")
-                assertTrue(root.snapshot()[root.keyed]!!.children.isEmpty())
+                assertTrue(
+                    root.tree
+                        .snapshot()[root.keyed]!!
+                        .children
+                        .isEmpty(),
+                )
             } finally {
                 done.set(true)
             }
         }
 
     @Test
-    fun rootDisposeDuringACaptureDoesNotDeadlockAndFailsOnlyAsDisposed() =
-        completesWithin(30, "root dispose racing captures") {
-            val root = CutRoot()
+    fun receiverDisposeDuringACaptureDoesNotDeadlockAndFailsOnlyAsDisposed() =
+        completesWithin(30, "receiver dispose racing captures") {
+            val root = CutApp()
+            // Taken before the race: the accessor itself refuses a disposed store.
+            val tree = root.tree
             val start = CyclicBarrier(2)
             val failures = ConcurrentLinkedQueue<Throwable>()
             val succeeded = AtomicInteger()
             val reader =
                 daemon("reader", failures) {
                     start.await()
-                    // Captures until the first one that finds the root disposed: every capture before
+                    // Captures until the first one that finds the receiver disposed: every capture before
                     // it returned, and that one — and nothing else — threw the documented exception.
                     while (true) {
                         try {
-                            root.snapshot()
+                            tree.snapshot()
                             succeeded.incrementAndGet()
                         } catch (e: IllegalStateException) {
                             check("disposed" in e.message.orEmpty()) { "a capture racing dispose threw $e" }
@@ -268,9 +272,9 @@ class TreeCutConcurrencyTest {
 
     private fun captureWhileCommitting(
         what: String,
-        commit: (CutRoot, Int) -> Unit,
+        commit: (CutApp, Int) -> Unit,
     ) {
-        val root = CutRoot()
+        val root = CutApp()
         val slow = AtomicBoolean(true)
         // Widens the window between the two participants' applies would
         // have been under the old commit order; the frame bracket closes it.
@@ -286,7 +290,7 @@ class TreeCutConcurrencyTest {
                     daemon("tree-reader") {
                         start.await()
                         while (!done.get()) {
-                            val tree = root.snapshot()
+                            val tree = root.tree.snapshot()
                             val lx = tree[root.left.x]
                             val ry = tree[root.right.y]
                             if (lx != ry) mixes += "x=$lx y=$ry"

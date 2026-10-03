@@ -428,7 +428,7 @@ class StoreHandle<V : Store<V>> internal constructor(
      *
      * Detachment removes the recorder alone: every middleware the test
      * installed on the store — before or after `track(v)` — and a tree's
-     * `Root.middlewares` ring stay in place, so a store that outlives the
+     * `StoreTree.middlewares` ring stay in place, so a store that outlives the
      * `storeTest` block keeps behaving as the test left it.
      */
     internal fun disposeRecorderInternal() {

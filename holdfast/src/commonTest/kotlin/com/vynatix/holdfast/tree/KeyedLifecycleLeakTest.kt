@@ -19,15 +19,14 @@ private class LeakBranchStore : Store<LeakBranchStore>() {
 }
 
 private class LeakThreadStore(
-    id: Int,
-    root: LeakRoot,
-) : Store<LeakThreadStore>(root.threads.at(id)) {
+    val id: Int,
+) : Store<LeakThreadStore>() {
     val n by state { 0 }
 }
 
-private class LeakRoot : Root() {
-    val fixed by branch(LeakBranchStore())
-    val threads by keyed<Int, LeakThreadStore>()
+private class LeakParent : Store<LeakParent>() {
+    val fixed by group { listOf(LeakBranchStore()) }
+    val threads by keyed<Int, LeakThreadStore> { LeakThreadStore(it) }
 }
 
 private class CountingLeakListener : LeafMembershipListener() {
@@ -46,48 +45,50 @@ private class CountingLeakListener : LeafMembershipListener() {
 private const val CYCLES = 1_000
 private const val BUDGET_SECONDS = 8
 
-/** T3: keyed churn leaves nothing behind in the registry, the listeners or the stores. */
+/** T3: keyed churn leaves nothing behind in the parent's registry, its listeners or the stores. */
 class KeyedLifecycleLeakTest {
     @Test
     fun aThousandCreateAndDisposeCyclesLeaveTheRegistryEmpty() {
-        val root = LeakRoot()
+        val parent = LeakParent()
+        val fixed = parent.fixed.stores.single()
         val listener = CountingLeakListener()
-        root.internalAddMembershipListener(listener)
+        parent.internalAddMembershipListener(listener)
         val started = TimeSource.Monotonic.markNow()
         var sampledObservers = 0
         repeat(CYCLES) { i ->
-            val t = root.threads.create(i) { LeakThreadStore(it, root) }
+            val t = parent.threads.create(i)
             t action { n mutate i }
             if (i % 100 == 0) sampledObservers += t.n.observerCount
             t.dispose()
-            assertNull(root[root.threads, i])
+            assertNull(parent.threads[i])
         }
         val elapsed = started.elapsedNow()
         assertTrue(elapsed.inWholeSeconds < BUDGET_SECONDS, "1,000 cycles took $elapsed")
-        assertTrue(root.entries(root.threads).isEmpty())
-        assertEquals(CYCLES, listener.attached)
-        assertEquals(CYCLES, listener.detached)
+        assertTrue(parent.threads.entries().isEmpty())
+        assertEquals(CYCLES, listener.attached, "one parent: each store is announced exactly once")
+        assertEquals(CYCLES, listener.detached, "one parent: each store's detach is announced exactly once")
         assertEquals(0, sampledObservers, "the tree installs no observers on a keyed store")
-        assertEquals(listOf<Store<*>>(root.fixed.stores.single()), root.children(root))
-        assertEquals(2, root.nodes.count { it is LeafNode || it is KeyedBranch<*, *> })
+        assertEquals(listOf(parent, fixed), parent.tree.stores())
+        assertEquals(listOf<StoreNode>(parent.fixed, parent.threads), parent.tree.children())
     }
 
     @Test
     fun reverseOrderDisposeLeavesNothing() {
-        val root = LeakRoot()
-        val stores = (0 until 50).map { i -> root.threads.create(i) { LeakThreadStore(it, root) } }
+        val parent = LeakParent()
+        val stores = (0 until 50).map { i -> parent.threads.create(i) }
         stores.asReversed().forEach { it.dispose() }
-        assertTrue(root.entries(root.threads).isEmpty())
-        stores.forEach { assertNull(root.nodeOf(it)) }
+        assertTrue(parent.threads.entries().isEmpty())
+        stores.forEach { assertNull(parent.tree.nodeOf(it)) }
+        assertEquals(listOf(parent, parent.fixed.stores.single()), parent.tree.stores())
     }
 
     @Test
-    fun branchStoresStayAttachedAcrossKeyedChurn() {
-        val root = LeakRoot()
-        val fixed = root.fixed.stores.single()
-        repeat(200) { i -> root.threads.create(i) { LeakThreadStore(it, root) }.dispose() }
-        assertNotNull(fixed.internalAttachment(treeMembershipKey))
-        assertNotNull(root.nodeOf(fixed))
-        assertEquals(listOf<Store<*>>(fixed), root.children(root.fixed))
+    fun groupStoresStayAttachedAcrossKeyedChurn() {
+        val parent = LeakParent()
+        val fixed = parent.fixed.stores.single()
+        repeat(200) { i -> parent.threads.create(i).dispose() }
+        assertNotNull(fixed.internalAttachment(treeMembershipKey)?.parentEdge?.value)
+        assertNotNull(parent.tree.nodeOf(fixed))
+        assertEquals(listOf(fixed), parent.tree.stores(parent.fixed))
     }
 }

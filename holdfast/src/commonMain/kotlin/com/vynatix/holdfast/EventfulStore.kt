@@ -60,23 +60,6 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
     onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
 ) : Store<Self>(),
     Eventful<E> {
-    /**
-     * Mirrors [Store]'s experimental membership constructor: delegates to the
-     * primary constructor above first, so `_events`/[events] (and every
-     * [Store] field) are initialized before [StoreMembership.bind] runs, and
-     * every subclass property initializer and delegated state still runs
-     * after it. The primary constructor above is untouched by this overload
-     * existing.
-     */
-    @ExperimentalStoreApi
-    protected constructor(
-        membership: StoreMembership<Self>,
-        extraBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
-        onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND,
-    ) : this(extraBufferCapacity, onBufferOverflow) {
-        membership.bind(this)
-    }
-
     private val _events: MutableSharedFlow<E> =
         MutableSharedFlow(
             replay = 0,

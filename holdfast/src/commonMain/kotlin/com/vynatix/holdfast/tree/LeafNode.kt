@@ -7,90 +7,126 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import kotlinx.atomicfu.atomic
 
-/** [LeafNode.attachPhase]: not indexed by the registry yet; a dispose now is never announced. */
+/** [LeafNode.attachPhase]: not registered under a parent in this attach epoch; a detach now is never announced. */
 internal const val ATTACH_UNANNOUNCED = 0
 
-/** [LeafNode.attachPhase]: indexed; the declaring thread owes the listeners `onAttached`, or is telling them. */
+/** [LeafNode.attachPhase]: registered; the attaching thread owes the ancestors `onAttached`, or is telling them. */
 internal const val ATTACH_ANNOUNCING = 1
 
-/** [LeafNode.attachPhase]: every listener heard `onAttached`; a dispose now is announced by its own thread. */
+/** [LeafNode.attachPhase]: every ancestor's listeners heard `onAttached`; a detach now is claimed and delivered. */
 internal const val ATTACH_ANNOUNCED = 2
 
-/** [LeafNode.attachPhase]: the store disposed while [ATTACH_ANNOUNCING]; the announcer delivers or drops the detach. */
+/** [LeafNode.attachPhase]: detached while [ATTACH_ANNOUNCING]; the announcer delivers the detach. */
 internal const val DETACH_DEFERRED = 3
 
+/** [LeafNode.attachPhase]: a detach was claimed; its deliverer resets the phase to [ATTACH_UNANNOUNCED]. */
+internal const val DETACHED = 4
+
 /**
- * One store's place in the tree: under a [Branch] (named by a pin or the
- * store's class name) or under a [KeyedBranch] (named by its encoded [key]).
+ * One store's place in a store tree, for the store's whole life: created
+ * with the store's tree state, re-parented when the store is declared as a
+ * child (`store { }`, `group { }`, a keyed `create`), and reset to a
+ * parentless, class-named node when its parent disposes (it becomes a
+ * subtree root and keeps working).
  *
- * A node outlives its store's membership: once the store is disposed — or
- * the root is — [store] answers `null`, but the node still identifies the
- * place in snapshots and test timelines captured while it was live.
+ * The node outlives its store: once the store is disposed [store] answers
+ * `null`, but the node keeps the place it had (its [parent], [name] and
+ * [key]), so snapshots and test timelines captured while it was live still
+ * identify it.
  */
 @ExperimentalStoreApi
 class LeafNode internal constructor(
-    override val root: Root,
-    override val parent: StoreNode,
-    override val name: String,
-    override val nameOrigin: NameOrigin,
-    /** The key this leaf was created for under a [KeyedBranch]; `null` under a [Branch]. */
-    val key: Any?,
+    attachment: TreeLeafAttachment?,
+    parent: StoreNode?,
+    name: String,
+    nameOrigin: NameOrigin,
+    key: Any?,
 ) : StoreNode {
+    /**
+     * The store's tree state; `null` for a node `decode` minted for a keyed
+     * entry with no live store, and once the store's dispose finished
+     * (the last step of `TreeLeafAttachment.onStoreDisposed`).
+     */
     @kotlin.concurrent.Volatile
-    internal var storeRef: Store<*>? = null
+    internal var attachment: TreeLeafAttachment? = attachment
 
-    /** The store at this leaf, or `null` once it has left the tree (disposed, or its root disposed). */
-    val store: Store<*>? get() = storeRef
-
-    /** The store's unique key while it was attached; identifies it in registries without holding it. */
     @kotlin.concurrent.Volatile
-    internal var storeKey: Long = 0L
+    override var parent: StoreNode? = parent
+        internal set
+
+    @kotlin.concurrent.Volatile
+    override var name: String = name
+        internal set
+
+    @kotlin.concurrent.Volatile
+    override var nameOrigin: NameOrigin = nameOrigin
+        internal set
+
+    /** The key this leaf was created for under a [KeyedBranch]; `null` elsewhere. */
+    @kotlin.concurrent.Volatile
+    var key: Any? = key
+        internal set
+
+    /** The store at this leaf, or `null` once it disposed (and for a node `decode` minted). */
+    val store: Store<*>? get() = attachment?.storeRef
 
     /**
-     * A branch leaf's announcement to the membership listeners (a keyed
-     * leaf's is ordered by its entry's construction lock instead):
-     * [ATTACH_UNANNOUNCED] until the registry indexed it, [ATTACH_ANNOUNCING]
-     * from then until the declaring thread has told every listener
-     * `onAttached`, then [ATTACH_ANNOUNCED] — or [DETACH_DEFERRED] when the
-     * store disposed meanwhile, so the announcer tells `onDetached` right
-     * after (a listener hears Attached strictly before Detached) or, when
-     * it had not begun, tells neither: a store gone before it was announced
-     * is never announced at all.
+     * The store's `lockOrderKey`, fixed at creation: identifies it in
+     * captures without holding it. `0L` only for a node `decode` minted.
+     */
+    internal val storeKey: Long = attachment?.storeRef?.lockOrderKey ?: 0L
+
+    /**
+     * The name this node takes when it has no parent: its store's class
+     * name minus `Store` (`"Store"` when the platform reports none, and for
+     * a minted node). Computed once, so a reset never reads [store].
+     */
+    internal val defaultName: String = attachment?.storeRef?.let(::defaultNodeName) ?: DEFAULT_STORE_NAME
+
+    /**
+     * The attach-phase machine of one attach epoch (see `TreeMembership.kt`):
+     * [ATTACH_UNANNOUNCED] → [ATTACH_ANNOUNCING] when the attacher registers
+     * it under its parent → [ATTACH_ANNOUNCED] once every ancestor's
+     * listeners heard `onAttached`; a detach claims [ATTACH_ANNOUNCED] →
+     * [DETACHED] (its deliverer resets to [ATTACH_UNANNOUNCED]) or defers
+     * from [ATTACH_ANNOUNCING] to [DETACH_DEFERRED] (the announcer delivers
+     * and resets).
      */
     internal val attachPhase = atomic(ATTACH_UNANNOUNCED)
 
     /**
-     * The store at this branch leaf disposed: `true` when the caller tells
-     * the listeners `onDetached` now; `false` when the detach is dropped
-     * (the leaf was never announced) or deferred to the announcer running.
+     * Claim this epoch's detach delivery: `true` when the caller delivers
+     * `onDetached` now (and then resets [DETACHED] to [ATTACH_UNANNOUNCED]);
+     * `false` when the detach is deferred to the announcer running, or there
+     * is nothing to deliver (never announced, or claimed already).
      */
     internal fun claimDetach(): Boolean {
         var claimed: Boolean? = null
         while (claimed == null) {
-            val phase = attachPhase.value
             claimed =
-                when {
-                    phase == ATTACH_ANNOUNCED -> true
-                    phase != ATTACH_ANNOUNCING -> false
-                    attachPhase.compareAndSet(ATTACH_ANNOUNCING, DETACH_DEFERRED) -> false
-                    else -> null
+                when (attachPhase.value) {
+                    ATTACH_ANNOUNCED -> if (attachPhase.compareAndSet(ATTACH_ANNOUNCED, DETACHED)) true else null
+                    ATTACH_ANNOUNCING ->
+                        if (attachPhase.compareAndSet(ATTACH_ANNOUNCING, DETACH_DEFERRED)) false else null
+                    else -> false
                 }
         }
         return claimed
     }
 
-    override fun toString(): String = "LeafNode(${path()})"
-
-    internal fun path(): String = "${root.name}/${pathUnderRoot()}"
-
-    /** The names from the root's first child down to this leaf, joined by `/`: how a restore issue names it. */
-    internal fun pathUnderRoot(): String {
+    override fun toString(): String {
         val names = ArrayList<String>()
         var current: StoreNode? = this
-        while (current != null && current !is Root) {
+        while (current != null) {
             names.add(current.name)
             current = current.parent
         }
-        return names.asReversed().joinToString("/")
+        return "LeafNode(${names.asReversed().joinToString("/")})"
     }
 }
+
+/** [LeafNode.defaultName] when no class name is available. */
+private const val DEFAULT_STORE_NAME = "Store"
+
+/** The name [store]'s node takes with no parent: its class name minus `Store`, else `"Store"`. */
+internal fun defaultNodeName(store: Store<*>): String = defaultLeafName(store::class.simpleName) ?: DEFAULT_STORE_NAME

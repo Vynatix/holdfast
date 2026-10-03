@@ -3,18 +3,24 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.tree.LeafNode
-import com.vynatix.holdfast.tree.Root
+import com.vynatix.holdfast.tree.group
+import com.vynatix.holdfast.tree.keyed
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -47,29 +53,29 @@ private class HaPlainStore : Store<HaPlainStore>() {
     val n by state { 0 }
 }
 
+/** A keyed store whose refresh fetches its own key. */
 private class HaKeyedStore(
-    id: String,
-    root: HaRoot,
-    remote: suspend () -> List<String>,
-) : Store<HaKeyedStore>(root.keyed.at(id)) {
+    private val id: String,
+) : Store<HaKeyedStore>() {
     val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
     val hydration =
         hydrator {
             base { items mutate listOf("seed") }
-            refresh { remote() } adopt { fetched -> items mutate fetched }
+            refresh { listOf(id) } adopt { fetched -> items mutate fetched }
         }
 }
 
-private class HaRoot(
+/** The receiver has no hydrator of its own: it is listed, first, as `NoHydrator`. */
+private class HaParent(
     remoteA: suspend () -> List<String> = { listOf("a") },
     remoteB: suspend () -> List<String> = { listOf("b") },
-) : Root("ha") {
-    val a = HaFeedStore(remoteA)
-    val b = HaFeedStore(remoteB)
-    val plain = HaPlainStore()
-    val feeds by branch(a, b).named(a, "a").named(b, "b")
-    val other by branch(plain)
-    val keyed by keyed<String, HaKeyedStore>(under = feeds)
+) : Store<HaParent>() {
+    val a by store { HaFeedStore(remoteA) }
+    val b by store { HaFeedStore(remoteB) }
+    val other by group { listOf(HaPlainStore()) }
+    val keyed by keyed<String, HaKeyedStore> { HaKeyedStore(it) }
+
+    val plain: HaPlainStore get() = other.stores.single() as HaPlainStore
 }
 
 /** A feed with a persisted overlay, whose seed reads [kv] before it takes the store. */
@@ -108,226 +114,369 @@ private class DisposingKvStore : SuspendingKvStore {
     override suspend fun snapshot(): Map<String, String> = emptyMap()
 }
 
-private class HaOverlayRoot(
+private class HaOverlayParent(
     kv: SuspendingKvStore,
-) : Root("hao") {
-    val o = HaOverlayStore(kv)
-    val a = HaFeedStore { listOf("a") }
-    val leaves by branch(o, a).named(o, "o").named(a, "a")
+) : Store<HaOverlayParent>() {
+    val o by store { HaOverlayStore(kv) }
+    val a by store { HaFeedStore { listOf("a") } }
 }
 
-/** `Root.hydrateAll`: every hydrator under a node driven, failures aggregated, entries refused. */
+/** A hydrated store that writes [label] into [order] when its seed runs. */
+private class HaOrderedStore(
+    private val label: String,
+    private val order: MutableList<String>,
+) : Store<HaOrderedStore>() {
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base {
+                order += label
+                items mutate listOf("seed")
+            }
+            refresh { listOf(label) } adopt { fetched -> items mutate fetched }
+        }
+}
+
+/** A mid-tree store with a hydrator of its own and one hydrated child. */
+private class HaOrderedMidStore(
+    private val order: MutableList<String>,
+) : Store<HaOrderedMidStore>() {
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base {
+                order += "mid"
+                items mutate listOf("seed")
+            }
+            refresh { listOf("mid") } adopt { fetched -> items mutate fetched }
+        }
+    val leaf by store { HaOrderedStore("leaf", order) }
+}
+
+/** A receiver with a hydrator of its own, over a hydrated mid-tree store. */
+private class HaOrderedParent : Store<HaOrderedParent>() {
+    val order = mutableListOf<String>()
+    val items by state(tags = setOf(StateTag.Remote)) { emptyList<String>() }
+    val hydration =
+        hydrator {
+            base {
+                order += "parent"
+                items mutate listOf("seed")
+            }
+            refresh { listOf("parent") } adopt { fetched -> items mutate fetched }
+        }
+    val mid by store { HaOrderedMidStore(order) }
+}
+
+/** A parent whose one child counts its lambda's runs: materialization is visible. */
+private class HaCountingParent : Store<HaCountingParent>() {
+    var childRuns = 0
+    val child by store {
+        childRuns++
+        HaPlainStore()
+    }
+}
+
+/** `StoreTree.hydrateAll`: every hydrator of the subtree driven, the receiver's first; failures aggregated; entries refused. */
 class HydrateAllTest {
     @Test
-    fun drivesEveryHydratorUnderTheNodeAndReportsLeavesWithoutOne() =
+    fun drivesEveryHydratorOfTheSubtreeAndReportsStoresWithoutOne() =
         runBlocking {
-            val root = HaRoot()
-            val k = root.keyed.create("k") { HaKeyedStore(it, root) { listOf("k") } }
-            val report = root.hydrateAll()
-            assertEquals(listOf("a", "b", "HaPlain", "k").sorted(), report.entries.map { it.node.name }.sorted())
-            assertEquals(listOf(root.a, root.b, root.plain, k).map { it.lockOrderKey }, report.entries.map { it.store.lockOrderKey })
+            val parent = HaParent()
+            val tree = parent.tree
+            assertEquals(4, tree.children().size, "a, b, other, keyed — materialized first, so the keyed store sorts after them")
+            val k = parent.keyed.create("k")
+            val report = tree.hydrateAll()
+            assertEquals(listOf("HaParent", "a", "b", "HaPlain", "k"), report.entries.map { it.node.name })
+            assertEquals(
+                listOf(parent, parent.a, parent.b, parent.plain, k).map { it.lockOrderKey },
+                report.entries.map { it.store.lockOrderKey },
+                "lockOrderKey order: the receiver first",
+            )
             assertTrue(report.isHealthy)
             assertEquals(
                 Hydration.Hydrated,
-                (report.entries.first { it.store === root.a }.outcome as HydrateAllReport.Outcome.Ran).hydration,
+                (report.entries.first { it.store === parent.a }.outcome as HydrateAllReport.Outcome.Ran).hydration,
             )
-            assertEquals(listOf("a"), root.a.items.value)
-            assertEquals(listOf("b"), root.b.items.value)
+            assertEquals(listOf("a"), parent.a.items.value)
+            assertEquals(listOf("b"), parent.b.items.value)
             assertEquals(listOf("k"), k.items.value)
-            assertEquals(listOf(root.plain), report.skipped.map { it.store })
-            assertIs<HydrateAllReport.Outcome.NoHydrator>(report.skipped.single().outcome)
+            assertEquals(listOf<Store<*>>(parent, parent.plain), report.skipped.map { it.store })
+            for (skipped in report.skipped) assertIs<HydrateAllReport.Outcome.NoHydrator>(skipped.outcome)
             assertEquals(emptyList<HydrateAllReport.Entry>(), report.failed)
+        }
+
+    @Test
+    fun theReceiversOwnHydratorRunsFirst() =
+        runBlocking {
+            val parent = HaOrderedParent()
+            val report = parent.tree.hydrateAll()
+            assertEquals(listOf("HaOrderedParent", "mid", "leaf"), report.entries.map { it.node.name })
+            assertSame(parent, report.entries.first().store)
+            assertEquals(listOf("parent", "mid", "leaf"), parent.order, "the seeds ran receiver first, then down the tree")
+            for (entry in report.entries) {
+                assertEquals(Hydration.Hydrated, assertIs<HydrateAllReport.Outcome.Ran>(entry.outcome).hydration)
+            }
+            assertEquals(listOf("parent"), parent.items.value)
+        }
+
+    @Test
+    fun aSubNodeCallExcludesTheReceiverAndIncludesTheSubNodesOwnStore() =
+        runBlocking {
+            val parent = HaOrderedParent()
+            val tree = parent.tree
+            val midNode = checkNotNull(tree.nodeOf(parent.mid))
+            val report = tree.hydrateAll(midNode)
+            assertEquals(listOf("mid", "leaf"), report.entries.map { it.node.name })
+            assertEquals(listOf("mid", "leaf"), parent.order)
+            assertEquals(Hydration.Detached, parent.hydration.current, "the receiver is not under the sub-node")
+            assertTrue(report.isHealthy)
+        }
+
+    @Test
+    fun withoutAScopeEachStoreRefreshesOnItsOwnScope() =
+        runBlocking {
+            val ran = mutableListOf<String>()
+            val parent =
+                HaParent(
+                    remoteA = {
+                        ran += "a on ${currentCoroutineContext()[CoroutineName]?.name}"
+                        listOf("a")
+                    },
+                    remoteB = {
+                        ran += "b on ${currentCoroutineContext()[CoroutineName]?.name}"
+                        listOf("b")
+                    },
+                )
+            // Unconfined: each refresh runs inline as its store's hydrate() launches it.
+            val scopeA = CoroutineScope(Dispatchers.Unconfined + Job() + CoroutineName("scope-a"))
+            val scopeB = CoroutineScope(Dispatchers.Unconfined + Job() + CoroutineName("scope-b"))
+            try {
+                parent.a.bindToScope(scopeA)
+                parent.b.bindToScope(scopeB)
+                val report = parent.tree.hydrateAll()
+                assertEquals(listOf("a on scope-a", "b on scope-b"), ran, "scope ?: store.scope, per store")
+                assertTrue(report.isHealthy)
+                assertEquals(listOf("a"), parent.a.items.value)
+                assertEquals(listOf("b"), parent.b.items.value)
+            } finally {
+                scopeA.cancel()
+                scopeB.cancel()
+            }
         }
 
     @Test
     fun aggregatesFailuresWithoutThrowing() =
         runBlocking {
             val offline = IllegalStateException("offline")
-            val root = HaRoot(remoteA = { throw offline })
-            val report = root.hydrateAll()
+            val parent = HaParent(remoteA = { throw offline })
+            val report = parent.tree.hydrateAll()
             assertFalse(report.isHealthy)
-            assertEquals(listOf(root.a), report.failed.map { it.store })
+            assertEquals(listOf<Store<*>>(parent.a), report.failed.map { it.store })
             val outcome = assertIs<HydrateAllReport.Outcome.Ran>(report.failed.single().outcome)
             assertEquals(Hydration.Failed(offline), outcome.hydration)
-            assertEquals(listOf("b"), root.b.items.value, "the other leaf hydrated regardless")
+            assertEquals(listOf("b"), parent.b.items.value, "the other store hydrated regardless")
         }
 
     @Test
     fun aThrowingSeedIsReportedAsFailedAndDoesNotStopTheRest() =
         runBlocking {
-            val root = HaRoot()
-            root.a.middlewares(
-                object : com.vynatix.holdfast.Middleware<HaFeedStore>() {
+            val parent = HaParent()
+            parent.a.middlewares(
+                object : Middleware<HaFeedStore>() {
                     override fun onTransactionCompleted(context: MiddlewareContext<HaFeedStore>) = error("seed rejected")
                 },
             )
-            val report = root.hydrateAll()
-            val failedA = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === root.a }.outcome)
+            val report = parent.tree.hydrateAll()
+            val failedA = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === parent.a }.outcome)
             val failure = assertIs<Hydration.Failed>(failedA.hydration)
             assertContains(failure.cause.message!!, "seed rejected")
-            assertEquals(Hydration.Detached, root.a.hydration.current, "the seed never committed")
-            assertEquals(listOf("b"), root.b.items.value)
+            assertEquals(Hydration.Detached, parent.a.hydration.current, "the seed never committed")
+            assertEquals(listOf("b"), parent.b.items.value)
         }
 
     @Test
     fun touchesOnlyTheSubtreeAndIsIdempotentAfterHydrated() =
         runBlocking {
-            val root = HaRoot()
-            val report = root.hydrateAll(root.other)
-            assertEquals(listOf("HaPlain"), report.entries.map { it.node.name })
-            assertEquals(Hydration.Detached, root.a.hydration.current)
+            val parent = HaParent()
+            val tree = parent.tree
+            val a = parent.a
+            val report = tree.hydrateAll(parent.other)
+            assertEquals(listOf("HaPlain"), report.entries.map { it.node.name }, "a sub-node call lists no receiver")
+            assertEquals(Hydration.Detached, a.hydration.current)
 
-            root.hydrateAll(root.feeds)
-            assertEquals(1, root.a.baseRuns)
-            val again = root.hydrateAll(root.feeds)
-            assertEquals(1, root.a.baseRuns, "a hydrated leaf's hydrator does nothing")
+            val aNode = checkNotNull(tree.nodeOf(a))
+            tree.hydrateAll(aNode)
+            assertEquals(1, a.baseRuns)
+            val again = tree.hydrateAll(aNode)
+            assertEquals(1, a.baseRuns, "a hydrated store's hydrator does nothing")
             assertTrue(again.isHealthy)
-            assertEquals(Hydration.Hydrated, (again.entries.first().outcome as HydrateAllReport.Outcome.Ran).hydration)
+            assertEquals(Hydration.Hydrated, (again.entries.single().outcome as HydrateAllReport.Outcome.Ran).hydration)
+            assertEquals(Hydration.Detached, parent.b.hydration.current, "b is not under a's node")
         }
 
     @Test
     fun withoutAwaitingItReportsThePhaseAfterTheSeed() =
         runBlocking {
             val gate = CompletableDeferred<List<String>>()
-            val root = HaRoot(remoteA = { gate.await() })
-            val report = root.hydrateAll(root.feeds, scope = this, awaitSettled = false)
-            assertEquals(Hydration.Seeded, (report.entries.first { it.store === root.a }.outcome as HydrateAllReport.Outcome.Ran).hydration)
-            assertEquals(listOf("seed"), root.a.items.value)
+            val parent = HaParent(remoteA = { gate.await() })
+            val a = parent.a
+            val report = parent.tree.hydrateAll(scope = this, awaitSettled = false)
+            assertEquals(Hydration.Seeded, (report.entries.first { it.store === a }.outcome as HydrateAllReport.Outcome.Ran).hydration)
+            assertEquals(listOf("seed"), a.items.value)
             gate.complete(listOf("late"))
-            assertEquals(Hydration.Hydrated, root.a.hydration.awaitSettled())
-            assertEquals(listOf("late"), root.a.items.value)
+            assertEquals(Hydration.Hydrated, a.hydration.awaitSettled())
+            assertEquals(listOf("late"), a.items.value)
         }
 
     @Test
-    fun insideAFrameBodyOrAnEntryItFailsBeforeTouchingAnyLeaf() =
+    fun insideAFrameBodyOrAnEntryItFailsBeforeTouchingAnyStore() =
         runBlocking {
-            val root = HaRoot()
+            val parent = HaParent()
+            val tree = parent.tree
+            val a = parent.a
+            val b = parent.b
+            val plain = parent.plain
             val refusals = mutableListOf<Throwable?>()
-            suspendAtomic(root.a, root.b) { refusals += runCatching { root.hydrateAll() }.exceptionOrNull() }.getOrThrow()
-            root.b.suspendAction { refusals += runCatching { root.hydrateAll() }.exceptionOrNull() }.getOrThrow()
-            root.plain.action { refusals += runCatching { runBlocking { root.hydrateAll() } }.exceptionOrNull() }.getOrThrow()
-            atomic(root.plain) { refusals += runCatching { runBlocking { root.hydrateAll() } }.exceptionOrNull() }.getOrThrow()
-            assertEquals(4, refusals.size)
+            suspendAtomic(a, b) { refusals += runCatching { tree.hydrateAll() }.exceptionOrNull() }.getOrThrow()
+            b.suspendAction { refusals += runCatching { tree.hydrateAll() }.exceptionOrNull() }.getOrThrow()
+            parent.suspendAction { refusals += runCatching { tree.hydrateAll() }.exceptionOrNull() }.getOrThrow()
+            plain.action { refusals += runCatching { runBlocking { tree.hydrateAll() } }.exceptionOrNull() }.getOrThrow()
+            atomic(plain) { refusals += runCatching { runBlocking { tree.hydrateAll() } }.exceptionOrNull() }.getOrThrow()
+            assertEquals(5, refusals.size)
             for (refusal in refusals) assertIs<IllegalStateException>(refusal)
-            assertEquals(0, root.a.baseRuns, "no leaf was touched")
-            assertEquals(Hydration.Detached, root.a.hydration.current)
-            assertEquals(Hydration.Detached, root.b.hydration.current)
+            assertEquals(0, a.baseRuns, "no store was touched")
+            assertEquals(Hydration.Detached, a.hydration.current)
+            assertEquals(Hydration.Detached, b.hydration.current)
         }
 
     @Test
     fun distinguishesNoHydratorFromDisposed() =
         runBlocking {
-            val root = HaRoot()
-            // b's seed disposes the keyed store created after it (a higher key: driven after b).
-            val victim = root.keyed.create("victim") { HaKeyedStore(it, root) { listOf("v") } }
-            val disposing = HaRoot()
-            val late = disposing.keyed.create("late") { HaKeyedStore(it, disposing) { listOf("l") } }
-            disposing.plain.middlewares(
-                object : com.vynatix.holdfast.Middleware<HaPlainStore>() {},
-            )
+            // Another parent's keyed store is no business of this call.
+            val bystander = HaParent()
+            val victim = bystander.keyed.create("victim")
+            val parent = HaParent()
+            val tree = parent.tree
+            assertEquals(4, tree.children().size, "materialized first: the keyed store sorts (and is driven) after b")
+            val late = parent.keyed.create("late")
+            parent.plain.middlewares(object : Middleware<HaPlainStore>() {})
             // Dispose the keyed store right after b's seed committed: from b's hydration observer.
-            disposing.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
-            val report = disposing.hydrateAll()
+            parent.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
+            val report = tree.hydrateAll()
             assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === late }.outcome)
-            assertIs<HydrateAllReport.Outcome.NoHydrator>(report.entries.first { it.store === disposing.plain }.outcome)
-            assertEquals(2, report.skipped.size)
+            assertIs<HydrateAllReport.Outcome.NoHydrator>(report.entries.first { it.store === parent.plain }.outcome)
+            assertIs<HydrateAllReport.Outcome.NoHydrator>(report.entries.first { it.store === parent }.outcome)
+            assertEquals(3, report.skipped.size)
             assertTrue(report.isHealthy)
-            assertEquals(listOf("v"), root.hydrateAll().let { victim.items.value })
+            assertEquals(emptyList<String>(), victim.items.value, "the other parent's store was never driven")
+            assertEquals(listOf("victim"), bystander.tree.hydrateAll().let { victim.items.value })
         }
 
     @Test
     fun cancellationPropagatesWhileRefreshJobsKeepRunning() =
         runBlocking {
             val gate = CompletableDeferred<List<String>>()
-            val root = HaRoot(remoteA = { gate.await() })
+            val parent = HaParent(remoteA = { gate.await() })
+            val tree = parent.tree
+            val a = parent.a
+            val b = parent.b
             val refreshScope = this
             val caller =
                 launch {
-                    root.hydrateAll(scope = refreshScope)
+                    tree.hydrateAll(scope = refreshScope)
                 }
             yield()
-            assertEquals(Hydration.Seeded, root.a.hydration.current, "seeded, awaiting the refresh")
+            assertEquals(Hydration.Seeded, a.hydration.current, "seeded, awaiting the refresh")
             caller.cancel()
             caller.join()
             assertTrue(caller.isCancelled)
             gate.complete(listOf("kept running"))
-            assertEquals(Hydration.Hydrated, root.a.hydration.awaitSettled())
-            assertEquals(listOf("kept running"), root.a.items.value)
-            assertEquals(Hydration.Hydrated, root.b.hydration.awaitSettled(), "b's refresh was launched before the cancel")
+            assertEquals(Hydration.Hydrated, a.hydration.awaitSettled())
+            assertEquals(listOf("kept running"), a.items.value)
+            assertEquals(Hydration.Hydrated, b.hydration.awaitSettled(), "b's refresh was launched before the cancel")
         }
 
     @Test
-    fun throwsOnADisposedRootAndAForeignNode() =
+    fun throwsOnADisposedStoreAndAForeignNode(): Unit =
         runBlocking {
-            val root = HaRoot()
-            val other = HaRoot()
-            assertFailsWith<IllegalArgumentException> { root.hydrateAll(other.feeds) }
-            root.dispose()
-            val failure = assertFailsWith<IllegalStateException> { root.hydrateAll() }
+            val parent = HaParent()
+            val foreign = HaParent()
+            val tree = parent.tree
+            assertFailsWith<IllegalArgumentException> { tree.hydrateAll(foreign.other) }
+            assertFailsWith<IllegalArgumentException> { tree.hydrateAll(foreign.tree.node) }
+            parent.dispose()
+            val failure = assertFailsWith<IllegalStateException> { tree.hydrateAll() }
             assertContains(failure.message!!, "disposed")
+            assertFailsWith<IllegalStateException> { parent.tree }
         }
 
     @Test
     fun theReportNamesNodesAndOutcomesNeverValues() =
         runBlocking {
-            val root = HaRoot()
-            val report = root.hydrateAll(root.feeds)
+            val parent = HaParent()
+            val report = parent.tree.hydrateAll()
             val text = report.toString()
+            assertContains(text, "Entry(HaParent: NoHydrator)")
             assertContains(text, "Entry(a: Ran(Hydrated))")
             assertFalse("seed" in text || "[a]" in text)
         }
 
     @Test
-    fun aLeafDisposedWhileAwaitedIsReportedDisposedAndNothingThrows() =
+    fun aStoreDisposedWhileAwaitedIsReportedDisposedAndNothingThrows() =
         runBlocking {
-            val root = HaRoot()
+            val parent = HaParent()
+            val a = parent.a
+            val b = parent.b
             // a's refresh adopts first (a lower key, launched first); its
             // observer disposes b after b's hydrate() ran, before b's awaitSettled().
-            root.a.hydration.state effect { if (this == Hydration.Hydrated) root.b.dispose() }
-            val report = root.hydrateAll(scope = this)
-            assertTrue(root.b.isDisposed)
-            val a = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === root.a }.outcome)
-            assertEquals(Hydration.Hydrated, a.hydration)
-            val b = report.entries.first { it.store === root.b }
-            assertIs<HydrateAllReport.Outcome.Disposed>(b.outcome)
-            assertEquals("b", b.node.name, "the entry keeps the node the leaf sat at")
-            assertEquals(listOf(root.b, root.plain), report.skipped.map { it.store })
-            assertTrue(report.isHealthy, "a leaf gone meanwhile is not a failure")
+            a.hydration.state effect { if (this == Hydration.Hydrated) b.dispose() }
+            val report = parent.tree.hydrateAll(scope = this)
+            assertTrue(b.isDisposed)
+            val ranA = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === a }.outcome)
+            assertEquals(Hydration.Hydrated, ranA.hydration)
+            val entryB = report.entries.first { it.store === b }
+            assertIs<HydrateAllReport.Outcome.Disposed>(entryB.outcome)
+            assertEquals("b", entryB.node.name, "the entry keeps the node the store sat at")
+            assertEquals(listOf<Store<*>>(parent, b, parent.plain), report.skipped.map { it.store })
+            assertTrue(report.isHealthy, "a store gone meanwhile is not a failure")
             assertEquals(emptyList<HydrateAllReport.Entry>(), report.failed)
         }
 
     @Test
-    fun aLeafDisposedAsItsHydrateBeginsIsReportedDisposedNotFailed() =
+    fun aStoreDisposedAsItsHydrateBeginsIsReportedDisposedNotFailed() =
         runBlocking {
             val kv = DisposingKvStore()
-            val root = HaOverlayRoot(kv)
-            kv.victim = root.o
-            val report = root.hydrateAll()
-            assertTrue(root.o.isDisposed)
-            assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === root.o }.outcome)
+            val parent = HaOverlayParent(kv)
+            val o = parent.o
+            kv.victim = o
+            val report = parent.tree.hydrateAll()
+            assertTrue(o.isDisposed)
+            assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === o }.outcome)
             assertEquals(emptyList<HydrateAllReport.Entry>(), report.failed)
             assertTrue(report.isHealthy)
-            assertEquals(listOf("a"), root.a.items.value, "the rest hydrated regardless")
+            assertEquals(listOf("a"), parent.a.items.value, "the rest hydrated regardless")
         }
 
     @Test
-    fun withoutAwaitingALeafDisposedAfterItsSeedIsReportedDisposed() =
+    fun withoutAwaitingAStoreDisposedAfterItsSeedIsReportedDisposed() =
         runBlocking {
             // Unconfined: each refresh runs inline as it is launched, so b's
             // refresh disposes b inside b's own hydrate(), which returns normally.
-            lateinit var root: HaRoot
-            root =
-                HaRoot(remoteB = {
-                    root.b.dispose()
+            lateinit var parent: HaParent
+            parent =
+                HaParent(remoteB = {
+                    parent.b.dispose()
                     listOf("b")
                 })
             val inline = CoroutineScope(Dispatchers.Unconfined + Job())
             try {
-                val report = root.hydrateAll(scope = inline, awaitSettled = false)
-                assertTrue(root.b.isDisposed)
-                assertEquals(Hydration.Seeded, root.b.hydration.current, "the phase keeps answering")
-                assertIs<HydrateAllReport.Outcome.Disposed>(report.entries.first { it.store === root.b }.outcome)
-                val a = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === root.a }.outcome)
+                val report = parent.tree.hydrateAll(scope = inline, awaitSettled = false)
+                val b = report.entries.first { it.node.name == "b" }
+                assertTrue(b.store.isDisposed)
+                assertEquals(Hydration.Seeded, (b.store as HaFeedStore).hydration.current, "the phase keeps answering")
+                assertIs<HydrateAllReport.Outcome.Disposed>(b.outcome)
+                val a = assertIs<HydrateAllReport.Outcome.Ran>(report.entries.first { it.store === parent.a }.outcome)
                 assertEquals(Hydration.Hydrated, a.hydration)
                 assertTrue(report.isHealthy)
             } finally {
@@ -336,19 +485,45 @@ class HydrateAllTest {
         }
 
     @Test
-    fun aDisposedLeafsEntryKeepsItsOwnNode() =
+    fun aDisposedStoresEntryKeepsItsOwnNode() =
         runBlocking {
-            val root = HaRoot()
-            val late = root.keyed.create("late") { HaKeyedStore(it, root) { listOf("l") } }
-            root.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
-            val report = root.hydrateAll()
+            val parent = HaParent()
+            val tree = parent.tree
+            assertEquals(4, tree.children().size, "materialized first: the keyed store sorts (and is driven) after b")
+            val late = parent.keyed.create("late")
+            parent.b.hydration.state effect { if (this == Hydration.Seeded) late.dispose() }
+            val report = tree.hydrateAll()
             val entry = report.entries.first { it.store === late }
             assertIs<HydrateAllReport.Outcome.Disposed>(entry.outcome)
-            assertNull(root.nodeOf(late), "the registry dropped the leaf on detach")
+            assertNull(tree.nodeOf(late), "a disposed store is no longer found")
             val leaf = assertIs<LeafNode>(entry.node)
             assertEquals("late", leaf.name)
             assertEquals("late", leaf.key)
-            assertSame(root.keyed, leaf.parent)
+            assertSame(parent.keyed, leaf.parent, "a disposed store's node keeps the place it had")
             assertEquals("Entry(late: Disposed)", entry.toString())
         }
+
+    @Test
+    fun theInsideAnEntryRefusalComesBeforeTheListingMaterializesAnyChild() =
+        runBlocking {
+            val parent = HaCountingParent()
+            val tree = parent.tree
+            val refused = parent.suspendAction { runCatching { tree.hydrateAll() }.exceptionOrNull() }.getOrThrow()
+            assertIs<IllegalStateException>(refused)
+            assertEquals(0, parent.childRuns, "refused before any child lambda ran")
+            plainAction(parent) { runCatching { runBlocking { tree.hydrateAll() } }.exceptionOrNull() }
+            assertEquals(0, parent.childRuns, "nor from a blocking action")
+            val report = tree.hydrateAll()
+            assertEquals(1, parent.childRuns, "outside every entry the listing materializes the child once")
+            assertEquals(listOf("HaCountingParent", "child"), report.entries.map { it.node.name })
+        }
+
+    private fun plainAction(
+        parent: HaCountingParent,
+        body: () -> Throwable?,
+    ) {
+        var thrown: Throwable? = null
+        parent.action { thrown = body() }.getOrThrow()
+        assertIs<IllegalStateException>(thrown)
+    }
 }
