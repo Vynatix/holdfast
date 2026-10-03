@@ -256,7 +256,10 @@ class MaterializationConcurrencyTest {
     fun `a snapshot never captures a half-applied commit`() {
         val store = WideStore()
         val cells = store.cells
-        val commits = 4_000
+        // The writer commits at least MIN_WIDE_COMMITS times and keeps going (up to
+        // MAX_WIDE_COMMITS) until a reader has landed a snapshot mid-run: a loaded
+        // runner can starve the never-blocking readers through a short fixed run.
+        val committed = AtomicInteger()
         val stop = AtomicBoolean(false)
         val torn = ConcurrentLinkedQueue<List<Any?>>()
         val readersRunning = CountDownLatch(3)
@@ -275,7 +278,7 @@ class MaterializationConcurrencyTest {
                             val distinctValues = values.toSet()
                             if (distinctValues.size != 1) {
                                 torn += values
-                            } else if ((distinctValues.single() as Int) in 1 until commits) {
+                            } else if ((distinctValues.single() as Int) in 1 until committed.get()) {
                                 midRun.incrementAndGet()
                             }
                         }
@@ -285,8 +288,12 @@ class MaterializationConcurrencyTest {
                 daemon("wide-writer") {
                     try {
                         check(readersRunning.await(10, TimeUnit.SECONDS)) { "the snapshot readers never started" }
-                        for (i in 1..commits) {
+                        while (committed.get() < MIN_WIDE_COMMITS ||
+                            (midRun.get() == 0 && committed.get() < MAX_WIDE_COMMITS)
+                        ) {
+                            val i = committed.get() + 1
                             store action { cells.forEach { it mutate i } }
+                            committed.set(i)
                         }
                     } finally {
                         stop.set(true)
@@ -297,7 +304,7 @@ class MaterializationConcurrencyTest {
         }
         if (torn.isNotEmpty()) fail("${torn.size} snapshot(s) mixed two commits, e.g. ${torn.first()}")
         assertTrue(midRun.get() > 0, "no snapshot saw an intermediate commit: the readers never overlapped the writer")
-        assertEquals(List(cells.size) { commits }, cells.map { it.value })
+        assertEquals(List(cells.size) { committed.get() }, cells.map { it.value })
     }
 
     @Test
@@ -347,3 +354,6 @@ class MaterializationConcurrencyTest {
         sub.dispose()
     }
 }
+
+private const val MIN_WIDE_COMMITS = 4_000
+private const val MAX_WIDE_COMMITS = 40_000
