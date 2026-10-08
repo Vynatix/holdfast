@@ -10,6 +10,22 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **A parked suspending entry's uncommitted writes no longer leak to other
+  coroutines on its thread (issue #28).** `State.value` and keyed
+  membership (`getOrNull`, `contains`, `entries`) read the active
+  transaction's pending writes and staged evictions whenever the reader's
+  thread id matched the transaction's owner. While a `suspendAction` or
+  `suspendAtomic` was parked, any other coroutine on that thread therefore
+  read what the body had staged, even writes that later rolled back: every
+  coroutine on wasmJs (all report thread id `0`), and on the JVM/Android
+  every coroutine sharing a single-threaded dispatcher (`Dispatchers.Main`,
+  `runBlocking`, `runTest`). A suspending entry's root now records the
+  settle scope it was opened in, and while it holds the store only reads
+  in that scope — its own body — see its pending state; everyone else reads
+  committed values. Blocking actions and reads from other threads are
+  unchanged. On iOS and wasmJs a nested `withContext(dispatcher)` section of
+  the body, which already loses the entry's settle scope there, now reads
+  committed values too.
 - **wasmJs: a `tryLock` that never counted its hold (issue #26).** On
   wasmJs the first read of every declared state threw
   `IllegalStateException: Mutex already unlocked` (replacing a throwing

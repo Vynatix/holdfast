@@ -558,7 +558,11 @@ Three things to internalize:
    values and its store's other declared states at the values the restore's
    transaction holds for them, restored or an enclosing action's pending
    writes — §4.1/§16.1/§16.3/§16.4). Other threads see committed values
-   only — they cannot witness "in-flight" mutations.
+   only — they cannot witness "in-flight" mutations. While a
+   `suspendAction`/`suspendAtomic` holds the store, only its body reads its
+   pending writes: another coroutine on the same thread (a single-threaded
+   dispatcher such as `Dispatchers.Main`, `runTest`, or any coroutine on
+   wasmJs) reads committed values too.
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
@@ -947,7 +951,11 @@ holdfast action {
 
 This is the only place reads see uncommitted values, and only on the
 thread executing the action. From any other thread, `count.value` returns
-the last committed value until this action commits. A state initializer
+the last committed value until this action commits. A `suspendAction` or
+`suspendAtomic` body reads its own writes the same way across its
+suspensions, but while it is parked another coroutine on its thread reads
+committed values, as another thread does (on iOS and wasmJs, a nested
+`withContext(dispatcher)` section of the body reads committed values too). A state initializer
 (§4.1) and a schema migration (§16.3) are the exceptions on the action's own
 thread. An initializer that runs inside the action, because the action is the
 first to need its state, and a `migrate` that a `restore` called in the action
@@ -2184,7 +2192,8 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    the frame before the body runs.
 3. **The body** — mutates stage into each store's root; inner actions are
    savepoints. Reads on the owner thread see pending writes
-   (read-your-own-writes); other threads see committed values only.
+   (read-your-own-writes) — in a `suspendAtomic`, only the body's own
+   reads; other threads, and other coroutines, see committed values only.
 4. **Middleware `onTransactionCompleted`** — ALL stores' hooks fire before
    ANY store commits, so a validation middleware throwing on store `c` still
    rolls `a` and `b` back. Corollary for middleware authors: for frames,

@@ -98,7 +98,11 @@ blocking call still waits forever; on wasmJs it throws
 only resume once the call returns the one thread (issue #27). While a `suspendAction` holds the store,
 another thread's bare `mutate`/`update` is not isolated from it — before the
 commit applies it joins the transaction, after it throws — so write from other
-threads through `action { }`, which waits. (`KeyedState.evict`/`evictAll` from
+threads through `action { }`, which waits. Reads are isolated: while the
+body is parked, another coroutine — on any thread, the body's own included —
+reads committed values, never the body's pending writes (on iOS and wasmJs a
+nested `withContext(dispatcher)` section of the body reads committed values
+too). (`KeyedState.evict`/`evictAll` from
 inside the commit are deferred until the suspending call releases the store;
 from another thread they have the same join-then-throw gap as bare `mutate`.)
 A failing
