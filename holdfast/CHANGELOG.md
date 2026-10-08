@@ -21,11 +21,25 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   every coroutine sharing a single-threaded dispatcher (`Dispatchers.Main`,
   `runBlocking`, `runTest`). A suspending entry's root now records the
   settle scope it was opened in, and while it holds the store only reads
-  in that scope — its own body — see its pending state; everyone else reads
-  committed values. Blocking actions and reads from other threads are
-  unchanged. On iOS and wasmJs a nested `withContext(dispatcher)` section of
-  the body, which already loses the entry's settle scope there, now reads
-  committed values too.
+  in that scope see its pending state; everyone else reads committed
+  values. Blocking actions and reads from other threads are unchanged. A
+  suspending entry started inside a blocking entry (an undispatched
+  `launch`, `runBlocking`) now opens a settle scope of its own, which hands
+  its derived-state work to the blocking entry's while that one is open, so
+  its body keeps reading its own writes after the blocking entry returns.
+  Still sharing the scope, and reading the pending state: the coroutines
+  the body launches, a suspending entry nested in the body (whose pending
+  writes the outer body and its other children read), and code resumed
+  inline from the body (`Dispatchers.Unconfined`,
+  `CoroutineStart.UNDISPATCHED`, `Dispatchers.Main.immediate`). On iOS and
+  wasmJs a nested `withContext(dispatcher)` section of the body, which
+  already loses the entry's settle scope there, now reads committed values
+  too. Behavior change: a bare `update { }` from another coroutine while
+  the body is parked now computes from the committed value; its write
+  still joins the parked transaction, as any thread's bare write does
+  (GUIDE §8.2), so it replaces the body's pending write to that state
+  instead of building on it. From another coroutine, write through
+  `suspendAction { }`.
 - **wasmJs: a `tryLock` that never counted its hold (issue #26).** On
   wasmJs the first read of every declared state threw
   `IllegalStateException: Mutex already unlocked` (replacing a throwing

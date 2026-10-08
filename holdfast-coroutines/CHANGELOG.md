@@ -11,7 +11,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Reads are isolated from a parked suspending entry (issue #28, fixed in
   `:holdfast`).** While a `suspendAction`/`suspendAtomic` body is parked,
   another coroutine on its thread (any coroutine on wasmJs) reads committed
-  values instead of the body's uncommitted writes and staged evictions.
+  values instead of the body's uncommitted writes and staged evictions,
+  unless it carries the body's settle scope (a coroutine the body launched,
+  a nested suspending entry, code resumed inline from the body). A
+  suspending entry started inside a blocking entry now opens a settle
+  scope of its own that hands its work to the blocking entry's while that
+  one is open, so its body keeps reading its own writes after the blocking
+  entry returns. A bare `update { }` from another coroutine meanwhile
+  computes from the committed value and replaces the body's pending write
+  to that state; write from other coroutines through `suspendAction { }`.
 - **wasmJs: a blocking entry beside a parked suspending holder no longer
   freezes the event loop (issue #27).** A blocking `action`, `atomic(...)`,
   `reset()`, `restore()`, `Hydrator.invalidate()` or `tree.reset()`/

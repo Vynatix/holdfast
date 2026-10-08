@@ -81,10 +81,13 @@ class Transaction internal constructor(
 
     /**
      * The settle scope open where [createForExternal] made this root: for a
-     * `suspendAction`/`suspendAtomic` root, the entry's own scope, which
-     * `:holdfast-coroutines` installs on every resumption of its body and on
-     * no other coroutine. [readsPendingHere] tells that body apart from
-     * another coroutine on the owner thread by it.
+     * `suspendAction`/`suspendAtomic` root, the scope of the outermost
+     * suspending entry it runs in — its own, opened even inside a blocking
+     * entry's scope ([SettleScopes.open]), or the one an enclosing suspending
+     * entry carries. `:holdfast-coroutines` installs it on every resumption of
+     * that body and of the coroutines that inherit its context, and on no
+     * other coroutine. [readsPendingHere] tells those apart from another
+     * coroutine on the owner thread by it.
      */
     @OptIn(StoreInternalApi::class)
     internal var openedInScope: SettleScope? = null
@@ -98,7 +101,11 @@ class Transaction internal constructor(
      * cannot tell the body from another coroutine that thread runs while the
      * body is parked: any coroutine on wasmJs (`currentThreadId()` is `0` for
      * all), or one sharing a single-threaded dispatcher elsewhere. Those read
-     * committed values, as another thread does. [MutableState.value] and
+     * committed values, as another thread does. The scope is the outermost
+     * suspending entry's, so a suspending entry nested in a body shares it
+     * with that body and the coroutines it launched, and code resumed inline
+     * from the body (an unconfined or undispatched start) runs inside it: all
+     * of those read the pending state too. [MutableState.value] and
      * [evictionView] read through it.
      */
     @OptIn(StoreInternalApi::class)

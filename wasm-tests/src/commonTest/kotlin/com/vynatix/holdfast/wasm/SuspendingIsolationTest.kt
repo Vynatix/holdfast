@@ -8,9 +8,12 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.coroutines.suspendAction
 import com.vynatix.holdfast.coroutines.suspendAtomic
+import com.vynatix.holdfast.effect
 import com.vynatix.holdfast.keyedState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
@@ -227,6 +230,71 @@ class SuspendingIsolationTest {
             assertEquals(3, nested)
             assertEquals(3, a.n.value)
             assertEquals(3, b.n.value)
+        }
+
+    // Started undispatched inside a blocking action, the body begins in that
+    // action's settle scope, which settles as soon as the action returns. The
+    // body has a scope of its own, so it keeps reading its own writes after
+    // it resumes.
+    @Test
+    fun aBodyStartedInsideABlockingActionKeepsReadingItsOwnWrites() =
+        runTest {
+            val host = IsolationStore()
+            val s = IsolationStore()
+            val reads = mutableListOf<Int>()
+            var holder: Job? = null
+            host
+                .action {
+                    holder =
+                        this@runTest.launch(start = CoroutineStart.UNDISPATCHED) {
+                            s
+                                .suspendAction {
+                                    n mutate 5
+                                    reads += n.value
+                                    yield()
+                                    reads += n.value
+                                    n.update { it + 1 }
+                                }.getOrThrow()
+                        }
+                }.getOrThrow()
+            checkNotNull(holder).join()
+            assertEquals(listOf(5, 5), reads, "the body lost its own write after resuming")
+            assertEquals(6, s.n.value, "the body's update built on its own pending write")
+        }
+
+    // The common shape of the above: an observer launches a suspending write
+    // inline (Dispatchers.Unconfined standing in for Main.immediate), inside
+    // the commit's settle scope, and the body parks past the commit.
+    @Test
+    fun aBodyLaunchedInlineFromAnObserverKeepsReadingItsOwnWrites() =
+        runTest {
+            val host = IsolationStore()
+            val s = IsolationStore()
+            val gate = CompletableDeferred<Unit>()
+            val reads = mutableListOf<Int>()
+            var holder: Job? = null
+            val observer =
+                host.n effect {
+                    if (this == 1) {
+                        holder =
+                            this@runTest.launch(Dispatchers.Unconfined) {
+                                s
+                                    .suspendAction {
+                                        n mutate 5
+                                        reads += n.value
+                                        gate.await()
+                                        reads += n.value
+                                        n.update { it + 1 }
+                                    }.getOrThrow()
+                            }
+                    }
+                }
+            host.action { n mutate 1 }.getOrThrow()
+            gate.complete(Unit)
+            checkNotNull(holder).join()
+            observer.dispose()
+            assertEquals(listOf(5, 5), reads, "the body lost its own write after resuming")
+            assertEquals(6, s.n.value, "the body's update built on its own pending write")
         }
 
     // Control: after the holder commits, everyone reads the committed value.
