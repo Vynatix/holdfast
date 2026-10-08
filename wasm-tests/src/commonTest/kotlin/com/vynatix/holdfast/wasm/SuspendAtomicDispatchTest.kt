@@ -57,8 +57,8 @@ class SuspendAtomicDispatchTest {
             assertNull(queuedSawOwner)
         }
 
-    // Consequence 1 (claim): the queued bare write joins the frame root and is
-    // rolled back with it.
+    // Before #29 (iOS/wasmJs) the queued bare write ran inside the frame's gap,
+    // joined its root and was rolled back with it; it now lands after the frame.
     @Test
     fun aWriteQueuedBeforeARolledBackSuspendAtomicIsNotSwallowedByIt() =
         runTest {
@@ -75,8 +75,9 @@ class SuspendAtomicDispatchTest {
             assertEquals(7, store.count.value)
         }
 
-    // Consequence 1b: with a committing frame the queued write is overwritten
-    // inside the frame instead of landing after it; an observer sees 1 then 7.
+    // Before #29 (iOS/wasmJs) the queued write ran inside the frame and was
+    // overwritten by it (an observer saw 0, then 1, never 7); it now lands
+    // after the frame, so the observer sees 0, 1, 7.
     @Test
     fun aWriteQueuedBeforeACommittingSuspendAtomicLandsAfterIt() =
         runTest {
@@ -185,9 +186,10 @@ class SuspendAtomicDispatchTest {
             assertEquals(4, first.count.value)
         }
 
-    // Consequence 2 (claim): a blocking action queued before the frame. On
-    // wasmJs today it lands in the frame's gap and spins in
-    // MutexSerializer.blockingAcquire (C1). Run separately (it hangs).
+    // Before #29 the queued blocking action ran inside the frame's gap: on
+    // wasmJs it threw #27's IllegalStateException (the frame held the
+    // serializer while parked); on a single-threaded iOS dispatcher it spun
+    // forever. It now runs after the frame commits.
     @Test
     fun aBlockingActionQueuedBeforeASuspendAtomicRunsAfterTheFrame() =
         runTest {
