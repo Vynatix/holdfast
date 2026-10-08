@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **wasmJs (issue #26, fixed in `:holdfast`).** Every `suspendAction`,
+  `suspendAtomic` and hydration decision threw `IllegalStateException:
+  Mutex already unlocked` on wasmJs: waiting out lock-only holders probes
+  the store's transaction lock through `internalTransactionLockFree()`,
+  whose release failed there. No change in this module; `:wasm-tests` now
+  runs suspending entries on wasmJs in CI.
 - **Issue #21 review (PR #24).** `StoreTree.hydrateAll` does not throw when
   a store is disposed after its `hydrate()` — before or while its
   `awaitSettled()` runs, or before its phase is read when not awaiting —

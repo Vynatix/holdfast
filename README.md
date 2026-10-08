@@ -97,9 +97,11 @@ for the full consistency contract.
 wasmJs artifacts are still published for downstream consumers, but the target
 is **experimental** with these limitations:
 
-- **Tests are disabled on wasmJs** — the test suite uses `runBlocking` /
-  `newSingleThreadContext`, neither of which exists on wasm, so wasmJs test
-  tasks are force-disabled and never run in CI.
+- **Only a regression suite runs on wasmJs** — the modules' own test suites
+  use `runBlocking` / `newSingleThreadContext`, neither of which exists on
+  wasm, so their wasmJs test tasks are force-disabled. The never-published
+  `:wasm-tests` module runs smoke tests through the public API on wasmJs
+  (Node.js) in CI instead.
 - **`FileSystemKvStore` throws `UnsupportedOperationException`** — the browser
   has no synchronous filesystem API; use `InMemoryKvStore` or a
   browser-storage-backed `KvStore` instead.

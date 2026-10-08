@@ -3,6 +3,7 @@ package com.vynatix.holdfast
 import com.vynatix.holdfast.platform.currentMaterializingLocal
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.setMaterializingLocal
+import com.vynatix.holdfast.platform.tryLockCounted
 import kotlinx.atomicfu.locks.SynchronousMutex
 
 // Materialization: running a declared state's initializer exactly once and
@@ -183,7 +184,8 @@ internal class InitializerGraph(
      * Take [latched]'s latch for this thread (`true`), or register this
      * thread as waiting for it (`false`). The owner check comes first: the
      * latch is reentrant on the JVM, so a thread re-entering its own latch
-     * must be caught before `tryLock` would let it in.
+     * must be caught before `tryLock` would let it in. That check also makes
+     * [tryLockCounted]'s unconditional take on wasmJs sound.
      */
     private fun claim(
         latched: Latched,
@@ -191,7 +193,7 @@ internal class InitializerGraph(
     ): Boolean =
         locked {
             if (latched.latchOwner == me) throw IllegalStateException(sameThreadCycleMessage(latched))
-            if (latched.latch.tryLock()) {
+            if (latched.latch.tryLockCounted()) {
                 latched.latchOwner = me
                 MaterializingStack.push(latched)
                 return@locked true

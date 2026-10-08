@@ -10,6 +10,20 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **wasmJs: a `tryLock` that never counted its hold (issue #26).** On
+  wasmJs the first read of every declared state threw
+  `IllegalStateException: Mutex already unlocked` (replacing a throwing
+  initializer's own exception), and so did every path that probes a
+  store's transaction lock without blocking: `derived` recomputes,
+  deferred keyed evictions, tree child and keyed-branch attaches, and every
+  `:holdfast-coroutines` `suspendAction`, `suspendAtomic` and hydration
+  decision (through `internalTransactionLockFree()`). atomicfu's js/wasm
+  `SynchronousMutex.tryLock()` returns `true` without counting the hold, so
+  the paired `unlock()` failed; both sites now take the mutex through an
+  internal try-lock that counts it on every target. The JVM, Android and
+  iOS behaviour is unchanged. A new never-published `:wasm-tests` module
+  runs a regression suite on wasmJs (Node.js), with the JVM as its control,
+  in CI.
 - **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
   by its declaring store's `dispose()` during its attach no longer leaves
   the store retained by that store's tree value (the value refuses
