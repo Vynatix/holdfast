@@ -11,7 +11,7 @@ import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 
 // The iOS/wasmJs carrier of a core thread-local slot across coroutine
-// resumptions — the frame marker (frameMarkerContext), the fanout marker
+// resumptions — the frame marker (withFrameMarker), the fanout marker
 // (withFanoutMarker) and the settle scope (withSettleScope) — where no
 // `ThreadContextElement` exists. In its own file: the common
 // FrameMarkerContext.kt holds the expects, and a JVM actual file of that name

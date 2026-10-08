@@ -22,7 +22,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
 import kotlin.uuid.ExperimentalUuidApi
@@ -419,8 +418,9 @@ private suspend fun <R> executeBody(
             // The marker context installs the thread-local marker on every
             // resume and restores the previous value on suspend, so enrollment
             // enforcement follows the body across dispatcher hops. Enforcement
-            // covers the BODY only — it is popped before commit fanout.
-            withContext(frame + frameMarkerContext(marker, coroutineContext[ContinuationInterceptor])) { body() }
+            // covers the BODY only — it is popped before commit fanout. The body
+            // starts undispatched: the frame holds every participant by now.
+            withFrameMarker(marker, frame) { body() }
         } catch (ce: CancellationException) {
             rollbackAll(roots, ce, observers, marker)
             throw ce
