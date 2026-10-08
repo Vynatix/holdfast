@@ -2,8 +2,6 @@
 
 package com.vynatix.holdfast
 
-import com.vynatix.holdfast.platform.currentThreadId
-
 // Staging keyed-entry evictions (issue #20, R7; plan D16, D18).
 //
 // `evict`/`evictAll` stage like `mutate`: into the store's transaction open on
@@ -213,7 +211,7 @@ private fun Store<*>.evictionRefusal(
  */
 internal fun Store<*>.evictionView(): Transaction? {
     val txn = activeTransaction ?: return null
-    return txn.takeIf { it.ownerThreadId == currentThreadId() && NoWriteRegion.current() == null }
+    return txn.takeIf { it.readsPendingHere(this) }
 }
 
 /**
