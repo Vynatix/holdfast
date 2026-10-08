@@ -588,10 +588,8 @@ class DerivedKeyedFramesSmokeTest {
                     right.action { b mutate 1 }.getOrThrow()
                     afterOtherEntry = pair.value
                     // Created while the parked action holds an uncommitted write
-                    // of left.a. Today its initial compute reads that write (the
-                    // parked action's owner thread is this one, issue #28), so
-                    // createDerivedState queues a catch-up recompute from
-                    // committed values, which runs at once: no scope is open here.
+                    // of left.a: its initial compute reads committed values, as
+                    // this coroutine is not the parked body (issue #28).
                     val created = host.derivedState(left.a, right.b) { left.a.value to right.b.value }
                     fresh = created.value
                     created.dispose()

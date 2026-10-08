@@ -558,7 +558,12 @@ Three things to internalize:
    values and its store's other declared states at the values the restore's
    transaction holds for them, restored or an enclosing action's pending
    writes — §4.1/§16.1/§16.3/§16.4). Other threads see committed values
-   only — they cannot witness "in-flight" mutations.
+   only — they cannot witness "in-flight" mutations. While a
+   `suspendAction`/`suspendAtomic` holds the store, only its body, on the
+   thread that opened it, reads its pending writes (with the exceptions in
+   §9.7): another coroutine on the same thread (a single-threaded dispatcher
+   such as `Dispatchers.Main`, `runTest`, or any coroutine on wasmJs) reads
+   committed values too.
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
@@ -733,12 +738,19 @@ a separate state).
 | Cost | O(1) into a map | one full transaction setup | one full transaction setup |
 | Recommended? | preferred | acceptable for one-liners | acceptable |
 
-Foreign thread while a `suspendAction`/`suspendAtomic` holds the store: a bare
-`mutate`/`update` is **not** wrapped in its own action. The suspending body may
-resume on any thread, so every thread's bare write stages into its
-transaction: before that transaction applies, the write silently joins it;
-once it has applied, the write throws until the suspending call returns. From
-other threads, write through `store action { … }`, which waits for the store.
+Another thread or another coroutine (any coroutine on wasmJs; one sharing the
+body's single-threaded dispatcher elsewhere) while a
+`suspendAction`/`suspendAtomic` holds the store: a bare `mutate`/`update` is
+**not** wrapped in its own action. The suspending body may resume on any
+thread, so every thread's bare write stages into its transaction: before that
+transaction applies, the write silently joins it; once it has applied, the
+write throws until the suspending call returns. A bare `update` there reads
+the committed value (§9.7, issue #28), so its joined write replaces the
+body's pending write to that state rather than building on it. From another
+thread, write through `store action { … }`, which waits for the store. From
+another coroutine, write through `suspendAction { }`, which suspends until
+the store is free; a blocking `action` there throws on wasmJs (#27) and, on a
+single-threaded dispatcher, blocks the thread the body needs to resume on.
 
 ### 8.3 Transformer vs Middleware
 
@@ -947,7 +959,19 @@ holdfast action {
 
 This is the only place reads see uncommitted values, and only on the
 thread executing the action. From any other thread, `count.value` returns
-the last committed value until this action commits. A state initializer
+the last committed value until this action commits. A `suspendAction` or
+`suspendAtomic` body reads its own writes the same way across its
+suspensions while it resumes on the thread that opened it (always, on a
+single-threaded dispatcher such as `Dispatchers.Main` or `runTest`, and on
+wasmJs); resumed on another thread (`Dispatchers.Default`/`IO`), or inside a
+nested `withContext(dispatcher)` section on iOS and wasmJs, it reads
+committed values. While it is parked, another coroutine on its thread reads
+committed values, as another thread does (issue #28) — except a coroutine
+that carries the body's settle scope: one the body launched, the body of a
+suspending entry nested in it (whose pending writes the outer body and its
+other children read too), and code resumed inline from the body
+(`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
+`Dispatchers.Main.immediate`), which runs as part of it. A state initializer
 (§4.1) and a schema migration (§16.3) are the exceptions on the action's own
 thread. An initializer that runs inside the action, because the action is the
 first to need its state, and a `migrate` that a `restore` called in the action
@@ -2184,7 +2208,9 @@ For `atomic(a, b, c) { body }` with lock order a < b < c:
    the frame before the body runs.
 3. **The body** — mutates stage into each store's root; inner actions are
    savepoints. Reads on the owner thread see pending writes
-   (read-your-own-writes); other threads see committed values only.
+   (read-your-own-writes) — in a `suspendAtomic`, only the body's own
+   reads (§9.7); other threads, and other coroutines, see committed values
+   only.
 4. **Middleware `onTransactionCompleted`** — ALL stores' hooks fire before
    ANY store commits, so a validation middleware throwing on store `c` still
    rolls `a` and `b` back. Corollary for middleware authors: for frames,

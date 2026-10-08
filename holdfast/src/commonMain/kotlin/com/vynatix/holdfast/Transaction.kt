@@ -1,5 +1,6 @@
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Clock
@@ -45,7 +46,14 @@ class Transaction internal constructor(
             id: String,
             ownerThreadId: Long,
             frameId: String? = null,
-        ): Transaction = Transaction(id, parent = null, ownerThreadId = ownerThreadId, frameId = frameId)
+        ): Transaction =
+            Transaction(id, parent = null, ownerThreadId = ownerThreadId, frameId = frameId).also {
+                // A suspendAction/suspendAtomic makes its roots inside its
+                // entry's settle scope, which its body carries across
+                // resumptions (readsPendingHere). Written before the root is
+                // installed, so the store's volatile slot publishes it.
+                it.openedInScope = SettleScopes.current()
+            }
 
         /**
          * Public-but-opt-in savepoint factory for `:holdfast-coroutines`
@@ -70,6 +78,41 @@ class Transaction internal constructor(
             return Transaction(id, parent = parent, ownerThreadId = ownerThreadId, frameId = frameId)
         }
     }
+
+    /**
+     * The settle scope open where [createForExternal] made this root: for a
+     * `suspendAction`/`suspendAtomic` root, the scope of the outermost
+     * suspending entry it runs in — its own, opened even inside a blocking
+     * entry's scope ([SettleScopes.open]), or the one an enclosing suspending
+     * entry carries. `:holdfast-coroutines` installs it on every resumption of
+     * that body and of the coroutines that inherit its context, and on no
+     * other coroutine. [readsPendingHere] tells those apart from another
+     * coroutine on the owner thread by it.
+     */
+    @OptIn(StoreInternalApi::class)
+    internal var openedInScope: SettleScope? = null
+
+    /**
+     * Whether a read here sees this transaction chain's pending writes and
+     * staged evictions on [store] (read-your-own-writes): on its owner thread,
+     * outside any no-write region, and — while a `suspendAction`/`suspendAtomic`
+     * holds [store] — only inside that holder's body, recognised by the settle
+     * scope its root was made in ([openedInScope]). The owner thread id alone
+     * cannot tell the body from another coroutine that thread runs while the
+     * body is parked: any coroutine on wasmJs (`currentThreadId()` is `0` for
+     * all), or one sharing a single-threaded dispatcher elsewhere. Those read
+     * committed values, as another thread does. The scope is the outermost
+     * suspending entry's, so a suspending entry nested in a body shares it
+     * with that body and the coroutines it launched, and code resumed inline
+     * from the body (an unconfined or undispatched start) runs inside it: all
+     * of those read the pending state too. [MutableState.value] and
+     * [evictionView] read through it.
+     */
+    @OptIn(StoreInternalApi::class)
+    internal fun readsPendingHere(store: Store<*>): Boolean =
+        ownerThreadId == currentThreadId() &&
+            NoWriteRegion.current() == null &&
+            (store.suspendingOwner == null || root.openedInScope.let { it == null || it === SettleScopes.current() })
 
     private val statusLock = StoreLock()
     private val endTimeLock = StoreLock()

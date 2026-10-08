@@ -77,7 +77,15 @@ internal interface SettleTask {
  * transaction's commit.
  */
 @StoreInternalApi
-class SettleScope internal constructor() {
+class SettleScope internal constructor(
+    /**
+     * The scope open on the opener's thread when this one opened
+     * ([SettleScopes.open]): this scope hands its work there while that scope
+     * takes it, so everything still settles once, with the outermost entry,
+     * and keeps the work that comes once that scope has settled.
+     */
+    private val within: SettleScope?,
+) {
     private val lock = SynchronizedObject()
 
     // Allocated on first use: most entries queue nothing.
@@ -93,32 +101,36 @@ class SettleScope internal constructor() {
 
     /**
      * Queue [task] unless this exact instance is already queued, in rank
-     * order ([SettleTask.settleRank]; in queueing order within a rank).
-     * `false`, queueing nothing, once the scope has settled.
+     * order ([SettleTask.settleRank]; in queueing order within a rank), or
+     * hand it to [within] while that scope takes it. `false`, queueing
+     * nothing, once the scope has settled.
      */
     internal fun enqueue(task: SettleTask): Boolean =
-        synchronized(lock) {
-            if (settled) return@synchronized false
-            val queue = tasks ?: mutableListOf<SettleTask>().also { tasks = it }
-            if (queue.none { it === task }) {
-                val after = queue.indexOfFirst { it.settleRank > task.settleRank }
-                if (after < 0) queue.add(task) else queue.add(after, task)
+        within?.enqueue(task) == true ||
+            synchronized(lock) {
+                if (settled) return@synchronized false
+                val queue = tasks ?: mutableListOf<SettleTask>().also { tasks = it }
+                if (queue.none { it === task }) {
+                    val after = queue.indexOfFirst { it.settleRank > task.settleRank }
+                    if (after < 0) queue.add(task) else queue.add(after, task)
+                }
+                true
             }
-            true
-        }
 
     /**
      * Drain [store]'s post-commit queue when this scope settles, before any
-     * recompute runs — the drain a frame owes a store whose root it opened.
-     * `false`, queueing nothing, once the scope has settled: drain it now.
+     * recompute runs — the drain a frame owes a store whose root it opened —
+     * or hand that to [within] while that scope takes it. `false`, queueing
+     * nothing, once the scope has settled: drain it now.
      */
     internal fun drainWhenSettled(store: Store<*>): Boolean =
-        synchronized(lock) {
-            if (settled) return@synchronized false
-            val queue = drains ?: mutableListOf<Store<*>>().also { drains = it }
-            if (queue.none { it === store }) queue.add(store)
-            true
-        }
+        within?.drainWhenSettled(store) == true ||
+            synchronized(lock) {
+                if (settled) return@synchronized false
+                val queue = drains ?: mutableListOf<Store<*>>().also { drains = it }
+                if (queue.none { it === store }) queue.add(store)
+                true
+            }
 
     /**
      * Run everything queued — work queued meanwhile included — until nothing
@@ -205,8 +217,19 @@ object SettleScopes {
         return prior
     }
 
-    /** A new scope, installed nowhere yet. Its opener owns it and must [settle][SettleScope.settle] it. */
-    fun open(): SettleScope = SettleScope()
+    /**
+     * A new scope, installed nowhere yet. Its opener owns it and must
+     * [settle][SettleScope.settle] it. Opened while a scope is open on this
+     * thread ([current]), it hands its work to that one while that one takes
+     * it — so derived states still settle once, with the outermost entry —
+     * and keeps, and settles itself, the work that comes after that one has
+     * settled. Either way it is a scope of its own, open until its opener
+     * settles it: `:holdfast-coroutines` gives a suspending entry started
+     * inside a blocking one such a scope, whose identity its transactions
+     * record ([Transaction.readsPendingHere]) for its whole body, which may
+     * outlive the blocking entry.
+     */
+    fun open(): SettleScope = SettleScope(within = current())
 }
 
 /**
@@ -216,7 +239,7 @@ object SettleScopes {
  */
 internal inline fun <R> settling(block: () -> R): R {
     if (SettleScopes.current() != null) return block()
-    val scope = SettleScope()
+    val scope = SettleScope(within = null)
     val prior = SettleScopes.install(scope)
     try {
         return block()

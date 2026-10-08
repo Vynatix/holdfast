@@ -2,7 +2,6 @@
 
 package com.vynatix.holdfast
 
-import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.atomicfu.atomic
 
 /**
@@ -209,7 +208,7 @@ class MutableState<T : Any>(
             // the region's thread-local is read before the peek: once per
             // owner-thread read inside a transaction; a read outside a
             // transaction pays nothing for it.
-            if (txn != null && txn.ownerThreadId == currentThreadId() && NoWriteRegion.current() == null) {
+            if (txn != null && txn.readsPendingHere(owningStore)) {
                 val pending = txn.findPendingValue(this)
                 if (pending != null) return afterGet(ComputeReads.uncommitted(pending))
             }
