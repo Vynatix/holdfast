@@ -52,9 +52,9 @@ interface SuspendingBridge<T : Any> : Bridge<T> {
      *
      * This runs inside the store's commit, which still holds the store: do not
      * write back into it from here. A `mutate` throws; a blocking `action`
-     * returns an `Error` — except on iOS and wasmJs inside a nested
-     * `withContext(dispatcher)`, where it is not recognised and waits for this
-     * very commit forever.
+     * returns an `Error` — except inside a nested `withContext(dispatcher)`,
+     * where it is not recognised: on iOS it waits for this very commit
+     * forever, on wasmJs it throws `IllegalStateException`.
      */
     suspend fun publishAwaited(value: T)
 

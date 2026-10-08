@@ -29,7 +29,10 @@ import kotlin.coroutines.cancellation.CancellationException
  * serializer, a second thread's blocking action on the same store failed with
  * a raw mutex error instead of waiting its turn.
  */
-internal class MutexSerializer : Store.AsyncSerializer {
+internal class MutexSerializer(
+    /** The store's class name, for the single-threaded refusal's message. */
+    private val storeName: String,
+) : Store.AsyncSerializer {
     val mutex = Mutex()
 
     /**
@@ -49,7 +52,7 @@ internal class MutexSerializer : Store.AsyncSerializer {
             // the mutex was just handed to) can only run once this call returns
             // the thread, so a failed tryLock can never succeed later. Refuse
             // instead of spinning forever (threadYield() is a no-op there).
-            check(blockingWaitCanEnd) { BLOCKING_WAIT_CANNOT_END }
+            check(blockingWaitCanEnd) { blockingWaitCannotEnd(storeName) }
             com.vynatix.holdfast.platform
                 .threadYield()
         }
@@ -71,13 +74,16 @@ internal class MutexSerializer : Store.AsyncSerializer {
 }
 
 /** Why [MutexSerializer.blockingAcquire] refuses to wait where [blockingWaitCanEnd] is `false`. */
-private const val BLOCKING_WAIT_CANNOT_END =
+private fun blockingWaitCannotEnd(storeName: String): String =
     "A blocking action, atomic(...), reset() or restore() (a store tree's reset/restore and a hydrator's " +
-        "invalidate() included) found this store held by a suspendAction, suspendAtomic or hydration " +
-        "decision that is suspended. On this single-threaded platform (wasmJs) that holder can only resume " +
-        "once this call returns, so the wait would never end. From a coroutine, write through " +
+        "invalidate() included) found $storeName held by a suspendAction, suspendAtomic or hydration " +
+        "decision that has not finished. On this single-threaded platform (wasmJs) that holder can only go " +
+        "on once this call returns, so the wait would never end. From an unrelated coroutine, write through " +
         "suspendAction { … } or suspendAtomic(…), which wait by suspending, or make the blocking call once " +
-        "the suspending holder has finished."
+        "that holder has finished. Inside that holder's own body, write with mutate/update: a nested action " +
+        "or suspendAction on the same store cannot run there. From its commit (an observer, bridge publish " +
+        "or event collector), launch the write once the commit has finished: " +
+        "store.scope.launch { store.suspendAction { … } }."
 
 /**
  * Lazy installation of the [Store.AsyncSerializer] hook on each store. The
@@ -99,7 +105,7 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
     return synchronized(installLock) {
         val again = store.asyncSerializer as? MutexSerializer
         if (again != null) return@synchronized again
-        val fresh = MutexSerializer()
+        val fresh = MutexSerializer(store::class.simpleName ?: "Store")
         store.asyncSerializer = fresh
         fresh
     }

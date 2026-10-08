@@ -168,7 +168,9 @@ class Hydrator<V : Store<V>> internal constructor(
      * A blocking action like any other: see [Store.action] for where it
      * throws or waits.
      *
-     * @throws IllegalStateException if the store is disposed.
+     * @throws IllegalStateException if the store is disposed; on wasmJs, also
+     *   when a suspended `suspendAction`, `suspendAtomic` or hydration
+     *   decision holds the store (it cannot wait there, issue #27).
      */
     fun invalidate(): TransactionResult<Unit> = engine.store.action(HydrationInvalidate(engine))
 
