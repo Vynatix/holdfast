@@ -30,16 +30,13 @@ kotlin {
     }
 
     // Node.js only: the library has no DOM surface, and the js/wasm actuals
-    // that broke (atomicfu's) are the same in the browser.
+    // that broke (atomicfu's) are the same in the browser. KGP runs wasm tests
+    // with its built-in runner (useMocha is ignored for wasm), which has no
+    // per-test timeout: runTest's own timeout and the 10-minute task cap below
+    // bound a hang.
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "30s"
-                }
-            }
-        }
+        nodejs()
     }
 
     sourceSets {

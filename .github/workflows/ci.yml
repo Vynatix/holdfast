@@ -53,8 +53,9 @@ jobs:
         run: ./gradlew publishToMavenLocal
         working-directory: hallmark-dep
 
-      # :wasm-tests is the only wasmJs code that runs in CI (Node.js; the
-      # library modules' own suites cannot compile for wasmJs).
+      # :wasm-tests is the only wasmJs test task CI runs (Node.js; the suites of
+      # :holdfast and :holdfast-coroutines cannot compile for wasmJs, and
+      # :holdfast-compose's compile-level browser smoke test is not run here).
       - name: Build and test (JVM + Android + wasmJs)
         run: |
           ./gradlew \

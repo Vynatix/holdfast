@@ -9,7 +9,9 @@ import kotlinx.atomicfu.locks.SynchronousMutex
  *
  * atomicfu's js/wasm actual (0.32.1 and 0.33.0) returns `true` from `tryLock()`
  * without counting it, so the paired `unlock()` fails its "Mutex already
- * unlocked" check (issue #26). The JVM and native actuals do count it.
+ * unlocked" check (issue #26). The JVM and native actuals do count it. The
+ * timed `tryLock(timeout)` has the same js/wasm bug and no counted variant
+ * yet: add one here before using it.
  *
  * Only for a caller that has ruled out holding [this] itself (callers check
  * their owner bookkeeping first): the wasmJs actual takes the mutex
