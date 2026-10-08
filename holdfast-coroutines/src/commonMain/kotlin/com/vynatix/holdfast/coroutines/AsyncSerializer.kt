@@ -6,6 +6,7 @@ import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.coroutines.platform.blockingWaitCanEnd
 import com.vynatix.holdfast.fanOutApplied
 import com.vynatix.holdfast.internalTransactionLockFree
 import kotlinx.atomicfu.locks.SynchronizedObject
@@ -43,6 +44,12 @@ internal class MutexSerializer : Store.AsyncSerializer {
     override fun blockingAcquire() {
         val token = Any()
         while (!mutex.tryLock(token)) {
+            // Single-threaded (wasmJs): the holder (a suspendAction/suspendAtomic
+            // body or hydration decision parked at a suspension point, or a waiter
+            // the mutex was just handed to) can only run once this call returns
+            // the thread, so a failed tryLock can never succeed later. Refuse
+            // instead of spinning forever (threadYield() is a no-op there).
+            check(blockingWaitCanEnd) { BLOCKING_WAIT_CANNOT_END }
             com.vynatix.holdfast.platform
                 .threadYield()
         }
@@ -62,6 +69,15 @@ internal class MutexSerializer : Store.AsyncSerializer {
         runCatching { mutex.unlock(token) }
     }
 }
+
+/** Why [MutexSerializer.blockingAcquire] refuses to wait where [blockingWaitCanEnd] is `false`. */
+private const val BLOCKING_WAIT_CANNOT_END =
+    "A blocking action, atomic(...), reset() or restore() (a store tree's reset/restore and a hydrator's " +
+        "invalidate() included) found this store held by a suspendAction, suspendAtomic or hydration " +
+        "decision that is suspended. On this single-threaded platform (wasmJs) that holder can only resume " +
+        "once this call returns, so the wait would never end. From a coroutine, write through " +
+        "suspendAction { … } or suspendAtomic(…), which wait by suspending, or make the blocking call once " +
+        "the suspending holder has finished."
 
 /**
  * Lazy installation of the [Store.AsyncSerializer] hook on each store. The
