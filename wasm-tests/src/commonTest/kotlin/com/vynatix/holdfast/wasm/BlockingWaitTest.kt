@@ -8,6 +8,7 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.atomic
 import com.vynatix.holdfast.coroutines.suspendAction
+import com.vynatix.holdfast.internalTransactionLockFree
 import com.vynatix.holdfast.reset
 import com.vynatix.holdfast.restore
 import com.vynatix.holdfast.snapshot
@@ -21,10 +22,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -65,24 +68,36 @@ private suspend fun <S : Store<S>> CoroutineScope.parkHolder(
 private suspend fun CoroutineScope.parkHolder(store: BlockingWaitStore): Job = parkHolder(store, { v -> n mutate v }, { n.value })
 
 /**
- * What every blocking call beside a parked holder may do: wait the holder out
- * and commit on top of its 6 (JVM, Android, iOS: the holder resumes on another
- * thread), or refuse with an IllegalStateException and leave the holder's 6
- * standing (wasmJs, where the holder can only resume once the call returns).
+ * What a blocking call beside a parked holder does, checked once the holder
+ * has finished. On the JVM (as on Android and iOS, where the holder resumes on
+ * another thread) it waits the holder out and commits on top of its 6:
+ * [actual] reads [expectedOnSuccess]. On wasmJs, where the holder can only
+ * resume once the call returns, it refuses with the #27 message naming
+ * [heldStore] and leaves the holder's 6 standing; [retry], the same call made
+ * now that the holder has finished, then commits and [actual] reads
+ * [expectedOnSuccess].
  */
 private fun <T> assertWaitedOrRefused(
     outcome: Result<TransactionResult<T>>,
-    actual: Int,
+    heldStore: String,
+    actual: () -> Int,
     expectedOnSuccess: Int,
+    retry: () -> TransactionResult<*>,
 ) {
-    val refused = outcome.exceptionOrNull()
-    if (refused == null) {
+    if (blockingWaitsCanEnd) {
         val result = outcome.getOrThrow()
         if (result is TransactionResult.Error) fail("blocking call returned Error: ${result.exception}")
-        assertEquals(expectedOnSuccess, actual)
+        assertEquals(expectedOnSuccess, actual())
     } else {
-        assertIs<IllegalStateException>(refused, "unexpected throw: $refused")
-        assertEquals(6, actual)
+        val refused = outcome.exceptionOrNull()
+        assertIs<IllegalStateException>(refused, "expected the #27 refusal, got $outcome")
+        val message = refused.message.orEmpty()
+        assertContains(message, "single-threaded")
+        assertContains(message, heldStore)
+        assertEquals(6, actual(), "the refusal left the holder's commit standing")
+        val again = retry()
+        assertIs<TransactionResult.Success<*>>(again, "the same call once the holder has finished: $again")
+        assertEquals(expectedOnSuccess, actual())
     }
 }
 
@@ -91,7 +106,9 @@ private fun <T> assertWaitedOrRefused(
  * forever in `MutexSerializer.blockingAcquire` on wasmJs, freezing the event
  * loop the holder needed to resume on. Each test drives one entry that takes
  * the store through `holdSerialized`; a hang fails the run (and everything
- * registered after it), so these tests pass only once wasmJs refuses instead.
+ * registered after it). On wasmJs each must refuse at once and then work once
+ * the holder has finished; on the JVM, the control, each must wait and commit
+ * ([blockingWaitsCanEnd]).
  */
 class BlockingWaitTest {
     // Precondition, without a blocking wait: the parked holder owns the
@@ -126,7 +143,9 @@ class BlockingWaitTest {
             val holder = parkHolder(store)
             val outcome = runCatching { store action { n update { it * 10 } } }
             holder.join()
-            assertWaitedOrRefused(outcome, store.n.value, 60)
+            assertWaitedOrRefused(outcome, "BlockingWaitStore", { store.n.value }, 60) {
+                store action { n update { it * 10 } }
+            }
         }
 
     // reset() runs through action: waited out, it lands on the initializer's 0.
@@ -137,7 +156,7 @@ class BlockingWaitTest {
             val holder = parkHolder(store)
             val outcome = runCatching { store.reset() }
             holder.join()
-            assertWaitedOrRefused(outcome, store.n.value, 0)
+            assertWaitedOrRefused(outcome, "BlockingWaitStore", { store.n.value }, 0) { store.reset() }
         }
 
     // restore() runs through action: waited out, it lands on the snapshot's 3.
@@ -150,27 +169,54 @@ class BlockingWaitTest {
             val holder = parkHolder(store)
             val outcome = runCatching { store.restore(snapshot) }
             holder.join()
-            assertWaitedOrRefused(outcome, store.n.value, 3)
+            assertWaitedOrRefused(outcome, "BlockingWaitStore", { store.n.value }, 3) { store.restore(snapshot) }
         }
 
-    // atomic(...) takes each participant through holdSerialized.
+    // atomic(...) takes each participant through holdSerialized, in lock
+    // order: `other`, built first, is taken before the held `store`, so a
+    // refusal has a participant to unwind.
     @Test
     fun anAtomicBesideAParkedSuspendAction() =
         runTest {
-            val store = BlockingWaitStore()
             val other = BlockingWaitStore()
+            val store = BlockingWaitStore()
             val holder = parkHolder(store)
-            val outcome =
-                runCatching {
-                    atomic(other, store) {
-                        other action { n mutate 1 }
-                        store action { n update { it * 10 } }
-                    }
+            val frame = {
+                atomic(other, store) {
+                    other action { n mutate 1 }
+                    store action { n update { it * 10 } }
                 }
+            }
+            val outcome = runCatching { frame() }
             holder.join()
-            assertWaitedOrRefused(outcome, store.n.value, 60)
-            // The frame either committed whole or never touched `other`.
-            assertEquals(if (outcome.isSuccess) 1 else 0, other.n.value)
+            if (!blockingWaitsCanEnd) {
+                // The refusal released `other` untouched.
+                assertEquals(0, other.n.value)
+                assertTrue(other.internalTransactionLockFree(), "the refused frame released other's lock")
+                assertNull(other.activeTransaction, "the refused frame left no transaction on other")
+            }
+            assertWaitedOrRefused(outcome, "BlockingWaitStore", { store.n.value }, 60, frame)
+            assertEquals(1, other.n.value, "the frame committed whole")
+        }
+
+    // The holder itself makes the blocking call: README's first known issue.
+    // It still spins on the JVM, so this runs on wasmJs only, where it is
+    // refused with advice for this case, and the body's commit stands.
+    @Test
+    fun aBlockingActionInsideTheHoldersOwnBodyIsRefused() =
+        runTest {
+            if (blockingWaitsCanEnd) return@runTest
+            val store = BlockingWaitStore()
+            var refused: Throwable? = null
+            val result =
+                store.suspendAction {
+                    n mutate 3
+                    refused = runCatching { store action { n mutate 4 } }.exceptionOrNull()
+                }
+            assertIs<TransactionResult.Success<*>>(result)
+            assertEquals(3, store.n.value)
+            val message = assertIs<IllegalStateException>(refused).message.orEmpty()
+            assertContains(message, "Inside that holder's own body, write with mutate/update")
         }
 
     // tree.reset() opens one atomic over the subtree's stores.
@@ -182,6 +228,6 @@ class BlockingWaitTest {
             val holder = parkHolder(parent, { v -> n mutate v }, { n.value })
             val outcome = runCatching { parent.tree.reset() }
             holder.join()
-            assertWaitedOrRefused(outcome, parent.n.value, 0)
+            assertWaitedOrRefused(outcome, "BlockingWaitParent", { parent.n.value }, 0) { parent.tree.reset() }
         }
 }
