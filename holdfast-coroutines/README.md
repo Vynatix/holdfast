@@ -89,9 +89,13 @@ before taking the store. As with blocking
 event collector the emit resumes inline — must not write back into a store
 that commit has applied: `mutate`/`update`/`emit` throw, and a blocking
 `action`/`atomic` on that store returns an `Error` (which the caller must
-check) rather than waiting on the commit it runs in. On iOS and wasmJs a
-nested `withContext(dispatcher)` inside the commit is not recognised and such
-a blocking call still waits forever. While a `suspendAction` holds the store,
+check) rather than waiting on the commit it runs in. On iOS a nested
+`withContext(dispatcher)` inside the commit is not recognised and such a
+blocking call still waits forever; on wasmJs it throws
+`IllegalStateException` instead, as does any blocking
+`action`/`atomic`/`reset()`/`restore()` on a store a suspended
+`suspendAction`/`suspendAtomic` or hydration decision holds — that holder can
+only resume once the call returns the one thread (issue #27). While a `suspendAction` holds the store,
 another thread's bare `mutate`/`update` is not isolated from it — before the
 commit applies it joins the transaction, after it throws — so write from other
 threads through `action { }`, which waits. (`KeyedState.evict`/`evictAll` from

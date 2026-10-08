@@ -258,7 +258,11 @@ experimental**: the artifact is still published for downstream consumers, but
   filesystem API in the browser);
 - `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
 - the platform is single-threaded (`currentThreadId() == 0`), so
-  thread-confinement checks trivially pass.
+  thread-confinement checks trivially pass;
+- a blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting (the holder can only resume
+  once the call returns).
 
 ## Positioning
 

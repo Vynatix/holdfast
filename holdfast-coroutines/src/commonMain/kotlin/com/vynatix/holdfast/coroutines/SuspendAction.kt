@@ -33,7 +33,10 @@ import kotlin.uuid.Uuid
  * Concurrency contract for 1.1:
  *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
  *    blocking `action` will block until the in-flight `suspendAction` completes,
- *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
+ *    and vice versa. On wasmJs, where the in-flight body can only resume on
+ *    the one thread the blocking call would wait on, that blocking `action`
+ *    (or `atomic`, `reset()`, `restore()`) throws an `IllegalStateException`
+ *    instead of waiting (issue #27). Coordination is via an internal coroutine [Mutex] installed
  *    lazily on first use — also while it is installed: this call waits,
  *    suspending, for a blocking `action`/`atomic` that took the store before
  *    the [Mutex] existed.
