@@ -8,6 +8,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **iOS/wasmJs: `suspendAtomic` no longer yields the thread before its body
+  runs (issue #29).** On iOS and wasmJs the frame marker's carrier is an
+  interceptor, so `suspendAtomic` started its body through a dispatching
+  `withContext` after it had taken every participant and installed its
+  roots: coroutines queued before the frame ran first, even for a body that
+  never suspends. A bare `mutate` queued that way joined the frame's root
+  and was rolled back with it, or silently overwritten when the frame
+  committed; a blocking `action` queued that way found the store held by
+  the frame: on a single-threaded iOS dispatcher (`Dispatchers.Main`,
+  `runTest`) it never returned, and on wasmJs it threw issue #27's
+  `IllegalStateException`. The body now starts undispatched on every
+  platform (`withFrameMarker`, through the same carrier as the fanout
+  marker and the settle scope); the JVM/Android path is unchanged.
+  `SuspendAtomicDispatchCommonTest` (common, so iOS runs it too) and
+  `:wasm-tests`' `SuspendAtomicDispatchTest` cover it.
 - **Reads are isolated from a parked suspending entry (issue #28, fixed in
   `:holdfast`).** While a `suspendAction`/`suspendAtomic` body is parked,
   another coroutine on its thread (any coroutine on wasmJs) reads committed

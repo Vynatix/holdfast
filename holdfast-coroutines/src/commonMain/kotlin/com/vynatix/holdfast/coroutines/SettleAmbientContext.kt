@@ -102,7 +102,7 @@ internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
  * Run [block] with [scope] carried in its context ([SettleAmbientContext]) and
  * installed as the settle scope of every thread it resumes on.
  *
- * Platform split as in [frameMarkerContext]: a `ThreadContextElement` on
+ * Platform split as in [withFrameMarker]: a `ThreadContextElement` on
  * JVM/Android; [withSlotIntercepted] on iOS and wasmJs, with the same gap — a
  * nested `withContext(Dispatchers.X)` inside [block] replaces the
  * interceptor, so a commit fanning out in that section does not see the
