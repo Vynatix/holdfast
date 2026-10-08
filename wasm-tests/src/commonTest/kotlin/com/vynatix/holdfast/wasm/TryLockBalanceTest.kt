@@ -43,9 +43,10 @@ private class ParentStore : Store<ParentStore>() {
 }
 
 /**
- * Records what [this] reports through its uncaughtObserverHandler instead of
- * throwing: a recompute or deferred eviction commits, then fails to release
- * the store, and that failure is reported, never thrown.
+ * Records what [this] reports through its uncaughtObserverHandler (instead of
+ * logging it). A deferred eviction reports a failure to release the store after
+ * its commit; a derived recompute's does not get here, since the settle loop or
+ * the post-commit drain drops it (see the derived tests).
  */
 private fun Store<*>.recordUncaughtFailures(): MutableList<Throwable> =
     mutableListOf<Throwable>().also { failures -> uncaughtObserverHandler = { failures += it } }
@@ -61,7 +62,9 @@ private fun assertNoneReported(failures: List<Throwable>) =
  * wasmJs regression.
  */
 class TryLockBalanceTest {
-    // InitializerGraph.claim → latch.tryLock(), released by InitializerGraph.release.
+    // InitializerGraph.claim → latch.lock() under the graph lock (its owner
+    // reads free), released by InitializerGraph.release. Fixed on main by PR #40;
+    // this keeps guarding the first-read path on wasmJs.
     @Test
     fun firstReadOfADeclaredStateMaterializesIt() {
         val store = CounterStore()
@@ -78,7 +81,7 @@ class TryLockBalanceTest {
         assertFailsWith<InitializerFailure> { store.broken.value }
     }
 
-    // StoreLock.tryAcquireIfUnheld → tryAcquire → mutex.tryLock(), then release().
+    // StoreLock.tryAcquireIfUnheld → tryAcquire → mutex.tryLockCounted(), then release().
     @Test
     fun theTransactionLockProbeIsBalanced() {
         val store = CounterStore()
@@ -103,7 +106,9 @@ class TryLockBalanceTest {
         assertNoneReported(failures)
     }
 
-    // Same path for a legacy derived, and the same caveat.
+    // Same path for a legacy derived, queued through postCommit and run by the
+    // action's post-commit drain, whose runCatching (PostCommitQueue.drain)
+    // drops the throw the same way: this guards the recompute only.
     @Test
     fun aLegacyDerivedRecomputesAfterACommit() {
         val store = CounterStore()
@@ -122,9 +127,9 @@ class TryLockBalanceTest {
     fun anEvictionFromTheCommitFanoutRunsDeferred() {
         val store = DocsStore()
         val failures = store.recordUncaughtFailures()
-        store action { docs["abc"] mutate 42 }
+        store.action { docs["abc"] mutate 42 }.getOrThrow()
         assertEquals(42, store.docs["abc"].value)
-        // effect fires once at once (trigger is 0 then), then in each commit's fanout.
+        // effect fires once immediately (trigger is 0 at subscription), then in each commit's fanout.
         val subscription = store.trigger effect { if (this == 1) store.docs.evict("abc") }
         store action { trigger mutate 1 }
         subscription.dispose()
