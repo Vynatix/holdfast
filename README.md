@@ -111,6 +111,12 @@ is **experimental** with these limitations:
   `suspendAction { … }` instead.
 - **Single-threaded model** — `currentThreadId()` returns `0` for every caller,
   so thread-confinement checks trivially pass.
+- **A blocking `action` cannot wait for a suspended `suspendAction`** — a
+  blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting, since that holder can only
+  resume once the blocking call returns. Write through `suspendAction { … }`
+  from coroutines on wasmJs.
 
 ## Install
 

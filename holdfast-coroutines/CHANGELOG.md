@@ -8,6 +8,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **wasmJs: a blocking entry beside a parked suspending holder no longer
+  freezes the event loop (issue #27).** A blocking `action`, `atomic(...)`,
+  `reset()`, `restore()`, `Hydrator.invalidate()` or `tree.reset()`/
+  `tree.restore()` on a store held by a `suspendAction`, `suspendAtomic` or
+  hydration decision that is suspended spun forever in the serializer's
+  blocking acquire on wasmJs: the holder can only resume on the thread the
+  spin occupies. It now throws an `IllegalStateException` that says to write
+  through `suspendAction`/`suspendAtomic` from a coroutine, or to make the
+  blocking call once the suspending holder has finished; the holder's
+  commit stands. JVM, Android and iOS still wait, as before.
 - **wasmJs (issue #26, fixed in `:holdfast`).** Every `suspendAction`,
   `suspendAtomic` and hydration decision threw `IllegalStateException:
   Mutex already unlocked` on wasmJs: waiting out lock-only holders probes
