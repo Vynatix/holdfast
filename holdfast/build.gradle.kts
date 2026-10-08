@@ -61,7 +61,7 @@ kotlin {
 // :web) can resolve it. The test suite uses `runBlocking` and
 // `newSingleThreadContext`, neither of which exists on wasmJs; coverage runs
 // on android/jvm/ios via `:check`. Disable wasmJs test compilation/execution
-// so the suite compiles cleanly.
+// so the suite compiles cleanly. wasmJs coverage lives in :wasm-tests.
 val wasmJsTestTasks =
     setOf(
         "compileTestKotlinWasmJs",
