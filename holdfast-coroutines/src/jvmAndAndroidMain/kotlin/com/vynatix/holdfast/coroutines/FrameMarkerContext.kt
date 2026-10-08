@@ -8,19 +8,21 @@ import com.vynatix.holdfast.FrameMarkers
 import com.vynatix.holdfast.Transaction
 import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 
 /**
  * JVM/Android: a [ThreadContextElement] keeps the thread-local marker slot
  * coherent across dispatch — and, unlike the non-JVM interceptor fallback,
  * survives nested `withContext(otherDispatcher)` sections (context elements
- * are inherited; the interceptor slot is not).
+ * are inherited; the interceptor slot is not). The dispatcher does not
+ * change, so `withContext` starts [block] undispatched on this thread. See
+ * [withFrameMarker].
  */
-internal actual fun frameMarkerContext(
+internal actual suspend fun <T> withFrameMarker(
     marker: FrameMarker,
-    delegate: ContinuationInterceptor?,
-): CoroutineContext = FrameMarkerElement(marker)
+    frame: CoroutineContext,
+    block: suspend () -> T,
+): T = withContext(frame + FrameMarkerElement(marker)) { block() }
 
 private class FrameMarkerElement(
     private val marker: FrameMarker,
