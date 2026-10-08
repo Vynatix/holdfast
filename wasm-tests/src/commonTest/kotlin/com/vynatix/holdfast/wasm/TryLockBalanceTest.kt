@@ -10,8 +10,8 @@ import com.vynatix.holdfast.coroutines.suspendAtomic
 import com.vynatix.holdfast.derived
 import com.vynatix.holdfast.derivedState
 import com.vynatix.holdfast.effect
-import com.vynatix.holdfast.keyedState
 import com.vynatix.holdfast.internalTransactionLockFree
+import com.vynatix.holdfast.keyedState
 import com.vynatix.holdfast.tree.keyed
 import com.vynatix.holdfast.tree.store
 import kotlinx.coroutines.test.runTest
