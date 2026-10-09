@@ -18,6 +18,11 @@ private class LoopHost : Store<LoopHost>() {
     val y by state { 0 }
 }
 
+private class TwoLoopSource : Store<TwoLoopSource>() {
+    val n by state { 0 }
+    val m by state { 0 }
+}
+
 private class PingStore : Store<PingStore>() {
     val s by state { 0 }
 }
@@ -134,6 +139,226 @@ class SettleReentrancyTest {
             pings.forEach { it.dispose() }
             cSub.dispose()
             hSub.dispose()
+        }
+    }
+
+    /**
+     * Issue #37: a legacy `derived` whose observer writes its source on
+     * another store with a plain action re-queues its recompute on the host's
+     * queue from inside every run, and its release drains that queue again —
+     * nested in the drain running it. No settle sees this loop. The nested
+     * drain hands its work to the outer one (so the stack stays flat), and the
+     * outer drain cuts the task once it has run the settle cap's number of
+     * times, leaving it queued for the host's next holder and reporting once.
+     */
+    @Test fun aLegacyDerivedFeedbackLoopThroughAnotherStoreEndsTheDrain() {
+        val source = LoopSource()
+        val host = LoopHost()
+        val reported = CopyOnWriteArrayList<Throwable>()
+        host.uncaughtObserverHandler = { reported += it }
+        source.uncaughtObserverHandler = { reported += it }
+        val (d, sub) = host.derived(source.n) { source.n.value }
+        val writes = AtomicInteger()
+        val loop =
+            d effect {
+                if (this > 0) {
+                    writes.incrementAndGet()
+                    source.action { n update { it + 1 } }.getOrThrow()
+                }
+            }
+        try {
+            completesWithin(60, "a legacy derived feedback loop through another store's action") {
+                host.action { source.action { n mutate 1 }.getOrThrow() }.getOrThrow()
+            }
+            assertTrue(writes.get() in 1..2_000, "the drain stopped re-running the loop: ${writes.get()} writes")
+            assertEquals(1, reported.size, "the cut is reported once: $reported")
+            val cut = assertIs<IllegalStateException>(reported.single())
+            assertTrue(cut.message.orEmpty().startsWith("a post-commit task of LoopHost"), cut.message)
+            assertTrue(cut.message.orEmpty().contains("1000 times in a row"), cut.message)
+        } finally {
+            loop.dispose()
+            sub.dispose()
+        }
+    }
+
+    /**
+     * Issue #37: the recompute a settle's cut left in an idle host's queue is
+     * run by the next drain of that queue — here one with no settle scope
+     * open, as `Store.postCommit`'s lost-wakeup drain is. Its own commit opens
+     * a settle that runs the loop up to the cap and leaves the recompute in
+     * the queue again, after the drain running it last took anything: the
+     * drain ends instead of running it once more, and the next holder gets it.
+     */
+    @Test fun aDrainWithNoSettleOpenRunsACutRecomputeOnceAndEnds() {
+        val source = LoopSource()
+        val host = LoopHost()
+        val reported = CopyOnWriteArrayList<Throwable>()
+        host.uncaughtObserverHandler = { reported += it }
+        source.uncaughtObserverHandler = { reported += it }
+        val echo = host.derivedState(source.n) { source.n.value }
+        val writes = AtomicInteger()
+        val loop =
+            echo effect {
+                if (this > 0) {
+                    writes.incrementAndGet()
+                    source.action { n update { it + 1 } }.getOrThrow()
+                }
+            }
+        try {
+            source.action { n mutate 1 }.getOrThrow()
+            assertEquals(1, reported.size, "the settle cut the loop: $reported")
+            val afterSettle = writes.get()
+            completesWithin(60, "a drain with no settle scope open, of a queue holding a cut recompute") {
+                assertNull(SettleScopes.current())
+                host.internalDrainPostCommitTasks()
+            }
+            assertTrue(
+                writes.get() - afterSettle in 1..2_000,
+                "the drain ran the loop once more, up to the settle cap: ${writes.get() - afterSettle} writes",
+            )
+            assertEquals(2, reported.size, "each settle reports its own cut: $reported")
+            reported.forEach { assertTrue(it.message.orEmpty().contains("recomputed 1000 times in one settle"), it.message) }
+        } finally {
+            loop.dispose()
+            echo.dispose()
+        }
+    }
+
+    /**
+     * Issue #37: two settle-cut recomputes left in an idle host's queue, run
+     * by a drain with no settle scope open. Each one's run settles its loop up
+     * to the cap and hands it back for the host's next holder; the drain that
+     * ran the settle leaves it there instead of starting the loop again, even
+     * when the other one's run takes and releases the host.
+     */
+    @Test fun aDrainWithNoSettleOpenRunsTwoCutRecomputesOnceEach() {
+        val source = TwoLoopSource()
+        val host = LoopHost()
+        val reported = CopyOnWriteArrayList<Throwable>()
+        host.uncaughtObserverHandler = { reported += it }
+        source.uncaughtObserverHandler = { reported += it }
+        val first = host.derivedState(source.n) { source.n.value }
+        val second = host.derivedState(source.m) { source.m.value }
+        val writes = AtomicInteger()
+        val loops =
+            listOf(
+                first effect {
+                    if (this > 0) {
+                        writes.incrementAndGet()
+                        source.action { n update { it + 1 } }.getOrThrow()
+                    }
+                },
+                second effect {
+                    if (this > 0) {
+                        writes.incrementAndGet()
+                        source.action { m update { it + 1 } }.getOrThrow()
+                    }
+                },
+            )
+        try {
+            // Each entry's settle cuts the loop it started (the second entry's
+            // drain of the host runs the first loop's cut recompute once more).
+            source.action { n mutate 1 }.getOrThrow()
+            source.action { m mutate 1 }.getOrThrow()
+            val afterSettles = writes.get()
+            val reportsAfterSettles = reported.size
+            assertTrue(reportsAfterSettles >= 2, "each settle cut its loop: $reported")
+            completesWithin(60, "a drain with no settle scope open, of a queue holding two cut recomputes") {
+                host.internalDrainPostCommitTasks()
+            }
+            assertTrue(
+                writes.get() - afterSettles in 1..4_000,
+                "the drain ran each loop at most once more, up to the settle cap: ${writes.get() - afterSettles} writes",
+            )
+            assertTrue(
+                reported.size - reportsAfterSettles in 1..2,
+                "each of the drain's settles reports its own cut, once: ${reported.size - reportsAfterSettles} reports",
+            )
+            reported.forEach { assertTrue(it.message.orEmpty().contains("recomputed 1000 times in one settle"), it.message) }
+        } finally {
+            loops.forEach { it.dispose() }
+            first.dispose()
+            second.dispose()
+        }
+    }
+
+    /**
+     * Issue #37: the same, with a legacy `derived` on the host over the
+     * looping derived state — its recompute takes and releases the host after
+     * the settle's cut, which hands the drain everything queued then. The cut
+     * recompute among it stays queued for the host's next holder.
+     */
+    @Test fun aDrainWithNoSettleOpenLeavesACutRecomputeQueuedPastAnotherHold() {
+        val source = LoopSource()
+        val host = LoopHost()
+        val reported = CopyOnWriteArrayList<Throwable>()
+        host.uncaughtObserverHandler = { reported += it }
+        source.uncaughtObserverHandler = { reported += it }
+        val echo = host.derivedState(source.n) { source.n.value }
+        val (doubled, doubledSub) = host.derived(echo) { echo.value * 2 }
+        val writes = AtomicInteger()
+        val loop =
+            echo effect {
+                if (this > 0) {
+                    writes.incrementAndGet()
+                    source.action { n update { it + 1 } }.getOrThrow()
+                }
+            }
+        try {
+            source.action { n mutate 1 }.getOrThrow()
+            val afterSettle = writes.get()
+            val reportsAfterSettle = reported.size
+            completesWithin(60, "a drain with no settle scope open, past another hold of the host") {
+                host.internalDrainPostCommitTasks()
+            }
+            assertTrue(
+                writes.get() - afterSettle in 1..2_000,
+                "the drain ran the loop once more, up to the settle cap: ${writes.get() - afterSettle} writes",
+            )
+            assertEquals(reportsAfterSettle + 1, reported.size, "one more settle, one more cut: $reported")
+            assertTrue(doubled.value >= 2, "the legacy derived over the loop kept up: ${doubled.value}")
+        } finally {
+            loop.dispose()
+            doubledSub.dispose()
+            echo.dispose()
+        }
+    }
+
+    /**
+     * Issue #37: a handler that records a drain's cut by writing the host
+     * takes the host from inside the report. The drain reports while it is
+     * still draining, so that write's drain hands it its work and the cut
+     * recompute stays where the cut left it: the handler does not restart the
+     * loop it is told about.
+     */
+    @Test fun aHandlerThatWritesTheHostDoesNotRestartTheCutLoop() {
+        val source = LoopSource()
+        val host = LoopHost()
+        val reported = CopyOnWriteArrayList<Throwable>()
+        host.uncaughtObserverHandler = {
+            reported += it
+            host.action { y update { it + 1 } }
+        }
+        source.uncaughtObserverHandler = { reported += it }
+        val (d, sub) = host.derived(source.n) { source.n.value }
+        val writes = AtomicInteger()
+        val loop =
+            d effect {
+                if (this > 0) {
+                    writes.incrementAndGet()
+                    source.action { n update { it + 1 } }.getOrThrow()
+                }
+            }
+        try {
+            completesWithin(60, "a feedback loop whose cut a store-writing handler records") {
+                host.action { source.action { n mutate 1 }.getOrThrow() }.getOrThrow()
+            }
+            assertTrue(writes.get() in 1..2_000, "the handler did not restart the loop: ${writes.get()} writes")
+            assertEquals(1, reported.size, "the cut is reported once: $reported")
+            assertEquals(1, host.y.value, "the handler's write committed")
+        } finally {
+            loop.dispose()
+            sub.dispose()
         }
     }
 }
