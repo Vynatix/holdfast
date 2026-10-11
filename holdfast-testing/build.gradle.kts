@@ -22,6 +22,19 @@ kotlin {
     applyDefaultHierarchyTemplate()
 
     sourceSets {
+        // Real-thread tests (a suspending entry that ends on another thread):
+        // the hop helpers need JVM executor/thread APIs, so they stay off the
+        // iOS targets — same shape as :holdfast-coroutines' host-test set.
+        val jvmAndAndroidHostTest by creating {
+            dependsOn(commonTest.get())
+        }
+        androidHostTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+        jvmTest {
+            dependsOn(jvmAndAndroidHostTest)
+        }
+
         commonMain.dependencies {
             api(project(":holdfast"))
             api(project(":holdfast-coroutines"))

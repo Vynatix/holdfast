@@ -32,6 +32,8 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 15. [Cross-Store Transactions](#15-cross-store-transactions) — enrollment, inner errors, the consistency contract, nesting, observability
 16. [Snapshots, persistence and boot (experimental)](#16-snapshots-persistence-and-boot-experimental) — reset, encoding snapshots, schema versions, state tags and redaction, derived states and `merged`, keyed state families, hydration, the persisted overlay
 17. [The store tree (experimental)](#17-the-store-tree-experimental) — declaring children with `store { }`/`group { }`/`keyed { }`, keyed stores through a declared factory, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
+18. [Threading & Scopes](#18-threading--scopes) — the four levels every entry passes through, why a slow observer is a slow store, the three refusals, scopes and their lifetimes
+19. [Lifecycle & Events](#19-lifecycle--events) — who calls `dispose()`, what it tears down and what it keeps, behavior after dispose, `EventfulStore` patterns
 
 ---
 
@@ -1270,6 +1272,24 @@ never T1's pending writes.
 of its subtree, keyed stores created mid-test included, records every
 transaction with its node into one tree timeline, and resets the store and
 its subtree at teardown so the next test finds the initial values.
+
+### 11.7 Suspending entries and the timeline
+
+A handle's `suspendAction`/`suspendAtomic` feeds the timeline exactly like a
+blocking `action` — `started`, one emission event per modified state,
+`committed` — because the recorder rides the middleware chain, which the
+suspending entries fire in the same order (§14.8). One fidelity limit
+remains: the recorder computes emission events from the transaction's
+modified-states set, which only the thread the entry *began* on may read.
+A suspending body that ends on a different dispatcher thread (a pooled one)
+therefore records **no emission events** for that transaction — its commit
+markers still land, `started`/`committed` matchers keep working, and
+`shouldBeSuccess`/`shouldBeError` are unaffected. Entries that end where
+they began — everything on a single-threaded dispatcher such as `runTest`'s
+or `Dispatchers.Main`, and every coroutine on wasmJs — always record the
+full timeline. Full emission fidelity after a thread hop is a named
+follow-up (it needs a post-commit recorder hook in core); until then, assert
+emissions from entries that end on their starting thread.
 
 ## 12. Common Pitfalls
 
@@ -4700,6 +4720,290 @@ class TreeHandle { val tree: StoreTree; val root: Store<*>; val captureMode: Cap
 data class TreeEvent(val node: StoreNode, val store: Store<*>, val phase: Phase, val transaction: Transaction, val cause: Throwable?, val timestamp: Long) { enum class Phase { Started, Completed, Errored } }
 fun TreeHandle.shouldCommitTogether(node: StoreNode): String; fun TreeHandle.shouldNotCommitTogether(node: StoreNode)
 ```
+
+---
+
+## 18. Threading & Scopes
+
+§10 answers "which lock does what". This chapter answers the question you
+bring to it: when I call an entry, what is holding what — and what does that
+cost me?
+
+### 18.1 The four levels
+
+```
+Store
+ └─ entry ................. action / atomic(...) / suspendAction / suspendAtomic
+     │                     (reset() and restore() run through action)
+     ├─ suspending serializer   one per store, installed by the first suspending
+     │                          entry; every entry takes it from then on — a
+     │                          blocking one waits out a parked suspending body
+     ├─ transactionLock         the blocking entry's bracket: body, apply pass,
+     │                          observer/bridge/event fanout — one hold per
+     │                          action, reentrant for nested (savepoint) actions
+     └─ settle scope            opened by the outermost entry; runs everything
+                                its commits queued once every store is released
+```
+
+**Level 1 — the entry.** `action`, `atomic(...)`, `suspendAction` and
+`suspendAtomic` are the four entry kinds; `reset()` and `restore()` run
+through `action` (§16.1, §16.2), and every hydration decision goes through
+the same serialization (§16.7). One entry runs on a store at a time;
+nested entries are savepoints of the enclosing one (§4.2, §15.4).
+
+**Level 2 — `transactionLock`.** A *blocking* entry holds the store's
+`transactionLock` for its whole duration: body, apply pass, and the observer
+and bridge fanout that follows (§5). The lock is reentrant, so a nested
+`action` on the same store doesn't re-take it. Another thread's blocking
+entry waits; plain reads (`state.value`, `snapshot()`) never take this lock
+and never wait behind it (§6, §10.1).
+
+**Level 3 — the suspending serializer.** The first suspending entry (or
+hydration decision) on a store installs a coroutine `Mutex` on it, for the
+store's life. From then on every entry — blocking or suspending — passes
+through it before anything else: a `suspendAction` body holds it across its
+suspension points (`delay`, `await`, `withContext`), so a blocking `action`
+waits for the body to finish rather than interleaving with it, and vice
+versa. Blocking and suspending entries on one store can therefore never
+overlap; two blocking entries simply queue. Before the first suspending
+entry a store has no serializer — blocking entries hold `transactionLock`
+alone — and the install window is closed from both sides (§10.2), so you
+should never observe the difference beyond the refusals below.
+
+**Level 4 — the settle scope.** Each outermost entry opens one settle scope
+(a suspending entry carries it across dispatch). Everything its commits
+queue — `derivedState`/`merged` recomputes, a frame's deferred store drains
+— runs once, at the settle, *after* every store has been released, each
+recompute reading one committed cut (§16.5). By the time the outermost entry
+returns, the derivations its commits changed have recomputed (unless the
+settle's feedback cap deferred a runaway loop, §16.5); a frame settles once
+for all its participants (§15.5). Scopes are invisible machinery: you
+observe them only as "one recompute per commit, never mid-entry".
+
+### 18.2 A slow observer is a slow store
+
+The fanout is part of the transaction: an `effect` callback runs while the
+committing store's `transactionLock` is still held, on the committing
+thread. An observer that takes a second takes the store's next action with
+it — every other entry on that store queues behind the hold. That is
+deliberate: observers see a fully applied, consistent store (§5), and the
+next entry starts from a store with no fanout in flight.
+
+What a *throwing* observer does not do is equally contractual: it rolls
+nothing back, stops no later observer, and crashes nothing — the failure is
+reported through `uncaughtObserverHandler`, loudly by default (§4.4, §12).
+The same is true of a throwing bridge publish, a failed `derived`
+recompute, and a settle task or frame drain that throws outside its
+transaction body: the settle loop reports it and keeps going, so one bad
+derivation cannot strand the rest of a commit's consequences.
+
+The rule of thumb: observers should record, forward, or launch — never
+grind. Do slow work on a scope:
+
+```kotlin
+val v = FeedsStore()
+val sub = v {
+    feeds effect { v.scope.launch { digest(this@effect) } }   // this@effect: the committed list
+}
+```
+
+An observer that opens an `action` on *another* store is legal (§8.1), but
+it holds this store's lock for the whole other action, and two stores
+observing into each other can deadlock on the two locks — the reason
+`atomic(...)` lock-orders its participants (§10.2, §15). The same "launch,
+don't block" advice applies doubled there.
+
+### 18.3 The three refusals
+
+The serializer's edges are user-visible as three teaching
+`IllegalStateException`s. Each names the store and the way out; the
+messages are quoted from the source.
+
+| You see | Cause | Fix |
+|---|---|---|
+| `A blocking action { } on S inside that store's own suspending body (a suspendAction or suspendAtomic holding it) would never return: …` (also with `atomic(…)` as the attempt) | A blocking `action`/`atomic`/`reset()`/`restore()` called on S from inside S's own `suspendAction`/`suspendAtomic` body — the blocking acquire would wait for the very mutex the body holds. Refused on **every** platform, before any wait | Stage the write with `mutate`/`update` (they join the suspending transaction), or make the blocking call once the body has returned. A blocking entry on another store is not affected |
+| `This mutex is already locked by the specified owner: … — this coroutine's own suspending entry (a suspendAction or suspendAtomic body) holds S's suspend mutex, so a nested suspending entry on the same store would wait for itself. …` | A `suspendAction`/`suspendAtomic` on S called from the *body's own coroutine* of a suspending entry already holding S | Same fix: `mutate`/`update` inside the body, or the entry afterwards. A suspending entry on another store — and one from a coroutine the body *launched* — waits normally |
+| `A blocking action, atomic(...), reset() or restore() … found S held by a suspendAction, suspendAtomic or hydration decision that has not finished. On this single-threaded platform (wasmJs) that holder can only go on once this call returns, so the wait would never end. …` | wasmJs only: a blocking entry from an *unrelated* coroutine while a suspending entry (parked at a suspension point) holds the store — on the one thread, the wait could never end | Write through `suspendAction { … }`/`suspendAtomic(…)` (they wait by suspending), or make the blocking call once the holder has finished |
+
+The nesting counterpart of the second row is a *visibility* rule, not a
+refusal: a suspending entry nested in another's body runs under a scope view
+of the enclosing one, so its writes are visible only inside it (its body
+and the coroutines it launches), while its body reads the enclosing body's
+pending writes like any nested entry (§6, §9.7).
+
+### 18.4 Scopes and their lifetimes
+
+`Store.scope` resolves per-call parameter → subclass override →
+`bindToScope` binding → `Store.defaultScope` (§13). The chain answers
+*which* scope; the lifetimes answer *who cancels it* — and the answer is
+always: not the store.
+
+- `dispose()` never cancels any scope — not the `bindToScope` binding, not
+  `Store.defaultScope`, not a per-call scope. Scope lifetimes are owned by
+  whoever created them.
+- Cancelling a scope you bound is a *soft pause*: work that asks for a scope
+  afterwards falls down the chain (to the next binding or the process
+  default). `dispose()` is terminal (§19).
+- `bindToScope` is rebindable and last-writer-wins; bind once at app init,
+  or guard the binding externally (§13).
+
+```kotlin
+val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+Store.defaultScope = appScope            // 4. process default — CAS-settable ONCE per process
+
+class PanelStore : Store<PanelStore>() {
+    override val scope: CoroutineScope   // 2. per-store override — beats 3 and 4
+        get() = appScope
+}
+
+val v = PanelStore()
+v.bindToScope(appScope)                  // 3. rebindable binding — you own the lifetime
+// 1. per-call scopes (hydrate(scope = …), asStateFlow(scope = …)) beat them all
+```
+
+**The `defaultScope` trap, and tests.** `Store.defaultScope` is
+compar-and-set **once per process**: the first assignment wins, and any
+later assignment throws
+`Store.defaultScope is settable-once; it has already been assigned.`
+Reading it before any assignment hands you a lazy library-owned process
+scope and does *not* freeze the value — only an explicit assignment does.
+There is no reset, which is the trap: a test that assigns it has poisoned
+every later test in that process, silently. So in tests, don't — prefer the
+per-call parameter or `bindToScope` (rebindable, per-store, and never
+restored by `storeTest` either, so unbind what you bind if the store
+outlives the test). If a suite genuinely needs the process default, set it
+once, before anything else runs, and treat it as process-global
+configuration rather than per-test state. (The harness *does* restore
+`bindClock` bindings at teardown — §11 — but scopes are yours.)
+
+---
+
+## 19. Lifecycle & Events
+
+### 19.1 Who calls `dispose()`
+
+`dispose()` is called by whoever owns the store's lifetime — and by nobody
+else:
+
+- **Process-long singletons** (`object App : Store<App>()`, §17) usually are
+  never disposed: a store that lives as long as the process needs no
+  teardown, and process death is the OS's business.
+- **Feature- or screen-owned stores** are disposed by their owner when the
+  feature goes away — a ViewModel's `onCleared`, a screen's disposal
+  (§14.9's `rememberDisposable` for Compose). The 0.6.0 plan formalizes
+  this in a `holdfast-lifecycle` module; until then the owner calls
+  `dispose()` directly.
+- **Trees**: dispose the *parent*. Disposing a parent releases its
+  `store { }`/`group { }` children as independent subtree roots and — by
+  default — disposes its keyed stores (§17.3). Disposing a child detaches
+  it from the parent and leaves the rest of the tree alone.
+- **In tests**: the harness never disposes. `storeTest`'s teardown removes
+  its recorder, restores clock bindings, and resets tracked trees to their
+  initializers (§11.6); dispose only in a test that is *about* disposal.
+
+`dispose()` is idempotent, never throws (internal failures are reported,
+not thrown — §12), and may be called from inside the store's own action or
+commit fanout: the lock it needs is reentrant, and the notifications that
+follow run under no lock `dispose()` took.
+
+### 19.2 What `dispose()` tears down — and what it deliberately keeps
+
+Torn down, in order: the active transaction is dropped (pending writes can
+never apply); library attachments are closed; the post-commit queue is
+*drained, not cleared* — a recompute waiting for a derived state hosted on
+another, live store still runs, so that store's compute, middleware and
+observers can execute inside your `dispose()` call; every state declaration
+with its initializer and every keyed family with its entries go; observers
+are dropped and bridges detached; both middleware lists are cleared; the
+subclass `onDispose` hook runs (`EventfulStore` clears its events replay
+cache there); attachments are told last, once each, under no lock
+`dispose()` took.
+
+Deliberately kept: the `bindToScope` binding and `Store.defaultScope`
+(`dispose()` is asymmetric with scope cancellation — §18.4); the clock
+binding, and `clock` stays readable; the transaction lock, left free; and
+every `StoreSnapshot` you took — snapshots are values, not store references
+(§14.1).
+
+### 19.3 After `dispose()`: what throws, what keeps working
+
+Every public entrypoint rejects a disposed store with
+`IllegalStateException: store disposed`. The rows are pinned by a
+table-driven test over the whole surface, so a new entrypoint cannot ship
+without a row:
+
+| After `dispose()`, calling … | behaves as |
+|---|---|
+| `action`, `mutate`/`update`, `effect`, `bridge`, `observeFrom` | throws `store disposed` |
+| `reset()`, `restore(…)` (every policy, sterile included), `snapshot()`, `taggedStates(…)` | throws |
+| a state delegate read (`v.count`) — or a *new* declaration (`val x by state { … }`) | throws |
+| `derivedState`/`merged` creation on it, `registerDerivedBackingState` | throws |
+| `properties`, `getState`, `hasState`, `removeState`, `clearStates` | throws |
+| keyed families: `docs[key]`, `getOrNull`, `in`, `entries`, `evict`, `evictAll` | throws |
+| `middlewares(…)`, `clearMiddleware()`, `bindClock(…)` | throws |
+| `isDisposed` (now `true`), `dispose()` again, reading `clock` | works — dispose is idempotent; the clock binding is kept |
+| reading a `StoreSnapshot` taken earlier (typed reads, `encode()`, `render()`, §16.2) | works — a snapshot is a value |
+| reading `scope`, and `bindToScope(…)` | work — the binding is yours, not the store's (§18.4) |
+
+Cold companion APIs (`asFlow`, `first`, `awaitValue`) refuse at their first
+read of the disposed store. Collectors already collecting simply see
+nothing more: no further commits fire observers, and an `EventfulStore`'s
+`events` flow never replays past events.
+
+### 19.4 `EventfulStore`: events that commit and roll back with the transaction
+
+`EventfulStore` is `Store` plus one built-in surface: a transactional
+`emit(event)` and an `events: SharedFlow<E>` (§4.4, §13). The pattern that
+works is a sealed hierarchy of things that *happened*, emitted from inside
+entries:
+
+```kotlin
+sealed class CounterEvent {
+    data class Saved(val at: Int) : CounterEvent()
+    data class Failed(val cause: Throwable) : CounterEvent()
+}
+
+class CounterStore : EventfulStore<CounterStore, CounterEvent>() {
+    val count by state { 0 }
+
+    fun increment() = action {
+        count update { it + 1 }
+        emit(CounterEvent.Saved(count.value))   // staged with the write; discarded on rollback
+    }
+}
+
+val v = CounterStore()
+val order = mutableListOf<String>()
+val states = v { count effect { order.add("state=$this") } }               // fires in the fanout
+val events = v.events.onEach { order.add("event=$it") }.launchIn(v.scope)  // drains after it
+// v.increment() → order gains "state=1" then "event=Saved(at=1)" — never the reverse
+```
+
+The guarantees, each of them contractual:
+
+- **Ordering.** A commit's fanout is observers → bridge publishes → events
+  (§5, §10.1), and events drain in the order they were `emit`ted. A
+  collector of both a state and `events` always sees the state value before
+  the event of the same commit.
+- **Rollback discards events.** `emit` stages into the transaction; a
+  rolled-back entry emits nothing. Emitting outside an entry throws
+  (`emit(event) called outside of an action / suspendAction. Events must be
+  staged inside a transaction so rollback can discard them.`), and so does
+  emitting from an observer into its own committing store, or from inside a
+  state initializer or schema migration (§12).
+- **Lossless delivery.** `events` is `replay = 0` with
+  `BufferOverflow.SUSPEND` by default: subscribers see only events emitted
+  after they subscribe, and a slow collector back-pressures the *emitter* —
+  events are unrecoverable, so the producer waits rather than drops. This
+  is the opposite policy of `State.asFlow()` (which conflates): state is
+  recoverable, events are not. Tune `extraBufferCapacity` for bursty
+  commits; choose a dropping policy only for events you have decided are
+  droppable.
+- **Sealed events, not state.** Events say what *happened* (`Saved`),
+  state holds what *is* (`count`) — a collector that needs the current
+  value should read the state, not fold events. That is what keeps the
+  replay-free, lossless policy affordable.
 
 ---
 

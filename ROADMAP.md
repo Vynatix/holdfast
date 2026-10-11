@@ -89,7 +89,7 @@ Issue #20 (snapshot-driven bootstrap: codecs, schema versions, tags, `reset()`, 
 
 - holdfast-testing README + 30-second quickstart under the new `storeTest` name (S)
 - Fix the `action`-shadowing trap (remove the dead extension; add a non-colliding verb that always routes through the handle) (M)
-- Synthesize timeline events for `suspendAction` so coroutine-first users stop getting inexplicably empty timelines (L)
+- Timeline fidelity for suspending entries — re-scoped from "synthesize timeline events for `suspendAction` (inexplicably empty timelines)": suspending transactions already feed the harness timeline through the middleware chain (pinned by `StoreHandleActionTest.suspendActionFeedsTheTimeline`), so nothing needed synthesizing. The real residual, found and fixed: a suspending body ending on another dispatcher thread made the recorder's owner-thread-confined `modifiedStates` read throw, silently dropping that transaction's emission events *and* commit markers from the timeline — the markers now always land (`SuspendingHopTimelineTest`, recorder degrades exactly as `ProfilingMiddleware` does); emission events after a thread hop still need a core seam (a post-commit recorder hook, or a non-owner-thread-checked modified-states accessor) and stay a named follow-up (S, was mis-sized L)
 - Never-recordable matcher categories throw instead of passing vacuously (S)
 - Dependency diet: drop unused `api(kotest-assertions)`; make the hallmark matcher optional (S)
 - GUIDE chapters: **Threading & Scopes** (4-level chain, observers-under-lock, dispose asymmetry, `defaultScope`-in-tests + a test-reset story) and **Lifecycle & Events** (who calls `dispose()`, EventfulStore patterns) (M)
