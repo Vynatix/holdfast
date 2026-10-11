@@ -8,7 +8,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private class EffectTestVault : Store<EffectTestVault>() {
-    val count by state { 0 }
+    // distinct = false keeps this suite's fan-out pins on the original
+    // re-fire contract (issue #007 flipped the default to distinct).
+    val count by state(distinct = false) { 0 }
     val label by state { "init" }
 }
 
@@ -193,8 +195,9 @@ class EffectNotificationTest {
     }
 
     /**
-     * Documented fan-out behaviour: each commit fires the effect, even when the value
-     * equals the previously committed value.
+     * Documented fan-out behaviour of a `distinct = false` state (the opt-out
+     * since issue #007 flipped the default): each commit fires the effect,
+     * even when the value equals the previously committed value.
      */
     @Test
     fun effectReceivesNotificationOnEachCommitEvenForSameValue() {

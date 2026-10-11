@@ -1239,10 +1239,16 @@ abstract class Store<Self : Store<Self>> {
      * [reset] resets it. Subsequent reads return the same instance.
      *
      *  - Pass a [transformer] to normalize on write or project on read.
-     *  - Pass [distinct] = true to skip observer fanout and bridge publish when a
-     *    commit re-applies the same value (StateFlow-style dedup). Default is
-     *    false — every commit fires observers, matching the library's original
-     *    contract.
+     *  - [distinct] is true by default, matching [kotlinx.coroutines.flow.StateFlow]:
+     *    a commit that re-applies the same value — the stored
+     *    post-[Transformer.set] raw value compared with `==` — skips observer
+     *    fanout and bridge publish. Pass [distinct] = false to re-fire on
+     *    every commit. Two caveats: an in-place-mutated object compares equal
+     *    to itself, so committing the same reference after mutating it is
+     *    silently deduped (mutate immutably, or opt out); and a `set` that is
+     *    not pure — a randomized cipher, where `set(x) != set(x)`, already
+     *    outside the [Transformer] contract — defeats the comparison, so
+     *    every commit of such a state fires.
      *
      * [initialize] runs at most once per materialization, on the thread that
      * first needs the state ([reset] also runs it again; see below). The store
@@ -1300,7 +1306,7 @@ abstract class Store<Self : Store<Self>> {
     @OptIn(ExperimentalStoreApi::class) // Passes "no tags" to the declaration; the stable signature has none.
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
         initialize: Initializer<T>,
     ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, emptySet(), initialize)
 
@@ -1339,7 +1345,7 @@ abstract class Store<Self : Store<Self>> {
     @ExperimentalStoreApi
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
         codec: StateCodec<T>? = null,
         tags: Set<StateTag> = emptySet(),
         initialize: Initializer<T>,
@@ -1361,7 +1367,7 @@ abstract class Store<Self : Store<Self>> {
         name: String,
         initial: T,
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
     ): MutableState<T> = registry.registerEager(name, initial, transformer, distinct, StateKind.Internal, emptyList())
 
     /**
@@ -1386,7 +1392,7 @@ abstract class Store<Self : Store<Self>> {
         name: String,
         initial: T,
         sources: List<State<*>>,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
     ): MutableState<T> {
         checkNotDisposed()
         return registry.registerEager(name, initial, null, distinct, StateKind.DerivedBacking, sources)
@@ -1437,11 +1443,41 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Read-modify-write convenience. Equivalent to `mutate(block(value))` but reads
-     * the current value once and threads it through [block]. Inside an active
-     * transaction owned by this thread, the read sees pending writes
-     * (read-your-own-writes); outside, an implicit single-shot transaction wraps
-     * the operation (same exceptions as [mutate]).
+     * Read-modify-write convenience: reads the current value once, threads it
+     * through [block], and mutates with the result — `mutate(block(value))`
+     * with the read and the write in one place.
+     *
+     * Inside a transaction this call stages into it under exactly [mutate]'s
+     * predicate — on the active transaction's owner thread, from inside a
+     * `suspendAction`/`suspendAtomic` body holding this store (on any thread
+     * that body resumed on), or on its commit-fanout thread (where the stage
+     * is refused loudly, as a bare `mutate` is). The read keeps its own,
+     * deliberately asymmetric thread-id-only rule (see [MutableState.value]):
+     * on the opening thread it sees the transaction's pending writes
+     * (read-your-own-writes); from a suspending body on another thread it
+     * reads the committed value, so the staged write replaces any pending
+     * write to that state (GUIDE §8.2).
+     *
+     * Standalone, the whole read-modify-write runs inside the one-shot action
+     * [mutate] synthesizes, under the store's serializer and
+     * `transactionLock`: **atomic with respect to blocking actions and
+     * one-shot mutates; updates concurrent with an in-flight `suspendAction`
+     * on the same store remain undefined** (a suspending holder's bare writes
+     * stage into its transaction — see [mutate]; GUIDE §8.2). Bridge-inbound
+     * writes bypass the transaction machinery by design, so this atomicity
+     * covers transactional writers only.
+     *
+     * Ordering: standalone, [block] runs inside that action's body — after
+     * middleware `onTransactionStarted`, under the store's `transactionLock`
+     * — so a slow [block] holds the store's lock exactly like a slow action
+     * body (normal action semantics, new for `update` callers).
+     *
+     * Strictness: the one-shot action's result is consumed with
+     * [TransactionResult.getOrThrow] — a throwing [block] propagates to the
+     * caller as itself (its transaction rolls back; never a silent rollback),
+     * and a middleware or commit-phase failure surfaces too. In this `update`
+     * is stricter than [mutate], whose standalone one-shot result is
+     * discarded.
      *
      * ```
      * store action {
@@ -1449,10 +1485,25 @@ abstract class Store<Self : Store<Self>> {
      *     items update { it + entry }
      * }
      * ```
+     *
+     * @throws IllegalStateException per [mutate] — a write a finalized
+     *   transaction would refuse, a read-only/foreign/sealed state, a
+     *   no-write region — and whatever [block] or a middleware throws (see
+     *   the strictness note).
      */
     infix fun <T : Any> State<T>.update(block: (T) -> T) {
         checkNotDisposed()
-        this mutate block(this.value)
+        val txn = _activeTransaction
+        if (txn != null && stagesInto(txn)) {
+            this mutate block(this.value)
+            return
+        }
+        // Standalone: route the whole read-modify-write through the one-shot
+        // action `mutate` synthesizes, so the read is serialized with the
+        // write (serializer + transactionLock) instead of racing concurrent
+        // commits. `getOrThrow` rethrows the original exception — a throwing
+        // block propagates, never a silent rollback.
+        action { this@update mutate block(this@update.value) }.getOrThrow()
     }
 
     /**

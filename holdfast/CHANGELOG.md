@@ -32,6 +32,46 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   uncatchable WasmGC traps). Correct stores — `EventfulStore` intermediates,
   user generic bases, subclasses of concrete stores, anonymous fakes,
   generic `G<T> : Store<G<T>>` — construct and dispatch unchanged.
+||||||| 10f96a7
+- **A standalone `update { }` is now an atomic read-modify-write (issue 004,
+  spec D2).** `State.update` used to read the current value before `mutate`
+  synthesized its one-shot write-side action, so concurrent standalone updates
+  overwrote each other — measured, about 50% of 10,000 concurrent increments
+  were lost. The whole read-modify-write now runs inside that one-shot action,
+  under the store's serializer and transaction lock: **atomic with respect to
+  blocking actions and one-shot mutates; updates concurrent with an in-flight
+  `suspendAction` on the same store remain undefined** (they stage into its
+  transaction), and bridge-inbound writes are excluded (they bypass
+  transactions by design). Behavior changes beyond the atomicity, both
+  deliberate: the block now runs inside the action's body — after middleware
+  `onTransactionStarted`, under the store's `transactionLock`, so a slow block
+  holds the lock like an action body — and the action's result is consumed
+  with `getOrThrow()`, so a throwing block propagates as itself and a
+  middleware/commit-phase failure surfaces, where `mutate`'s standalone
+  one-shot result is discarded (`update` is stricter than `mutate`). Inside an
+  owner transaction — a `suspendAction`/`suspendAtomic` body included, on any
+  thread it resumed on — nothing changes: the update stages into that
+  transaction, read-your-own-writes.
+||||||| parent of 0e9eeec (changelog: [Unreleased] behavior-change entry for the distinct default flip (#007))
+- **Breaking: `distinct` now defaults to `true` at every state declaration
+  site (issue #007).** A commit that re-applies the same value — the stored
+  post-`Transformer.set` raw value compared with `==` — skips observer fanout
+  and bridge publish, matching `StateFlow`'s conflation semantics. Declare
+  `state(distinct = false) { … }` (or `keyedState(distinct = false) { … }`)
+  to keep re-firing on every commit. The default flipped consistently at the
+  stable and experimental `state(...)` overloads, `keyedState(...)`, the
+  public `MutableState` constructor and the internal registration seams, so
+  `derived`/`suspendDerived` backing states dedupe too — a same-value source
+  commit no longer schedules a recompute, so list every state a `compute`
+  reads among its sources. Inbound bridge apply (`applyFromBridge`) still
+  fires observers unconditionally, and `reset()` still skips unchanged states
+  regardless of `distinct`. `restore()` semantics changed with the flip: a
+  state whose value the snapshot leaves unchanged fires neither its observers
+  nor its bridge (a `distinct = false` state still re-fires and re-publishes).
+  The comparison is against the stored raw value: an in-place-mutated object
+  is silently deduped (mutate immutably or opt out), reference-equality types
+  (`ByteArray`) never dedupe, and a non-pure `set` — a randomized cipher,
+  already outside the `Transformer` contract — defeats the dedup entirely.
 
 ### Fixed
 

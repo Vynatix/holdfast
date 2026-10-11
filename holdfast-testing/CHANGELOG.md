@@ -10,6 +10,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A suspending entry that ends on another thread keeps its commit markers.**
+  Under `suspendAction`/`suspendAtomic` the completed middleware hook runs on
+  the thread the body ended on; `Transaction.modifiedStates` is
+  owner-thread-confined, so a body that resumed on another dispatcher thread
+  after its last suspension made the recorder's read throw — and the
+  suspending path's per-hook `runCatching` swallowed it, leaving the
+  timeline with `started` alone (no emission events, no `committed`): an
+  intermittently, inexplicably empty timeline for coroutine-first tests. The
+  recorder now degrades the way `ProfilingMiddleware` degrades its
+  attribution: such a transaction records no emission events, but its
+  `committed` (or `errored`/`rolled back`) markers always land
+  (`SuspendingHopTimelineTest`). Full emission-event fidelity after a thread
+  hop needs a core seam (a post-commit recorder hook, or a
+  non-owner-thread-checked modified-states accessor) and stays a named
+  follow-up; suspending entries that end on the thread they began — the
+  common case on single-threaded dispatchers such as `runTest`,
+  `Dispatchers.Main` and every coroutine on wasmJs — always recorded the
+  full timeline.
 - **Issue #21 review (PR #24).** `track(tree)`'s teardown does not spin
   on the test thread when a live store of the subtree is still held by an
   entry it cannot wait out (a `suspendAction`/`suspendAtomic` body parked

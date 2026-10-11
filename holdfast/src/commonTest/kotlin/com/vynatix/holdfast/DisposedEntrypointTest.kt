@@ -119,6 +119,10 @@ class DisposedEntrypointTest {
             Entrypoint("clock") { p, _ -> p.clock },
             Entrypoint("internalBoundClock") { p, _ -> p.internalBoundClock },
             Entrypoint("isDisposed") { p, _ -> p.isDisposed },
+            // Scope resolution has no disposed check: `scope` keeps answering the
+            // (possibly cancelled) binding and `bindToScope` keeps rebinding, per §19.3.
+            Entrypoint("scope") { p, _ -> p.scope },
+            Entrypoint("bindToScope") { p, _ -> p.bindToScope(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)) },
             // Lock-free reads of the attachment slot, which dispose() empties.
             Entrypoint("internalAttachment (null)") { p, _ -> check(p.internalAttachment(probeAttachmentKey) == null) },
             Entrypoint("internalAttachments (empty)") { p, _ -> check(p.internalAttachments().isEmpty()) },

@@ -145,9 +145,13 @@ internal object PrivilegedHooks {
      * so the call site in [com.vynatix.holdfast.testing.internal.Recorder] doesn't
      * need its own `@OptIn`.
      *
-     * Throws if invoked off the owner thread; the recorder's hooks always run
-     * on the owner thread (the middleware chain is synchronous and on the
-     * thread that called [com.vynatix.holdfast.Store.action]).
+     * Throws if invoked off the owner thread. The blocking path always runs
+     * the hooks there (the middleware chain is synchronous and on the thread
+     * that called [com.vynatix.holdfast.Store.action]); a
+     * `suspendAction`/`suspendAtomic` body that resumed on another dispatcher
+     * thread after its last suspension does not — the recorder catches the
+     * throw and records no emission events for that transaction (its commit
+     * markers survive).
      */
     fun modifiedStates(transaction: Transaction): Set<State<*>> = transaction.modifiedStates
 
