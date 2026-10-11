@@ -8,6 +8,23 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Added
+
+- **`StoreSuspendInFlightException` (issue 003, with `:holdfast-coroutines`).**
+  The public exception a blocking `action { }` (also `atomic(…)`, `reset()`,
+  `restore()`) throws when it has waited — from another thread — for a
+  suspending operation holding the store's serializer mutex that stopped
+  making observable progress for the whole wait budget (2 s by default,
+  progress-aware: every step the operation takes restarts the clock).
+  Constructed only by serializer implementations (the constructor is
+  `@StoreInternalApi`); user code catches it. It escapes the blocking
+  entrypoint raw — never folded into a `TransactionResult.Error` — because
+  it is thrown by the serializer acquire, before any transaction exists.
+  Also new: `@StoreInternalApi Store.suspendingProgressEpoch`, the counter a
+  blocking waiter reads to tell a progressing suspending holder from a stuck
+  one. With `:holdfast-coroutines`, whose `MutexSerializer` gained the
+  bounded wait (see that module's changelog).
+
 ### Changed
 
 - **A mutation inside a bare `store { }` block now throws (issue 005).**
@@ -42,6 +59,24 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   now refuses, like every other public `Store` entrypoint, and
   disposed-store refusals take precedence over the bare-invoke teaching
   refusal.
+||||||| 6492480
+- **A blocking action's wait for an in-flight suspending operation is bounded
+  now (issue 003, with `:holdfast-coroutines`).** It "will block until the
+  in-flight `suspendAction` completes" was the documented contract — an
+  unbounded spin that froze the calling thread forever when the suspending
+  holder was stuck (the iOS livelock class), and hard-froze the tab on
+  wasmJs (refused outright there since issue #27, and inside the holder's own
+  body since issue #31). Now: a blocking entry from another thread waits up
+  to 2 seconds for a suspending holder — the clock restarting whenever the
+  operation observably progresses (it stages a write, starts its commit) —
+  and then throws `StoreSuspendInFlightException`; an actively progressing
+  holder never trips the budget however long it runs. Waits behind another
+  blocking action are NOT bounded (a blocking holder cannot park the thread
+  it needs, so its wait always ends). Coroutine callers should use
+  `suspendAction { … }`/`suspendAtomic(…)`, which wait by suspending;
+  background-thread waiters see the new throw only when the suspending
+  operation went quiet for the whole budget. `action`'s KDoc documents the
+  amended wait contract.
 - **The CRTP self-type contract is enforced now (issue 006).** A store
   declared against another type (`class Foo : Store<Bar>()`) compiled but
   failed only at first dispatch — and inside `action { }` the cast failure
@@ -107,6 +142,24 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **A blocking entry beside a STUCK suspending holder no longer spins
+  forever (issue 003, with `:holdfast-coroutines`).** With the serializer
+  installed, a blocking `action { }`/`atomic(…)`/`reset()`/`restore()` from
+  another thread while a `suspendAction`/`suspendAtomic` was parked on
+  something that never completed busy-spun on the serializer mutex — 100 %
+  CPU, `RUNNABLE`, no deadlock detector reporting it — for as long as the
+  process lived. The wait is now bounded by the 2 s progress-aware budget
+  (see Changed) and ends in a teaching `StoreSuspendInFlightException`. This
+  closes the last open spin on the serializer; the SPIN_OWNER trio that
+  preceded it — a nested `action { action { } }` failing with a raw kotlinx
+  mutex error, a second thread's concurrent blocking action failing the same
+  way instead of waiting, and a sync `derived()` recompute swallowed into
+  silent staleness — was already fixed by the fresh-token-per-acquire and
+  nested-acquire-skip shapes (see their entries below: "Nested `action`
+  works again on a store that has used `suspendAction`", "Blocking
+  `atomic()` is serialized against in-flight suspending work", and the
+  derived-recompute entries); this issue's gate composes with those, it does
+  not replace them.
 - **The outer body's other coroutines no longer read a nested suspending
   entry's uncommitted writes (issue #38, with `:holdfast-coroutines`).** A
   `suspendAction`/`suspendAtomic` nested in another suspending entry's body

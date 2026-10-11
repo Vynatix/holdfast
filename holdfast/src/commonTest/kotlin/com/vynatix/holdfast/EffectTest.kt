@@ -224,6 +224,8 @@ class EffectNotificationTest {
         val good1 = mutableListOf<Int>()
         val good2 = mutableListOf<Int>()
         val throwerCalls = atomic(0)
+        val reported = mutableListOf<Throwable>()
+        v.uncaughtObserverHandler = { reported += it }
 
         // The middle subscriber doesn't throw on the initial-subscribe callback (which
         // isn't wrapped in observe()), but it throws on every later notification.
@@ -243,6 +245,7 @@ class EffectNotificationTest {
 
         assertEquals(listOf(7), good1, "good1 still received; good1=$good1")
         assertEquals(listOf(7), good2, "good2 still received despite middle subscriber throwing; good2=$good2")
+        assertEquals(1, reported.size, "the throwing subscriber's failure was captured; reported=$reported")
         d1.dispose()
         d2.dispose()
         d3.dispose()

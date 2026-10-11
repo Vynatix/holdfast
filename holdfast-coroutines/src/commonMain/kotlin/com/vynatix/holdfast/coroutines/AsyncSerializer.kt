@@ -5,6 +5,7 @@ package com.vynatix.holdfast.coroutines
 import com.vynatix.holdfast.FanoutMarkers
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreSuspendInFlightException
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.coroutines.platform.blockingWaitCanEnd
 import com.vynatix.holdfast.fanOutApplied
@@ -14,6 +15,10 @@ import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 /**
  * AsyncSerializer impl backed by a coroutine [Mutex]. Blocking `action` callers
@@ -28,10 +33,34 @@ import kotlin.coroutines.cancellation.CancellationException
  * `IllegalStateException`. So while one thread's blocking action held the
  * serializer, a second thread's blocking action on the same store failed with
  * a raw mutex error instead of waiting its turn.
+ *
+ * ## The escapable wait (issue 003)
+ *
+ * A blocking acquire that finds the mutex held by a suspending entry waits a
+ * progress-aware budget ([budget], 2 s by default) instead of forever: the
+ * clock restarts on every observable step the holder takes (each advance of
+ * `Store.suspendingProgressEpoch` — entry, a staged write, a commit phase
+ * starting), so an actively progressing holder never trips the guard however
+ * long it runs. When the holder goes quiet for the whole budget the waiter
+ * throws [StoreSuspendInFlightException] — teaching, with the elapsed wait
+ * and budget in the message — after one final `tryLock`. A holder recognized
+ * as BLOCKING (another `action`/`atomic`, which never parks the thread it
+ * needs) is never budgeted: blocking-vs-blocking waits stay unbounded, as
+ * for serializer-free stores. The holder kind is read through
+ * `Store.suspendingOwner` (set only while a suspending entry holds the mutex,
+ * cleared before it releases); the suspending side's install/teardown windows
+ * read as "not suspending", which merely pauses the clock — conservative in
+ * the safe direction. Where the wait is provably futile outright — a
+ * single-threaded host (wasmJs, [blockingWaitCanEnd]) — the pre-existing
+ * refusal of issue #27 fires before any of this.
  */
 internal class MutexSerializer(
-    /** The store's class name, for the single-threaded refusal's message. */
+    /** The store's class name, for the refusal and budget messages. */
     private val storeName: String,
+    /** The serialized store: its epoch makes the budget progress-aware. */
+    private val store: Store<*>,
+    /** How long a blocking acquire waits on a quiet suspending holder before throwing. */
+    internal val budget: Duration = SUSPENDING_WAIT_BUDGET,
 ) : Store.AsyncSerializer {
     val mutex = Mutex()
 
@@ -44,25 +73,80 @@ internal class MutexSerializer(
     @kotlin.concurrent.Volatile
     private var blockingHolder: Any? = null
 
+    /**
+     * Kind of the suspending entry currently holding [mutex] —
+     * "suspendAction" / "suspendAtomic" — for the budget-exceeded message.
+     * Set by the suspending acquire paths right after they take the mutex and
+     * cleared where they release it (or tear the entry down), so it is never
+     * stale across holders.
+     */
+    @kotlin.concurrent.Volatile
+    internal var suspendingHolderLabel: String? = null
+
     override fun blockingAcquire() {
         val token = Any()
-        while (!mutex.tryLock(token)) {
+        // When the current unproductive wait began: (re)started on every
+        // observable step by the suspending holder, nulled while the hold
+        // reads as blocking.
+        var quietSince: TimeMark? = null
+        var seenEpoch = 0L
+        while (true) {
+            if (tryLockBlocking(token)) return
             // Single-threaded (wasmJs): the holder (a suspendAction/suspendAtomic
             // body or hydration decision parked at a suspension point, or a waiter
             // the mutex was just handed to) can only run once this call returns
             // the thread, so a failed tryLock can never succeed later. Refuse
             // instead of spinning forever (threadYield() is a no-op there).
             check(blockingWaitCanEnd) { blockingWaitCannotEnd(storeName) }
+            // Progress-aware budget: run the clock only while a suspending
+            // entry holds the store. A blocking holder is never budgeted —
+            // it cannot park the thread it needs, so its wait always ends.
+            if (store.suspendingOwner != null) {
+                val epoch = store.suspendingProgressEpoch
+                val clock = quietSince
+                if (clock == null || epoch != seenEpoch) {
+                    seenEpoch = epoch
+                    quietSince = TimeSource.Monotonic.markNow()
+                } else if (clock.elapsedNow() >= budget) {
+                    // Race the release one last time before giving up.
+                    if (tryLockBlocking(token)) return
+                    throw StoreSuspendInFlightException(
+                        suspendingBudgetExceededMessage(
+                            storeName = storeName,
+                            holderLabel = suspendingHolderLabel,
+                            quietFor = clock.elapsedNow(),
+                            budget = budget,
+                        ),
+                    )
+                }
+            } else {
+                quietSince = null
+            }
             com.vynatix.holdfast.platform
                 .threadYield()
         }
+    }
+
+    /** Take [mutex] for a blocking caller: record the holder, self-heal a leaked owner. */
+    private fun tryLockBlocking(token: Any): Boolean {
+        if (!mutex.tryLock(token)) return false
         blockingHolder = token
+        // Self-heal: suspendingOwner is set only while a suspending entry
+        // holds this mutex and cleared before it releases, so one observed by
+        // a fresh holder of the mutex is provably leaked (a torn-down entry
+        // that skipped its clear). Clear it, race-free — no suspending entry
+        // can be installing while we hold — so it cannot mask later waits.
+        store.suspendingOwner = null
+        return true
     }
 
     override fun tryBlockingAcquire(): Boolean {
         val token = Any()
         val acquired = mutex.tryLock(token)
-        if (acquired) blockingHolder = token
+        if (acquired) {
+            blockingHolder = token
+            store.suspendingOwner = null
+        }
         return acquired
     }
 
@@ -85,6 +169,31 @@ private fun blockingWaitCannotEnd(storeName: String): String =
         "or event collector), launch the write once the commit has finished: " +
         "store.scope.launch { store.suspendAction { … } }."
 
+/** Default budget a blocking acquire gives a quiet suspending holder (issue 003). */
+internal val SUSPENDING_WAIT_BUDGET: Duration = 2.seconds
+
+/**
+ * Why [MutexSerializer.blockingAcquire] gives up on a suspending holder:
+ * names the store and the holder kind, carries the elapsed wait and the
+ * configured budget, and teaches the two ways out.
+ */
+private fun suspendingBudgetExceededMessage(
+    storeName: String,
+    holderLabel: String?,
+    quietFor: Duration,
+    budget: Duration,
+): String {
+    val holder = holderLabel ?: "suspendAction or suspendAtomic"
+    return "A blocking action, atomic(...), reset() or restore() gave up waiting for $storeName after " +
+        "${quietFor.inWholeMilliseconds} ms without observable progress from the $holder holding it " +
+        "(budget ${budget.inWholeMilliseconds} ms; the clock restarts whenever that operation visibly moves — " +
+        "it staged no write and started no commit phase for the whole window, so if it is waiting on " +
+        "something only this call's thread can finish, the wait would never end). From a coroutine, write " +
+        "through suspendAction { … } — or suspendAtomic(…) for several stores — which waits by suspending; " +
+        "from a blocking thread, call again once the suspending operation has finished. A wait behind " +
+        "another blocking action is never budgeted."
+}
+
 /**
  * Lazy installation of the [Store.AsyncSerializer] hook on each store. The
  * hook is installed on first use and persists for the store's lifetime — the
@@ -105,7 +214,11 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
     return synchronized(installLock) {
         val again = store.asyncSerializer as? MutexSerializer
         if (again != null) return@synchronized again
-        val fresh = MutexSerializer(store::class.simpleName ?: "Store")
+        val fresh =
+            MutexSerializer(
+                storeName = store::class.simpleName ?: "Store",
+                store = store,
+            )
         store.asyncSerializer = fresh
         fresh
     }

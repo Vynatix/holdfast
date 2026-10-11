@@ -601,7 +601,11 @@ abstract class Store<Self : Store<Self>> {
         /**
          * May throw [IllegalStateException] where the wait cannot end — a
          * single-threaded platform with the mutex held by a parked suspending
-         * entry (see `:holdfast-coroutines`' `MutexSerializer`, issue #27).
+         * entry (see `:holdfast-coroutines`' `MutexSerializer`, issue #27) —
+         * or [StoreSuspendInFlightException] when the wait for a suspending
+         * holder that stopped making observable progress exceeds the
+         * serializer's budget (issue 003). A wait behind another blocking
+         * holder is never refused.
          */
         fun blockingAcquire()
 
@@ -640,6 +644,21 @@ abstract class Store<Self : Store<Self>> {
     @StoreInternalApi
     @kotlin.concurrent.Volatile
     var suspendingOwner: Any? = null
+
+    /**
+     * Advances whenever the store's in-flight suspending operation
+     * (`suspendAction`/`suspendAtomic`, `:holdfast-coroutines`) observably
+     * progresses: on entry, on each staged write, and as its commit phases
+     * start. Read by the serializer's blocking acquire to keep its wait
+     * budget progress-aware — a holder that keeps advancing restarts the
+     * clock, so only a holder that goes quiet for the whole budget fails its
+     * waiters with `StoreSuspendInFlightException`. A lost increment leaves
+     * the epoch unchanged, which only ever shortens a waiter's patience
+     * (throw, never hang), so the `++` need not be atomic.
+     */
+    @StoreInternalApi
+    @kotlin.concurrent.Volatile
+    var suspendingProgressEpoch: Long = 0
 
     /**
      * Tasks queued during an in-progress transaction that should run AFTER the
@@ -944,6 +963,14 @@ abstract class Store<Self : Store<Self>> {
      *   where the blocking acquire would wait for the very suspend mutex that
      *   body holds (issue #31). `reset()` and `restore()` run through
      *   `action` and refuse the same way.
+     * @throws StoreSuspendInFlightException when this call has been waiting
+     *   (from another thread) for an in-flight suspending operation on this
+     *   store that stopped making observable progress for the serializer's
+     *   whole wait budget — 2 s by default, restarted on every observable
+     *   step the operation takes. A wait behind another blocking action is
+     *   never budgeted. Same for `atomic(…)`, `reset()` and `restore()`:
+     *   the throw comes from the serializer acquire, before any transaction
+     *   exists, so it escapes raw rather than as a `TransactionResult.Error`.
      * @throws ClassCastException when this store violates the CRTP self-type
      *   contract (`class Foo : Store<Bar>()`): the receiver-bridge cast
      *   failure is rethrown with a teaching message instead of being wrapped
@@ -1119,19 +1146,6 @@ abstract class Store<Self : Store<Self>> {
             exception is FrameContractException ||
                 (frame.isEnrolled(this) && !frame.policy.tolerateInnerErrors)
         if (escalate) throw exception
-    }
-
-    internal fun unenrolledMessage(
-        frame: FrameMarker,
-        via: String,
-    ): String {
-        val name = this::class.simpleName ?: "Store"
-        val fn = if (frame.suspending) "suspendAtomic" else "atomic"
-        return "$name was mutated (via $via) inside $fn${frame.describeParticipants()} but is not " +
-            "enrolled. Its writes would commit independently and would NOT roll back with the frame. " +
-            "Fix: add $name to the $fn(...) participant list. (Mid-frame enrollment is not possible — " +
-            "it would acquire a lock outside the sorted global order.) To deliberately run an " +
-            "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
     }
 
     /** A nested action's savepoint, under the lock its enclosing holder already has. */
@@ -1570,6 +1584,10 @@ abstract class Store<Self : Store<Self>> {
         val txn = _activeTransaction
         if (txn != null && stagesInto(txn)) {
             stageWrite(txn, state, that)
+            // Observable progress by a suspending holder: this write (from its
+            // body or a foreign thread joining its transaction) restarts any
+            // blocking waiter's budget clock (suspendingProgressEpoch).
+            if (suspendingOwner != null) suspendingProgressEpoch++
             return
         }
 

@@ -62,7 +62,12 @@ import kotlin.uuid.Uuid
  * Locking: [stores] are sorted by [Store.lockOrderKey]; each store's
  * [Store.AsyncSerializer] coroutine `Mutex` (the same one [suspendAction]
  * uses) is acquired in that order — deadlock-safe global ordering, mutually
- * exclusive with blocking [Store.action] and per-store [suspendAction].
+ * exclusive with blocking [Store.action] and per-store [suspendAction]. A
+ * blocking `action`/`atomic` from another thread waiting on a participant
+ * this frame holds waits the progress-aware budget and then throws
+ * [com.vynatix.holdfast.StoreSuspendInFlightException] (issue 003); from
+ * inside the body or the frame's commit on that store it is refused outright
+ * instead (issue #31).
  *
  * Reentrancy: nested `suspendAtomic` calls within the same coroutine reuse
  * the outer call's locks. Stores already held by the outer frame get a
@@ -306,6 +311,10 @@ private suspend fun <R> acquireAndRun(
             val root = Transaction.createForExternal(id, ownerThreadId, frameId = id)
             v.internalSetActiveTransaction(root)
             v.suspendingOwner = ownerKey
+            // Observable progress for any blocking waiter on this store
+            // (issue 003): the entry bumped, staged writes and the frame's
+            // commit phase bump again.
+            v.suspendingProgressEpoch++
             rootsAcquired += RootEntry(store = v, txn = root, session = v.internalFrameMiddlewareSession(root))
             try {
                 acquireAndRun(
@@ -330,7 +339,10 @@ private suspend fun <R> acquireAndRun(
                 frame.heldVaults -= v
             }
         } finally {
-            runCatching { serializer.mutex.unlock(ownerKey) }
+            runCatching {
+                serializer.suspendingHolderLabel = null
+                serializer.mutex.unlock(ownerKey)
+            }
         }
     } else {
         // Held by the outer frame: no mutex acquire. Open a SAVEPOINT of the
@@ -404,11 +416,13 @@ private suspend fun takeParticipant(
         drainOnExit += v
         throw ce
     }
+    serializer.suspendingHolderLabel = "suspendAtomic"
     try {
         v.awaitLockOnlyHolders()
     } catch (ce: CancellationException) {
         // We held the serializer while we waited: release it and owe the
         // store a drain, for the same reason as above.
+        serializer.suspendingHolderLabel = null
         runCatching { serializer.mutex.unlock(ownerKey) }
         drainOnExit += v
         throw ce
@@ -465,6 +479,9 @@ private suspend fun <R> executeBody(
             // validation middleware throwing on the last store still rolls
             // every store back.
             roots.forEach { it.session.fireCompleted() }
+            // Commit-phase start is observable progress for blocking waiters
+            // on every participant (issue 003).
+            roots.forEach { it.store.suspendingProgressEpoch++ }
             commitInLockOrder(roots, observers, marker.frameId)
             TransactionResult.Success(resultTxn, value)
         } catch (e: Throwable) {
