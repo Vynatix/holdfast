@@ -146,7 +146,8 @@ class MergedTest {
         val writes =
             listOf<Pair<String, () -> Unit>>(
                 "mutate" to { inbox { shown mutate listOf("x") } },
-                "update" to { inbox { shown update { it + "x" } } },
+                // Scope fn so the read-only refusal, not the invoke defusal, answers (issue 005).
+                "update" to { with(inbox) { shown update { it + "x" } } },
                 "bridge" to { inbox { shown bridge null } },
                 "observeFrom" to { inbox { shown observeFrom Observable { Disposable { } } } },
                 "mutate on the backing state" to { inbox { shown.observableBacking()!! mutate listOf("x") } },

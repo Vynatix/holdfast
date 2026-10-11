@@ -233,7 +233,7 @@ class SuspendFanoutWriteTest {
             val s = EchoStore()
             val t = CopyStore()
             val failures = s.collectFailures()
-            onCommit(s.trigger) { value -> t { copy mutate value } }
+            onCommit(s.trigger) { value -> with(t) { copy mutate value } } // scope fn: one-shot, not bare-invoke (issue 005)
 
             s.suspendAction { trigger mutate 5 }
 

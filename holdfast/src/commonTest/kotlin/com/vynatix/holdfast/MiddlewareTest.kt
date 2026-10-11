@@ -259,7 +259,9 @@ class MiddlewareImplicitTransactionTest {
         val events = mutableListOf<String>()
         v.middlewares(GlobalRecordingMiddleware("M", events))
 
-        v { n mutate 42 }
+        // `with(v)`, not `v { }`: a bare-invoke mutation is refused (issue
+        // 005); the scope function keeps this test on the one-shot path.
+        with(v) { n mutate 42 }
 
         assertEquals(42, v.n.value)
         assertTrue("M:started" in events, "middleware must fire for implicit transaction; events=$events")

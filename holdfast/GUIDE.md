@@ -329,12 +329,19 @@ other threads still see the committed value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
-see only the committed value. This means standalone `holdfast { x mutate v }`
-is equivalent to `holdfast action { x mutate v }` — never a "raw" write that
-skips observers, middleware, or commit semantics — except while a
-`suspendAction`/`suspendAtomic` holds the store: then a bare write from any
-thread stages into (or, once it has applied, is refused by) that transaction;
-see §8.2.
+see only the committed value — never a "raw" write that skips observers,
+middleware, or commit semantics — except while a `suspendAction`/
+`suspendAtomic` holds the store: then a bare write from any thread stages
+into (or, once it has applied, is refused by) that transaction; see §8.2.
+
+One spelling of "outside any transaction" is refused outright: inside a
+bare `store { … }` block (§4.7) `mutate` throws an `IllegalStateException`
+naming `store action { }` as the mutating form. The block looks like a
+scope but each bare write there would run as its own one-shot action, so a
+mid-block throw commits the earlier writes — the partial-commit trap the
+refusal defuses. The scope functions `with(store) { … }` and
+`store.run { … }` are NOT that block: a bare write inside them takes the
+one-shot path described above.
 
 ### 4.4 `effect { … }` — Observe
 
@@ -461,18 +468,37 @@ later, with that store's node.
 
 ### 4.7 `invoke { … }` — Context block
 
-`store { … }` — the operator on `Store` — runs `block(self)` with no locks
-and no transaction. It exists so store-extension members like `effect` and
-`bridge` can be called with store-as-receiver:
+`store { … }` — the operator on `Store` — runs `block(self)` with no locks and
+no transaction: the **read-only/wiring scope**. It exists so the store's
+member-extensions (`mutate`, `update`, `bridge`, `observeFrom`) resolve with
+the store as receiver — `effect` is a top-level extension on `State` and
+needs no receiver:
 
 ```kotlin
-val d = holdfast { count effect { … } }      // effect is an extension on Store<Self>
+val d = holdfast { count effect { … } }      // wiring: subscribe with the receiver in scope
 val v = holdfast { count.value }             // plain read
 ```
 
-`holdfast { x mutate y }` is a special case — `mutate` itself synthesizes an
-implicit action when there is no active transaction. So this form still
-goes through middleware and observers.
+**Mutations inside the block throw.** `mutate`, `update` and `emit` (on an
+`EventfulStore`) throw an `IllegalStateException` naming
+`store action { }` as the mutating form. Each of them would otherwise run as
+its own one-shot action, so a mid-block throw would commit the earlier
+writes — the exact non-atomicity `action` exists to prevent. This holds
+dynamically too: a subclass method that mutates, called from inside the
+block, throws the same way.
+
+What stays legal inside the block: reads, `effect { }`, `bridge`/
+`observeFrom` wiring, and `removeState`/`clearStates` (deliberately —
+dropping a state is not a transactional write; see §13). An `action { }` (or `atomic(...)`, `suspendAction`, `suspendAtomic`)
+**started** inside the block is legal and stages normally — its transaction
+wins over the block's guard. `with(store) { … }` and `store.run { … }` are
+plain Kotlin scope functions, not this operator: a bare `mutate` inside them
+synthesizes the one-shot action as usual (§4.3).
+
+The guard is per-thread and best-effort, not a guarantee: it travels with
+the invoking thread only, and a mutation that hops threads
+(`scope.launch { … }` inside the block) escapes it. The block also refuses
+on a disposed store, like every entrypoint.
 
 ---
 
@@ -1266,7 +1292,7 @@ never T1's pending writes.
     v.middlewares(object : Middleware<CounterStore>() {
         override fun onTransactionStarted(c: MiddlewareContext<CounterStore>) { calls++ }
     })
-    v { count mutate 42 }
+    with(v) { count mutate 42 } // scope fn, not `v { }`: bare-invoke mutations throw (§4.7)
     assertEquals(1, calls)
 }
 ```
@@ -5090,8 +5116,9 @@ val r = v action { x update { it + 1 }; "${x.value} done" }
 // Failed atomic mutation: rolled back whole, observers never fire.
 v action { x mutate 99; error("nope") }.onError { … }
 
-// Bare mutation — same outcome as a one-mutate action.
-v { x mutate 2 }                                       // → x=2
+// Bare mutation outside any block — same outcome as a one-mutate action. Not
+// `v { x mutate 2 }`: bare-invoke mutations throw (§4.7); use a scope function.
+with(v) { x mutate 2 }                                // → x=2
 
 // Keyed entries (exp.): created on first get, evicted like a write.
 v action { drafts["a"] mutate "hello"; drafts.evict("b") }
