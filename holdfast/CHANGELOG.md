@@ -21,6 +21,54 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   double-dispose stays safe and disposing one leaves the other live. The
   parity check pinned while fixing #26 is flipped accordingly.
 
+- **A store's post-commit drain no longer recurses on one thread (issue
+  #37).** A derived state's recompute, run by a drain of its host's
+  post-commit queue, takes the host and releases it, which drains the same
+  queue again. That drain ran in place, so every time another thread handed
+  the recompute back while this thread held the host (a reader calling
+  `StoreTree.internalSettleNow()`, or reading a stale `tree.value`, in a
+  loop) added a stack level, until a `StackOverflowError` that the drain's
+  `runCatching` swallowed without a trace. Where it struck, it could leave a
+  lock held or a derived-state compute frame installed on the thread, which
+  then refused the thread's next `action` ("the compute of
+  TreeValueHost.value is running on this thread";
+  `TreeConsistentCutTest.aCaptureRacingAKeyedDisposeNeverThrows` on CI). A
+  drain nested in a drain of the same queue on the same thread now runs
+  nothing in place: it hands the outer drain what was queued at that moment,
+  which the outer drain runs as one more pass before it ends. Two things
+  end such passes when the drain itself keeps feeding them: a recompute a
+  settle cut stays queued for the host's next holder instead of being run
+  again by the drain that ran the settle, and after 1,000 passes in a row
+  made only of tasks the draining thread queued — a legacy `derived` whose
+  observer writes one of its sources on another store, which used to end
+  at the swallowed overflow — the drain cuts the next one, leaves it queued
+  for the host's next holder and reports the cut once through
+  `uncaughtObserverHandler`, as a settle does. A pass that runs anything
+  another thread queued starts that count again. A derived state's
+  recompute queued by work that drain is running now runs once that work
+  returns, not when its committing call does.
+
+- **wasmJs: a `tryLock` that never counted its hold (issue #26).** On
+  wasmJs the first read of every declared state threw
+  `IllegalStateException: Mutex already unlocked` (replacing a throwing
+  initializer's own exception), and so did a tree child's first read and a
+  keyed branch's `create`/`getOrCreate` (their per-entry claim locks), and
+  every `:holdfast-coroutines` `suspendAction`, `suspendAtomic` and
+  hydration decision (through the transaction-lock probe
+  `internalTransactionLockFree()`). A keyed eviction deferred out of a
+  commit's fanout still applied, but reported that exception through
+  `uncaughtObserverHandler`; a `derived`/`derivedState` recompute committed
+  and the failure after it was dropped (issue #30). atomicfu's js/wasm
+  `SynchronousMutex.tryLock()` returns `true` without counting the hold, so
+  the paired `unlock()` failed. The initializer latch is claimed with
+  `lock()` instead — under the graph lock, once its owner reads free, so it
+  never blocks and balances on every target (PR #40, landed on main) — and
+  the store lock's non-blocking acquire — the transaction-lock probe,
+  `tryTopLevelAction`'s recomputes and deferred evictions, and the tree's
+  child and keyed claims — goes through an internal try-lock that counts
+  it on every target. The JVM, Android and iOS behaviour is unchanged. A
+  new never-published `:wasm-tests` module runs a regression suite on
+  wasmJs (Node.js), with the JVM as its control, in CI.
 - **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
   by its declaring store's `dispose()` during its attach no longer leaves
   the store retained by that store's tree value (the value refuses

@@ -46,6 +46,9 @@ private const val MAX_FRAMES = 30_000
 private const val CHURN_ROUNDS = 500
 private const val MAX_CHURN_ROUNDS = 50_000
 private const val MIN_CUTS = 1_000
+
+/** Every how many back-to-back commits a writer that a capture must race sleeps 1 ms. */
+private const val READER_WINDOW_EVERY = 64
 private const val MIN_CAPTURES_BEFORE_DISPOSE = 20
 
 /**
@@ -143,6 +146,10 @@ class TreeCutConcurrencyTest {
                                 x mutate k
                                 x2 mutate k
                             }
+                            // A capture retries while a commit's write bracket is open and
+                            // never blocks the writer, so a writer committing back to back
+                            // can starve the reader on a loaded runner: leave it a window.
+                            if (k % READER_WINDOW_EVERY == 0) Thread.sleep(1)
                         }
                     }
                 start.await()

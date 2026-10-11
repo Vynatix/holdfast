@@ -1500,12 +1500,13 @@ derived's own store is busy (another action, frame or `suspendAction`
 holds it), the recompute is handed to that holder and runs on the
 holder's thread when it releases — so a derived can briefly lag its
 sources, even on the same store when another holder takes the store right
-after the commit, then converges. Read the sources, or use `computed`,
-when you need the caller's own write. A throwing `compute` rolls that
-recompute back and is reported through `uncaughtObserverHandler`
-(logged while no handler is set); the next source commit
-recomputes normally. Disposing the `Disposable` stops recomputation,
-including a recompute that is already queued.
+after the commit, or when the commit is made by work the store's own
+post-commit drain is running on the same thread, then converges. Read the
+sources, or use `computed`, when you need the caller's own write. A
+throwing `compute` rolls that recompute back and is reported through
+`uncaughtObserverHandler` (logged while no handler is set); the next
+source commit recomputes normally. Disposing the `Disposable` stops
+recomputation, including a recompute that is already queued.
 
 The experimental `derivedState(sources) { … }` and `merged(local, remote)`
 (§16.5) return a read-only `DerivedState` instead of a `Pair`: it is its
