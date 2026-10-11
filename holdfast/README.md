@@ -177,7 +177,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 
 ### `:holdfast-coroutines` extension
 
-- **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same store via an internal coroutine `Mutex`.
+- **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same store via an internal coroutine `Mutex`: a blocking entry from another thread waits up to 2 s (the clock restarting whenever the suspending operation observably progresses) and then throws `StoreSuspendInFlightException`; a wait behind another blocking action is never budgeted.
 - **`Flow` / `StateFlow` / `first` / `awaitValue`** adapters for state observation in coroutine code.
 - **`hydrator { base { }; refresh { } adopt { } }`** *(experimental)* — a store's hydration lifecycle, `Detached` → `Seeded` → `Hydrated` (or `Failed(cause)`): `hydrate()` seeds in one transaction that also marks the refresh in flight, fetches only once that has committed, and does nothing while in flight or hydrated, however many callers ask; `adopt` may write only `Remote` states; `invalidate()` and `reset()` detach. `Hydrator.state` is observable and a `derivedState` source, so a health flag over several stores needs no frame ([GUIDE §16.7](GUIDE.md#167-hydration-holdfast-coroutines)). `overlay(kv, key)` persists the `UserAuthored` states under a pinned key and puts them back in the seed, after `base { }`; a blob it cannot apply is reported and never written over ([GUIDE §16.8](GUIDE.md#168-the-persisted-overlay-holdfast-coroutines)).
 
@@ -239,7 +239,12 @@ and `com.vynatix.holdfast.crypto`:
   store via a coroutine `Mutex` installed lazily through an internal
   `AsyncSerializer` hook — also while it is being installed: the first
   suspending entry waits out, without holding a thread, a blocking `action`
-  or `atomic` that took the store before it existed.
+  or `atomic` that took the store before it existed. The blocking side's
+  wait is escapable: behind a suspending holder it lasts up to 2 s — the
+  clock restarting whenever the in-flight operation observably progresses
+  (a staged write, a commit phase starting) — and then throws
+  `StoreSuspendInFlightException`; behind another blocking action it is
+  never budgeted.
 - `derived` recomputes never wait on the derived's store: one recompute per
   source commit for same-store sources, and if that store is busy the
   recompute is handed to its current holder and runs when that holder

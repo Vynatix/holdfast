@@ -191,7 +191,14 @@ for when each lands.
   JVM/Android/iOS — on wasmJs it already threw, with a different message,
   issue #27). The same refusal covers `reset()`, `restore()` and blocking
   `atomic(...)` on that store: they all wait on the store's suspend mutex,
-  which the enclosing body itself holds. *Inside a suspending body write with
+  which the enclosing body itself holds. From *another* thread, the wait
+  behind that suspending holder is **bounded**: it lasts up to 2 s — the
+  clock restarting whenever the in-flight operation observably progresses
+  (it stages a write, starts its commit) — and then throws
+  `StoreSuspendInFlightException` naming the store, the holder, the elapsed
+  wait and the budget (issue 003; it used to spin forever when the holder
+  was stuck). A wait behind another *blocking* action is never budgeted.
+  *Inside a suspending body write with
   `mutate`/`update`* — it stages into the suspending transaction — *or make
   the blocking call once the body has returned; a blocking entry on another
   store is unaffected.* (From inside a `suspendAction`'s or
@@ -210,9 +217,11 @@ for when each lands.
   state (including a second
   `suspendAction` queued behind the first), nested `action` on a
   coroutine-touched store, blocking actions from two threads on a
-  coroutine-touched store, blocking `atomic()` racing a `suspendAction`, and
-  a store's first `suspendAction` or `suspendAtomic` racing a blocking
+  coroutine-touched store, blocking `atomic()` racing a `suspendAction`, a
+  store's first `suspendAction` or `suspendAtomic` racing a blocking
   `action` or `atomic` that took the store before its mutex was installed —
+  and, since issue 003, a cross-thread blocking entry beside a *stuck*
+  suspending holder (bounded wait + throw instead of the eternal spin) —
   are fixed.
 
 - **Hydration (experimental) cannot see every wait for itself.** `hydrate()`

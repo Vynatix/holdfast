@@ -101,7 +101,11 @@ or another coroutine (any coroutine on wasmJs) is not isolated from it —
 before the commit applies it joins the transaction, after it throws. A bare
 `update` there computes from the committed value, so its joined write
 replaces the body's pending write to that state instead of building on it.
-Write from other threads through `action { }`, which waits, and from other
+Write from other threads through `action { }`, which waits — up to 2 s
+behind a suspending holder, the clock restarting whenever that operation
+observably progresses (a staged write, a commit phase starting), then
+throwing `StoreSuspendInFlightException`; behind another blocking action the
+wait is never budgeted (issue 003) — and from other
 coroutines through `suspendAction { }`, which suspends until the store is
 free. Reads are isolated: while the body is parked, a coroutine on any
 thread, the body's own included, reads committed values, never the body's
