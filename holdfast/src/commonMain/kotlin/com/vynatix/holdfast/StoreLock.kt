@@ -2,6 +2,7 @@ package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.tryLockCounted
+import com.vynatix.holdfast.platform.tryLockCounts as platformTryLockCounts
 import kotlinx.atomicfu.locks.SynchronousMutex
 
 /**
