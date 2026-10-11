@@ -1,6 +1,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.tryLockCounted
 import kotlinx.atomicfu.locks.SynchronousMutex
 
 /**
@@ -58,14 +59,16 @@ class StoreLock {
      * Reentrancy is read the same way [acquire] reads it. On wasmJs every
      * caller reports thread id `0`, so a held lock always reads as this
      * thread's and the call deepens it; that is only sound because that
-     * target is single-threaded, which [acquire] already assumes.
+     * target is single-threaded, which [acquire] already assumes. The mutex
+     * is only tried when [locked] is clear, which [tryLockCounted]'s
+     * unconditional take on wasmJs relies on.
      */
     internal fun tryAcquire(): Boolean {
         val currentThreadId = currentThreadId()
         val acquired =
             when {
                 locked && ownerThreadId == currentThreadId -> true
-                mutex.tryLock() -> {
+                mutex.tryLockCounted() -> {
                     locked = true
                     ownerThreadId = currentThreadId
                     lockCount = 0

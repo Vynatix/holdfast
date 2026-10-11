@@ -53,7 +53,10 @@ jobs:
         run: ./gradlew publishToMavenLocal
         working-directory: hallmark-dep
 
-      - name: Build and test (JVM + Android)
+      # :wasm-tests is the only wasmJs test task CI runs (Node.js; the suites of
+      # :holdfast and :holdfast-coroutines cannot compile for wasmJs, and
+      # :holdfast-compose's compile-level browser smoke test is not run here).
+      - name: Build and test (JVM + Android + wasmJs)
         run: |
           ./gradlew \
             -Pholdfast.includeHallmark=true \
@@ -63,6 +66,7 @@ jobs:
             :holdfast-testing:jvmTest :holdfast-testing:testAndroidHostTest \
             :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
             :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
+            :wasm-tests:jvmTest :wasm-tests:wasmJsTest \
             --continue --stacktrace
 
       - name: Upload test reports
@@ -98,6 +102,7 @@ jobs:
             :holdfast-testing:detekt :holdfast-testing:ktlintCheck \
             :holdfast-hallmark:detekt :holdfast-hallmark:ktlintCheck \
             :holdfast-hallmark-coroutines:detekt :holdfast-hallmark-coroutines:ktlintCheck \
+            :wasm-tests:ktlintCheck \
             --stacktrace
 
   ios-and-jvm:
