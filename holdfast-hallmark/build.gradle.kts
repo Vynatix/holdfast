@@ -5,7 +5,7 @@ plugins {
     id("holdfast.quality")
     id("holdfast.dokka")
     id("holdfast.abi")
-    id("holdfast.publish.sonatype")
+    id("holdfast.publish")
 }
 
 // ktlint 1.7.x does not yet parse Kotlin 2.2+ `context(name: Type)` parameters.
