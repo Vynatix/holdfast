@@ -10,6 +10,38 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **A mutation inside a bare `store { }` block now throws (issue 005).**
+  `store { x mutate v }` looked like a scope but was a plain pass-through:
+  each bare `mutate`/`update` there synthesized its OWN one-shot action, so
+  a throw mid-block left the earlier writes committed — the empirical
+  partial-commit probe — and a failing one-shot `mutate` discarded its
+  `TransactionResult`, making the failure silent. Now `mutate`, `update`
+  and `emit` throw a teaching `IllegalStateException` naming
+  `store action { }` as the mutating form while a bare invoke block is on
+  the caller's thread — including through a subclass method the block
+  calls, and cross-store (`storeA { storeB.bump() }` throws). Precedence
+  is structural: the check lives only on the one-shot-synthesis branch, so
+  an `action { }`, `atomic(...)`, `suspendAction` or `suspendAtomic`
+  started inside the block stages exactly as before (the documented
+  receiver-DSL shapes keep working), a bare invoke inside an action
+  stages, and wiring/reads inside the block (`effect { }`, `bridge`,
+  `observeFrom`, plain reads, `removeState`/`clearStates`) stay legal.
+  `emit`'s check runs before the active-transaction lookup in BOTH
+  `EventfulStore.emit` and `EventfulSupport.emit`, so an emit inside bare
+  invoke no longer stages onto another thread's concurrent action. The
+  guard is per-thread (a lock-guarded map keyed by thread id; a single
+  slot under wasmJs's shared id) and best-effort: a mutation that hops
+  threads (`scope.launch { … }` inside the block) escapes it, and
+  `with(store) { … }`/`store.run { … }` are plain scope functions that
+  keep the one-shot semantics. Migrate call sites to `store action { }`
+  (or a scope function where a deliberate one-shot is wanted).
+- **`invoke { }` on a disposed store now throws (issue 005).** The
+  operator gained the standard `checkNotDisposed()` gate: a bare
+  `store { }` on a disposed store used to run its block silently (only
+  the body's own reads/wiring calls would refuse); the entrypoint itself
+  now refuses, like every other public `Store` entrypoint, and
+  disposed-store refusals take precedence over the bare-invoke teaching
+  refusal.
 - **The CRTP self-type contract is enforced now (issue 006).** A store
   declared against another type (`class Foo : Store<Bar>()`) compiled but
   failed only at first dispatch — and inside `action { }` the cast failure
