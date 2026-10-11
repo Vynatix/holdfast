@@ -411,9 +411,9 @@ public final class com/vynatix/holdfast/SerializerInstallWindowKt {
 	public static final fun internalTransactionLockFree (Lcom/vynatix/holdfast/Store;)Z
 }
 
-public final class com/vynatix/holdfast/SettleScope {
-	public final fun isOpen ()Z
-	public final fun settle ()V
+public class com/vynatix/holdfast/SettleScope {
+	public fun isOpen ()Z
+	public fun settle ()V
 }
 
 public final class com/vynatix/holdfast/SettleScopeKt {
@@ -426,6 +426,7 @@ public final class com/vynatix/holdfast/SettleScopes {
 	public final fun current ()Lcom/vynatix/holdfast/SettleScope;
 	public final fun install (Lcom/vynatix/holdfast/SettleScope;)Lcom/vynatix/holdfast/SettleScope;
 	public final fun open ()Lcom/vynatix/holdfast/SettleScope;
+	public final fun openJoined (Lcom/vynatix/holdfast/SettleScope;)Lcom/vynatix/holdfast/SettleScope;
 }
 
 public abstract interface class com/vynatix/holdfast/SnapshotEntry {

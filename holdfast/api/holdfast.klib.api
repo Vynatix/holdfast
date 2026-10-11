@@ -836,13 +836,6 @@ final class com.vynatix.holdfast/RestoreReport { // com.vynatix.holdfast/Restore
     final fun toString(): kotlin/String // com.vynatix.holdfast/RestoreReport.toString|toString(){}[0]
 }
 
-final class com.vynatix.holdfast/SettleScope { // com.vynatix.holdfast/SettleScope|null[0]
-    final val isOpen // com.vynatix.holdfast/SettleScope.isOpen|{}isOpen[0]
-        final fun <get-isOpen>(): kotlin/Boolean // com.vynatix.holdfast/SettleScope.isOpen.<get-isOpen>|<get-isOpen>(){}[0]
-
-    final fun settle() // com.vynatix.holdfast/SettleScope.settle|settle(){}[0]
-}
-
 final class com.vynatix.holdfast/SnapshotFormatException : kotlin/IllegalArgumentException // com.vynatix.holdfast/SnapshotFormatException|null[0]
 
 final class com.vynatix.holdfast/SnapshotMigrationException : kotlin/IllegalStateException { // com.vynatix.holdfast/SnapshotMigrationException|null[0]
@@ -955,6 +948,13 @@ open class com.vynatix.holdfast/FrameContractException : kotlin/IllegalStateExce
 
 open class com.vynatix.holdfast/NodeStore : com.vynatix.holdfast/Store<com.vynatix.holdfast/NodeStore> { // com.vynatix.holdfast/NodeStore|null[0]
     constructor <init>() // com.vynatix.holdfast/NodeStore.<init>|<init>(){}[0]
+}
+
+open class com.vynatix.holdfast/SettleScope { // com.vynatix.holdfast/SettleScope|null[0]
+    open val isOpen // com.vynatix.holdfast/SettleScope.isOpen|{}isOpen[0]
+        open fun <get-isOpen>(): kotlin/Boolean // com.vynatix.holdfast/SettleScope.isOpen.<get-isOpen>|<get-isOpen>(){}[0]
+
+    open fun settle() // com.vynatix.holdfast/SettleScope.settle|settle(){}[0]
 }
 
 sealed class com.vynatix.holdfast/RestoreIssue { // com.vynatix.holdfast/RestoreIssue|null[0]
@@ -1078,6 +1078,7 @@ final object com.vynatix.holdfast/SettleScopes { // com.vynatix.holdfast/SettleS
     final fun current(): com.vynatix.holdfast/SettleScope? // com.vynatix.holdfast/SettleScopes.current|current(){}[0]
     final fun install(com.vynatix.holdfast/SettleScope?): com.vynatix.holdfast/SettleScope? // com.vynatix.holdfast/SettleScopes.install|install(com.vynatix.holdfast.SettleScope?){}[0]
     final fun open(): com.vynatix.holdfast/SettleScope // com.vynatix.holdfast/SettleScopes.open|open(){}[0]
+    final fun openJoined(com.vynatix.holdfast/SettleScope): com.vynatix.holdfast/SettleScope // com.vynatix.holdfast/SettleScopes.openJoined|openJoined(com.vynatix.holdfast.SettleScope){}[0]
 }
 
 final val com.vynatix.holdfast.tree/internalCaptureCount // com.vynatix.holdfast.tree/internalCaptureCount|@com.vynatix.holdfast.tree.StoreTree{}internalCaptureCount[0]

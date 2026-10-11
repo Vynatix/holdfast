@@ -96,13 +96,21 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         return suspendActionInFrame(frame, body)
     }
     val serializer = ensureSerializer(this)
+    // The coroutine making this call, read BEFORE the entry's settle handling:
+    // a nested entry's join wrap is a new coroutine, so kotlinx's same-owner
+    // mutex refusal can no longer see that the caller IS the holder's body —
+    // the probe below compares this against the store's suspendingOwner
+    // (issue #38, refuseOwnSuspendingOwner).
+    val caller: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
     // An entry: the derived states this action's commit changes a source of
     // settle once the outermost entry — this one, unless it is nested in
     // another — has released everything, on whatever thread it ends on.
     return settlingSuspended {
-        // Read inside: a suspending entry nested in the body must see the
-        // same Job, so its acquire of this store's mutex fails fast.
+        // The owner the store's mutex is locked with: the coroutine the BODY
+        // runs in. A directly-nested entry's caller (above) is exactly this
+        // coroutine, so the probe recognizes it at any nesting depth.
         val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
+        refuseOwnSuspendingOwner(caller)
         try {
             suspendActionUnderMutex(serializer, owner, body)
         } finally {

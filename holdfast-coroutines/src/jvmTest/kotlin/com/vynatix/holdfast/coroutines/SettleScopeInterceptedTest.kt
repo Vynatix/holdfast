@@ -27,6 +27,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -128,7 +129,15 @@ class SettleScopeInterceptedTest {
             assertEquals(1_000, currentTime, "the timeout ran on the test dispatcher's virtual time")
         }
 
-    @Test fun aNestedEntryJoinsTheCarriedScopeAndLeavesItOpen() =
+    /**
+     * A nested entry joins the carried scope FOR SETTLING, under a view of it
+     * with an identity of its own (#38 — this row used to pin the bare join:
+     * the nested entry's slot held the carried scope itself, which is what
+     * let the enclosing body's other coroutines read the nested entry's
+     * uncommitted writes): the view settles nothing, and is open exactly
+     * while the carried scope is — its lifecycle is the carried one's.
+     */
+    @Test fun aNestedEntryJoinsUnderAViewOfTheCarriedScopeAndLeavesItOpen() =
         runBlocking {
             var nestedSaw: SettleScope? = null
             carried {
@@ -136,8 +145,11 @@ class SettleScopeInterceptedTest {
                 settlingSuspended { nestedSaw = SettleScopes.current() }
                 assertTrue(scope.isOpen, "the nested entry joined: it did not settle the scope")
             }
-            assertSame(scope, nestedSaw)
-            assertTrue(scope.isOpen)
+            val view = assertNotNull(nestedSaw)
+            assertTrue(view !== scope, "the nested entry runs under a view of the carried scope (#38)")
+            assertTrue(view.isOpen, "the carried scope is open, so the view is")
+            settleInstalled(scope)
+            assertFalse(view.isOpen, "the view is open exactly while the carried scope is")
         }
 
     @Test fun anotherCoroutineOnTheSameThreadNeverSeesTheScope() =

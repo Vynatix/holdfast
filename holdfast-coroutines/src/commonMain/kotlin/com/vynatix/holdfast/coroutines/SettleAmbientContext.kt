@@ -23,11 +23,14 @@ import kotlin.coroutines.coroutineContext
 // value on every suspension, exactly as the frame marker travels
 // (FrameMarkerContext.kt). A commit that fans out on another thread than the
 // one that opened the entry still queues into the entry's scope. A suspending
-// entry nested in another joins the outer scope; one started inside a
-// blocking entry on its thread (`runBlocking`, an undispatched launch) opens
-// a scope of its own that forwards its work to the blocking entry's while
-// that one is open — its body may outlive that entry, and its transactions
-// need a scope that stays theirs (#28).
+// entry nested in another joins the outer scope FOR SETTLING — under a
+// [com.vynatix.holdfast.SettleScopes.openJoined] view of it, an identity of
+// its own, so the outer body's other coroutines (which carry the outer scope)
+// no longer read the nested entry's uncommitted writes (#38) — and one
+// started inside a blocking entry on its thread (`runBlocking`, an
+// undispatched launch) opens a scope of its own that forwards its work to the
+// blocking entry's while that one is open — its body may outlive that entry,
+// and its transactions need a scope that stays theirs (#28).
 
 /**
  * The settle scope a suspending entry runs in, carried in its coroutine
@@ -41,46 +44,58 @@ internal class SettleAmbientContext(
 
 /**
  * Run [block] — a `suspendAction` or `suspendAtomic`, from the point where it
- * starts taking the store — as an entry: inside the open settle scope this
- * coroutine carries (joined, so it does not settle here — directly when that
- * scope is installed in this coroutine's slot, or, when it is not, re-wrapped
- * through [withSettleScope] so it is: on iOS/wasmJs a
- * `withContext(dispatcher)` section of the carrying body displaces the
- * interceptor that installs it, and an entry started there would otherwise
- * make its roots with no scope in the slot), or else inside a new scope that
- * settles when [block] has returned or thrown, on whatever thread it ends on,
- * with the scope still installed, so the recomputes it runs join it. Started
- * inside a blocking entry's scope on this thread, the new scope hands its
- * work to that one while that one is open ([SettleScopes.open]), so derived
- * states still settle once, with the blocking entry; the body keeps its own
- * scope, whose identity its transactions record, even when it outlives the
- * blocking entry (#28).
+ * starts taking the store — as an entry: inside the settle scope this
+ * coroutine carries, or else inside a new scope that settles when [block] has
+ * returned or thrown, on whatever thread it ends on, with the scope still
+ * installed, so the recomputes it runs join it.
  *
- * Unless the carried scope is already installed in this coroutine's slot (the
- * direct join), it first checks the caller for cancellation, on every
- * platform: called from an already-cancelled coroutine it throws that
- * [CancellationException] before [block] takes anything. [block] then runs
- * inside a `withContext` (on JVM/Android; an undispatched child on iOS and
- * wasmJs), whose child job would turn a caller cancelled while [block] runs
- * into a [CancellationException] even once [block] has returned — after its
- * commit, which ran under `NonCancellable`. So once [block] has returned (or
- * thrown), that outcome is what this call returns (or throws): a caller
- * cancelled after the body returned still gets the committed
- * [TransactionResult], and sees its cancellation at its next suspension
- * point.
+ * A NESTED entry — the coroutine carries an open scope ([SettleAmbientContext])
+ * — joins that scope for settling, but under a VIEW of it
+ * ([SettleScopes.openJoined], installed through [withSettleScope] so the
+ * slot — and any root [block] makes, whose `openedInScope` reads it — sees
+ * the view, on every platform: on iOS/wasmJs even a `withContext(dispatcher)`
+ * section of the carrying body displaces the interceptor that installs the
+ * carried scope). The view is the entry's own identity for read-your-own-
+ * writes (#38): the enclosing body's other coroutines, which carry the real
+ * scope, read the nested entry's writes only once committed, while the
+ * nested body keeps reading every enclosing body's pending writes. No scope
+ * of its own and no settle here: the outermost entry settles everything the
+ * view forwards to it.
  *
- * Read `coroutineContext` (the owner `Job` of a serializer acquire, say)
- * inside [block], so that a suspending entry nested in it — which joins, and
- * reads it there too — sees the same one, and a nested acquire of a mutex this
- * entry holds fails fast instead of waiting for itself.
+ * An entry with no carried scope — the outermost one, or one started inside a
+ * blocking entry's scope on this thread — opens a scope of its own
+ * ([SettleScopes.open]) that hands its work to the blocking entry's while
+ * that one is open, so derived states still settle once, with the blocking
+ * entry; the body keeps its own scope, whose identity its transactions
+ * record, even when it outlives the blocking entry (#28).
+ *
+ * Unless the carried scope is already installed in this coroutine's slot (no
+ * longer special, but still true of the common case), the paths first check
+ * the caller for cancellation, on every platform: called from an
+ * already-cancelled coroutine they throw that [CancellationException] before
+ * [block] takes anything. [block] then runs inside a `withContext` (on
+ * JVM/Android; an undispatched child on iOS and wasmJs), whose child job
+ * would turn a caller cancelled while [block] runs into a
+ * [CancellationException] even once [block] has returned — after its commit,
+ * which ran under `NonCancellable`. So once [block] has returned (or thrown),
+ * that outcome is what this call returns (or throws): a caller cancelled
+ * after the body returned still gets the committed [TransactionResult], and
+ * sees its cancellation at its next suspension point.
+ *
+ * That wrap is a NEW coroutine, whose `Job` is not the caller's: the
+ * same-store fail-fast of a nested suspending entry therefore no longer
+ * rides the owner identity (kotlinx's `Mutex` same-owner refusal) — the
+ * entry kinds probe for it explicitly before taking the mutex, comparing the
+ * caller coroutine's `Job` against the store's `suspendingOwner`
+ * (`refuseOwnSuspendingOwner`).
  */
 internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
-    val carried = coroutineContext[SettleAmbientContext]?.scope
-    if (carried != null && carried.isOpen && SettleScopes.current() === carried) return block()
-    // Before taking anything, on every platform: the iOS/wasmJs actual starts
-    // [block] as an UNDISPATCHED child, which (unlike withContext) runs even
-    // when the caller is already cancelled.
+    // Before taking anything, on every platform: both wraps below start
+    // [block] as a child (withContext on JVM/Android, an UNDISPATCHED child
+    // on iOS/wasmJs), and the UNDISPATCHED one — unlike withContext — runs
+    // even when the caller is already cancelled.
     coroutineContext.ensureActive()
+    val carried = coroutineContext[SettleAmbientContext]?.scope
     return if (carried != null && carried.isOpen) {
         joiningCarriedScope(carried, block)
     } else {
@@ -89,21 +104,24 @@ internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
 }
 
 /**
- * Join the carried scope when it is open but NOT installed in this
- * coroutine's slot — on iOS/wasmJs a withContext(dispatcher) section of the
- * carrying body displaced the interceptor that installs it. Re-wrap the
- * CURRENT dispatcher with the carried scope through [withSettleScope], so
- * the slot — and any root [block] makes, whose openedInScope reads it —
- * sees it. No scope of its own and no settle here: it settles with its
- * opener, like the direct join (#28 review F1).
+ * Join the carried scope under a VIEW of its own, installed around [block]
+ * through [withSettleScope] so the slot — and any root [block] makes, whose
+ * `openedInScope` reads it — sees the view (issue #38): the nested entry's
+ * writes are read only by its own body, everything it queues settles with
+ * the outermost entry, and a nested body that outlives that one reads the
+ * view as closed the moment its scope settled. The view re-wraps the CURRENT
+ * dispatcher on iOS/wasmJs, where a withContext(dispatcher) section of the
+ * carrying body displaced the interceptor that installs the carried scope
+ * (#28 review F1). No scope of its own and no settle here.
  */
 private suspend fun <T> joiningCarriedScope(
     carried: SettleScope,
     block: suspend () -> T,
 ): T {
+    val view = SettleScopes.openJoined(carried)
     var joined: Result<T>? = null
     try {
-        withSettleScope(carried) {
+        withSettleScope(view) {
             joined = runCatching { block() }
         }
     } catch (ce: CancellationException) {

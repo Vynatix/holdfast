@@ -8,6 +8,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The outer body's other coroutines no longer read a nested suspending
+  entry's uncommitted writes (issue #38, fixed in `:holdfast`).** A
+  `suspendAction`/`suspendAtomic` started inside another suspending entry's
+  body joined the settle scope the coroutine already carried — the outer
+  entry's — so while the nested entry was parked, the outer body and every
+  coroutine it launched read the nested entry's staged writes and evictions,
+  including ones that then rolled back. A nested entry now runs its body
+  under a scope view of the enclosing one's (installed by `settlingSuspended`
+  on every platform, which also keeps the #28 review F1 re-wrap): an identity
+  of its own for read-your-own-writes, everything it queues still settling
+  once, with the outermost entry. A nested entry on the same store still
+  fails fast instead of waiting for itself — enforced by a new explicit probe
+  (`refuseOwnSuspendingOwner`), because the view makes the nested body a new
+  coroutine whose `Job` kotlinx's same-owner mutex refusal can no longer
+  match; an entry from a coroutine the body merely launched still waits for
+  the holder, as before. A nested `suspendAtomic` on a store an enclosing
+  `suspendAction` holds gets the same probe. Code resumed inline from a body
+  (`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
+  `Dispatchers.Main.immediate`) still shares that body's scope — a documented
+  gap, as before.
 - **A blocking entry inside a store's own suspending body is refused instead
   of hanging (issue #31, fixed in `:holdfast`).** A blocking
   `action { }`, `reset()`, `restore()` or `atomic(...)` on a store, called
