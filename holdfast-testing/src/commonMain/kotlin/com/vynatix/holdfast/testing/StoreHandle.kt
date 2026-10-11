@@ -40,8 +40,9 @@ import kotlin.time.Clock
  * pushes [StoreEvent]s into [timeline] for every transaction lifecycle, with
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
- * known limits (commit-time errors after the body returns, user middlewares
- * not auto-wrapped, suspendAction not running middleware in 1.1).
+ * known limits (commit-time errors after the body returns; user middlewares
+ * not auto-wrapped — their lifecycle events never reach the timeline, and the
+ * handle-receiver matcher combinators refuse predicates on them).
  *
  * The handle also remembers the store's clock binding (`Store.bindClock`) as
  * it was when the store was first tracked, and teardown puts it back — after
@@ -265,6 +266,20 @@ class StoreHandle<V : Store<V>> internal constructor(
             )
         return adaptBridge(attached)
     }
+
+    /**
+     * Whether [state]'s bridge publishes reach this handle's timeline: an
+     * install-time [RecordingBridgeWrapper] covers it (the wrapper map, or a
+     * wrapper still attached to the state — a racing handle may have adopted
+     * it). Wrapping happens only in this handle's `init`, so a state whose
+     * bridge is not wrapped by probe time can never produce
+     * [BridgePublished]/[BridgeObserved] events; the handle-receiver matcher
+     * combinators use this to refuse such predicates with a teaching error
+     * instead of letting them pass vacuously.
+     */
+    internal fun isBridgeRecordable(state: State<*>): Boolean =
+        synchronized(handleLock) { state in bridgeWrappers } ||
+            (state as? MutableState<*>)?.bridge is RecordingBridgeWrapper<*>
 
     @Suppress("UNCHECKED_CAST")
     private fun adaptBridge(attached: Bridge<*>): BridgeView<*> =
