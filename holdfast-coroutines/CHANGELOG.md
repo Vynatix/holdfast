@@ -6,6 +6,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The serializer's blocking wait is escapable now (issue 003, with
+  `:holdfast`).** `MutexSerializer.blockingAcquire` spun
+  `tryLock`/`threadYield` without a deadline, so a blocking
+  `action { }`/`atomic(…)`/`reset()`/`restore()` from another thread while a
+  `suspendAction`/`suspendAtomic` was stuck spun forever. It now waits a
+  progress-aware budget — `SUSPENDING_WAIT_BUDGET`, 2 s, injectable per test
+  through the internal `MutexSerializer` constructor (never
+  `Store.defaultScope`, which is CAS-once per process) — and throws the new
+  public `StoreSuspendInFlightException` (core's changelog) when the holder
+  goes quiet for the whole budget: the clock restarts on every observable
+  step the holder takes (entry, a staged write via core's
+  `Store.suspendingProgressEpoch`, a commit phase starting), so a progressing
+  holder never trips it. A holder recognized as blocking
+  (`Store.suspendingOwner` unset) is never budgeted — blocking-vs-blocking
+  waits stay unbounded — and the suspending side's install/teardown windows
+  merely pause the clock, the conservative direction. A successful blocking
+  acquire also self-heals a leaked `suspendingOwner` (one observed while the
+  mutex is held is provably stale, cleared race-free). The instant-throw legs
+  land elsewhere and compose with the budget: wasmJs's `blockingWaitCanEnd`
+  refusal (issue #27, unchanged, fires first) and the own-body refusal
+  (issue #31, unchanged). `suspendAction`/`suspendAtomic` KDoc now state the
+  amended wait contract.
+
 ### Fixed
 
 - **The outer body's other coroutines no longer read a nested suspending
