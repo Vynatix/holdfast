@@ -11,7 +11,7 @@ README.md#2: Gradle install snippet (settings.gradle.kts + build.gradle.kts frag
 # --- holdfast/GUIDE.md: fragments that do not compile today ---
 holdfast/GUIDE.md#9: illustrative fragment with `…` placeholders
 holdfast/GUIDE.md#22: illustrative fragment with `…` placeholders
-holdfast/GUIDE.md#90: cheatsheet with `…` placeholders and undeclared helpers (including the store-tree lines' SettingsStore, ThreadStore, other and MyTreeMiddleware), illustrative by design
+holdfast/GUIDE.md#93: cheatsheet with `…` placeholders and undeclared helpers (including the store-tree lines' SettingsStore, ThreadStore, other and MyTreeMiddleware), illustrative by design
 
 # --- holdfast/GUIDE.md: API-reference signature listings (§13/§14), not standalone-compilable ---
 holdfast/GUIDE.md#28: API-reference signature listing (Bridge/Observable/Publisher)
