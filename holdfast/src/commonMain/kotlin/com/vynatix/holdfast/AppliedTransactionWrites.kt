@@ -135,6 +135,26 @@ internal fun Store<*>.appliedWriteMessage(
 }
 
 /**
+ * The refusal text for a write to this store inside [frame] while it is not
+ * enrolled: the write would commit independently and not roll back with the
+ * frame. [via] names the write path that hit the refusal. (Lives outside
+ * `Store.kt` to keep that class under detekt's `LargeClass` line.)
+ */
+@OptIn(StoreInternalApi::class)
+internal fun Store<*>.unenrolledMessage(
+    frame: FrameMarker,
+    via: String,
+): String {
+    val name = this::class.simpleName ?: "Store"
+    val fn = if (frame.suspending) "suspendAtomic" else "atomic"
+    return "$name was mutated (via $via) inside $fn${frame.describeParticipants()} but is not " +
+        "enrolled. Its writes would commit independently and would NOT roll back with the frame. " +
+        "Fix: add $name to the $fn(...) participant list. (Mid-frame enrollment is not possible — " +
+        "it would acquire a lock outside the sorted global order.) To deliberately run an " +
+        "independent side-transaction, pass policy = FramePolicy.AllowUnenrolled."
+}
+
+/**
  * `Store.property` for failure messages, or a generic phrase for a state
  * with no declaration (a `MutableState` constructed by hand). Reads the
  * state's declaration back-link, so it takes no lock: this runs on the

@@ -1809,7 +1809,13 @@ internal coroutine `Mutex` installed lazily — also while it is being
 installed: the first `suspendAction` or `suspendAtomic` on a store waits,
 suspending and holding no thread, for a blocking `action` or `atomic` that
 took the store before the `Mutex` existed, and a blocking one that finds it
-installed once it has the store waits for it. Cancellation of the body
+installed once it has the store waits for it: **up to 2 seconds** — the
+clock restarting whenever the in-flight suspending operation observably
+progresses (it stages a write, starts its commit) — after which it throws
+`StoreSuspendInFlightException` instead of freezing the calling thread on a
+holder that may never finish (issue 003). A wait behind another *blocking*
+action is never budgeted: a blocking holder cannot park the thread it
+needs, so that wait always ends. Cancellation of the body
 rolls back the transaction; commit phase wraps in `NonCancellable` so
 observer/bridge fanout completes cleanly even if the surrounding scope
 cancels mid-commit, and the call then returns the commit's
@@ -1831,7 +1837,9 @@ Limitations: while the `suspendAction` holds the store, a bare
 `mutate`/`update` from ANY thread (including threads the body spawns) stages
 into its transaction. Before the apply pass it silently joins it; after, it
 throws until `suspendAction` returns (§8.2). Other threads should write
-through `store action { … }`, which waits.
+through `store action { … }`, which waits — bounded by the 2 s
+progress-aware budget described above when a suspending holder holds the
+store.
 
 ### 14.9 `:holdfast-compose`
 
