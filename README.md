@@ -101,8 +101,14 @@ is **experimental** with these limitations:
   `:holdfast-coroutines`' own test suites use `runBlocking` /
   `newSingleThreadContext`, neither of which exists on wasm, so their wasmJs
   test tasks are force-disabled (`:holdfast-compose` has only a compile-level
-  smoke test). The never-published `:wasm-tests` module runs smoke tests
-  through the public API on wasmJs (Node.js) in CI instead.
+  smoke test). The never-published `:wasm-tests` module is the wasmJs
+  coverage instead: a commonTest suite over the public,
+  `@ExperimentalStoreApi` and `@StoreInternalApi` surface that runs on
+  wasmJs (Node.js) in CI with the JVM as the control — a test green on the
+  JVM and red on wasmJs is a wasmJs bug — and pins the fixed wasmJs defects
+  (#26 mutex `tryLock` balance, #27 blocking-wait refusal, #28 parked-read
+  isolation, #29 undispatched frame bodies, #31 own-body blocking refusal,
+  #38 nested-entry scopes).
 - **`FileSystemKvStore` throws `UnsupportedOperationException`** — the browser
   has no synchronous filesystem API; use `InMemoryKvStore` or a
   browser-storage-backed `KvStore` instead.
@@ -267,8 +273,10 @@ for when each lands.
   `store action { }` for any mutation.
 
 - **Nothing is published to Maven Central yet.** The badge and the install block
-  above describe the intended coordinates, not a resolvable artifact — build from
-  source until 0.3.0 ships the release pipeline.
+  above describe the intended coordinates, not a resolvable artifact — build
+  from source until the first release ships. The release pipeline is on main
+  (tag-driven `publish.yml`, `scripts/release.sh`, the `RELEASE.md` runbook —
+  issue #46); nothing has been published through it yet.
 
 ## Contributing
 
