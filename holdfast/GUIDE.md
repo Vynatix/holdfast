@@ -4841,9 +4841,10 @@ always: not the store.
 - `dispose()` never cancels any scope — not the `bindToScope` binding, not
   `Store.defaultScope`, not a per-call scope. Scope lifetimes are owned by
   whoever created them.
-- Cancelling a scope you bound is a *soft pause*: work that asks for a scope
-  afterwards falls down the chain (to the next binding or the process
-  default). `dispose()` is terminal (§19).
+- Cancelling a scope you bound is *not* observed by the store: `scope` keeps
+  answering the cancelled binding, and new work launched on it never runs —
+  rebind with `bindToScope` (last-writer-wins) or pass a per-call scope.
+  `dispose()` is terminal (§19).
 - `bindToScope` is rebindable and last-writer-wins; bind once at app init,
   or guard the binding externally (§13).
 
@@ -4937,7 +4938,7 @@ without a row:
 |---|---|
 | `action`, `mutate`/`update`, `effect`, `bridge`, `observeFrom` | throws `store disposed` |
 | `reset()`, `restore(…)` (every policy, sterile included), `snapshot()`, `taggedStates(…)` | throws |
-| a state delegate read (`v.count`) — or a *new* declaration (`val x by state { … }`) | throws |
+| a state delegate read (`v.count`) — or a *new* declaration (`val x by state { … }`) | throws (a `State` handle obtained earlier, and its `tags`, stay readable — they read the declaration/last committed value) |
 | `derivedState`/`merged` creation on it, `registerDerivedBackingState` | throws |
 | `properties`, `getState`, `hasState`, `removeState`, `clearStates` | throws |
 | keyed families: `docs[key]`, `getOrNull`, `in`, `entries`, `evict`, `evictAll` | throws |
