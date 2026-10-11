@@ -25,6 +25,16 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   host), the report is guarded so a throwing handler cannot strand the work
   still queued, and the settle keeps going after the failure, so later tasks
   and drains still run.
+- **Issue #32 — observer registration identity.** Passing the same handler to
+  `effect` twice no longer collapses into one observer: every
+  `MutableState.observe` registration now carries its own identity (a fresh
+  holder per call), so registering the same handler — or any observers an
+  equality-based set would compare equal, such as `effect`'s bound
+  `handler::invoke` references to one receiver, or a reused non-capturing
+  lambda — yields two observers, two initial fires, two fires per commit and
+  two independent `Disposable`s, each removing exactly its own registration;
+  double-dispose stays safe and disposing one leaves the other live. The
+  parity check pinned while fixing #26 is flipped accordingly.
 
 - **A store's post-commit drain no longer recurses on one thread (issue
   #37).** A derived state's recompute, run by a drain of its host's

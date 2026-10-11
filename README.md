@@ -111,6 +111,12 @@ is **experimental** with these limitations:
   `suspendAction { … }` instead.
 - **Single-threaded model** — `currentThreadId()` returns `0` for every caller,
   so thread-confinement checks trivially pass.
+- **A blocking `action` cannot wait for a suspended `suspendAction`** — a
+  blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting, since that holder can only
+  resume once the blocking call returns. Write through `suspendAction { … }`
+  from coroutines on wasmJs.
 
 ## Install
 
@@ -172,17 +178,19 @@ for when each lands.
   carries the cross-store hazard every observer does (GUIDE §10.2, §17.8).
 
 - **A blocking `action { }` called from inside a `suspendAction { }` body on the
-  same store still spins.** The serializer is held by the suspending body and the
-  blocking call waits for it. *Workaround:* inside a suspending body use
+  same store still spins on JVM/Android/iOS** (on wasmJs it throws an
+  `IllegalStateException` at once instead, issue #27). The serializer is held by
+  the suspending body and the blocking call waits for it. *Workaround:* inside a suspending body use
   `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
   fail-fast guard is next in 0.2.0. (From inside a `suspendAction`'s or
   `suspendAtomic`'s commit — an observer, a bridge publish, an event collector
   the emit resumes inline, a frame observer — a blocking `action` or `atomic`
   on a store whose transaction that commit has applied — for a
   `suspendAtomic`, any participant, since every one applies before any fans
-  out — already returns an `Error` instead of spinning. One gap remains: on
-  iOS and wasmJs, inside a nested `withContext(dispatcher)` there (say, in a
-  `publishAwaited`). A store that commit has applied refuses every inline
+  out — already returns an `Error` instead of spinning. One gap remains:
+  inside a nested `withContext(dispatcher)` there (say, in a
+  `publishAwaited`) the call is not recognised — on iOS it still waits
+  forever; on wasmJs it throws an `IllegalStateException`. A store that commit has applied refuses every inline
   write — `mutate` throws there too — so make the write part of the action,
   or launch it once the commit has finished:
   `store.scope.launch { store.suspendAction { … }.getOrThrow() }`.) Other

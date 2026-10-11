@@ -28,9 +28,11 @@ import kotlinx.coroutines.test.TestScope
  * `advanceTimeBy()`, and `currentTime` can be invoked against it directly.
  *
  * Implements [StoreAutoRegistration] — the member-extension surface that lets
- * tests call `myStore.action { … }`, `myStore.read { … }`, `myStore.timeline`,
- * etc. directly inside a [storeTest] block without an explicit [track] call.
- * See [StoreAutoRegistration] for the resolution model. The
+ * tests call `myStore.trackedAction { … }`, `myStore.read { … }`,
+ * `myStore.timeline`, etc. directly inside a [storeTest] block without an
+ * explicit [track] call. See [StoreAutoRegistration] for the resolution
+ * model (a bare `myStore.action { … }` stays `Store`'s own member and does
+ * not auto-track). The
  * `inline reified middlewareEventsOf<M>()` overload is declared as a member
  * here (not in the interface) because reified type parameters require `inline`
  * and an `inline reified` interface member would inline through the abstract

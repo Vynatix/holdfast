@@ -43,6 +43,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   builds the tree value's host store (the core builds it on the first
   value read only).
 
+### Removed
+
+- **The `V.action` auto-registration extension** (0.5.0 "harness earns its
+  claim"). `Store.action` is a member and always won overload resolution,
+  so the extension was dead at every call site: a bare
+  `store.action { … }` inside `storeTest` never auto-tracked and never fed
+  the handle's `lastResult` slot or the unconsumed-error guard. Replaced
+  by `V.trackedAction` — a name `Store` does not declare, so Kotlin cannot
+  shadow it and it always routes through the `StoreHandle` (auto-track,
+  result recorded, pending-error guard armed); its KDoc teaches the
+  routing, and `AutoRegistrationTest` pins both sides.
+
 ### BREAKING (behavior)
 
 - **Teardown keeps the middleware a test installed.** `storeTest`'s
@@ -55,6 +67,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   store tree's `tree.middlewares` ring is untouched. A test that relied on
   teardown clearing its own middleware must call `clearMiddleware()`
   itself.
+- **Never-recordable matcher categories refuse instead of passing
+  vacuously.** The handle-receiver timeline combinators (`shouldFire`,
+  `shouldFireInOrder`, `shouldFireInExactOrder`, `shouldNotFire`) now throw
+  a teaching `IllegalStateException` — mirroring how Secret value-matchers
+  refuse — for two categories whose events can never appear on a recorded
+  timeline: `middleware { }` predicates the recorder's self-events cannot
+  satisfy (user middlewares are not wrapped in v1, so their
+  started/completed/errored events never appear), and
+  `bridgePublished`/`bridgeObserved` on a state whose bridge the recorder
+  never wrapped (none attached, attached after `track(v)`, or the state not
+  materialized then). Previously `shouldNotFire` with such a predicate
+  passed vacuously and the positive forms failed with a generic
+  "did not match". Synthetic `List<StoreEvent>` receivers (hand-built
+  timelines) and `Capture.None` stay permissive.
 
 ### Changed
 
@@ -63,6 +89,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tracking a keyed store from the thread that created it, get exactly one
   handle per store (a handle built by a losing racer detaches its recorder
   and is dropped).
+- **`suspendAction` feeds the timeline.** Verified and pinned by
+  `StoreHandleActionTest.suspendActionFeedsTheTimeline`:
+  `:holdfast-coroutines`' suspending entries fire the middleware chain in
+  concentric-ring order like the blocking path, so the harness recorder
+  records suspending transactions the same as blocking ones. The stale
+  Recorder/StoreHandle KDoc claims ("suspendAction does not run the
+  middleware chain", "suspendAction not running middleware in 1.1") are
+  corrected — there is no never-recorded suspending-timeline category
+  today.
+- **Dependency diet.** Dropped the unused `api(kotest-assertions-core)`:
+  no source in this module — or in any module compiling against it
+  (`:holdfast`'s commonTest, `:doc-snippets`) — imports `io.kotest`; the
+  matcher surface is hand-rolled. The hallmark matcher
+  (`shouldBeBoxedAs`) already lives in `:holdfast-hallmark`; nothing
+  hallmark-shaped is hard-wired into this module's build.
 
 ### Added
 
@@ -95,3 +136,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   skipped — then removes the recorder; no store is ever disposed.
   `track(tree)` is idempotent by receiver identity and throws on a
   disposed store.
+- **Module README** (`holdfast-testing/README.md`, 0.5.0 funnel): the
+  dependency line, a complete copy-paste quickstart under the current
+  `storeTest { }` name (`track`, a handle action, a `shouldFireInOrder`
+  timeline matcher), how to run it, the action-shadowing trap with the
+  `trackedAction` verb, a compact surface listing, what teardown
+  enforces, and the never-recordable/Secret refusals. `:doc-snippets`
+  does not twin module READMEs outside its tracked list, so the README's
+  fenced blocks are not CI-compiled; both were verified verbatim by a
+  temporary mirror test.
