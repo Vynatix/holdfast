@@ -36,7 +36,13 @@ import kotlin.uuid.Uuid
  *    and vice versa. On wasmJs, where the in-flight body can only resume on
  *    the one thread the blocking call would wait on, that blocking `action`
  *    (or `atomic`, `reset()`, `restore()`) throws an `IllegalStateException`
- *    instead of waiting (issue #27). Coordination is via an internal coroutine [Mutex] installed
+ *    instead of waiting (issue #27). Called on THIS store from inside this
+ *    body, a blocking `action` (or `atomic(...)`, `reset()`, `restore()`)
+ *    throws that `IllegalStateException` on EVERY platform (issue #31): the
+ *    body holds the store's suspend mutex, so the wait could never end —
+ *    stage the write with `mutate`/`update` instead, or make the blocking
+ *    call once the body has returned; a blocking entry on another store is
+ *    unaffected. Coordination is via an internal coroutine [Mutex] installed
  *    lazily on first use — also while it is installed: this call waits,
  *    suspending, for a blocking `action`/`atomic` that took the store before
  *    the [Mutex] existed.

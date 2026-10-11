@@ -10,6 +10,19 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **A blocking entry inside a store's own suspending body is refused instead
+  of hanging (issue #31).** A blocking `action { }`, `reset()`, `restore()`
+  or `atomic(...)` on a store, called from inside that same store's
+  `suspendAction`/`suspendAtomic` body (`:holdfast-coroutines`), spun forever
+  on the store's suspend mutex — held by the very body making the call — on
+  every platform (on wasmJs it already refused, with a different message,
+  issue #27). It now throws an `IllegalStateException` naming the store and
+  the working alternatives, before any wait: the entry guard recognizes the
+  body through the settle scope its suspending root was opened in (the same
+  signal that isolates its pending reads, issue #28), which the body carries
+  across every dispatch. A blocking entry on another store, and one from a
+  thread beside a parked suspending holder — which keeps waiting for it as
+  before — are unaffected.
 - **A settle no longer silently drops a thrown exception (issue #30).**
   `SettleScope.settle()` wrapped each piece of work — a derived state's
   recompute, or a frame's drain of one store's post-commit queue — in a

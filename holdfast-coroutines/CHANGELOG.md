@@ -8,6 +8,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A blocking entry inside a store's own suspending body is refused instead
+  of hanging (issue #31, fixed in `:holdfast`).** A blocking
+  `action { }`, `reset()`, `restore()` or `atomic(...)` on a store, called
+  from inside that same store's `suspendAction`/`suspendAtomic` body, spun
+  forever on the store's suspend mutex — held by the very body making the
+  call — on JVM/Android/iOS (on wasmJs it already refused with issue #27's
+  message). It now throws an `IllegalStateException` naming the store and the
+  working alternatives — `mutate`/`update` stage into the suspending
+  transaction, or make the blocking call once the body has returned — on
+  every platform, with one message. A blocking entry on another store, and
+  one from a thread beside a parked suspending holder, are unaffected.
 - **iOS/wasmJs: `suspendAtomic` no longer yields the thread before its body
   runs (issue #29).** On iOS and wasmJs the frame marker's carrier is an
   interceptor, so `suspendAtomic` started its body through a dispatching

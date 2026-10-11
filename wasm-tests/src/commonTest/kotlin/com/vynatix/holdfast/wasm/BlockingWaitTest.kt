@@ -199,13 +199,13 @@ class BlockingWaitTest {
             assertEquals(1, other.n.value, "the frame committed whole")
         }
 
-    // The holder itself makes the blocking call: README's first known issue.
-    // It still spins on the JVM, so this runs on wasmJs only, where it is
-    // refused with advice for this case, and the body's commit stands.
+    // The holder itself makes the blocking call: issue #31 (README's first
+    // known issue). Refused with one teaching message on EVERY platform —
+    // on the JVM it used to spin forever, and on wasmJs it was refused with
+    // issue #27's single-threaded message — and the body's commit stands.
     @Test
     fun aBlockingActionInsideTheHoldersOwnBodyIsRefused() =
         runTest {
-            if (blockingWaitsCanEnd) return@runTest
             val store = BlockingWaitStore()
             var refused: Throwable? = null
             val result =
@@ -216,7 +216,9 @@ class BlockingWaitTest {
             assertIs<TransactionResult.Success<*>>(result)
             assertEquals(3, store.n.value)
             val message = assertIs<IllegalStateException>(refused).message.orEmpty()
-            assertContains(message, "Inside that holder's own body, write with mutate/update")
+            assertContains(message, "inside that store's own suspending body")
+            assertContains(message, "BlockingWaitStore")
+            assertContains(message, "mutate")
         }
 
     // tree.reset() opens one atomic over the subtree's stores.

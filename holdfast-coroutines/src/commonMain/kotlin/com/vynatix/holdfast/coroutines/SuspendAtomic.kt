@@ -50,8 +50,11 @@ import kotlin.uuid.Uuid
  *
  * **Interop fails fast.** Blocking `store.action { }` on a participant inside
  * the body throws [com.vynatix.holdfast.FrameInteropException] immediately
- * instead of deadlocking on the store's suspend mutex. Nested frames that
- * introduce a store sorting below an already-held `lockOrderKey` throw
+ * instead of deadlocking on the store's suspend mutex. The same refusal,
+ * with the same teaching shape, covers a blocking entry on a store held by
+ * its own suspending body outside any frame — inside a `suspendAction` body
+ * (issue #31). Nested frames that introduce a store sorting below an
+ * already-held `lockOrderKey` throw
  * [com.vynatix.holdfast.FrameLockOrderException] at entry. Frame-contract
  * violations rethrow out of `suspendAtomic` after rollback — they are never
  * folded into an ignorable `Error` result.

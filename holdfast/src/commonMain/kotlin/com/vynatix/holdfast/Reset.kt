@@ -96,7 +96,9 @@ package com.vynatix.holdfast
  *   action: inside a `:holdfast-coroutines` `suspendAtomic` body that enrolls
  *   this store it throws `FrameInteropException`, and inside an [atomic] body
  *   that does not enroll it, `UnenrolledStoreException` (unless the frame's
- *   policy allows unenrolled writes).
+ *   policy allows unenrolled writes); inside this store's own
+ *   `suspendAction`/`suspendAtomic` body it throws instead of waiting for the
+ *   very suspend mutex that body holds (issue #31).
  */
 @ExperimentalStoreApi
 fun <V : Store<V>> V.reset(): TransactionResult<Unit> {
