@@ -87,7 +87,10 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   `CoroutineStart.UNDISPATCHED`, `Dispatchers.Main.immediate`). On iOS and
   wasmJs a nested `withContext(dispatcher)` section of the body, which
   already loses the entry's settle scope there, now reads committed values
-  too. Behavior change: a bare `update { }` from another coroutine while
+  too; a suspending entry started inside such a section re-wraps the
+  section's dispatcher with the carried settle scope, so it is isolated the
+  same way — its root records that scope rather than none, and while it
+  parks, other coroutines read committed values. Behavior change: a bare `update { }` from another coroutine while
   the body is parked now computes from the committed value; its write
   still joins the parked transaction, as any thread's bare write does
   (GUIDE §8.2), so it replaces the body's pending write to that state

@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -230,6 +231,44 @@ class SuspendingIsolationTest {
             assertEquals(3, nested)
             assertEquals(3, a.n.value)
             assertEquals(3, b.n.value)
+        }
+
+    // An entry started inside a withContext(dispatcher) section of another
+    // suspending entry's body. On iOS and wasmJs the section displaces the
+    // slot carrier of the body's settle scope; the entry used to join the
+    // carried scope without it installed in the slot, its root recorded no
+    // scope, and while it parked every coroutine read its uncommitted writes
+    // (#28 review F1). It re-wraps the section's dispatcher with the carried
+    // scope now, so it is isolated like any other entry.
+    @Test
+    fun anEntryStartedInsideAWithContextSectionOfABodyIsIsolated() =
+        runTest {
+            val a = IsolationStore()
+            val b = IsolationStore()
+            val parked = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<Unit>()
+            var seenInInnerBody = -1
+            val holder =
+                launch(Dispatchers.Default) {
+                    a.suspendAction {
+                        withContext(Dispatchers.Default) {
+                            b.suspendAction {
+                                n mutate 5
+                                seenInInnerBody = n.value
+                                parked.complete(Unit)
+                                gate.await()
+                                throw IsolationRollback()
+                            }
+                        }
+                    }
+                }
+            parked.await()
+            val seenOutside = b.n.value
+            gate.complete(Unit)
+            holder.join()
+            assertEquals(5, seenInInnerBody, "read-your-own-writes inside the entry started in the section")
+            assertEquals(0, b.n.value, "the entry's write rolled back")
+            assertEquals(0, seenOutside, "another coroutine read the parked write of an entry started in a withContext section")
         }
 
     // Started undispatched inside a blocking action, the body begins in that

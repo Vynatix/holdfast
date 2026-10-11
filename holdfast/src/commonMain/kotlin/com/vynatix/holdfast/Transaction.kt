@@ -87,7 +87,10 @@ class Transaction internal constructor(
      * entry carries. `:holdfast-coroutines` installs it on every resumption of
      * that body and of the coroutines that inherit its context, and on no
      * other coroutine. [readsPendingHere] tells those apart from another
-     * coroutine on the owner thread by it.
+     * coroutine on the owner thread by it. A root made where no scope is
+     * installed records `null`, and `null` deliberately restores
+     * owner-thread semantics ([readsPendingHere] then relies on the thread
+     * check alone).
      */
     @OptIn(StoreInternalApi::class)
     internal var openedInScope: SettleScope? = null
@@ -105,8 +108,10 @@ class Transaction internal constructor(
      * suspending entry's, so a suspending entry nested in a body shares it
      * with that body and the coroutines it launched, and code resumed inline
      * from the body (an unconfined or undispatched start) runs inside it: all
-     * of those read the pending state too. [MutableState.value] and
-     * [evictionView] read through it.
+     * of those read the pending state too. A root made where no scope was
+     * installed records `null` in [openedInScope], and `null` deliberately
+     * restores owner-thread semantics (the thread check alone).
+     * [MutableState.value] and [evictionView] read through it.
      */
     @OptIn(StoreInternalApi::class)
     internal fun readsPendingHere(store: Store<*>): Boolean =

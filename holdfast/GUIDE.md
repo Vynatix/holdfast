@@ -965,7 +965,11 @@ suspensions while it resumes on the thread that opened it (always, on a
 single-threaded dispatcher such as `Dispatchers.Main` or `runTest`, and on
 wasmJs); resumed on another thread (`Dispatchers.Default`/`IO`), or inside a
 nested `withContext(dispatcher)` section on iOS and wasmJs, it reads
-committed values. While it is parked, another coroutine on its thread reads
+committed values. A suspending entry started inside such a section keeps the
+issue #28 isolation: it re-wraps the section's dispatcher with the body's
+settle scope, so its parked writes do not leak either — only the outer
+body's own reads inside the section stay committed. While it is parked,
+another coroutine on its thread reads
 committed values, as another thread does (issue #28) — except a coroutine
 that carries the body's settle scope: one the body launched, the body of a
 suspending entry nested in it (whose pending writes the outer body and its
@@ -2178,7 +2182,10 @@ Rules of the enforcement window:
 - In `suspendAtomic`, the enforcement marker travels with the coroutine
   across dispatcher hops (JVM/Android: `ThreadContextElement`; iOS/wasmJs: a
   delegating interceptor — on those two platforms a nested
-  `withContext(otherDispatcher)` section inside the body is not policed).
+  `withContext(otherDispatcher)` section inside the body is not policed; a
+  suspending entry started inside such a section is still read-isolated, as
+  §9.7 describes — it re-wraps the section's dispatcher with the carried
+  settle scope — so only the body's own reads there stay committed).
   Coroutines launched onto OTHER scopes (`GlobalScope.launch`) escape the
   frame on every platform — those writes are concurrent, not in-frame.
 
@@ -3036,7 +3043,9 @@ fun pinThenAdopt(notes: NotesStore) {
   body or its commit resumed elsewhere (on iOS and wasmJs, not inside a
   nested `withContext(dispatcher)` in it: a commit there does not see the
   entry's scope, so the derived states it changes recompute after that
-  commit, once per commit rather than once per entry); one holding a
+  commit, once per commit rather than once per entry; a suspending entry
+  started in that section re-wraps the section's dispatcher with the carried
+  scope, so its own commits see the scope again); one holding a
   source's store never holds another entry's recompute back, even one
   parked on the recomputing thread — Android's main thread, `runBlocking`,
   any thread on wasmJs: that recompute runs from committed values, and
