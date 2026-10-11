@@ -12,11 +12,13 @@ import com.vynatix.holdfast.testing.bridge.BridgeView
 import com.vynatix.holdfast.testing.bridge.LatchedBridge
 import com.vynatix.holdfast.testing.bridge.RecordingBridge
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.Recorder
 import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.reflect.KProperty1
+import kotlin.time.Clock
 
 /**
  * Test-scope handle to a tracked [Store]. Returned by [StoreTestScope.track]; the
@@ -38,8 +40,22 @@ import kotlin.reflect.KProperty1
  * pushes [StoreEvent]s into [timeline] for every transaction lifecycle, with
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
- * known limits (commit-time errors after the body returns, user middlewares
- * not auto-wrapped, suspendAction not running middleware in 1.1).
+ * known limits (commit-time errors after the body returns; user middlewares
+ * not auto-wrapped — their lifecycle events never reach the timeline, and the
+ * handle-receiver matcher combinators refuse predicates on them).
+ *
+ * The handle also remembers the store's clock binding (`Store.bindClock`) as
+ * it was when the store was first tracked, and teardown puts it back — after
+ * the body, and again once the test's un-joined child coroutines finish — so a
+ * clock a test binds on a long-lived (singleton) store after tracking it does
+ * not leak into the next test. Track the store before binding its clock, with
+ * `track` or an auto-registering extension such as `store.read { }` or
+ * `store.trackedAction { }` (a bare `store.action { }` resolves to the
+ * `Store` member and does not track): a
+ * clock bound before the first track counts as the pre-test binding and is
+ * kept. Work in `backgroundScope` or on a scope outside the test is not waited
+ * for, so a binding it makes after the test ends is not undone; join such work
+ * before the body ends.
  */
 class StoreHandle<V : Store<V>> internal constructor(
     val store: V,
@@ -47,6 +63,15 @@ class StoreHandle<V : Store<V>> internal constructor(
 ) {
     private val handleLock = SynchronizedObject()
     private val pendingErrorList: MutableList<TransactionResult.Error> = mutableListOf()
+
+    /**
+     * The store's raw clock binding when this handle was created (`null` when
+     * none), which [StoreTestScope] restores at teardown and again when the
+     * test's job completes (see
+     * [com.vynatix.holdfast.testing.internal.PrivilegedHooks.restoreBoundClock]).
+     * Read before `init` installs anything, so it is the pre-track binding.
+     */
+    internal val clockAtTrack: Clock? = PrivilegedHooks.boundClock(store)
 
     /**
      * Privileged recorder. `null` when [captureMode] is [Capture.None] — the
@@ -69,6 +94,15 @@ class StoreHandle<V : Store<V>> internal constructor(
      * track(v) replaces the wrapped reference with the unwrapped one and
      * subsequent BridgePublished/Observed events will not fire for that
      * state.
+     *
+     * Only [Store.properties] are walked, so a bridge attached to an entry of
+     * a keyed state family (`keyedState`) is never wrapped: its publishes and
+     * inbound values do not reach the timeline (its writes do, as
+     * EmissionEvents).
+     *
+     * Guarded by [handleLock]: a handle that lost the registration race for
+     * this store hands its wrappers over from its own thread
+     * ([yieldToInternal]).
      */
     private val bridgeWrappers: MutableMap<State<*>, RecordingBridgeWrapper<*>> = mutableMapOf()
 
@@ -106,7 +140,7 @@ class StoreHandle<V : Store<V>> internal constructor(
                 .filter { (_, _, attached) -> attached !is RecordingBridgeWrapper<*> }
         for ((state, mutable, attached) in wrappable) {
             val wrapper = RecordingBridgeWrapper(state = state, delegate = attached, recorder = recorder)
-            bridgeWrappers[state] = wrapper
+            synchronized(handleLock) { bridgeWrappers[state] = wrapper }
             // Replace the attached bridge — store setter disposes the old
             // inbound subscription and calls wrapper.observe.
             mutable.bridge = wrapper as Bridge<Any>
@@ -158,10 +192,12 @@ class StoreHandle<V : Store<V>> internal constructor(
      * Filter of [timeline] for [EmissionEvent]s targeting [prop]'s state on
      * this store. Resolves [prop] against the live store instance, so
      * `MyStore::count` returns events for the same `State<*>` reference the
-     * recorder pushed at commit time. Order is preserved.
+     * recorder pushed at commit time — for a `derivedState`/`merged`
+     * property, its backing state, which its recomputes commit. Order is
+     * preserved.
      */
     fun emissions(prop: KProperty1<V, State<*>>): List<EmissionEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<EmissionEvent>().filter { it.state === target }
     }
 
@@ -170,10 +206,11 @@ class StoreHandle<V : Store<V>> internal constructor(
      * store. Populated by the [Recorder] when bridges attached to tracked
      * states publish / observe — see [RecordingBridgeWrapper] for the wrap
      * strategy and the v1 limit (bridges attached AFTER `track(v)` are not
-     * wrapped).
+     * wrapped). A bridge on a keyed state family's entry is never wrapped, so
+     * its publishes and inbound values are not recorded.
      */
     fun bridgeEvents(prop: KProperty1<V, State<*>>): List<BridgeEvent> {
-        val target = prop.get(store)
+        val target = PrivilegedHooks.recordedState(prop.get(store))
         return timeline.filterIsInstance<BridgeEvent>().filter { it.state === target }
     }
 
@@ -197,14 +234,25 @@ class StoreHandle<V : Store<V>> internal constructor(
      * [com.vynatix.holdfast.bridge.KvBridge]) only the wrapper-tracked publishes
      * are visible — but only if the bridge was wrapped at install time.
      *
+     * For a `StateTag.Secret` state the view withholds every published value
+     * (each entry of `published` is [com.vynatix.holdfast.Redacted]), and the
+     * bridge value matchers refuse it; see [BridgeView].
+     *
      * @throws IllegalStateException if the state has no bridge attached.
      */
     fun bridge(prop: KProperty1<V, State<*>>): BridgeView<*> {
-        val state = prop.get(store)
-        val wrapper = bridgeWrappers[state]
-        if (wrapper != null) {
-            return BridgeView(BridgeView.WrappedSource(wrapper))
-        }
+        val state = PrivilegedHooks.recordedState(prop.get(store))
+        val wrapper = synchronized(handleLock) { bridgeWrappers[state] }
+        val view = wrapper?.let { BridgeView(BridgeView.WrappedSource(it)) } ?: attachedBridgeView(prop, state)
+        // A Secret state's published values are withheld here, as in the timeline.
+        return if (PrivilegedHooks.isSecret(state)) view.withheldFor(prop.name) else view
+    }
+
+    /** [bridge]'s view of a state no install-time wrapper covers. */
+    private fun attachedBridgeView(
+        prop: KProperty1<V, State<*>>,
+        state: State<*>,
+    ): BridgeView<*> {
         // Fallback: no install-time wrapper, but the state may have a bridge
         // attached after track(v). Probe the MutableState.bridge directly and
         // try to construct a view from a known test-bridge type.
@@ -218,6 +266,20 @@ class StoreHandle<V : Store<V>> internal constructor(
             )
         return adaptBridge(attached)
     }
+
+    /**
+     * Whether [state]'s bridge publishes reach this handle's timeline: an
+     * install-time [RecordingBridgeWrapper] covers it (the wrapper map, or a
+     * wrapper still attached to the state — a racing handle may have adopted
+     * it). Wrapping happens only in this handle's `init`, so a state whose
+     * bridge is not wrapped by probe time can never produce
+     * [BridgePublished]/[BridgeObserved] events; the handle-receiver matcher
+     * combinators use this to refuse such predicates with a teaching error
+     * instead of letting them pass vacuously.
+     */
+    internal fun isBridgeRecordable(state: State<*>): Boolean =
+        synchronized(handleLock) { state in bridgeWrappers } ||
+            (state as? MutableState<*>)?.bridge is RecordingBridgeWrapper<*>
 
     @Suppress("UNCHECKED_CAST")
     private fun adaptBridge(attached: Bridge<*>): BridgeView<*> =
@@ -339,31 +401,65 @@ class StoreHandle<V : Store<V>> internal constructor(
     }
 
     /**
+     * Unwind this handle after it lost the registration race for its store to
+     * [winner] ([com.vynatix.holdfast.testing.internal.HandleRegistry.register]).
+     * Two handles built at once both re-attach the store's bridges, and
+     * whichever wrapped a state first owns its [RecordingBridgeWrapper] (the
+     * other found the state wrapped and skipped it). So each wrapper this
+     * handle installed that is still the state's bridge is handed over:
+     * re-pointed at the winner's recorder and listed in its map when the
+     * winner records, or, when it records nothing (`Capture.None`), unwrapped
+     * so the state's own bridge is back. Then the recorder comes off as at
+     * teardown. Without this the wrappers would feed this handle's cleared
+     * recorder and the winner would never see their publishes.
+     */
+    internal fun yieldToInternal(winner: StoreHandle<V>) {
+        val mine = synchronized(handleLock) { bridgeWrappers.toMap() }
+        val target = winner.recorder
+        for ((state, wrapper) in mine) {
+            if (!wrapper.isAttached()) continue
+            if (target == null) {
+                wrapper.unwrap()
+            } else {
+                wrapper.redirectTo(target)
+                winner.adoptWrapperInternal(state, wrapper)
+            }
+        }
+        disposeRecorderInternal()
+    }
+
+    /** List [wrapper], installed by a losing racer and now feeding this handle's recorder, for [bridge]. */
+    private fun adoptWrapperInternal(
+        state: State<*>,
+        wrapper: RecordingBridgeWrapper<*>,
+    ) {
+        synchronized(handleLock) { bridgeWrappers[state] = wrapper }
+    }
+
+    /**
      * Detach the recorder middleware from the tracked store and drop every
      * recorded event. Called from [StoreTestScope.tearDown] in a fixed order
      * (after barriers cancel, before the handle registry clears) so no
      * post-teardown action accidentally records events.
      *
-     * Detachment is "all-middleware-clear" because :holdfast only exposes
-     * [com.vynatix.holdfast.Store.clearMiddleware] for removal — there is no
-     * single-entry uninstall. Tests that install user middlewares before
-     * `track(v)` and expect them to persist past teardown should re-install
-     * them in the next test. (Pragmatically, store instances rarely outlive a
-     * `storeTest` block.)
+     * Detachment removes the recorder alone: every middleware the test
+     * installed on the store — before or after `track(v)` — and a tree's
+     * `StoreTree.middlewares` ring stay in place, so a store that outlives the
+     * `storeTest` block keeps behaving as the test left it.
      */
     internal fun disposeRecorderInternal() {
         val r = recorder ?: return
-        // Order: clear store's middleware list first (so no subsequent action on
-        // this store can fire the recorder), then drop the recorder's buffer.
-        // Catch any throw so teardown stays robust under leaked handles.
-        runCatching { store.clearMiddleware() }
+        // Order: remove the recorder from the store first (so no subsequent
+        // action on this store can fire it), then drop its buffer. Catch any
+        // throw so teardown stays robust under leaked handles.
+        runCatching { PrivilegedHooks.removeMiddleware(store, r) }
         // Drop the wrapper map; the wrappers remain attached to states (the
         // store still references them) but they hold a reference to a
         // recorder we are about to clear, so future publishes from a leaked
         // post-teardown action would push events into an empty buffer (no
         // observable effect). Clearing the map releases our reference so a
         // leaked handle does not retain wrappers indefinitely.
-        bridgeWrappers.clear()
+        synchronized(handleLock) { bridgeWrappers.clear() }
         r.dispose()
     }
 }

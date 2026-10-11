@@ -8,7 +8,7 @@ plugins {
     id("holdfast.quality")
     id("holdfast.dokka")
     id("holdfast.abi")
-    id("holdfast.publish.sonatype")
+    id("holdfast.publish")
 }
 
 kotlin {
@@ -31,6 +31,10 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+        }
+        // A headless Recomposer drives ComposeRecompositionTest on the JVM.
+        jvmTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

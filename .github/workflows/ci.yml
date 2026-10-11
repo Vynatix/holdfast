@@ -30,6 +30,12 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list still names the legacy `tools`
+          # package, which the SDK repository no longer carries; sdkmanager then
+          # exits 1 before any build step runs. AGP downloads the platform and
+          # build-tools it needs itself once the licences are accepted.
+          packages: platform-tools
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -47,7 +53,10 @@ jobs:
         run: ./gradlew publishToMavenLocal
         working-directory: hallmark-dep
 
-      - name: Build and test (JVM + Android)
+      # :wasm-tests is the only wasmJs test task CI runs (Node.js; the suites of
+      # :holdfast and :holdfast-coroutines cannot compile for wasmJs, and
+      # :holdfast-compose's compile-level browser smoke test is not run here).
+      - name: Build and test (JVM + Android + wasmJs)
         run: |
           ./gradlew \
             -Pholdfast.includeHallmark=true \
@@ -58,7 +67,19 @@ jobs:
             :holdfast-debug:jvmTest :holdfast-debug:testAndroidHostTest \
             :holdfast-hallmark:jvmTest :holdfast-hallmark:testAndroidHostTest \
             :holdfast-hallmark-coroutines:jvmTest :holdfast-hallmark-coroutines:testAndroidHostTest \
-            --stacktrace
+            :wasm-tests:jvmTest :wasm-tests:wasmJsTest \
+            --continue --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-jvm-android
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            !hallmark-dep/**
+          if-no-files-found: ignore
 
       - name: API check and Dokka
         run: |
@@ -84,6 +105,7 @@ jobs:
             :holdfast-debug:detekt :holdfast-debug:ktlintCheck \
             :holdfast-hallmark:detekt :holdfast-hallmark:ktlintCheck \
             :holdfast-hallmark-coroutines:detekt :holdfast-hallmark-coroutines:ktlintCheck \
+            :wasm-tests:ktlintCheck \
             --stacktrace
 
   ios-and-jvm:
@@ -116,7 +138,9 @@ jobs:
         run: ./gradlew publishToMavenLocal
         working-directory: hallmark-dep
 
-      - name: iOS sim arm64 and JVM tests
+      # The apiChecks validate the iOS klib ABI slices, which a Linux host
+      # cannot dump (holdfast-testing's klib dump is hand-edited there).
+      - name: iOS sim arm64 and JVM tests, iOS ABI check
         run: |
           ./gradlew \
             -Pholdfast.includeHallmark=true \
@@ -127,4 +151,18 @@ jobs:
             :holdfast-debug:iosSimulatorArm64Test :holdfast-debug:jvmTest \
             :holdfast-hallmark:iosSimulatorArm64Test :holdfast-hallmark:jvmTest \
             :holdfast-hallmark-coroutines:iosSimulatorArm64Test :holdfast-hallmark-coroutines:jvmTest \
-            --stacktrace
+            :holdfast:apiCheck :holdfast-coroutines:apiCheck :holdfast-testing:apiCheck :holdfast-compose:apiCheck :holdfast-debug:apiCheck \
+            --continue --stacktrace
+
+      # A Kotlin/Native test failure reaches the console as "AssertionError at
+      # null:-1"; the message is only in the XML report.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-ios-jvm
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            !hallmark-dep/**
+          if-no-files-found: ignore

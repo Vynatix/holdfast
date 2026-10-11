@@ -96,6 +96,16 @@ data class TransactionErrored(
  * [newValue] is the post-`transformer.get` view of the about-to-be-committed
  * pending write (read via [State.value] on the owner thread inside the active
  * transaction, so read-your-own-writes returns the pending value).
+ *
+ * For a `StateTag.Secret` state (a `derived` of one included) both values are
+ * [com.vynatix.holdfast.Redacted]: a secret never reaches a timeline, so the
+ * event can be printed. Its presence still says the state changed.
+ *
+ * A `derivedState`/`merged` state's value is committed by its recompute, in a
+ * transaction of its own on its store, and [state] is then its backing state
+ * (a `MutableState`), not the `DerivedState` itself: look its events up
+ * through the handle (`handle.emissions(MyStore::merged)`,
+ * `emitted(MyStore::merged)`), which resolves the property to that backing.
  */
 data class EmissionEvent(
     val state: State<*>,
@@ -141,6 +151,9 @@ data class MiddlewareErrored(
  * attached after `track(v)` are not wrapped, so their interactions are invisible
  * to the timeline. The constraint is forced by `:holdfast` not exposing a hook for
  * late bridge attachments.
+ *
+ * The `value` of a [BridgePublished] or [BridgeObserved] event for a
+ * `StateTag.Secret` state is [com.vynatix.holdfast.Redacted].
  */
 sealed interface BridgeEvent : StoreEvent {
     val state: State<*>

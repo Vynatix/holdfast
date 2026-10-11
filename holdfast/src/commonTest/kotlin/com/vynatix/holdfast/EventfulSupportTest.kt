@@ -129,16 +129,24 @@ class EventfulSupportTest {
             val v = SupportVault()
             // Drop the initial firing of effect (fires once with current value on
             // subscribe — see Effect.kt KDoc). Only commit-time entries are scored.
-            val trace = mutableListOf<String>()
+            val recorded = mutableListOf<String>()
+            val traceLock = object : kotlinx.atomicfu.locks.SynchronizedObject() {}
+
+            // The effect records on the committing thread, the collector on a
+            // Default worker: guard the shared list.
+            fun record(item: String) = kotlinx.atomicfu.locks.synchronized(traceLock) { recorded += item }
+
+            fun snapshot() = kotlinx.atomicfu.locks.synchronized(traceLock) { recorded.toList() }
+
             var skippedInitial = false
             val disposable =
                 v.n effect {
-                    if (skippedInitial) trace += "state=$this"
+                    if (skippedInitial) record("state=$this")
                     skippedInitial = true
                 }
             val collectJob =
                 testScope.launch {
-                    v.events.collect { trace += "event=$it" }
+                    v.events.collect { record("event=$it") }
                 }
             delay(50)
 
@@ -147,11 +155,12 @@ class EventfulSupportTest {
                 emit(SupportEvent.A)
             }
             withTimeoutOrNull(2_000) {
-                while (trace.size < 2) delay(10)
+                while (snapshot().size < 2) delay(10)
             }
             delay(100)
             disposable.dispose()
             collectJob.cancel()
+            val trace = snapshot()
 
             // effect fires SYNCHRONOUSLY during commit's observer fanout, so it lands
             // before the event hits the SharedFlow collector. Both must be present

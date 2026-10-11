@@ -6,10 +6,12 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 private class ApiVault : Store<ApiVault>() {
-    val n by state { 0 }
+    // `n` opts out of the dedup default (issue #007) so the update/mutate and
+    // re-fire tests below keep the original contract; `s` and `items` stay at
+    // the distinct default.
+    val n by state(distinct = false) { 0 }
     val s by state { "init" }
     val items by state { emptyList<String>() }
-    val nDistinct by state(distinct = true) { 0 }
 }
 
 class UpdateExtensionTest {
@@ -154,27 +156,30 @@ class ActionGenericReturnValueTest {
     }
 }
 
-class StateDistinctOptInTest {
+class StateDistinctSemanticsTest {
     @Test
     fun distinctStateDoesNotFireObserverOnSameValueCommit() {
+        // Since issue #007 the distinct comparison IS the default: `s` is
+        // declared with no arguments and still dedupes.
         val v = ApiVault()
-        v action { nDistinct mutate 5 }
-        val seen = mutableListOf<Int>()
-        val sub = v { nDistinct effect { seen.add(this) } }
+        v action { s mutate "x" }
+        val seen = mutableListOf<String>()
+        val sub = v { s effect { seen.add(this) } }
         seen.clear()
 
-        v action { nDistinct mutate 5 } // same value
-        v action { nDistinct mutate 5 } // same value again
-        assertEquals(emptyList(), seen, "distinct=true skips observer fanout when the committed value is unchanged")
+        v action { s mutate "x" } // same value
+        v action { s mutate "x" } // same value again
+        assertEquals(emptyList(), seen, "the distinct default skips observer fanout when the committed value is unchanged")
 
-        v action { nDistinct mutate 6 } // different
-        assertEquals(listOf(6), seen)
+        v action { s mutate "y" } // different
+        assertEquals(listOf("y"), seen)
         sub.dispose()
     }
 
     @Test
     fun nonDistinctStateStillFiresOnSameValueCommit() {
-        // Verify the default (distinct=false) preserves the original library contract.
+        // The explicit opt-out (distinct = false) preserves the original
+        // re-fire contract.
         val v = ApiVault()
         v action { n mutate 5 }
         val seen = mutableListOf<Int>()
@@ -183,7 +188,7 @@ class StateDistinctOptInTest {
 
         v action { n mutate 5 }
         v action { n mutate 5 }
-        assertEquals(listOf(5, 5), seen, "distinct=false (default) fires observer on every commit, even same value")
+        assertEquals(listOf(5, 5), seen, "distinct=false fires observer on every commit, even same value")
         sub.dispose()
     }
 }

@@ -200,26 +200,34 @@ class FrameFanoutTest {
         sub.dispose()
     }
 
-    @Test fun observersOnTheOwnerThreadSeePendingSiblingValuesDuringFanout() {
+    @Test fun observersSeeEverySiblingParticipantAppliedDuringFanout() {
         val a = FrameAccount(initial = 100)
         val b = FrameAccount(initial = 0)
         var bValueDuringAFanout = -1L
+        var bCommittedDuringAFanout = -1L
         val sub =
             a {
                 balance effect {
-                    if (this == 70L) bValueDuringAFanout = b.balance.value
+                    if (this == 70L) {
+                        bValueDuringAFanout = b.balance.value
+                        bCommittedDuringAFanout = b.snapshot()[b.balance] ?: -1L
+                    }
                 }
             }
         atomic(a, b) {
             a.action { balance update { it - 30 } }
             b.action { balance update { it + 30 } }
         }
-        // Commits apply sequentially in lock order, but reads from the frame's
-        // owner thread go through the still-active root's pending writes
-        // (read-your-own-writes during fanout) — so an observer on A checking
-        // the cross-store invariant sees B's about-to-be-committed value, and
-        // the invariant holds at every fanout point.
+        // Every participant applies before any fans out (issue #20, R9), so an
+        // observer on A checking the cross-store invariant finds B's value
+        // committed, not merely pending: a snapshot, which reads committed
+        // values only, sees it. (It used to see B's old value, B's root not
+        // having applied yet.) The plain owner-thread read is a regression
+        // guard: it saw B's pending write through read-your-own-writes before
+        // R9 too. FrameCommitOrderTest and ConsistentCutConcurrencyTest pin
+        // the guarantee for readers on other threads.
         assertEquals(30L, bValueDuringAFanout)
+        assertEquals(30L, bCommittedDuringAFanout)
         assertEquals(30L, b.balance.value)
         sub.dispose()
     }

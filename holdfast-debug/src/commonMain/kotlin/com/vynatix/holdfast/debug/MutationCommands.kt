@@ -156,7 +156,7 @@ internal class MutationCommands(
         state: State<*>,
         literal: String,
     ): Any {
-        if (name in entry.redact) {
+        if (entry.renderer.isRedacted(name, state)) {
             fail("REJECTED (redacted) $name: writes are refused to keep its value out of the console")
         }
         val current =

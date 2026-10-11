@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
@@ -30,7 +31,9 @@ import kotlin.time.Clock
  *  1. **TransactionStarted** + **MiddlewareStarted (self)** — pushed from
  *     `onTransactionStarted`, before the body runs.
  *  2. **EmissionEvent** — pushed from `onTransactionCompleted`, one per state
- *     in [com.vynatix.holdfast.Transaction.modifiedStates]. The hook runs after
+ *     in [com.vynatix.holdfast.Transaction.modifiedStates], with both values
+ *     [Redacted][com.vynatix.holdfast.Redacted] for a `StateTag.Secret` state
+ *     ([PrivilegedHooks.recordedValue]). The hook runs after
  *     the body returns successfully and BEFORE :holdfast calls `txn.commit()`,
  *     so `state.value` (read-your-own-writes overlay) returns the pending
  *     post-set value. To compute `oldValue` (the COMMITTED view, pre-action)
@@ -66,10 +69,16 @@ import kotlin.time.Clock
  *    is `final`). Their lifecycle events are therefore absent from the timeline.
  *    The recorder pushes self-events for itself so [com.vynatix.holdfast.testing.StoreHandle.middlewareEventsOf]
  *    is non-empty, but for any user-class M the typed view returns empty.
- *  - **suspendAction** does not run the middleware chain at all (see
- *    `:holdfast-coroutines.SuspendAction` — middlewares are documented as "NOT
- *    invoked for 1.1"). The recorder therefore sees no events for suspending
- *    actions. This matches the production contract.
+ *
+ *    (`suspendAction` is NOT a limitation: it fires the middleware chain in
+ *    concentric-ring order like the blocking path, so suspending transactions
+ *    are recorded the same as blocking ones. The old "middleware not invoked
+ *    for 1.1" note was stale. One fidelity limit remains: under
+ *    `suspendAction`/`suspendAtomic` the completed hook runs on the thread the
+ *    body ended on, and [Transaction.modifiedStates] is owner-thread-confined
+ *    — a body that resumed on another dispatcher thread after its last
+ *    suspension records NO [EmissionEvent]s for that transaction. The commit
+ *    markers are kept either way; see `onTransactionCompleted`.)
  *
  * The buffer is guarded by an [atomicfu][SynchronizedObject] lock so concurrent
  * `parallel { … }` tests don't corrupt it. The recorder only writes to the
@@ -214,15 +223,32 @@ internal class Recorder<V : Store<V>>(
         // middleware holds the store's transactionLock, so the brief
         // internalSetActiveTransaction(null) toggle inside the helper is safe
         // from concurrent observation.
-        val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store)
+        // modifiedStates is owner-thread-only. A state the store does not list
+        // (a derivedState's backing) is read with the registered ones.
+        //
+        // modifiedStates is owner-thread-confined, and under suspendAction /
+        // suspendAtomic the completed hook runs on the thread the body ENDED
+        // on — another dispatcher thread when the body resumed elsewhere after
+        // its last suspension. The read throws there; the recorder must
+        // degrade (no EmissionEvents for that transaction), never lose the
+        // commit markers: the hook itself is runCatching-isolated on the
+        // suspending path, so a throw here used to leave the timeline with
+        // started alone — an intermittently "inexplicably empty" timeline for
+        // coroutine-first tests. Mirrors ProfilingMiddleware's attribution
+        // degradation.
+        val modified: Set<State<*>> =
+            runCatching { PrivilegedHooks.modifiedStates(txn) }.getOrElse { emptySet() }
+        if (modified.isNotEmpty()) {
+            val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store, modified)
 
-        // Iterate modifiedStates (owner-thread-only). For each, read the
-        // post-set value via the public State.value getter — read-your-own-writes
-        // is in effect, so this returns the about-to-be-committed pending value.
-        for (state in PrivilegedHooks.modifiedStates(txn)) {
-            val newValue: Any = state.value
-            val oldValue = committedSnapshot[state]
-            push(EmissionEvent(state = state, oldValue = oldValue, newValue = newValue, timestamp = now))
+            // For each modified state, read the post-set value via the public
+            // State.value getter — read-your-own-writes is in effect, so this
+            // returns the about-to-be-committed pending value.
+            for (state in modified) {
+                val newValue = PrivilegedHooks.recordedValue(state, state.value)
+                val oldValue = committedSnapshot[state]
+                push(EmissionEvent(state = state, oldValue = oldValue, newValue = newValue, timestamp = now))
+            }
         }
         push(TransactionCommitted(transaction = txn, timestamp = now))
         push(MiddlewareCompleted(middleware = this, transaction = txn, timestamp = now))

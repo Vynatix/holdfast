@@ -121,20 +121,29 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 ### Core surface
 
 - **Transactional `action { }`** — atomic multi-state writes; body's return value flows into `TransactionResult.Success<R>`.
-- **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`.
-- **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, `ProfilingMiddleware`, or your own.
+- **Effects + bridges** — observe state changes; two-way external sync via `Bridge<T>`; inbound-only via `observeFrom(Observable<T>)`. A throwing effect, bridge publish or `derived` recompute never undoes its commit: it goes to `Store.uncaughtObserverHandler`, and is logged (standard error on JVM/Android) while no handler is set — set one at app init to route these failures into your own logging. An effect writing back into the store whose commit is notifying it is refused instead of being lost: `mutate`/`update`/`emit` throw into that handler, and a nested `action`/`atomic` returns an `Error` the effect must check ([GUIDE §4.4](GUIDE.md#4-the-seven-primitives)).
+- **Middleware** — wrap every transaction with `LoggingMiddleware`, `TimingMiddleware`, `ValidationMiddleware`, `ProfilingMiddleware`, or your own; over a store tree, one `TreeMiddleware` (`App.tree.middlewares(...)`, experimental) wraps the transactions of `App` and of every store under it with that store's node, outermost of each store's own.
 - **Transformers** — normalize on write / project on read, including the asymmetric case where `set` and `get` produce different shapes.
 - **Cross-store state ownership** — foreign-store states are rejected at compile time of the call (runtime ownership check at O(1)).
-- **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt).
+- **`Store.snapshot()` / `Store.restore()`** — capture and restore raw state, asymmetric-transformer-safe (raw round-trip means no double-encrypt). States are declared when the store is constructed, so a snapshot holds every declared state — a never-read one at its initial value — as one consistent cut that no concurrent commit is half-way through. `restore` ignores a state name the store does not declare, and a declared state the snapshot has no value for keeps its value; snapshots compare by value.
+- **Snapshots that leave memory** *(experimental)* — declare a state with a codec (`state(codec = IntCodec) { 0 }`; every `bridge.Codec` is a stable `StateCodec`), and `snapshot().encode()` writes the snapshot as canonical text that `StoreSnapshot.decode(text)` reads back, in another store instance or process. States without a codec are listed, never written. `restore(snapshot, RestorePolicy.Strict | IgnoreUnknown | BestEffort)` reports what it restored, kept and skipped, and a rejected restore changes nothing; `snapshot[store.count]` reads one state's value, typed by the state. No exception these APIs throw quotes a state's value ([GUIDE §16.2](GUIDE.md#162-encoding-snapshots-codecs-restore-policies-typed-reads)).
+- **Schema versions** *(experimental)* — a store whose states are renamed, or whose codecs' text changes, between releases implements `SchemaVersioned`: `schemaVersion` is recorded in every snapshot and its encoded text, and `migrate(from, view)` upcasts an older decoded snapshot's text (`view.rename("fontSize", "textSize")`) before the restore reads it. A newer snapshot, or a captured one of another version, is refused with a `SnapshotMigrationException` naming the store and both versions, and nothing changes; `migrate` may read states but not write any store ([GUIDE §16.3](GUIDE.md#163-schema-versions-and-migration)).
+- **State tags** *(experimental)* — `state(tags = setOf(StateTag.Secret)) { "" }`. A `Secret` value stays readable in memory (and a captured snapshot restores it), but is written as `null` by `encode()`, shown as `<redacted>` by a captured snapshot's `render()`, read as `Redacted` from any snapshot but a `snapshot(SnapshotScope.Raw)` capture, and never reaches a `:holdfast-testing` timeline, a matcher's failure message or the built-in middleware's output; a `derived` with a Secret source is one. `snapshot(SnapshotScope.UserAuthored)` captures exactly the states and keyed state families tagged `UserAuthored`. `Remote` states are left out of `encode()` unless `includeRemote = true`, and `restore(snapshot, policy, sterile = true)` resets them to their initial values instead of restoring them. `state.tags` and `store.taggedStates(tag)` read the tags back ([GUIDE §16.4](GUIDE.md#164-state-tags-snapshot-scopes-and-redaction)).
+- **`Store.reset()`** *(experimental)* — put every declared state back to what its initializer computes, in one transaction. The initializers run again (one that reads another declared state reads that state's reset value, in the order a new store's first reads would run them), their results are staged raw (an encrypted state is not encrypted twice), and only the states whose value changes are staged, so observers and bridges fire once for each and never for the rest. A throwing initializer rolls the whole reset back ([GUIDE §16.1](GUIDE.md#161-reset)).
 - **`Store.computed { } / Store.derived(sources) { }`** — read-time-computed and push-recomputed derived states; the latter returns its own observable `State<T>` plus a `Disposable`.
+- **`derivedState(sources) { } / merged(local, remote) { }`** *(experimental)* — a read-only `DerivedState<T>` (declare it with `by`), that settles: recomputed once per outermost `action`, `atomic` frame, `suspendAction` or `suspendAtomic` that changes a source — however many sources, stores and nested actions or frame participants it touches — after that entry has released every store, reading its sources from one committed cut (never a torn cross-store pair; inside the entry it reflects none of that entry's writes). `merged` names the split between what the user writes (`local`, tagged `UserAuthored`) and what sync adopts (`remote`, tagged `Remote`): an adoption writes `remote` only, so it never clobbers the user's side, and recomputes the merge once. Observable through `effect`, the coroutines flows and Compose's `collectAsState`; writing it throws; snapshots, `reset()` and `restore` leave it to recompute from its sources ([GUIDE §16.5](GUIDE.md#165-derived-states-and-merged)).
+- **`keyedState<K, T> { key -> … }`** *(experimental)* — a keyed state family, `val docs by keyedState<String, Doc>(codec = …, keyCodec = …) { id -> Doc(id) }`: one ordinary state per key, created at the key's first `docs[key]` and the same `State` while it lives, so actions, frames, `effect` and derived states work on it unchanged. `docs.evict(key)`/`evictAll()` are transactional — staged, committed or rolled back with their action, applied in the same cut as its writes — and leave a stale handle whose writes throw, while every other entry keeps its observers and bridges; an eviction from the store's own commit fanout is deferred until the commit ends. Snapshots capture every live entry (`snapshot.keysOf(docs)`, `snapshot[docs[key]]`), `encode()` writes a family as an object under its name, `restore` creates the entries it holds and never evicts, and `reset()` re-runs every live entry's initializer. No message, `toString` or middleware sample shows a key ([GUIDE §16.6](GUIDE.md#166-keyed-state-families)).
+- **The store tree** *(experimental)* — a store declares other stores as its children, next to its states: `object App : Store<App>() { val theme by state { "light" }; val settings by store { SettingsStore() }; val session by group { listOf(SignInStore() named "sign-in", ProfileStore()) }; val threads by keyed<String, ThreadStore> { id -> ThreadStore(id) } }`. A parent is an ordinary store, and every child keeps its own actions, middleware and locks. A declaration runs no child code; the child is built once, on its first read or when a tree operation needs it. A store has one parent (a second declaration fails naming both) and cannot become its own ancestor; cycles through child declarations and state initializers throw instead of deadlocking. An inline child behind a plain interface works too (`val draft by store<Draft> { object : NodeStore(), Draft { … } }`, written through its own methods or `(draft as NodeStore) action { … }`); `store { }` must produce a store. Names come from properties, class names and keys unless pinned: `store(named = …)`, `group(named = …)`, `keyed(named = …)`, and a group member's `named` pin inside the lambda (which tells two stores of one class apart). A keyed store is an ordinary store class created through the factory declared with its branch — `App.threads.create(id)` / `getOrCreate(id)` — live only once the factory returned it; a failing factory leaves no entry. Disposing a store detaches it, releases its `store { }` and `group { }` children as subtree roots, and disposes the stores its keyed branches built (`keyed(onParentDispose = KeyedDisposal.Release)` releases them instead; `App.threads.dispose(id)`/`disposeAll()` dispose them one by one or all at once). Any store's `tree` is its view of its subtree, and lookups take nodes and stores, never strings: `App.tree.children()`, `App.tree.stores(node)`, `App.tree.nodeOf(store)`, `App.threads[id]`, `App.threads.entries()`. `App.tree.snapshot(node, scope)` captures a subtree — the parent's own states with its children's — as ONE consistent cut across its live stores (a commit or a cross-store frame is seen whole or not at all, no store lock is taken, no writer blocked), and the `TreeSnapshot` reads by identity: `tree[settings.theme]` is typed by the state, `tree[node]` is the subtree, `Secret` values read as `Redacted`, a kept capture keeps the names it captured, and value equality plus `equalsEncodable` compare captures. `App.tree.restore(capture)` and `App.tree.reset(node)` put a subtree back, or back to its initializers, as ONE frame over its live stores — planned outside every lock, applied in one write bracket, all-or-nothing, refusing to nest inside an action or frame — and return a per-store report. `tree.encode()`/`App.tree.decode(text)` carry a subtree as text: names only for structure, the receiver identified once (its `TreeIdentified.treeId`, else its node name; `decode` refuses a text captured under another receiver), each store its own `holdfast.store` body, keyed entries under their keys, `pendingKeys(branch)` for the process-death idiom (create, then restore), undeclared paths reported rather than fatal. `App.tree.verifyPersistedNames()` flags a persisted store at a class-named group leaf, a property-named child, group or keyed branch over a persisted store, a class-named top-level receiver with no `TreeIdentified`, and a keyed branch without a key codec; `encode()` under `UserAuthored` refuses the first. `App.tree` is itself a `State<TreeSnapshot>`: the subtree as ONE consistent capture kept current, settled once per outermost action, frame, `suspendAction`/`suspendAtomic`, restore or reset that changes it, after every lock releases, recapturing only the stores that moved, published only when it differs; observe it with `effect`, `asFlow`/`asStateFlow` (defaulting to the store's `scope`) or `collectAsState()`. `App.tree.middlewares(TreeMiddleware)` sees the transactions of the store and every store under it — attached now or later, frames with their shared `frameId`, the suspending path too — with that store's node, always outermost of the store's own middleware (an ancestor's outside a descendant's), and `removeMiddleware` stops it without losing a started observation's terminal hook. `:holdfast-testing`'s `track(App.tree)` tracks the store and every store of its subtree — those that join later too — into one `TreeHandle` timeline with nodes, and resets them at teardown; `:holdfast-coroutines`' `App.tree.hydrateAll(node)` hydrates every store of a subtree, the parent's own hydrator included, with one report ([GUIDE §17](GUIDE.md#17-the-store-tree-experimental)).
 - **`atomic(vararg stores, policy) { }`** — cross-store transaction frames: all enrolled stores commit or roll back together (basic usage in [Cross-store transactions](#cross-store-transactions) above). Per-store middleware fires for the frame with a shared `Transaction.frameId`; full contract in [GUIDE §15](GUIDE.md#15-cross-store-transactions).
 - **`EncryptingTransformer(Cipher)`** — store ciphertext, read plaintext. Asymmetric-rollback-safe. Ships with educational `XorCipher`; production users plug their own AES via `javax.crypto` / CryptoKit.
 - **`FileSystemKvStore(path)`** — disk-backed `KvStore` for `KvBridge`, atomic writes via tempfile + rename on JVM/Android and `NSData.writeToURL(atomically=true)` on iOS.
+- **`Store.clock` / `bindClock(clock)`** *(experimental)* — time as an input: store code reads `clock.now()`, and a test pins it with a fixed `kotlin.time.Clock` (subclass getter override → bound clock → `Clock.System`). `storeTest { }` restores each tracked store's binding to its value at first track, so track before binding.
 
 ### `:holdfast-coroutines` extension
 
 - **`suspendAction { }`** — async-aware transactional body. Mutually exclusive with blocking `action` on the same store via an internal coroutine `Mutex`.
 - **`Flow` / `StateFlow` / `first` / `awaitValue`** adapters for state observation in coroutine code.
+- **`hydrator { base { }; refresh { } adopt { } }`** *(experimental)* — a store's hydration lifecycle, `Detached` → `Seeded` → `Hydrated` (or `Failed(cause)`): `hydrate()` seeds in one transaction that also marks the refresh in flight, fetches only once that has committed, and does nothing while in flight or hydrated, however many callers ask; `adopt` may write only `Remote` states; `invalidate()` and `reset()` detach. `Hydrator.state` is observable and a `derivedState` source, so a health flag over several stores needs no frame ([GUIDE §16.7](GUIDE.md#167-hydration-holdfast-coroutines)). `overlay(kv, key)` persists the `UserAuthored` states under a pinned key and puts them back in the seed, after `base { }`; a blob it cannot apply is reported and never written over ([GUIDE §16.8](GUIDE.md#168-the-persisted-overlay-holdfast-coroutines)).
 
 ### `:holdfast-compose` extension
 
@@ -143,7 +152,7 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 
 ### `:holdfast-testing` extension
 
-- **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions.
+- **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions. Teardown puts each tracked store's clock binding (`bindClock`) back to what it was when the store was first tracked, including bindings made by the test's un-joined child coroutines, so a test clock does not leak into the next test through a singleton store. Track the store before binding its clock, with `track(store)` or an auto-tracking call such as `store.read { }` (a bare `store.action { }` resolves to the `Store` member and does not track): a clock bound before the first track, or on a store the test never tracks, is kept. Work in `backgroundScope` or on scopes outside the test is not waited for, so join it before the body ends. A `StateTag.Secret` state's values are recorded as `Redacted` in the timeline and in bridge views, value matchers on it (`emitted(prop, value)`, `shouldHavePublished`) are refused with a teaching error while `emitted(prop)` and counts still work, and `shouldMatch`/`shouldMatchSnapshotOf` compare it without printing it.
 
 ### `:holdfast-hallmark` + `:holdfast-hallmark-coroutines`
 
@@ -151,7 +160,10 @@ Bridge to the [Hallmark](https://github.com/vynatix/hallmark) refinement-types
 library — `ValidatingTransformer` for write-validating state, `Store.boxed { }`
 state factory pairing a state cell with a `BoxedValidator`, `BoxedCodec` for
 validated values in `KvBridge` persistence, and `Store.suspendValidateAndMutate`
-for async-validation flows. Hallmark itself is a separate library; use the
+for async-validation flows. The experimental `boxed(validator, codec, tags)` and
+`boxedHandle(validator, codec, tags)` overloads declare a boxed state with a
+snapshot codec and state tags; for a `StateTag.Secret` state, a validation
+failure's `HallmarkException` withholds the rejected value. Hallmark itself is a separate library; use the
 bridge only when you want validated values living in transactional state.
 
 ## Standard library (in-tree)
@@ -178,7 +190,10 @@ and `com.vynatix.holdfast.crypto`:
 - Transactions are thread-confined: only the action's owner thread sees pending
   writes. Cross-thread reads see committed values.
 - `mutate` from a non-owner thread auto-wraps in a one-shot transaction —
-  middleware fires; observers see only committed values.
+  middleware fires; observers see only committed values — except while a
+  `suspendAction`/`suspendAtomic` holds the store: then a bare write from any
+  thread stages into (or, once it has applied, is refused by) that
+  transaction; see GUIDE §8.2.
 - `atomic(s1, s2, …)` sorts stores by a process-monotonic `lockOrderKey`
   and acquires locks in order — deadlock-safe across any combination. Frame
   bodies are policed: writes to unenrolled stores throw, nested frames verify
@@ -186,14 +201,45 @@ and `com.vynatix.holdfast.crypto`:
   `FrameInteropException` instead of deadlocking.
 - `suspendAction` and blocking `action` are mutually exclusive on the same
   store via a coroutine `Mutex` installed lazily through an internal
-  `AsyncSerializer` hook.
+  `AsyncSerializer` hook — also while it is being installed: the first
+  suspending entry waits out, without holding a thread, a blocking `action`
+  or `atomic` that took the store before it existed.
+- `derived` recomputes never wait on the derived's store: one recompute per
+  source commit for same-store sources, and if that store is busy the
+  recompute is handed to its current holder and runs when that holder
+  releases — so `value` may briefly lag the committing call. The experimental
+  `derivedState`/`merged` settle instead: once per outermost `action`,
+  `atomic` frame, `suspendAction` or `suspendAtomic` that changes their
+  sources — on any stores, in any nesting — after it has released every
+  store, each reading its sources from one committed cut, a chain in order.
+  So one never commits or shows a torn pair across the participants of a
+  frame, even when its recompute races another thread's frame (a frame
+  nested in an action or frame it shares a store with applies that store
+  with the enclosing entry: see the next point).
+- `atomic`/`suspendAtomic` apply every participant, inside one write
+  bracket, before any participant fans out; then each fans out in lock
+  order. A consistent read across the participants sees a frame whole or
+  not at all — an outermost frame, or a nested one sharing no store with its
+  enclosing action or frame (a shared store joins as a savepoint and applies
+  when the enclosing transaction commits) — and an observer of one
+  participant finds the others applied, and may not write into any of them.
+- Commit fanout (observers, bridge publishes, events) runs after the
+  transaction has applied, while the store is still held — under its lock
+  for a blocking `action`, under its serializer for `suspendAction`. An
+  observer that writes back into that same store gets an
+  `IllegalStateException` (`mutate`/`update`/`emit`) or an `Error` result
+  (nested `action`/`atomic`) — the write could never commit. Other threads'
+  actions just wait for the store. (While a `suspendAction`/`suspendAtomic`
+  holds the store, a bare `mutate`/`update` from another thread is not
+  wrapped in its own action: it joins the suspending transaction before that
+  applies and throws after — use `action` from other threads.)
 
 ## Modules
 
 | Artifact | Role |
 |---|---|
 | `com.vynatix:holdfast` | Core. |
-| `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }`. |
+| `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` + `hydrator { … }` (experimental). |
 | `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
 | `com.vynatix:holdfast-testing` | Test scope, handle, timeline, matchers. |
 | `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
@@ -204,13 +250,21 @@ and `com.vynatix.holdfast.crypto`:
 Android, JVM, and iOS are supported tiers — their tests run in CI. **wasmJs is
 experimental**: the artifact is still published for downstream consumers, but
 
-- tests are disabled on wasmJs (the test suite uses `runBlocking` /
-  `newSingleThreadContext`, absent on wasm);
+- only a regression suite runs on wasmJs: the module's own test suite uses
+  `runBlocking` / `newSingleThreadContext`, absent on wasm, so its wasmJs
+  tests are disabled, and the never-published `:wasm-tests` module covers it
+  instead — a commonTest suite over the public, experimental and internal
+  surface on wasmJs (Node.js) in CI, with the JVM as the control, pinning
+  the fixed wasmJs defects (#26, #27, #28, #29, #31, #38);
 - `FileSystemKvStore` throws `UnsupportedOperationException` (no synchronous
   filesystem API in the browser);
 - `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
 - the platform is single-threaded (`currentThreadId() == 0`), so
-  thread-confinement checks trivially pass.
+  thread-confinement checks trivially pass;
+- a blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting (the holder can only resume
+  once the call returns).
 
 ## Positioning
 
@@ -253,7 +307,8 @@ should pin to an exact version. SemVer guarantees apply once 1.0 is declared.
 ## Building
 
 ```sh
-./gradlew :holdfast:allTests              # tests on Android JVM + iOS sim + JVM + wasmJs
+./gradlew :holdfast:allTests              # tests on Android JVM + iOS sim + JVM
+./gradlew :wasm-tests:allTests            # wasmJs (Node.js) regression suite + its JVM control
 ./gradlew :holdfast:detekt :holdfast:ktlintCheck
 ./gradlew :holdfast:apiCheck              # ABI binary-compat check
 ./gradlew :holdfast:dokkaGenerate         # API doc site at build/dokka/html

@@ -8,7 +8,6 @@
     <ID>MaxLineLength:Effect.kt:val</ID>
     <ID>MaxLineLength:FileSystemKvStore.ios.kt:FileSystemKvStore$NSFileManager.defaultManager.createDirectoryAtURL(it, withIntermediateDirectories = true, attributes = null, error = null)</ID>
     <ID>MaxLineLength:MutableState.kt:MutableState$internal</ID>
-    <ID>MaxLineLength:MutableState.kt:MutableState$private fun afterGet: T</ID>
     <ID>MaxLineLength:MutableState.kt:val ms = (this as? MutableState&lt;T>) ?: error("observerCount is only defined for MutableState (store.state { ... })")</ID>
     <ID>TooGenericExceptionCaught:Atomic.kt:e: Throwable</ID>
     <ID>TooGenericExceptionCaught:Middleware.kt:Middleware$e: Throwable</ID>

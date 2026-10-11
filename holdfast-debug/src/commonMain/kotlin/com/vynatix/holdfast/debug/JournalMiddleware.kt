@@ -230,7 +230,7 @@ class JournalMiddleware<V : Store<V>> internal constructor(
                 val after =
                     runCatching { state.value }
                         .fold(
-                            onSuccess = { renderer.render(name, it) },
+                            onSuccess = { renderer.render(name, state, it) },
                             onFailure = { "<read failed: ${it::class.simpleName}>" },
                         )
                 val before = synchronized(lock) { lastSeen[name] }
@@ -280,7 +280,7 @@ class JournalMiddleware<V : Store<V>> internal constructor(
             synchronized(lock) { seedingState = name }
             val disposable =
                 try {
-                    ms.observe { value -> onObserved(store, name, value) }
+                    ms.observe { value -> onObserved(store, name, ms, value) }
                 } finally {
                     synchronized(lock) { seedingState = null }
                 }
@@ -293,11 +293,12 @@ class JournalMiddleware<V : Store<V>> internal constructor(
     private fun onObserved(
         store: Store<*>,
         name: String,
+        state: State<*>,
         value: Any,
     ) {
         if (!active) return
         // User code (toString) runs before the lock is taken.
-        val rendered = renderer.render(name, value)
+        val rendered = renderer.render(name, state, value)
         val activeTxn = runCatching { store.activeTransaction }.getOrNull()
         synchronized(lock) {
             val before = lastSeen[name]

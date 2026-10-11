@@ -167,7 +167,7 @@ class InitializerTest {
             assertEquals(
                 1,
                 v.callCount.value,
-                "propertiesLock must serialize first-access; initializer ran once across $workers parallel readers",
+                "the initializer latch must serialize first access; initializer ran once across $workers parallel readers",
             )
         }
 }

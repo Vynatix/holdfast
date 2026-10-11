@@ -78,12 +78,12 @@ for the full consistency contract.
 
 | Artifact | Role |
 |---|---|
-| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, derived state, cross-store `atomic` frames, encryption transformer, file-system store. |
-| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies. |
-| [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` / `rememberDisposable`. |
-| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers. |
+| [`com.vynatix:holdfast`](holdfast/) | Core — transactions, state, middleware, bridges, snapshot/restore, snapshots encoded to text through state codecs with restore policies and typed reads (experimental), schema versions with `migrate` upcasting of older snapshots (experimental), state tags — `Secret` values redacted from encoded snapshots, renders and logs, `UserAuthored` snapshot scopes, `Remote` states reset by a sterile restore (experimental) — `reset()` to initial values (experimental), derived state, read-only `derivedState`/`merged(local, remote)` states that settle once per outermost action or frame, from a consistent cut of their sources (experimental), keyed state families — one state per key, with transactional eviction and snapshot support (experimental) — cross-store `atomic` frames applied whole before any participant fans out, encryption transformer, file-system store, injectable `Store.clock` (experimental), and the store tree — a store declares its children next to its states (`val settings by store { SettingsStore() }`, a `group { listOf(…) }` with per-store `named` pins, a keyed `keyed<K, S> { key -> … }` branch whose factory is declared once), built on first use, one parent per store, `store`/`group` children released as subtree roots and keyed stores disposed when their parent is disposed; `App.tree.snapshot(node)` as one consistent cut over a store and its subtree with typed reads, `App.tree.restore(capture)`/`App.tree.reset(node)` as one frame over a subtree, `encode()`/`decode()` text for a whole subtree, checked against the receiver's identity (`TreeIdentified`), with a persisted-name self-check, `App.tree` itself a `State<TreeSnapshot>` settled once per outermost action or frame, and `App.tree.middlewares(TreeMiddleware)` over the store and its subtree (experimental, issue #21). |
+| [`com.vynatix:holdfast-coroutines`](holdfast-coroutines/) | `Flow` / `StateFlow` adapters + `suspendAction { … }` / `suspendAtomic(…) { … }` for async transactional bodies, and a store hydration lifecycle — `hydrator { base; refresh; adopt }`: seed once, fetch once however many callers ask, adopt into `Remote` states only, back to `Detached` only through `invalidate()` or `reset()`, with an optional persisted overlay — `overlay(kv, key)` — that writes the `UserAuthored` states under a pinned key and puts them back over `base { }` (experimental), and `store.tree.hydrateAll(node)` to hydrate a store and every store of its subtree with one report (experimental). |
+| [`com.vynatix:holdfast-compose`](holdfast-compose/) | `@Composable` `collectAsState` (on a store's state, or any `State` — a store's `tree` value included) / `rememberDisposable`. |
+| [`com.vynatix:holdfast-testing`](holdfast-testing/) | Testing harness — `storeTest { }`, `StoreHandle`, timeline matchers, cross-store frame matchers, and `track(store.tree)` for a store tree (the store and every store of its subtree tracked, one tree timeline with nodes, the subtree reset at teardown; experimental); `Secret` state values never reach a timeline or a failure message. |
 | [`com.vynatix:holdfast-debug`](holdfast-debug/) | On-device debugging console (**experimental**) — `dump`/`set`/`journal`/`autopsy`/`diff`/`rewind`/`quarantine` over registered stores, driven from `adb shell dumpsys` on Android or `HoldfastDebug.execute(...)` anywhere. |
-| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory, `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
+| [`com.vynatix:holdfast-hallmark`](holdfast-hallmark/) | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }` state factory (with experimental codec and tags overloads that keep a `Secret` value out of validation errors), `BoxedCodec`, `shouldBeBoxedAs` test matcher. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 | [`com.vynatix:holdfast-hallmark-coroutines`](holdfast-hallmark-coroutines/) | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. Unreleased — requires the sibling Hallmark repo; enable with `-Pholdfast.includeHallmark=true`. |
 
 ## Platform support
@@ -98,9 +98,18 @@ for the full consistency contract.
 wasmJs artifacts are still published for downstream consumers, but the target
 is **experimental** with these limitations:
 
-- **Tests are disabled on wasmJs** — the test suite uses `runBlocking` /
-  `newSingleThreadContext`, neither of which exists on wasm, so wasmJs test
-  tasks are force-disabled and never run in CI.
+- **Only a regression suite runs on wasmJs** — `:holdfast`'s and
+  `:holdfast-coroutines`' own test suites use `runBlocking` /
+  `newSingleThreadContext`, neither of which exists on wasm, so their wasmJs
+  test tasks are force-disabled (`:holdfast-compose` has only a compile-level
+  smoke test). The never-published `:wasm-tests` module is the wasmJs
+  coverage instead: a commonTest suite over the public,
+  `@ExperimentalStoreApi` and `@StoreInternalApi` surface that runs on
+  wasmJs (Node.js) in CI with the JVM as the control — a test green on the
+  JVM and red on wasmJs is a wasmJs bug — and pins the fixed wasmJs defects
+  (#26 mutex `tryLock` balance, #27 blocking-wait refusal, #28 parked-read
+  isolation, #29 undispatched frame bodies, #31 own-body blocking refusal,
+  #38 nested-entry scopes).
 - **`FileSystemKvStore` throws `UnsupportedOperationException`** — the browser
   has no synchronous filesystem API; use `InMemoryKvStore` or a
   browser-storage-backed `KvStore` instead.
@@ -109,6 +118,12 @@ is **experimental** with these limitations:
   `suspendAction { … }` instead.
 - **Single-threaded model** — `currentThreadId()` returns `0` for every caller,
   so thread-confinement checks trivially pass.
+- **A blocking `action` cannot wait for a suspended `suspendAction`** — a
+  blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting, since that holder can only
+  resume once the blocking call returns. Write through `suspendAction { … }`
+  from coroutines on wasmJs.
 
 ## Install
 
@@ -165,26 +180,104 @@ pin to exact versions. SemVer guarantees apply once 1.0 is declared.
 Open hazards in the current tree, named honestly. See [`ROADMAP.md`](ROADMAP.md)
 for when each lands.
 
+- **An observer of a store's `tree` value is an ordinary observer.** It runs
+  in the value's host commit fanout, under the host lock and no other
+  store's lock; one that writes to a store another thread is committing
+  carries the cross-store hazard every observer does (GUIDE §10.2, §17.8).
+
 - **A blocking `action { }` called from inside a `suspendAction { }` body on the
-  same store still spins.** The serializer is held by the suspending body and the
-  blocking call waits for it. *Workaround:* inside a suspending body use
-  `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
-  fail-fast guard is next in 0.2.0. Other combinations that used to hang —
-  `suspendAction` with a `derived()` state, nested `action` on a
-  coroutine-touched store, and blocking `atomic()` racing a `suspendAction` — are
-  fixed.
+  same store throws an `IllegalStateException`** naming the store and the
+  working alternative, on every platform (issue #31; it used to spin forever on
+  JVM/Android/iOS — on wasmJs it already threw, with a different message,
+  issue #27). The same refusal covers `reset()`, `restore()` and blocking
+  `atomic(...)` on that store: they all wait on the store's suspend mutex,
+  which the enclosing body itself holds. *Inside a suspending body write with
+  `mutate`/`update`* — it stages into the suspending transaction — *or make
+  the blocking call once the body has returned; a blocking entry on another
+  store is unaffected.* (From inside a `suspendAction`'s or
+  `suspendAtomic`'s commit — an observer, a bridge publish, an event collector
+  the emit resumes inline, a frame observer — a blocking `action` or `atomic`
+  on a store whose transaction that commit has applied — for a
+  `suspendAtomic`, any participant, since every one applies before any fans
+  out — already returns an `Error` instead of spinning. One gap remains:
+  inside a nested `withContext(dispatcher)` there (say, in a
+  `publishAwaited`) the call is not recognised — on iOS it still waits
+  forever; on wasmJs it throws an `IllegalStateException`. A store that commit has applied refuses every inline
+  write — `mutate` throws there too — so make the write part of the action,
+  or launch it once the commit has finished:
+  `store.scope.launch { store.suspendAction { … }.getOrThrow() }`.) Other
+  combinations that used to hang or fail — `suspendAction` with a `derived()`
+  state (including a second
+  `suspendAction` queued behind the first), nested `action` on a
+  coroutine-touched store, blocking actions from two threads on a
+  coroutine-touched store, blocking `atomic()` racing a `suspendAction`, and
+  a store's first `suspendAction` or `suspendAtomic` racing a blocking
+  `action` or `atomic` that took the store before its mutex was installed —
+  are fixed.
+
+- **Hydration (experimental) cannot see every wait for itself.** `hydrate()`
+  and `awaitSettled()` throw inside an action, frame, `suspendAction` or
+  `suspendAtomic` — body or commit, and a child coroutine of a
+  `suspendAction`/`suspendAtomic` body (or a plain `runBlocking { }` on a
+  blocking body's own thread) — instead of waiting for the transaction that
+  waits for them. They cannot tell that a coroutine launched on another scope
+  is awaited by such a body (`store.scope.launch { hydration.hydrate() }.join()`
+  inside `store.suspendAction { }`), nor a coroutine that a blocking
+  `action`/`atomic` body runs on another thread
+  (`runBlocking(Dispatchers.Default) { hydration.hydrate() }`, or a
+  `launch(Dispatchers.X)` inside the body's `runBlocking`): on the same store
+  these wait for the body forever — politely, holding no thread — and on
+  another store the seed commits outside the enclosing transaction. *Workaround:* never wait for a
+  `hydrate()` or `awaitSettled()` from inside a transaction; launch it and
+  return, or await it before opening the transaction. Two narrower limits:
+  `adopt { }`'s `Remote`-only policy covers the hydrating store — a write to
+  another store from `adopt` commits on its own, outside the adoption's
+  rollback — and the hydration gate never queues on the store's mutex, so
+  under a continuous stream of `suspendAction`s on one store a `hydrate()`
+  waits until the stream has a gap.
+
+- **The persisted overlay (experimental) writes behind the commit.** Its
+  writer puts the `UserAuthored` states under the key on the store's scope
+  after the commit that changed them, so a process that dies before it runs
+  loses that commit's change. A change made before the first `hydrate()` is
+  not written by itself, and a blob the seed reads is put over it. The
+  writer learns of a change from the commit's observer fanout, so a commit
+  whose fanout skips its observers (a throwing `Transformer.get`, a
+  rethrowing `uncaughtObserverHandler`) is persisted only with the next
+  change, and a `UserAuthored` state `removeState`/`clearStates` dropped is
+  watched again only from the next seed. `clearOverlay()`, like
+  `hydrate()`, throws inside a transaction. *Workaround:* hydrate before the
+  user can edit, keep `Transformer.get` total on `UserAuthored` states, do
+  not rethrow from the handler, and call `clearOverlay()` once the
+  transaction has returned.
 
 - **Writing to a second store from an observer can deadlock.** `action` holds the
   store's transaction lock across the whole commit fanout, so two stores whose
   observers write to each other block on each other's locks — an ordering
   `atomic`'s deadlock-safe `lockOrderKey` never sees, because it does not run
   through `atomic`. *Workaround:* from an observer, write to another store via
-  `Store.scope` rather than inline.
+  `Store.scope` rather than inline. (`derived()` states are not affected: a
+  recompute whose store is busy is handed to that store's current holder
+  instead of waiting for it.) Writing back into the *same* store from its own
+  observer is not a silent loss any more: `mutate`/`update`/`emit` throw (the
+  exception reaches `uncaughtObserverHandler`, or the default log), and a
+  nested `action`/`atomic` returns an `Error` without running — the observer
+  must check that result, or the write is still dropped without a log line.
 
-- **Standalone `state.update { }` outside an action is not atomic.** It is a
-  read-modify-write, so concurrent callers overwrite each other — measured, about
-  50% of 10,000 concurrent increments are lost. *Workaround:* wrap the update in
-  `action { }`, which serializes it under the store's transaction lock.
+- **A standalone `state.update { }` is atomic only with respect to blocking
+  actions and one-shot mutates.** The whole read-modify-write now runs inside
+  the one-shot transaction `mutate` synthesizes, under the store's serializer
+  and transaction lock (it used to read outside that transaction — measured,
+  about 50% of 10,000 concurrent increments were lost), and its result is
+  consumed with `getOrThrow`: a throwing block — or a middleware/commit-phase
+  failure — propagates to the caller instead of rolling back silently
+  (stricter than `mutate`), with the block itself running inside the
+  transaction (a slow block holds the store's lock, like an action body).
+  Updates concurrent with an in-flight `suspendAction` on the same store
+  remain undefined (they stage into its transaction), and bridge-inbound
+  writes bypass the transaction machinery by design. *Workaround:* for a
+  defined outcome against a suspending holder, write through
+  `suspendAction { }`.
 
 - **`store { }` (plain invoke) does not open a transaction — `store action { }`
   does.** Writes inside a bare invoke commit one by one, with observers firing
@@ -192,8 +285,10 @@ for when each lands.
   `store action { }` for any mutation.
 
 - **Nothing is published to Maven Central yet.** The badge and the install block
-  above describe the intended coordinates, not a resolvable artifact — build from
-  source until 0.3.0 ships the release pipeline.
+  above describe the intended coordinates, not a resolvable artifact — build
+  from source until the first release ships. The release pipeline is on main
+  (tag-driven `publish.yml`, `scripts/release.sh`, the `RELEASE.md` runbook —
+  issue #46); nothing has been published through it yet.
 
 ## Contributing
 

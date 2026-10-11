@@ -2,6 +2,7 @@ package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.testing.BridgeObserved
 import com.vynatix.holdfast.testing.BridgePublished
@@ -33,6 +34,11 @@ import kotlin.time.Clock
  *    re-attach can produce one synthetic-looking observed value. Tests that
  *    need to ignore that should attach the bridge before tracking, or check
  *    `published.size > N` rather than exact equality.
+ *  - Two handles built at once for one store both re-attach; whichever wrapped
+ *    a state first owns its wrapper. When that handle then loses the
+ *    registration ([com.vynatix.holdfast.testing.StoreHandle.yieldToInternal])
+ *    the wrapper is [redirectTo] the winner's recorder, or [unwrap]ped when the
+ *    winner records nothing.
  *  - At handle dispose ([com.vynatix.holdfast.testing.StoreHandle.disposeRecorderInternal])
  *    the wrapper remains attached to the store but no further events are
  *    pushed because the recorder's buffer has been cleared. The wrapper
@@ -41,6 +47,11 @@ import kotlin.time.Clock
  * Concurrency: every internal mutation runs under [lock]. Forwarding to the
  * delegate happens outside the lock so a long-running delegate publish doesn't
  * serialise unrelated wrapper inspection.
+ *
+ * Secret redaction: for a `StateTag.Secret` [state] the wrapper never keeps a
+ * value. Its events carry [com.vynatix.holdfast.Redacted], and so does its
+ * [published] history, one entry per publish (the delegate still gets the
+ * real value: the bridge is the app's own).
  *
  * @param T value type carried by the bridge.
  * @param state the [State] this bridge is bound to, used to label the
@@ -53,31 +64,42 @@ import kotlin.time.Clock
 internal class RecordingBridgeWrapper<T : Any>(
     private val state: State<*>,
     private val delegate: Bridge<T>,
-    private val recorder: Recorder<*>,
+    recorder: Recorder<*>,
 ) : Bridge<T> {
     private val lock = SynchronizedObject()
-    private val publishedList: MutableList<T> = mutableListOf()
+    private val publishedList: MutableList<Any> = mutableListOf()
     private var capturedObserver: ((T) -> Unit)? = null
 
-    /** Snapshot of every published value, in call order. Defensive copy. */
+    /** Where the events go: the installing handle's recorder, or a race winner's after [redirectTo]. */
+    @kotlin.concurrent.Volatile
+    private var recorder: Recorder<*> = recorder
+
+    /**
+     * Snapshot of every published value, in call order. Defensive copy. For a
+     * Secret state every entry is [com.vynatix.holdfast.Redacted] (erased
+     * into `T`: only reachable through a star-projected
+     * [com.vynatix.holdfast.testing.bridge.BridgeView]).
+     */
+    @Suppress("UNCHECKED_CAST")
     val published: List<T>
-        get() = synchronized(lock) { publishedList.toList() }
+        get() = synchronized(lock) { publishedList.toList() as List<T> }
 
     override fun observe(observer: (T) -> Unit): Disposable {
         synchronized(lock) {
             capturedObserver = observer
         }
         return delegate.observe { value ->
-            recorder.push(BridgeObserved(state = state, value = value, timestamp = nowMillis()))
+            recorder.push(BridgeObserved(state = state, value = recorded(value), timestamp = nowMillis()))
             observer(value)
         }
     }
 
     override fun publish(value: T): Boolean {
+        val recorded = recorded(value)
         synchronized(lock) {
-            publishedList.add(value)
+            publishedList.add(recorded)
         }
-        recorder.push(BridgePublished(state = state, value = value, timestamp = nowMillis()))
+        recorder.push(BridgePublished(state = state, value = recorded, timestamp = nowMillis()))
         // Forward to the delegate AFTER recording so the timeline ordering is
         // "we saw the publish attempt" → "delegate did its thing"; if the
         // delegate throws (e.g. FailingBridge), the BridgePublished event still
@@ -94,5 +116,30 @@ internal class RecordingBridgeWrapper<T : Any>(
         observer?.invoke(value)
     }
 
+    /** Whether this wrapper is still [state]'s bridge (a later attach, or a racing wrapper, may have replaced it). */
+    fun isAttached(): Boolean = mutableState()?.bridge === this
+
+    /** Send every later event to [recorder]: the wrapper's owner after a lost track race. */
+    fun redirectTo(recorder: Recorder<*>) {
+        this.recorder = recorder
+    }
+
+    /**
+     * Put [delegate] back as [state]'s bridge, if this wrapper still is it. A
+     * re-attach like the wrap was: the delegate's `observe` runs again, a
+     * load-on-attach replay included. Never throws (a state that refuses a
+     * bridge now keeps the wrapper, which forwards as before).
+     */
+    fun unwrap() {
+        val mutable = mutableState() ?: return
+        if (mutable.bridge === this) runCatching { mutable.bridge = delegate }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mutableState(): MutableState<T>? = state as? MutableState<T>
+
     private fun nowMillis(): Long = Clock.System.now().toEpochMilliseconds()
+
+    /** [value] as the harness may keep it: `Redacted` for a Secret state. */
+    private fun recorded(value: T): Any = PrivilegedHooks.recordedValue(state, value) ?: value
 }

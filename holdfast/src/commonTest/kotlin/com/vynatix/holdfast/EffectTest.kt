@@ -1,3 +1,5 @@
+@file:OptIn(StoreInternalApi::class)
+
 package com.vynatix.holdfast
 
 import kotlinx.atomicfu.atomic
@@ -6,8 +8,94 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private class EffectTestVault : Store<EffectTestVault>() {
-    val count by state { 0 }
+    // distinct = false keeps this suite's fan-out pins on the original
+    // re-fire contract (issue #007 flipped the default to distinct).
+    val count by state(distinct = false) { 0 }
     val label by state { "init" }
+}
+
+/**
+ * Issue #32: passing the same handler to `effect` twice must be two
+ * registrations — two observers, two initial fires, two fires per commit —
+ * and each [Disposable] removes exactly its own registration, never the
+ * other's. The old equality-based observer set collapsed them (bound
+ * `handler::invoke` references to one receiver compare equal), which #26's
+ * wasmJs sweep pinned as a parity check; these tests pin the fixed contract.
+ */
+class EffectDuplicateHandlerTest {
+    @Test
+    fun sameHandlerRegisteredTwiceIsTwoObserversWithTwoFiresPerCommit() {
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        val handler: Int.() -> Unit = { seen.add(this) }
+        val d1 = v { count effect handler }
+        val d2 = v { count effect handler }
+
+        assertEquals(2, v.count.observerCount, "two registrations of one handler are two observers")
+        assertEquals(listOf(0, 0), seen, "each registration fires once with the current value")
+
+        seen.clear()
+        v action { count mutate 1 }
+        assertEquals(listOf(1, 1), seen, "both registrations fire per commit; seen=$seen")
+
+        d1.dispose()
+        d2.dispose()
+    }
+
+    @Test
+    fun disposingOneRegistrationKeepsTheOtherFiring() {
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        val handler: Int.() -> Unit = { seen.add(this) }
+        val d1 = v { count effect handler }
+        val d2 = v { count effect handler }
+        seen.clear()
+
+        d1.dispose()
+        assertEquals(1, v.count.observerCount, "disposing one of two registrations leaves exactly the other")
+
+        v action { count mutate 2 }
+        assertEquals(listOf(2), seen, "the surviving registration keeps firing; seen=$seen")
+
+        d2.dispose()
+        assertEquals(0, v.count.observerCount)
+        v action { count mutate 3 }
+        assertEquals(listOf(2), seen, "nothing fires once both registrations are disposed; seen=$seen")
+    }
+
+    @Test
+    fun doubleDisposeOfOneRegistrationIsSafeAndDoesNotRemoveTheOther() {
+        val v = EffectTestVault()
+        val seen = mutableListOf<Int>()
+        val handler: Int.() -> Unit = { seen.add(this) }
+        val d1 = v { count effect handler }
+        val d2 = v { count effect handler }
+        seen.clear()
+
+        d1.dispose()
+        d1.dispose()
+        assertEquals(1, v.count.observerCount, "a double-dispose removes only its own registration")
+
+        v action { count mutate 1 }
+        assertEquals(listOf(1), seen, "the other registration survives a sibling's double-dispose; seen=$seen")
+
+        d2.dispose()
+    }
+
+    @Test
+    fun initialFireHappensOncePerRegistrationWithTheCurrentValue() {
+        val v = EffectTestVault()
+        v action { count mutate 5 }
+
+        val seen = mutableListOf<Int>()
+        val handler: Int.() -> Unit = { seen.add(this) }
+        val d1 = v { count effect handler }
+        val d2 = v { count effect handler }
+
+        assertEquals(listOf(5, 5), seen, "each registration independently fires once with the current value")
+        d1.dispose()
+        d2.dispose()
+    }
 }
 
 class EffectSubscribeTest {
@@ -32,18 +120,19 @@ class EffectSubscribeTest {
     }
 
     @Test
-    fun subscribingTwiceWithSameLambdaReferenceRegistersOnceDueToHashSet() {
+    fun subscribingTwiceWithSameLambdaReferenceRegistersTwoIndependentObservers() {
         val v = EffectTestVault()
         val seen = mutableListOf<Int>()
         val callback: Int.() -> Unit = { seen.add(this) }
         val d1 = v { count effect callback }
         val d2 = v { count effect callback }
+        assertEquals(listOf(0, 0), seen, "each registration gets its own initial fire")
         seen.clear()
 
         v action { count mutate 1 }
-        // The same lambda reference, registered twice in a Set, deduplicates.
-        // Therefore we expect a single notification per commit.
-        assertEquals(listOf(1), seen, "same observer reference deduped by HashSet; seen=$seen")
+        // Issue #32: two registrations of one handler are two observers —
+        // two fires per commit, each Disposable removing exactly its own.
+        assertEquals(listOf(1, 1), seen, "same handler registered twice fires twice per commit; seen=$seen")
         d1.dispose()
         d2.dispose()
     }
@@ -106,8 +195,9 @@ class EffectNotificationTest {
     }
 
     /**
-     * Documented fan-out behaviour: each commit fires the effect, even when the value
-     * equals the previously committed value.
+     * Documented fan-out behaviour of a `distinct = false` state (the opt-out
+     * since issue #007 flipped the default): each commit fires the effect,
+     * even when the value equals the previously committed value.
      */
     @Test
     fun effectReceivesNotificationOnEachCommitEvenForSameValue() {

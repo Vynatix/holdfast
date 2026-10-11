@@ -2,6 +2,7 @@ package com.vynatix.holdfast.testing
 
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.testing.matcher.shouldFireInOrder
 import kotlinx.coroutines.delay
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,5 +59,28 @@ class StoreHandleActionTest {
             assertSame(iae, result.exception)
             // Strict scope-exit guard requires the error to be acknowledged.
             ctr.consumeAllPendingErrors()
+        }
+
+    @Test
+    fun suspendActionFeedsTheTimeline() =
+        storeTest {
+            val ctr = track(CountVault())
+            val result =
+                ctr.suspendAction {
+                    delay(0)
+                    count mutate 3
+                    count.value
+                }
+            assertIs<TransactionResult.Success<*>>(result)
+            // suspendAction runs the middleware chain (concentric-ring order,
+            // matching the blocking path), so the recorder sees the suspending
+            // transaction like any other: started + emission + committed. This
+            // pins that a coroutine-first test's timeline is NOT inexplicably
+            // empty (the old "middleware not invoked for 1.1" claim is stale).
+            ctr shouldFireInOrder {
+                started
+                emitted(CountVault::count)
+                committed
+            }
         }
 }

@@ -1,6 +1,7 @@
 package com.vynatix.holdfast.debug
 
 import com.vynatix.holdfast.Middleware
+import com.vynatix.holdfast.StateTag
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transformer
 
@@ -35,6 +36,12 @@ class CounterStore : Store<CounterStore>() {
 
         override fun get(value: String): String = value
     }
+}
+
+/** A store whose sensitive state is declared with core's Secret tag instead of a redact list. */
+class VaultStore : Store<VaultStore>() {
+    val pin by state(tags = setOf(StateTag.Secret)) { "1234" }
+    val owner by state { "ada" }
 }
 
 /** Rejects any transaction that leaves `count` negative — runs before commit. */

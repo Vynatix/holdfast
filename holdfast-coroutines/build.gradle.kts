@@ -7,7 +7,7 @@ plugins {
     id("holdfast.quality")
     id("holdfast.dokka")
     id("holdfast.abi")
-    id("holdfast.publish.sonatype")
+    id("holdfast.publish")
 }
 
 kotlin {
@@ -57,8 +57,8 @@ kotlin {
 }
 
 // Tests use `runBlocking`, which doesn't exist on wasmJs; coverage runs on
-// android/jvm/ios. Main code compiles cleanly for wasmJs so :shared/wasmJs
-// can resolve this module.
+// android/jvm/ios, and on wasmJs through :wasm-tests. Main code compiles
+// cleanly for wasmJs so :shared/wasmJs can resolve this module.
 val wasmJsTestTasks =
     setOf(
         "compileTestKotlinWasmJs",

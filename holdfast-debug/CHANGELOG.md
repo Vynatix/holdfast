@@ -33,5 +33,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Argument-less dumps print one summary line and never a value, so
   bugreports capture no state. `MainThreadMutationRunner` hops mutating
   commands to the main thread with a cancel-if-not-started timeout.
+- **Secret states are redacted automatically**: a state tagged
+  `StateTag.Secret` prints as `<redacted>` in `dump`, `get`, `journal`,
+  `autopsy` and `diff`, and `set` refuses it, with no `redact` entry needed.
 - `DebugConsole.repl(...)` helper for stdin/stdout or socket front ends on
   JVM and elsewhere.

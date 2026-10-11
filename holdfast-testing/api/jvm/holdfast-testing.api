@@ -124,7 +124,6 @@ public final class com/vynatix/holdfast/testing/MiddlewareStarted : com/vynatix/
 }
 
 public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistration {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun getLastResult (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -136,10 +135,10 @@ public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistrati
 	public fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun track (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;)Lcom/vynatix/holdfast/testing/StoreHandle;
 	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;ILjava/lang/Object;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public fun trackedAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public final class com/vynatix/holdfast/testing/StoreAutoRegistration$DefaultImpls {
-	public static fun action (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public static fun bridgeEvents (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun emissions (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun getLastResult (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -150,6 +149,7 @@ public final class com/vynatix/holdfast/testing/StoreAutoRegistration$DefaultImp
 	public static fun read (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public static fun suspendAction (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;ILjava/lang/Object;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public static fun trackedAction (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public abstract interface class com/vynatix/holdfast/testing/StoreEvent {
@@ -181,7 +181,6 @@ public final class com/vynatix/holdfast/testing/StoreTestKt {
 }
 
 public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/holdfast/testing/StoreAutoRegistration, kotlinx/coroutines/CoroutineScope {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun autoTrackTimeline (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
@@ -197,6 +196,7 @@ public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/hol
 	public fun read (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun track (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public fun trackedAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public final class com/vynatix/holdfast/testing/TransactionCommitted : com/vynatix/holdfast/testing/TransactionEvent {
@@ -254,6 +254,54 @@ public final class com/vynatix/holdfast/testing/TransactionStarted : com/vynatix
 	public fun getTimestamp ()J
 	public fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
 	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/testing/TreeEvent {
+	public fun <init> (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/TreeEvent$Phase;Lcom/vynatix/holdfast/Transaction;Ljava/lang/Throwable;J)V
+	public final fun component1 ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public final fun component2 ()Lcom/vynatix/holdfast/Store;
+	public final fun component3 ()Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public final fun component4 ()Lcom/vynatix/holdfast/Transaction;
+	public final fun component5 ()Ljava/lang/Throwable;
+	public final fun component6 ()J
+	public final fun copy (Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/TreeEvent$Phase;Lcom/vynatix/holdfast/Transaction;Ljava/lang/Throwable;J)Lcom/vynatix/holdfast/testing/TreeEvent;
+	public static synthetic fun copy$default (Lcom/vynatix/holdfast/testing/TreeEvent;Lcom/vynatix/holdfast/tree/StoreNode;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/TreeEvent$Phase;Lcom/vynatix/holdfast/Transaction;Ljava/lang/Throwable;JILjava/lang/Object;)Lcom/vynatix/holdfast/testing/TreeEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Ljava/lang/Throwable;
+	public final fun getNode ()Lcom/vynatix/holdfast/tree/StoreNode;
+	public final fun getPhase ()Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public final fun getStore ()Lcom/vynatix/holdfast/Store;
+	public final fun getTimestamp ()J
+	public final fun getTransaction ()Lcom/vynatix/holdfast/Transaction;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/vynatix/holdfast/testing/TreeEvent$Phase : java/lang/Enum {
+	public static final field Completed Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public static final field Errored Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public static final field Started Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+	public static fun values ()[Lcom/vynatix/holdfast/testing/TreeEvent$Phase;
+}
+
+public final class com/vynatix/holdfast/testing/TreeFixtureKt {
+	public static final fun track (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/testing/Capture;Z)Lcom/vynatix/holdfast/testing/TreeHandle;
+	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreTestScope;Lcom/vynatix/holdfast/tree/StoreTree;Lcom/vynatix/holdfast/testing/Capture;ZILjava/lang/Object;)Lcom/vynatix/holdfast/testing/TreeHandle;
+}
+
+public final class com/vynatix/holdfast/testing/TreeHandle {
+	public final fun committedFrameIds (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public final fun consumeAllPendingErrors ()V
+	public final fun events (Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/util/List;
+	public final fun getCaptureMode ()Lcom/vynatix/holdfast/testing/Capture;
+	public final fun getRoot ()Lcom/vynatix/holdfast/Store;
+	public final fun getTimeline ()Ljava/util/List;
+	public final fun getTree ()Lcom/vynatix/holdfast/tree/StoreTree;
+	public final fun group (Lcom/vynatix/holdfast/tree/StoreNode;)Lcom/vynatix/holdfast/testing/matcher/StoreHandleGroup;
+	public final fun handle (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/testing/StoreHandle;
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -490,5 +538,10 @@ public final class com/vynatix/holdfast/testing/matcher/TransactionRolledBackPre
 public final class com/vynatix/holdfast/testing/matcher/TransactionStartedPredicate : com/vynatix/holdfast/testing/matcher/EventPredicate {
 	public fun getDescription ()Ljava/lang/String;
 	public fun matches (Lcom/vynatix/holdfast/testing/StoreEvent;)Z
+}
+
+public final class com/vynatix/holdfast/testing/matcher/TreeMatchersKt {
+	public static final fun shouldCommitTogether (Lcom/vynatix/holdfast/testing/TreeHandle;Lcom/vynatix/holdfast/tree/StoreNode;)Ljava/lang/String;
+	public static final fun shouldNotCommitTogether (Lcom/vynatix/holdfast/testing/TreeHandle;Lcom/vynatix/holdfast/tree/StoreNode;)V
 }
 

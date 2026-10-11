@@ -139,10 +139,12 @@ lightest to strictest:
 
 ## What to know before trusting the output
 
-- **Redaction is by name.** `State.value` is the post-`transformer.get` view,
-  so a state behind an `EncryptingTransformer` prints its plaintext unless
-  you list it in `register(..., redact = setOf(...))`. Redacted states cannot
-  be `set` either.
+- **Redaction.** A state tagged `StateTag.Secret` is always shown as
+  `<redacted>` — the same rule core's renders and logs follow. For a
+  sensitive state declared without tags, list its name in
+  `register(..., redact = setOf(...))`: `State.value` is the
+  post-`transformer.get` view, so a state behind an `EncryptingTransformer`
+  otherwise prints its plaintext. Redacted states cannot be `set` either.
 - **Lazy registration.** A `by state` delegate that was never read is not in
   `properties`, so it is absent from `dump`, `set`, checkpoints and the
   journal until first use. `dump` says so when a store has no states yet.

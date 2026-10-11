@@ -1,12 +1,21 @@
+@file:OptIn(ExperimentalStoreApi::class)
+
 package com.vynatix.holdfast.compose
 
 import androidx.compose.runtime.Composable
+import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.tree.store
+import com.vynatix.holdfast.tree.tree
 import kotlin.test.Test
 
 private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
     val n by state { 0 }
     val s by state { "init" }
+}
+
+private class ComposeBindingsParent : Store<ComposeBindingsParent>() {
+    val leaf by store { ComposeBindingsVault() }
 }
 
 /**
@@ -16,8 +25,10 @@ private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
  * these prove the API surface compiles and resolves correctly across the
  * KMP targets, which is the contract the module owes its consumers.
  *
- * End-to-end recomposition behavior is verified by app-level tests in the
- * consuming module (`:shared`).
+ * Recomposition itself is verified on the JVM only, by `jvmTest`'s
+ * `ComposeRecompositionTest`, which drives a headless `Recomposer` (no UI
+ * toolkit) and counts recompositions; app-level tests in a consuming module
+ * cover the rest.
  */
 class ComposeBindingsCompileTest {
     @Test
@@ -29,9 +40,11 @@ class ComposeBindingsCompileTest {
             val v = ComposeBindingsVault()
             val n = v.collectAsState(v.n)
             val s = v.collectAsState(v.s)
+            val tree = ComposeBindingsParent().tree.collectAsState()
             // Avoid unused warnings.
             n.value
             s.value
+            tree.value
             rememberDisposable {
                 com.vynatix.holdfast.Disposable { /* no-op */ }
             }

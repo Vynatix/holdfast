@@ -191,7 +191,7 @@ internal class ReadCommands(
         ): String =
             runCatching { state.value }
                 .fold(
-                    onSuccess = { entry.renderer.render(name, it) },
+                    onSuccess = { entry.renderer.render(name, state, it) },
                     onFailure = { "<read failed: ${it::class.simpleName}: ${it.message}>" },
                 )
     }

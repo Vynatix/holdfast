@@ -97,6 +97,37 @@ class DebugConsoleTest {
     }
 
     @Test
+    fun secretTaggedStatesAreRedactedEverywhereWithoutARedactList() {
+        val (registry, console) = newConsole()
+        val store = VaultStore()
+        store.pin
+        store.owner
+        registry.register(store, "vault")
+        console.execute("mark vault")
+        store.action {
+            pin mutate "9876"
+            owner mutate "grace"
+        }
+        store.action {
+            pin mutate "5555"
+            error("rolled back")
+        }
+        val outputs =
+            listOf("dump vault", "get vault pin", "journal vault", "autopsy vault", "diff vault")
+                .map { console.execute(it) }
+        outputs.forEach { out ->
+            listOf("1234", "9876", "5555").forEach { secret ->
+                assertFalse(out.contains(secret), "Secret value leaked into: $out")
+            }
+        }
+        assertContains(outputs[0], "pin")
+        assertContains(outputs[0], ValueRenderer.REDACTED)
+        assertContains(outputs[0], "grace")
+        assertContains(console.execute("set vault pin 0000"), "redacted")
+        assertEquals("9876", store.pin.value)
+    }
+
+    @Test
     fun getReadsOneValueAndTruncatesLongOnes() {
         val (_, console, store) = registered(options = DebugOptions(valueMaxChars = 5))
         store.action { label mutate "abcdefghij" }

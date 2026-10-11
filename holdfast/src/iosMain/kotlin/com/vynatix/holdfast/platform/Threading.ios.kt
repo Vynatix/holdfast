@@ -12,3 +12,5 @@ actual fun currentThreadId(): Long = pthread_self().toLong()
 actual fun threadYield() {
     sched_yield()
 }
+
+internal actual val tryLockCounts: Boolean = true

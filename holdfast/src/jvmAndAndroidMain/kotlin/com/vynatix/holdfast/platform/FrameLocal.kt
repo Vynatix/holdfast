@@ -13,3 +13,11 @@ internal actual fun setFrameLocal(value: Any?) {
         frameLocal.set(value)
     }
 }
+
+private val fanoutLocal = ThreadLocal<Any?>()
+
+internal actual fun currentFanoutLocal(): Any? = fanoutLocal.get()
+
+internal actual fun setFanoutLocal(value: Any?) {
+    if (value == null) fanoutLocal.remove() else fanoutLocal.set(value)
+}

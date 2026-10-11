@@ -11,6 +11,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.UnenrolledStoreException
+import com.vynatix.holdfast.internalRefuseInitializerWrite
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -32,12 +33,28 @@ import kotlin.uuid.Uuid
  * Concurrency contract for 1.1:
  *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
  *    blocking `action` will block until the in-flight `suspendAction` completes,
- *    and vice versa. Coordination is via an internal coroutine [Mutex] installed
- *    lazily on first use.
+ *    and vice versa. On wasmJs, where the in-flight body can only resume on
+ *    the one thread the blocking call would wait on, that blocking `action`
+ *    (or `atomic`, `reset()`, `restore()`) throws an `IllegalStateException`
+ *    instead of waiting (issue #27). Called on THIS store from inside this
+ *    body, a blocking `action` (or `atomic(...)`, `reset()`, `restore()`)
+ *    throws that `IllegalStateException` on EVERY platform (issue #31): the
+ *    body holds the store's suspend mutex, so the wait could never end —
+ *    stage the write with `mutate`/`update` instead, or make the blocking
+ *    call once the body has returned; a blocking entry on another store is
+ *    unaffected. Coordination is via an internal coroutine [Mutex] installed
+ *    lazily on first use — also while it is installed: this call waits,
+ *    suspending, for a blocking `action`/`atomic` that took the store before
+ *    the [Mutex] existed.
  *  - **Cancellation**: a `CancellationException` thrown from the body rolls back
  *    the transaction. Cancellation BETWEEN body return and commit is suppressed
  *    via [NonCancellable] on the commit phase — once the body completes, the
- *    commit's observer/bridge fanout runs to completion to avoid mid-fanout desync.
+ *    commit's observer/bridge fanout runs to completion to avoid mid-fanout
+ *    desync, and the call returns the commit's [TransactionResult] even if the
+ *    caller was cancelled meanwhile (the caller sees its cancellation at its
+ *    next suspension point). Called from an already-cancelled coroutine, an
+ *    outermost `suspendAction` throws that [CancellationException] before
+ *    taking the store, on every platform.
  *  - **Middleware**: `Middleware<V>` sync hooks fire on the suspending path
  *    in concentric-ring order — last-registered middleware is outermost (its
  *    `onTransactionStarted` fires first), matching `Store.middlewares`'s
@@ -48,6 +65,11 @@ import kotlin.uuid.Uuid
  *    failure does not abort other middlewares' hooks.
  *  - **Concurrent threads inside the body**: undefined. Stick to single-flight
  *    bodies.
+ *  - **Derived states settle once**: this call is an entry, like `action`. The
+ *    `derivedState`/`merged` states whose sources its commit — or any action,
+ *    frame or `suspendAction` nested in its body — changes recompute once,
+ *    after the outermost entry on this coroutine has released every store,
+ *    on whatever thread it ends on (see [com.vynatix.holdfast.SettleScope]).
  *
  * Example:
  * ```
@@ -61,6 +83,9 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): TransactionResult<R> {
+    // A state initializer or a schema migration (SchemaVersioned.migrate) may
+    // read states but not write them (Store.state).
+    internalRefuseInitializerWrite("run suspendAction")
     // Frame policing (body-only: the marker travels with the frame's coroutine
     // and is popped before commit fanout). A participant of a suspendAtomic
     // frame runs as a SAVEPOINT of its frame root — no mutex re-acquisition
@@ -71,16 +96,33 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         return suspendActionInFrame(frame, body)
     }
     val serializer = ensureSerializer(this)
-    val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
-
-    return try {
-        suspendActionUnderMutex(serializer, owner, body)
-    } finally {
-        // Deferred post-commit work (derived recomputes) drains AFTER the mutex
-        // releases — recomputes run blocking `action`s, which would spin forever
-        // on a mutex this call still holds. Same placement, and same reason, as
-        // suspendAtomic's drain. `finally`, so the cancellation path drains too.
-        internalDrainPostCommitTasks()
+    // The coroutine making this call, read BEFORE the entry's settle handling:
+    // a nested entry's join wrap is a new coroutine, so kotlinx's same-owner
+    // mutex refusal can no longer see that the caller IS the holder's body —
+    // the probe below compares this against the store's suspendingOwner
+    // (issue #38, refuseOwnSuspendingOwner).
+    val caller: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
+    // An entry: the derived states this action's commit changes a source of
+    // settle once the outermost entry — this one, unless it is nested in
+    // another — has released everything, on whatever thread it ends on.
+    return settlingSuspended {
+        // The owner the store's mutex is locked with: the coroutine the BODY
+        // runs in. A directly-nested entry's caller (above) is exactly this
+        // coroutine, so the probe recognizes it at any nesting depth.
+        val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
+        refuseOwnSuspendingOwner(caller)
+        try {
+            suspendActionUnderMutex(serializer, owner, body)
+        } finally {
+            // Deferred post-commit work (derived recomputes) drains AFTER the mutex
+            // releases — a recompute opens a fresh top-level action, which cannot
+            // run while this call still holds the mutex. Draining after the release
+            // also makes this call a valid hand-off target for recomputes that found
+            // the store busy (Store.tryTopLevelAction). Same placement, and same
+            // reason, as suspendAtomic's drain. `finally`, so the cancellation path
+            // drains too.
+            internalDrainPostCommitTasks()
+        }
     }
 }
 
@@ -95,6 +137,10 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
     body: suspend V.() -> R,
 ): TransactionResult<R> =
     serializer.mutex.withLock(owner) {
+        // Before anything is installed: a blocking holder that read the
+        // serializer as not installed yet may still hold the store under its
+        // transaction lock alone (awaitLockOnlyHolders).
+        awaitLockOnlyHolders()
         val txn =
             Transaction.createForExternal(
                 id = body::class.simpleName ?: Uuid.random().toString(),

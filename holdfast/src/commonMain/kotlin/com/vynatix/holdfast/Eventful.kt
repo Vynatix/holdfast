@@ -41,6 +41,8 @@ interface Eventful<E : Any> {
      * Throws [IllegalStateException] if called outside of [Store.action] /
      * `store-coroutines.suspendAction`. Events MUST be transactional — emitting
      * outside a transaction would bypass the rollback-discards-events guarantee.
+     * Throws it too while the transaction's commit is already fanning out (an
+     * observer emitting on its own store): that event would never be drained.
      */
     fun emit(event: E)
 }
