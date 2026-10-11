@@ -40,6 +40,14 @@ jobs:
           fi
           echo "HOLDFAST_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
+      # Fail loudly before any upload if the namespace is wrong or the token
+      # is bad (same preflight scripts/release.sh runs locally).
+      - name: Namespace preflight
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
+        run: scripts/check-namespace.sh
+
       # Hallmark modules are gated behind -Pholdfast.includeHallmark=true and
       # excluded from the publish set (their hallmark dep is mavenLocal-only).
       - name: Verify build before publish
@@ -52,6 +60,12 @@ jobs:
             :holdfast-testing:apiCheck \
             --stacktrace
 
+      # `publishAndReleaseToMavenCentral` is provided by the vanniktech
+      # publication plugin (com.vanniktech:gradle-maven-publish-plugin) via
+      # the holdfast.publish convention. It uploads through the Central Portal
+      # publisher API, triggers the release and waits for Central's
+      # validation to finish. Same task the local path
+      # (scripts/release.sh) runs.
       - name: Publish to Maven Central
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
