@@ -305,18 +305,22 @@ private suspend fun <R> acquireAndRun(
             // A fresh top-level root makes this frame the store's holder. A store
             // that already had a transaction leaves the drain to its holder.
             if (priorActive == null) drainOnExit += v
-            // Install a fresh root transaction for this store. Subsequent
-            // mutate / update / suspendAction calls inside the body stage into
-            // this root's pendingWrites.
-            val root = Transaction.createForExternal(id, ownerThreadId, frameId = id)
-            v.internalSetActiveTransaction(root)
-            v.suspendingOwner = ownerKey
-            // Observable progress for any blocking waiter on this store
-            // (issue 003): the entry bumped, staged writes and the frame's
-            // commit phase bump again.
-            v.suspendingProgressEpoch++
-            rootsAcquired += RootEntry(store = v, txn = root, session = v.internalFrameMiddlewareSession(root))
             try {
+                // Install a fresh root transaction for this store. Subsequent
+                // mutate / update / suspendAction calls inside the body stage
+                // into this root's pendingWrites. Installed inside the try,
+                // whose finally restores what was there before: a throw
+                // anywhere between the install and the recursion — the
+                // progress epoch or the middleware session — leaves nothing
+                // of this frame installed (issue 002 A6(i)).
+                val root = Transaction.createForExternal(id, ownerThreadId, frameId = id)
+                v.internalSetActiveTransaction(root)
+                v.suspendingOwner = ownerKey
+                // Observable progress for any blocking waiter on this store
+                // (issue 003): the entry bumped, staged writes and the frame's
+                // commit phase bump again.
+                v.suspendingProgressEpoch++
+                rootsAcquired += RootEntry(store = v, txn = root, session = v.internalFrameMiddlewareSession(root))
                 acquireAndRun(
                     sorted = sorted,
                     newlyHeldSet = newlyHeldSet,

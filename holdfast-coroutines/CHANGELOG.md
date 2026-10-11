@@ -33,6 +33,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A throw between a suspending entry's install and its body no longer
+  strands the store (issue 002 A6(i)).** `suspendAction` and `suspendAtomic`
+  set the active transaction and `suspendingOwner` before the protected `try`
+  began, so anything throwing in the pre-body stretch — the progress-epoch and
+  holder-label bookkeeping, the middleware snapshot, the frame's middleware
+  session — unwound past the clearing `finally`: the dead transaction stayed
+  in the slot (a same-thread follow-up action silently merged into a root
+  nobody commits) and the owner leaked (a budgeted blocker for later blocking
+  calls). The installs now sit inside the try, whose finally clears both on
+  every exit. The exit order itself is unchanged and load-bearing (issue 002
+  A6(ii)): the transaction slot clears before the suspending owner — a bare
+  foreign `mutate` in the residual window finds no transaction and synthesizes
+  its own one-shot action — and both clear before the mutex releases. No
+  user-code path could throw in that stretch (middleware hooks are
+  contract-isolated), so this is hardening for library-internal failures and
+  future edits, pinned by `SuspendEntryHygieneTest` and
+  `SuspendExitWindowTest`.
 - **The outer body's other coroutines no longer read a nested suspending
   entry's uncommitted writes (issue #38, fixed in `:holdfast`).** A
   `suspendAction`/`suspendAtomic` started inside another suspending entry's

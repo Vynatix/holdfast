@@ -23,6 +23,22 @@ private class DerivedHostStore : Store<DerivedHostStore>() {
     val unrelated by state { 0 }
 }
 
+/** A bridge the test drives: [deliver] is an inbound write. */
+private class InboundListBridge : Bridge<List<Int>> {
+    private var inbound: ((List<Int>) -> Unit)? = null
+
+    override fun observe(observer: (List<Int>) -> Unit): Disposable {
+        inbound = observer
+        return Disposable { inbound = null }
+    }
+
+    override fun publish(value: List<Int>): Boolean = true
+
+    fun deliver(value: List<Int>) {
+        inbound?.invoke(value)
+    }
+}
+
 class ComputedTest {
     @Test fun computedReflectsCurrentSourceValues() {
         val v = DerivedVault()
@@ -385,5 +401,72 @@ class DerivedTest {
         assertEquals(31, sum.value)
         assertEquals(9, max.value)
         assertEquals(8, count.value)
+    }
+
+    /**
+     * Issue 002 residue, audit row 16: an inbound bridge write on an IDLE
+     * store recomputes a `derived` inline. `MutableState.applyFromBridge`
+     * writes the value and notifies observers; the derived's source observer
+     * defers through `postCommit`, which finds no active transaction and runs
+     * the recompute right there — synchronously inside the deliver, with no
+     * settle and no later holder to wait for.
+     */
+    @Test fun derivedViaBridgeInboundRunsImmediately() {
+        val v = DerivedVault()
+        var computes = 0
+        val (doubled, d) =
+            v.derived(v.items) {
+                computes++
+                items.value.sum() * 2
+            }
+        disposables += d
+        val inbound = InboundListBridge()
+        v { items bridge inbound }
+        assertEquals(1, computes, "the initial compute")
+        assertEquals(0, doubled.value)
+
+        inbound.deliver(listOf(1, 2, 3))
+
+        assertEquals(2, computes, "exactly one recompute, run inline by the idle store's postCommit")
+        assertEquals(12, doubled.value, "the derived is current as deliver returns")
+    }
+
+    /**
+     * Issue 002 residue, audit row 19: a middleware observes the derived
+     * recompute as a real transaction of its own. The source action and the
+     * recompute are two distinct started→completed pairs, the recompute's
+     * transaction id being the derived's backing-state name (`__derived_N`),
+     * and the recompute runs only after the source action has completed.
+     */
+    @Test fun aMiddlewareObservesTheDerivedRecomputeTransaction() {
+        val v = DerivedVault()
+        val log = mutableListOf<Pair<String, String>>() // "started"/"completed" to transaction id
+        v.middlewares(
+            object : Middleware<DerivedVault>() {
+                override fun onTransactionStarted(context: MiddlewareContext<DerivedVault>) {
+                    log += "started" to context.transaction.id
+                }
+
+                override fun onTransactionCompleted(context: MiddlewareContext<DerivedVault>) {
+                    log += "completed" to context.transaction.id
+                }
+            },
+        )
+        val (total, d) = v.derived(v.items) { items.value.sum() }
+        disposables += d
+        log.clear()
+
+        v action { items mutate listOf(5) }
+
+        assertEquals(4, log.size, "two transactions: the source action and the recompute")
+        assertEquals(
+            listOf("started", "completed", "started", "completed"),
+            log.map { it.first },
+            "each transaction is started then completed",
+        )
+        val recomputeId = log[2].second
+        assertTrue(recomputeId.startsWith("__derived_"), "the second transaction is the derived's recompute (id=$recomputeId)")
+        assertEquals(recomputeId, log[3].second, "the recompute transaction runs to its completed hook")
+        assertEquals(total.value, 5)
     }
 }
