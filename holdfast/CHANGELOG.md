@@ -8,6 +8,28 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Changed
+
+- **A standalone `update { }` is now an atomic read-modify-write (issue 004,
+  spec D2).** `State.update` used to read the current value before `mutate`
+  synthesized its one-shot write-side action, so concurrent standalone updates
+  overwrote each other — measured, about 50% of 10,000 concurrent increments
+  were lost. The whole read-modify-write now runs inside that one-shot action,
+  under the store's serializer and transaction lock: **atomic with respect to
+  blocking actions and one-shot mutates; updates concurrent with an in-flight
+  `suspendAction` on the same store remain undefined** (they stage into its
+  transaction), and bridge-inbound writes are excluded (they bypass
+  transactions by design). Behavior changes beyond the atomicity, both
+  deliberate: the block now runs inside the action's body — after middleware
+  `onTransactionStarted`, under the store's `transactionLock`, so a slow block
+  holds the lock like an action body — and the action's result is consumed
+  with `getOrThrow()`, so a throwing block propagates as itself and a
+  middleware/commit-phase failure surfaces, where `mutate`'s standalone
+  one-shot result is discarded (`update` is stricter than `mutate`). Inside an
+  owner transaction — a `suspendAction`/`suspendAtomic` body included, on any
+  thread it resumed on — nothing changes: the update stages into that
+  transaction, read-your-own-writes.
+
 ### Fixed
 
 - **The outer body's other coroutines no longer read a nested suspending
