@@ -247,6 +247,16 @@ internal class OwnedKeyedDisposeTask(
     override fun deferPastSettle(report: Boolean) = settle()
 
     /**
+     * Report through the first store of the list, the one this task was
+     * disposing when it threw (`dispose()` never throws, so this is a
+     * backstop — a library bug, but not a silent one). Works on a store the
+     * task already disposed.
+     */
+    override fun reportUncaught(error: Throwable) {
+        stores.first().internalReportUncaughtFailure(error)
+    }
+
+    /**
      * Dispose the stores where no lock [disposing]'s dispose holds is held:
      * when the settle scope open on this thread settles, else from
      * [disposing]'s post-commit queue when this thread holds its transaction

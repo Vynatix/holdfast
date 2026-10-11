@@ -59,6 +59,19 @@ internal interface SettleTask {
      * host's [Store.uncaughtObserverHandler], handing off first.
      */
     fun deferPastSettle(report: Boolean)
+
+    /**
+     * Report [error], which a settle caught escaping [settle] past the paths
+     * that report their own failures (a recompute's failed transaction is
+     * reported by the task itself; this is a throw around it, from outside a
+     * transaction body — such as out of the top-level attempt's lock
+     * release, issue #26's wasmJs bug): through the task's host store's
+     * [Store.internalReportUncaughtFailure], like every post-commit failure,
+     * quoting no state value. The settle keeps going after the failure and
+     * guards this call, so a throwing handler cannot strand the work still
+     * queued.
+     */
+    fun reportUncaught(error: Throwable)
 }
 
 /**
@@ -126,8 +139,12 @@ class SettleScope internal constructor() {
      * recomputes, lower ranks first. Called once, by the entry that opened
      * the scope, after it has released everything it took, with the scope
      * still installed on its thread, so the entries a recompute opens join
-     * it. A throwing task is swallowed, like a post-commit drain's: a
-     * recompute reports its own failures.
+     * it. A task, or a frame's drain, that throws past the paths that report
+     * their own failures — a throw from outside a transaction body, never a
+     * failed transaction, which its task reports — is reported, never
+     * dropped: a drain through that store's [Store.uncaughtObserverHandler],
+     * a task through its host's ([SettleTask.reportUncaught]). The settle
+     * keeps going after such a failure.
      *
      * A task, or a frame's drain of one store, that this settle has already
      * run [MAX_SETTLE_RUNS] times is not run again: the task is handed to its
@@ -173,6 +190,28 @@ class SettleScope internal constructor() {
                         }
                     is SettleTask -> if (loop) next.deferPastSettle(report = firstCut) else next.settle()
                 }
+            }.onFailure { error -> reportUncaught(next, error) }
+        }
+    }
+
+    /**
+     * [settle] caught [error] escaping a piece of its work past the paths
+     * that report their own failures (a failed transaction is reported by
+     * its task; this is a throw around it): report it, never drop it — a
+     * drain through that store's [internalReportUncaughtFailure], a task
+     * through [SettleTask.reportUncaught] to its host. Guarded, and the
+     * settle keeps going after the failure: a throwing handler must not
+     * strand the work still queued, nor mask the entry's own exception
+     * ([settle] runs in a finally).
+     */
+    private fun reportUncaught(
+        next: Any,
+        error: Throwable,
+    ) {
+        runCatching {
+            when (next) {
+                is Store<*> -> if (!next.isDisposed) next.internalReportUncaughtFailure(error)
+                is SettleTask -> next.reportUncaught(error)
             }
         }
     }

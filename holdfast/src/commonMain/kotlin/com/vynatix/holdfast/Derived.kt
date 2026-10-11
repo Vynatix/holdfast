@@ -210,6 +210,16 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
     }
 
     /**
+     * A settle caught [error] escaping the recompute outside its transaction
+     * body (a failed transaction is reported by the attempt itself; this is
+     * what was thrown around it): report it like any other post-commit
+     * failure, value-free. The settle guards the call.
+     */
+    override fun reportUncaught(error: Throwable) {
+        if (!host.isDisposed) host.internalReportUncaughtFailure(error)
+    }
+
+    /**
      * A change of [changed], a store this derived state follows as a whole
      * (StoreEdges.kt), was noticed inside a no-write region with no settle
      * scope open — a fallback no known path takes (see SourceFollower): leave

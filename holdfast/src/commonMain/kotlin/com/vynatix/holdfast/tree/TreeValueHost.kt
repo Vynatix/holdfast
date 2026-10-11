@@ -47,4 +47,13 @@ internal class HostDisposeTask(
     override fun deferPastSettle(report: Boolean) {
         host.handOffPostCommit { host.dispose() }
     }
+
+    /**
+     * Report through the host, whose handler forwards to [owner]'s — the
+     * route every failure of the tree's value takes. Works on the disposed
+     * host a failed [settle] leaves.
+     */
+    override fun reportUncaught(error: Throwable) {
+        host.internalReportUncaughtFailure(error)
+    }
 }
