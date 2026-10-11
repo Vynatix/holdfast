@@ -108,9 +108,11 @@ private class CoreOtherDraftSection(
 }
 
 private class CoreCounterStore : Store<CoreCounterStore>() {
-    val count by state { 0 }
+    // distinct = false (issue #007's opt-out): this suite contrasts a state
+    // that re-fires on an equal value with the deduping default (`deduped`).
+    val count by state(distinct = false) { 0 }
     val label by state { "" }
-    val deduped by state(distinct = true) { 0 }
+    val deduped by state { 0 }
     var disposeHooks = 0
 
     override fun onDispose() {

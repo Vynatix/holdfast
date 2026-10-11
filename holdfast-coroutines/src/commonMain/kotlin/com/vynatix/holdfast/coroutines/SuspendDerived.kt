@@ -59,6 +59,13 @@ import kotlinx.coroutines.launch
  * time. If [compute] suspends on a long-running operation here, the caller
  * blocks; subsequent recomputes are async-launched.
  *
+ * **Same-value commits**: the backing state is `distinct` (the state
+ * default), and a source commit the source's own `distinct` dedup skips (a
+ * same-value commit, by default) schedules no recompute at all — so a
+ * [compute] that reads state it does not list among [sources] no longer
+ * refreshes as a side effect of such commits. List everything [compute]
+ * reads.
+ *
  * A source may be any state a store produced, including core's experimental
  * `derivedState`/`merged` ones.
  *

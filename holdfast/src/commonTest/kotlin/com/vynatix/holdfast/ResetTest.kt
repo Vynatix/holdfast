@@ -51,7 +51,10 @@ private class ProfileStore : Store<ProfileStore>() {
 }
 
 private class Panel : Store<Panel>() {
-    val count by state { 0 }
+    // distinct = false (issue #007's opt-out): the nested-reset tests assert a
+    // write that ends where it started still fires, which the distinct default
+    // now dedups.
+    val count by state(distinct = false) { 0 }
     val label by state { "idle" }
     val limit by state { 10 }
     val step by state { 1 }

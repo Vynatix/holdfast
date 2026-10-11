@@ -29,6 +29,26 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   owner transaction — a `suspendAction`/`suspendAtomic` body included, on any
   thread it resumed on — nothing changes: the update stages into that
   transaction, read-your-own-writes.
+||||||| parent of 0e9eeec (changelog: [Unreleased] behavior-change entry for the distinct default flip (#007))
+- **Breaking: `distinct` now defaults to `true` at every state declaration
+  site (issue #007).** A commit that re-applies the same value — the stored
+  post-`Transformer.set` raw value compared with `==` — skips observer fanout
+  and bridge publish, matching `StateFlow`'s conflation semantics. Declare
+  `state(distinct = false) { … }` (or `keyedState(distinct = false) { … }`)
+  to keep re-firing on every commit. The default flipped consistently at the
+  stable and experimental `state(...)` overloads, `keyedState(...)`, the
+  public `MutableState` constructor and the internal registration seams, so
+  `derived`/`suspendDerived` backing states dedupe too — a same-value source
+  commit no longer schedules a recompute, so list every state a `compute`
+  reads among its sources. Inbound bridge apply (`applyFromBridge`) still
+  fires observers unconditionally, and `reset()` still skips unchanged states
+  regardless of `distinct`. `restore()` semantics changed with the flip: a
+  state whose value the snapshot leaves unchanged fires neither its observers
+  nor its bridge (a `distinct = false` state still re-fires and re-publishes).
+  The comparison is against the stored raw value: an in-place-mutated object
+  is silently deduped (mutate immutably or opt out), reference-equality types
+  (`ByteArray`) never dedupe, and a non-pure `set` — a randomized cipher,
+  already outside the `Transformer` contract — defeats the dedup entirely.
 
 ### Fixed
 

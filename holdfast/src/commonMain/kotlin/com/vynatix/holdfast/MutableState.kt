@@ -31,7 +31,7 @@ class MutableState<T : Any>(
     private val transformer: Transformer<T>? = null,
     @property:StoreInternalApi
     val owningStore: Store<*>,
-    internal val distinct: Boolean = false,
+    internal val distinct: Boolean = true,
 ) : State<T> {
     /** Deprecated alias for [owningStore], kept for one minor release. */
     @Deprecated(
@@ -263,9 +263,11 @@ class MutableState<T : Any>(
      * lets a concurrent `snapshot()` see half of a commit. The bracket helpers
      * are `internal`, so companion modules must not call this.
      *
-     * If [distinct] is true and the new processed value is `==` to
-     * `currentValue`, nothing is written and this returns `false` — the caller
-     * skips both fanout phases for this state (opt-in dedup).
+     * If [distinct] is true (the default at every declaration site) and the
+     * new processed value is `==` to `currentValue`, nothing is written and
+     * this returns `false` — the caller skips both fanout phases for this
+     * state (same-value dedup; a `distinct = false` state re-fires on every
+     * commit).
      */
     @StoreInternalApi
     fun applyCommittedValue(processedValue: T): Boolean =
