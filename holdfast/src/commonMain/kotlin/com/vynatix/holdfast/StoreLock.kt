@@ -17,8 +17,21 @@ import kotlinx.atomicfu.locks.SynchronousMutex
  * Reentrancy is tracked here rather than delegated: [SynchronousMutex] is not
  * reentrant, so the underlying mutex is taken only on the outermost acquire and
  * released only when the matching depth unwinds.
+ *
+ * wasmJs counter rule (holdfast PR #40's doctrine, applied here): atomicfu's
+ * wasmJs `SynchronousMutex` is a counting no-op — `lock` counts, `unlock`
+ * counts down (throwing "Mutex already unlocked" at zero) and `tryLock` NEVER
+ * counts, succeeding without claiming. So every acquire this class makes is
+ * `lock`/`tryLock`-where-it-counts, never a bare wasmJs `tryLock`, or the
+ * matching `release()` would underflow the counter. See [tryAcquire].
  */
-class StoreLock {
+class StoreLock
+internal constructor(
+    private val tryLockCounts: Boolean,
+) {
+    /** Production locks: the platform's claim rule ([platformTryLockCounts]). */
+    constructor() : this(platformTryLockCounts)
+
     private val mutex = SynchronousMutex()
 
     /**
@@ -61,7 +74,12 @@ class StoreLock {
      * thread's and the call deepens it; that is only sound because that
      * target is single-threaded, which [acquire] already assumes. The mutex
      * is only tried when [locked] is clear, which [tryLockCounted]'s
-     * unconditional take on wasmJs relies on.
+     * unconditional take on wasmJs relies on: wasmJs's [SynchronousMutex.tryLock]
+     * never counts, so a tryLock-claim paired with [release]'s unlock would
+     * decrement a zero counter and throw "Mutex already unlocked" — the wasm
+     * break PR #40's InitializerGraph fix first found; this was its surviving
+     * twin, filed as PR #48 and independently fixed upstream by #47's
+     * [tryLockCounted], which this branch now adopts.
      */
     internal fun tryAcquire(): Boolean {
         val currentThreadId = currentThreadId()
@@ -79,6 +97,33 @@ class StoreLock {
         if (acquired) lockCount++
         return acquired
     }
+
+    /**
+     * Claim a lock the owner-state read as free, for [tryAcquire]:
+     * [SynchronousMutex.tryLock] where it counts, [SynchronousMutex.lock]
+     * where it does not (wasmJs — see [tryAcquire]). Writes the owner fields
+     * only when the claim succeeds; a failed JVM `tryLock` (the flags lagged a
+     * take or release on another thread) claims nothing.
+     */
+    private fun claimFree(currentThreadId: Long): Boolean =
+        if (tryLockCounts) {
+            if (mutex.tryLock()) {
+                locked = true
+                ownerThreadId = currentThreadId
+                lockCount = 0
+                true
+            } else {
+                false
+            }
+        } else {
+            // wasmJs: counts, and cannot park — the flags are exact on its
+            // single thread (no suspension happens inside a StoreLock bracket).
+            mutex.lock()
+            locked = true
+            ownerThreadId = currentThreadId
+            lockCount = 0
+            true
+        }
 
     /**
      * Non-blocking, non-reentrant [acquire]: take the lock only if NO thread
