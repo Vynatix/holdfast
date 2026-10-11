@@ -252,8 +252,10 @@ experimental**: the artifact is still published for downstream consumers, but
 
 - only a regression suite runs on wasmJs: the module's own test suite uses
   `runBlocking` / `newSingleThreadContext`, absent on wasm, so its wasmJs
-  tests are disabled, and the never-published `:wasm-tests` module runs
-  smoke tests through the public API on wasmJs (Node.js) in CI instead;
+  tests are disabled, and the never-published `:wasm-tests` module covers it
+  instead — a commonTest suite over the public, experimental and internal
+  surface on wasmJs (Node.js) in CI, with the JVM as the control, pinning
+  the fixed wasmJs defects (#26, #27, #28, #29, #31, #38);
 - `FileSystemKvStore` throws `UnsupportedOperationException` (no synchronous
   filesystem API in the browser);
 - `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
