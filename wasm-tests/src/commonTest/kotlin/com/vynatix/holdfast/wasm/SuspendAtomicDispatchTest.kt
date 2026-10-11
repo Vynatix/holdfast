@@ -63,7 +63,7 @@ class SuspendAtomicDispatchTest {
     fun aWriteQueuedBeforeARolledBackSuspendAtomicIsNotSwallowedByIt() =
         runTest {
             val store = DispatchStore()
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } }
             val frame =
                 suspendAtomic(store) {
                     store { count mutate 1 }
@@ -84,7 +84,7 @@ class SuspendAtomicDispatchTest {
             val store = DispatchStore()
             val seen = mutableListOf<Int>()
             val subscription = store.count effect { seen += this }
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } }
             val frame = suspendAtomic(store) { store { count mutate 1 } }
             assertIs<TransactionResult.Success<*>>(frame)
             advanceUntilIdle()
@@ -100,7 +100,7 @@ class SuspendAtomicDispatchTest {
     fun aWriteQueuedBeforeARolledBackSuspendActionIsNotSwallowedByIt() =
         runTest {
             val store = DispatchStore()
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } }
             val result =
                 store.suspendAction {
                     count mutate 1
@@ -117,7 +117,7 @@ class SuspendAtomicDispatchTest {
     fun aWriteQueuedBeforeASuspendingFrameBodyJoinsItOnEveryPlatform() =
         runTest {
             val store = DispatchStore()
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } }
             val frame =
                 suspendAtomic(store) {
                     yield()
@@ -140,14 +140,14 @@ class SuspendAtomicDispatchTest {
             assertFailsWith<UnenrolledStoreException> {
                 suspendAtomic(enrolled) {
                     enrolled { count mutate 1 }
-                    outsider { count mutate 5 }
+                    with(outsider) { count mutate 5 } // scope fn: the unenrolled one-shot path (issue 005)
                 }
             }
             assertFailsWith<UnenrolledStoreException> {
                 suspendAtomic(enrolled) {
                     enrolled { count mutate 2 }
                     yield()
-                    outsider { count mutate 6 }
+                    with(outsider) { count mutate 6 } // scope fn: the unenrolled one-shot path (issue 005)
                 }
             }
             assertEquals(0, enrolled.count.value)

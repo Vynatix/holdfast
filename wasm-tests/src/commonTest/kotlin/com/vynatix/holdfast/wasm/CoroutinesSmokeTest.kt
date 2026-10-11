@@ -479,7 +479,7 @@ class CoroutinesSmokeTest {
                             right { b mutate 6 }
                         }.getOrThrow()
                         delay(1)
-                        right { b mutate 7 }
+                        with(right) { b mutate 7 } // scope fn: the unenrolled one-shot path (issue 005)
                     }
                 }
             assertTrue("CoroutinesRight" in unenrolled.message.orEmpty(), unenrolled.message)

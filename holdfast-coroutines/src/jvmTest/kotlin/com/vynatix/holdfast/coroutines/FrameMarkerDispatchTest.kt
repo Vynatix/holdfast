@@ -33,7 +33,7 @@ class FrameMarkerDispatchTest {
             assertFailsWith<UnenrolledStoreException> {
                 suspendAtomic(a, b) {
                     withContext(Dispatchers.Default) {
-                        c { balance mutate 1L }
+                        with(c) { balance mutate 1L } // scope fn: exercise the unenrolled one-shot path (issue 005)
                     }
                 }
             }

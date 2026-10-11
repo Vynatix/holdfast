@@ -94,16 +94,33 @@ abstract class EventfulStore<Self : EventfulStore<Self, E>, E : Any>(
      * Also throws [IllegalStateException] from inside a state initializer, in
      * an action or not (see [Store.state]), or a schema migration
      * ([SchemaVersioned.migrate]).
+     *
+     * Also throws [IllegalStateException] inside a bare `store { }` block
+     * ([Store.invoke]) while no transaction this thread stages into is
+     * active: emit has no one-shot synthesis of its own, so it is refused
+     * outright there — never staged onto another thread's concurrent action —
+     * and the message names `store action { }` (issue 005). Inside an owned
+     * or suspending-holder transaction the emit stages as usual.
      */
     final override fun emit(event: E) {
         // Before the transaction check: an initializer emits outside any action too.
         NoWriteRegion.refuse { "emit an event on $displayName" }
-        val txn =
-            activeTransaction ?: error(
+        val txn = activeTransaction
+        // Bare-invoke defusal (issue 005), with the precedence rule: emit has
+        // no one-shot synthesis of its own, so it refuses whenever no
+        // transaction this thread stages into is active — before the lookup's
+        // outside-action error (so the teaching message names `store action { }`),
+        // and instead of staging onto another thread's concurrent action (the
+        // caller-thread-confined hole). An owned or suspending-holder
+        // transaction wins: the receiver-DSL shapes (`store { emit(…) }`
+        // inside a suspending entry) keep staging.
+        if (txn == null || !stagesInto(txn)) BareInvokeGuard.refuseMutation()
+        val staging =
+            txn ?: error(
                 "emit(event) called outside of an action / suspendAction. " +
                     "Events must be staged inside a transaction so rollback can discard them.",
             )
-        txn.stageEmittedEvent(this, _events, event)
+        staging.stageEmittedEvent(this, _events, event)
     }
 
     /**

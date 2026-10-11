@@ -118,6 +118,13 @@ class EventfulSupport<E : Any>(
      * Also throws [IllegalStateException] from inside a state initializer, in
      * an action or not (see [Store.state]), or a schema migration
      * ([SchemaVersioned.migrate]).
+     *
+     * Also throws [IllegalStateException] inside a bare `store { }` block
+     * ([Store.invoke]) while no transaction this thread stages into is
+     * active — before the bound store's transaction is consulted for
+     * staging, so a concurrent action on it never turns the emit into a
+     * stage onto that foreign transaction; the message names
+     * `store action { }` (issue 005).
      */
     override fun emit(event: E) {
         val store =
@@ -127,12 +134,19 @@ class EventfulSupport<E : Any>(
             )
         // Before the transaction check: an initializer emits outside any action too.
         NoWriteRegion.refuse { "emit an event on ${store.displayName}" }
-        val txn =
-            store.activeTransaction ?: error(
+        val txn = store.activeTransaction
+        // Same placement and precedence as EventfulStore.emit: refuse a
+        // bare-invoke emit whenever no transaction this thread stages into is
+        // active — the teaching message when nothing is active, and never a
+        // stage onto another thread's concurrent action on the bound store
+        // (issue 005). An owned or suspending-holder transaction wins.
+        if (txn == null || !store.stagesInto(txn)) BareInvokeGuard.refuseMutation()
+        val staging =
+            txn ?: error(
                 "emit(event) called outside of an action / suspendAction. " +
                     "Events must be staged inside a transaction so rollback can discard them.",
             )
-        txn.stageEmittedEvent(store, _events, event)
+        staging.stageEmittedEvent(store, _events, event)
     }
 
     private companion object {

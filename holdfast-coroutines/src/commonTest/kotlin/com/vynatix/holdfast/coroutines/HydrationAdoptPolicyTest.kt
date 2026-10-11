@@ -87,7 +87,7 @@ class HydrationAdoptPolicyTest {
         assertEquals("", store.draft.value)
 
         val donor = Inbox { }
-        donor { draft mutate "from a snapshot" }
+        with(donor) { draft mutate "from a snapshot" } // scope fn: one-shot, not bare-invoke (issue 005)
         val snapshot = donor.snapshot()
         val (restored, viaRestore) = hydrated { restore(snapshot) }
         assertTrue("Inbox.draft" in viaRestore.failure().message.orEmpty())

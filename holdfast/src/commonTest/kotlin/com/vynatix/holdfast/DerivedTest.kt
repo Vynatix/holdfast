@@ -357,7 +357,10 @@ class DerivedTest {
         val sub =
             total effect {
                 val t = this
-                earlier { unrelated mutate t }
+                // Scope function, not `earlier { }`: the effect's post-commit
+                // one-shot write must not be refused as a bare-invoke
+                // mutation (issue 005).
+                with(earlier) { unrelated mutate t }
             }
 
         val r = atomic(earlier, v) { v { items mutate listOf(2, 3) } }

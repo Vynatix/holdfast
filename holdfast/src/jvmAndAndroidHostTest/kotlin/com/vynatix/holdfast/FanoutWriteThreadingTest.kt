@@ -72,7 +72,7 @@ class FanoutWriteThreadingTest {
     @Test fun anotherThreadsMutateDuringFanoutWaitsAndCommits() {
         val s = ThreadedFanoutStore()
 
-        val failure = overlapFanoutWith(s) { s { echo mutate 7 } }
+        val failure = overlapFanoutWith(s) { with(s) { echo mutate 7 } } // scope fn, not an invoke block (issue 005)
 
         assertNull(failure, "another thread's mutate is not nested and must not be refused")
         assertEquals(7, s.echo.value)
@@ -108,7 +108,7 @@ class FanoutWriteThreadingTest {
                         // this state's bridge down, on the bridge lock held
                         // around this call.
                         Thread.sleep(150)
-                        s { echoRef mutate value }
+                        with(s) { echoRef mutate value } // scope fn: the thread bare one-shot, not an invoke block (issue 005)
                         return true
                     }
                 }

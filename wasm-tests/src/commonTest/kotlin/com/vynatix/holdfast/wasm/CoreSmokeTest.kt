@@ -379,8 +379,9 @@ class CoreSmokeTest {
         val fired = mutableListOf<Int>()
         coreOnCommit(store.count) { fired += it }
 
-        store { count mutate 7 }
-        store { count update { it + 1 } }
+        // Scope fns, not `store { }`: bare-invoke mutations throw (issue 005).
+        with(store) { count mutate 7 }
+        with(store) { count update { it + 1 } }
 
         assertEquals(8, store.count.value)
         assertEquals(listOf(7, 8), fired)
@@ -482,7 +483,7 @@ class CoreSmokeTest {
                 }
             store { label mutate "bare" }
         }
-        coreOnCommit(store.count) { value -> other { count mutate value * 100 } }
+        coreOnCommit(store.count) { value -> with(other) { count mutate value * 100 } }
         coreOnCommit(events.count) { events.emit("from observer") }
 
         assertIs<TransactionResult.Success<*>>(store action { count mutate 1 })

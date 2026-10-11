@@ -80,7 +80,7 @@ class SuspendFrameInteropTest {
             val c = SuspendFrameAccount()
             assertFailsWith<UnenrolledStoreException> {
                 suspendAtomic(a, b) {
-                    c { balance mutate 5L }
+                    with(c) { balance mutate 5L } // scope fn: exercise the unenrolled one-shot path (issue 005)
                 }
             }
             assertEquals(0L, c.balance.value)

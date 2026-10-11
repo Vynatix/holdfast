@@ -33,7 +33,7 @@ class SealedStateTest {
         val attempts =
             listOf<() -> Unit>(
                 { store { sealed mutate "x" } },
-                { store { sealed update { "x" } } },
+                { with(store) { sealed update { "x" } } }, // scope fn so the sealed refusal, not the invoke defusal, answers (issue 005)
                 { store { sealed bridge null } },
                 { store { sealed observeFrom Observable { Disposable { } } } },
                 { sealed.bridge = null },
