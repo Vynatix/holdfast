@@ -10,6 +10,26 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **wasmJs: `StoreLock.tryAcquire` claimed a free lock with
+  `SynchronousMutex.tryLock`, which never counts on that target** (atomicfu's
+  wasmJs actual is a counting no-op: `lock` counts, `unlock` counts down and
+  throws `IllegalStateException: Mutex already unlocked` at zero, `tryLock`
+  always succeeds without counting — the same disease PR #40 cured in
+  `InitializerGraph.claim`, surviving in the store's own lock). Every
+  non-blocking top-level bracket a free `StoreLock` opened — the serializer
+  install-window probe `internalTransactionLockFree` (so every hydration-gate
+  decision and `suspendAction`/`suspendAtomic` wait-out), `tryTopLevelAction`'s
+  `tryTopLevelUnderLock`/`drainIfUnheld` (every derived-recompute attempt and
+  post-commit drain), and the tree's `attachLock`/`constructionLock` claims —
+  ended in its `release()` decrementing a zero counter: on Astrid's web app the
+  error fired from the first post-sign-in screen on (13/15 captures, review
+  finding G-04) and every hydration decision died at the gate, so no store
+  synced. Free locks are now claimed by owner-state: `lock()` where tryLock
+  does not count (`platform/Threading.tryLockCounts`, `false` on wasmJs only —
+  it cannot park there, the flags being exact on its single thread), a real
+  `tryLock` everywhere else, so JVM/Android/iOS behavior is unchanged. Pinned
+  by `StoreLockWasmClaimTest` over the modelled route.
+
 - **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
   by its declaring store's `dispose()` during its attach no longer leaves
   the store retained by that store's tree value (the value refuses
