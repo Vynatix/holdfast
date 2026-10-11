@@ -184,14 +184,16 @@ class SettleScopeInterceptedTest {
     }
 
     /**
-     * The documented iOS/wasmJs gap: a dispatcher switch inside the entry
-     * drops the carrier, so a nested `suspendAction` joins the carried scope
-     * (it is in the context) but its commit, fanning out on a thread where the
-     * scope is not installed, takes PR 9's no-scope routing: the recompute
-     * goes to the source store's queue and runs once that commit has released
-     * the store — once per source commit, never inline in the fanout.
+     * A dispatcher switch inside the entry displaces the carrier, so a
+     * nested `suspendAction` finds its carried scope NOT installed in the
+     * slot. It re-wraps the switched dispatcher with it (`settlingSuspended`),
+     * so its commit — fanning out right there — sees the scope again, as on
+     * the JVM, where the `ThreadContextElement` survives the switch: the
+     * recomputes its commits change queue into the carried scope, dedup by
+     * identity, and run once, when that scope settles — not once per source
+     * commit through the source store's queue.
      */
-    @Test fun aNestedDispatcherSwitchFallsBackToTheSourceStoreRouting() {
+    @Test fun aNestedDispatcherSwitchIsReWrappedSoCommitsJoinTheCarriedScope() {
         val left = InterceptedSource()
         val right = InterceptedOther()
         val host = InterceptedHost()
@@ -215,14 +217,15 @@ class SettleScopeInterceptedTest {
                 }
             }
             assertNull(installedAfterSwitch, "the carrier is not installed after the switch")
-            assertEquals(1 to 1, pair.value)
-            assertEquals(
-                3,
-                computes.get(),
-                "no scope on the fanout thread: one recompute per source commit, via the source store's queue",
-            )
-            assertFalse(sourceHeld.get(), "each recompute ran after its source commit released the store")
             assertTrue(scope.isOpen, "the nested entries joined the carried scope without settling it")
+            assertEquals(0 to 0, pair.value, "nothing recomputes before the carried scope settles")
+            assertEquals(1, computes.get(), "only the initial compute ran")
+
+            settleInstalled(scope)
+
+            assertEquals(1 to 1, pair.value)
+            assertEquals(2, computes.get(), "the two commits queued ONE deduped recompute into the carried scope")
+            assertFalse(sourceHeld.get(), "the recompute ran after its source commits released the stores")
         } finally {
             pair.dispose()
         }

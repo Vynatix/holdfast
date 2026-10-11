@@ -124,7 +124,6 @@ public final class com/vynatix/holdfast/testing/MiddlewareStarted : com/vynatix/
 }
 
 public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistration {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun getLastResult (Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -136,10 +135,10 @@ public abstract interface class com/vynatix/holdfast/testing/StoreAutoRegistrati
 	public fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public abstract fun track (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;)Lcom/vynatix/holdfast/testing/StoreHandle;
 	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;ILjava/lang/Object;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public fun trackedAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public final class com/vynatix/holdfast/testing/StoreAutoRegistration$DefaultImpls {
-	public static fun action (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public static fun bridgeEvents (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun emissions (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public static fun getLastResult (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;)Lcom/vynatix/holdfast/TransactionResult;
@@ -150,6 +149,7 @@ public final class com/vynatix/holdfast/testing/StoreAutoRegistration$DefaultImp
 	public static fun read (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public static fun suspendAction (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun track$default (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;ILjava/lang/Object;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public static fun trackedAction (Lcom/vynatix/holdfast/testing/StoreAutoRegistration;Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public abstract interface class com/vynatix/holdfast/testing/StoreEvent {
@@ -181,7 +181,6 @@ public final class com/vynatix/holdfast/testing/StoreTestKt {
 }
 
 public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/holdfast/testing/StoreAutoRegistration, kotlinx/coroutines/CoroutineScope {
-	public fun action (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 	public final fun autoTrackTimeline (Lcom/vynatix/holdfast/Store;)Ljava/util/List;
 	public fun bridgeEvents (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
 	public fun emissions (Lcom/vynatix/holdfast/Store;Lkotlin/reflect/KProperty1;)Ljava/util/List;
@@ -197,6 +196,7 @@ public final class com/vynatix/holdfast/testing/StoreTestScope : com/vynatix/hol
 	public fun read (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public fun suspendAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun track (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/testing/Capture;)Lcom/vynatix/holdfast/testing/StoreHandle;
+	public fun trackedAction (Lcom/vynatix/holdfast/Store;Lkotlin/jvm/functions/Function1;)Lcom/vynatix/holdfast/TransactionResult;
 }
 
 public final class com/vynatix/holdfast/testing/TransactionCommitted : com/vynatix/holdfast/testing/TransactionEvent {

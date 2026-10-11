@@ -2,7 +2,6 @@
 
 package com.vynatix.holdfast
 
-import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.atomicfu.atomic
 
 /**
@@ -48,7 +47,7 @@ class MutableState<T : Any>(
     private val observersLock = StoreLock()
     private val bridgeLock = StoreLock()
 
-    private val observers = mutableSetOf<(T) -> Unit>()
+    private val observers = mutableSetOf<ObserverRegistration<T>>()
 
     /**
      * Test-only window onto the live observer set size. Unlike a "total observers
@@ -209,7 +208,7 @@ class MutableState<T : Any>(
             // the region's thread-local is read before the peek: once per
             // owner-thread read inside a transaction; a read outside a
             // transaction pays nothing for it.
-            if (txn != null && txn.ownerThreadId == currentThreadId() && NoWriteRegion.current() == null) {
+            if (txn != null && txn.readsPendingHere(owningStore)) {
                 val pending = txn.findPendingValue(this)
                 if (pending != null) return afterGet(ComputeReads.uncommitted(pending))
             }
@@ -387,9 +386,9 @@ class MutableState<T : Any>(
      */
     private fun notifyObservers(value: T) {
         val snapshot = observersLock.withLock { observers.toList() }
-        snapshot.forEach { observer ->
+        snapshot.forEach { registration ->
             try {
-                observer(value)
+                registration.observer(value)
             } catch (e: Throwable) {
                 owningStore.internalReportUncaughtFailure(e)
             }
@@ -400,6 +399,13 @@ class MutableState<T : Any>(
      * Subscribe to commits. Fires once immediately with the current value
      * (post-`transformer.get`), then once for every successful top-level commit
      * that includes this state in its pending writes.
+     *
+     * Every call is its own registration, compared by identity, never by the
+     * observer's `equals`: passing the same observer twice registers two
+     * entries — two initial fires, two fires per commit — and each returned
+     * [Disposable] removes exactly its own registration, never another's.
+     * (An equality-based set would collapse them: `effect` registers
+     * `handler::invoke`, and bound references to one receiver compare equal.)
      *
      * Returns a [Disposable] that removes the observer when called. Double-dispose
      * is safe (idempotent).
@@ -412,6 +418,7 @@ class MutableState<T : Any>(
      */
     @StoreInternalApi
     fun observe(observer: (T) -> Unit): Disposable {
+        val registration = ObserverRegistration(observer)
         // Register and read the current value under observersLock, but fire
         // outside it — see [notifyObservers] for why no callback may run under
         // that lock.
@@ -424,7 +431,7 @@ class MutableState<T : Any>(
         // included in it — it sees the old value, then the new one.
         val current =
             observersLock.withLock {
-                observers.add(observer)
+                observers.add(registration)
                 // Initial callback uses the same view as the value getter — post-transformer.get —
                 // so an observer never sees a value the getter wouldn't return for the same state.
                 stateLock.withLock { afterGet(currentValue) }
@@ -433,7 +440,7 @@ class MutableState<T : Any>(
 
         return Disposable {
             observersLock.withLock {
-                observers.remove(observer)
+                observers.remove(registration)
             }
         }
     }
@@ -511,6 +518,18 @@ class MutableState<T : Any>(
  */
 internal class WriteSeal(
     val refusal: String,
+)
+
+/**
+ * One [MutableState.observe] registration: a fresh identity per call wrapping
+ * the caller's observer, so the same observer registered twice is two
+ * independent set entries — two fires per commit, two [Disposable]s, each
+ * removing exactly its own (default identity equals/hashCode; an
+ * equality-based set would collapse bound `handler::invoke` references to one
+ * receiver, issue #32).
+ */
+private class ObserverRegistration<T>(
+    val observer: (T) -> Unit,
 )
 
 /**

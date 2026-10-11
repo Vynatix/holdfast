@@ -8,7 +8,7 @@ plugins {
     id("holdfast.quality")
     id("holdfast.dokka")
     id("holdfast.abi")
-    id("holdfast.publish.sonatype")
+    id("holdfast.publish")
 }
 
 kotlin {

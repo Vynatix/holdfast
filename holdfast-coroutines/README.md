@@ -89,12 +89,31 @@ before taking the store. As with blocking
 event collector the emit resumes inline — must not write back into a store
 that commit has applied: `mutate`/`update`/`emit` throw, and a blocking
 `action`/`atomic` on that store returns an `Error` (which the caller must
-check) rather than waiting on the commit it runs in. On iOS and wasmJs a
-nested `withContext(dispatcher)` inside the commit is not recognised and such
-a blocking call still waits forever. While a `suspendAction` holds the store,
-another thread's bare `mutate`/`update` is not isolated from it — before the
-commit applies it joins the transaction, after it throws — so write from other
-threads through `action { }`, which waits. (`KeyedState.evict`/`evictAll` from
+check) rather than waiting on the commit it runs in. On iOS a nested
+`withContext(dispatcher)` inside the commit is not recognised and such a
+blocking call still waits forever; on wasmJs it throws
+`IllegalStateException` instead, as does any blocking
+`action`/`atomic`/`reset()`/`restore()` on a store a suspended
+`suspendAction`/`suspendAtomic` or hydration decision holds — that holder can
+only resume once the call returns the one thread (issue #27). While a
+`suspendAction` holds the store, a bare `mutate`/`update` from another thread
+or another coroutine (any coroutine on wasmJs) is not isolated from it —
+before the commit applies it joins the transaction, after it throws. A bare
+`update` there computes from the committed value, so its joined write
+replaces the body's pending write to that state instead of building on it.
+Write from other threads through `action { }`, which waits, and from other
+coroutines through `suspendAction { }`, which suspends until the store is
+free. Reads are isolated: while the body is parked, a coroutine on any
+thread, the body's own included, reads committed values, never the body's
+pending writes or staged evictions (issue #28) — unless it carries the body's
+settle scope. The coroutines the body launches carry it, and a suspending
+entry nested in the body joins it, so the outer body and its children read a
+nested entry's pending writes; code resumed inline from the body
+(`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
+`Dispatchers.Main.immediate`) runs as part of it. The body reads its own
+writes while it runs on the thread that opened it; resumed on another thread,
+or inside a nested `withContext(dispatcher)` on iOS and wasmJs, it reads
+committed values. (`KeyedState.evict`/`evictAll` from
 inside the commit are deferred until the suspending call releases the store;
 from another thread they have the same join-then-throw gap as bare `mutate`.)
 A failing

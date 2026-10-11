@@ -1,7 +1,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
-import com.vynatix.holdfast.platform.tryLockCounts as platformTryLockCounts
+import com.vynatix.holdfast.platform.tryLockCounted
 import kotlinx.atomicfu.locks.SynchronousMutex
 
 /**
@@ -72,29 +72,27 @@ internal constructor(
      * Reentrancy is read the same way [acquire] reads it. On wasmJs every
      * caller reports thread id `0`, so a held lock always reads as this
      * thread's and the call deepens it; that is only sound because that
-     * target is single-threaded, which [acquire] already assumes.
-     *
-     * A free lock is claimed by owner-state, and — on wasmJs, whose
-     * [SynchronousMutex.tryLock] never counts — through [SynchronousMutex.lock],
-     * never `tryLock`: a tryLock-claim succeeds without incrementing the
-     * counter, so the matching [release] decrements a zero counter and throws
-     * "Mutex already unlocked" (the wasm break PR #40's InitializerGraph fix
-     * first found; this was its surviving twin). `lock` always counts and
-     * cannot park there: the owner-state read above is exact on that single
-     * thread. Where tryLock DOES count (JVM, Android, iOS) the claim stays a
-     * real `tryLock`, which also answers `false` honestly in the instant the
-     * flags lag a take or release on another thread.
+     * target is single-threaded, which [acquire] already assumes. The mutex
+     * is only tried when [locked] is clear, which [tryLockCounted]'s
+     * unconditional take on wasmJs relies on: wasmJs's [SynchronousMutex.tryLock]
+     * never counts, so a tryLock-claim paired with [release]'s unlock would
+     * decrement a zero counter and throw "Mutex already unlocked" — the wasm
+     * break PR #40's InitializerGraph fix first found; this was its surviving
+     * twin, filed as PR #48 and independently fixed upstream by #47's
+     * [tryLockCounted], which this branch now adopts.
      */
     internal fun tryAcquire(): Boolean {
         val currentThreadId = currentThreadId()
         val acquired =
             when {
                 locked && ownerThreadId == currentThreadId -> true
-                // Held by another thread: answer at once. (Unreachable on
-                // wasmJs, where every holder reads as this thread's.)
-                locked -> false
-                // Free by owner-state: claim it.
-                else -> claimFree(currentThreadId)
+                mutex.tryLockCounted() -> {
+                    locked = true
+                    ownerThreadId = currentThreadId
+                    lockCount = 0
+                    true
+                }
+                else -> false
             }
         if (acquired) lockCount++
         return acquired

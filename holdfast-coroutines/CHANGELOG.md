@@ -8,6 +8,39 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Reads are isolated from a parked suspending entry (issue #28, fixed in
+  `:holdfast`).** While a `suspendAction`/`suspendAtomic` body is parked,
+  another coroutine on its thread (any coroutine on wasmJs) reads committed
+  values instead of the body's uncommitted writes and staged evictions,
+  unless it carries the body's settle scope (a coroutine the body launched,
+  a nested suspending entry, code resumed inline from the body). A
+  suspending entry started inside a blocking entry now opens a settle
+  scope of its own that hands its work to the blocking entry's while that
+  one is open, so its body keeps reading its own writes after the blocking
+  entry returns. A bare `update { }` from another coroutine meanwhile
+  computes from the committed value and replaces the body's pending write
+  to that state; write from other coroutines through `suspendAction { }`.
+- **wasmJs: a blocking entry beside a parked suspending holder no longer
+  freezes the event loop (issue #27).** A blocking `action`, `atomic(...)`,
+  `reset()`, `restore()`, `Hydrator.invalidate()` or `tree.reset()`/
+  `tree.restore()` on a store held by a `suspendAction`, `suspendAtomic` or
+  hydration decision that is suspended spun forever in the serializer's
+  blocking acquire on wasmJs: the holder can only resume on the thread the
+  spin occupies. It now throws an `IllegalStateException` that names the
+  store and says how to write instead: from an unrelated coroutine through
+  `suspendAction`/`suspendAtomic`, or once the holder has finished; inside
+  the holder's own body with `mutate`/`update`; from its commit by
+  launching the write once the commit has finished. The holder's commit
+  stands. The same refusal now ends a blocking `action` inside a
+  `suspendAction` body on the same store, and one inside a nested
+  `withContext(dispatcher)` in the holder's commit, both of which spun.
+  JVM, Android and iOS still wait, as before.
+- **wasmJs (issue #26, fixed in `:holdfast`).** Every `suspendAction`,
+  `suspendAtomic` and hydration decision threw `IllegalStateException:
+  Mutex already unlocked` on wasmJs: waiting out lock-only holders probes
+  the store's transaction lock through `internalTransactionLockFree()`,
+  whose release failed there. No change in this module; `:wasm-tests` now
+  runs suspending entries on wasmJs in CI.
 - **Issue #21 review (PR #24).** `StoreTree.hydrateAll` does not throw when
   a store is disposed after its `hydrate()` — before or while its
   `awaitSettled()` runs, or before its phase is read when not awaiting —

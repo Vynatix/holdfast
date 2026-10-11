@@ -22,9 +22,12 @@ import kotlin.coroutines.coroutineContext
 // it in the thread-local slot on every resumption and restores the previous
 // value on every suspension, exactly as the frame marker travels
 // (FrameMarkerContext.kt). A commit that fans out on another thread than the
-// one that opened the entry still queues into the entry's scope, and a
-// suspending entry nested in another — or in a blocking action on its thread,
-// through `runBlocking` — joins the outer scope.
+// one that opened the entry still queues into the entry's scope. A suspending
+// entry nested in another joins the outer scope; one started inside a
+// blocking entry on its thread (`runBlocking`, an undispatched launch) opens
+// a scope of its own that forwards its work to the blocking entry's while
+// that one is open — its body may outlive that entry, and its transactions
+// need a scope that stays theirs (#28).
 
 /**
  * The settle scope a suspending entry runs in, carried in its coroutine
@@ -39,22 +42,32 @@ internal class SettleAmbientContext(
 /**
  * Run [block] — a `suspendAction` or `suspendAtomic`, from the point where it
  * starts taking the store — as an entry: inside the open settle scope this
- * coroutine carries, or that a blocking entry on this thread opened (joined,
- * so it does not settle here), or else inside a new scope that settles when
- * [block] has returned or thrown, on whatever thread it ends on, with the
- * scope still installed, so the recomputes it runs join it.
+ * coroutine carries (joined, so it does not settle here — directly when that
+ * scope is installed in this coroutine's slot, or, when it is not, re-wrapped
+ * through [withSettleScope] so it is: on iOS/wasmJs a
+ * `withContext(dispatcher)` section of the carrying body displaces the
+ * interceptor that installs it, and an entry started there would otherwise
+ * make its roots with no scope in the slot), or else inside a new scope that
+ * settles when [block] has returned or thrown, on whatever thread it ends on,
+ * with the scope still installed, so the recomputes it runs join it. Started
+ * inside a blocking entry's scope on this thread, the new scope hands its
+ * work to that one while that one is open ([SettleScopes.open]), so derived
+ * states still settle once, with the blocking entry; the body keeps its own
+ * scope, whose identity its transactions record, even when it outlives the
+ * blocking entry (#28).
  *
- * Unless it joins the scope this coroutine already carries, it first checks
- * the caller for cancellation, on every platform: called from an
- * already-cancelled coroutine it throws that [CancellationException] before
- * [block] takes anything. [block] then runs inside a `withContext` (on
- * JVM/Android; an undispatched child on iOS and wasmJs), whose child job
- * would turn a caller cancelled while [block] runs into a
- * [CancellationException] even once [block] has returned — after its commit,
- * which ran under `NonCancellable`. So once [block] has returned (or thrown),
- * that outcome is what this call returns (or throws): a caller cancelled
- * after the body returned still gets the committed [TransactionResult], and
- * sees its cancellation at its next suspension point.
+ * Unless the carried scope is already installed in this coroutine's slot (the
+ * direct join), it first checks the caller for cancellation, on every
+ * platform: called from an already-cancelled coroutine it throws that
+ * [CancellationException] before [block] takes anything. [block] then runs
+ * inside a `withContext` (on JVM/Android; an undispatched child on iOS and
+ * wasmJs), whose child job would turn a caller cancelled while [block] runs
+ * into a [CancellationException] even once [block] has returned — after its
+ * commit, which ran under `NonCancellable`. So once [block] has returned (or
+ * thrown), that outcome is what this call returns (or throws): a caller
+ * cancelled after the body returned still gets the committed
+ * [TransactionResult], and sees its cancellation at its next suspension
+ * point.
  *
  * Read `coroutineContext` (the owner `Job` of a serializer acquire, say)
  * inside [block], so that a suspending entry nested in it — which joins, and
@@ -63,13 +76,54 @@ internal class SettleAmbientContext(
  */
 internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
     val carried = coroutineContext[SettleAmbientContext]?.scope
-    if (carried != null && carried.isOpen) return block()
+    if (carried != null && carried.isOpen && SettleScopes.current() === carried) return block()
     // Before taking anything, on every platform: the iOS/wasmJs actual starts
     // [block] as an UNDISPATCHED child, which (unlike withContext) runs even
     // when the caller is already cancelled.
     coroutineContext.ensureActive()
-    val joined = SettleScopes.current()
-    val scope = joined ?: SettleScopes.open()
+    return if (carried != null && carried.isOpen) {
+        joiningCarriedScope(carried, block)
+    } else {
+        settlingInOwnScope(block)
+    }
+}
+
+/**
+ * Join the carried scope when it is open but NOT installed in this
+ * coroutine's slot — on iOS/wasmJs a withContext(dispatcher) section of the
+ * carrying body displaced the interceptor that installs it. Re-wrap the
+ * CURRENT dispatcher with the carried scope through [withSettleScope], so
+ * the slot — and any root [block] makes, whose openedInScope reads it —
+ * sees it. No scope of its own and no settle here: it settles with its
+ * opener, like the direct join (#28 review F1).
+ */
+private suspend fun <T> joiningCarriedScope(
+    carried: SettleScope,
+    block: suspend () -> T,
+): T {
+    var joined: Result<T>? = null
+    try {
+        withSettleScope(carried) {
+            joined = runCatching { block() }
+        }
+    } catch (ce: CancellationException) {
+        // Before [block] ran there is nothing to keep; after, its outcome
+        // stands (a body the cancellation reached threw — and rolled back —
+        // on its own).
+        if (joined == null) throw ce
+    }
+    return checkNotNull(joined).getOrThrow()
+}
+
+/**
+ * A scope of its own even inside a blocking entry's: it hands its work to
+ * that one while that one takes it, and its identity stays this body's for
+ * as long as the body runs, even past the blocking entry's end (#28). It
+ * settles when [block] has returned or thrown, with the scope still
+ * installed.
+ */
+private suspend fun <T> settlingInOwnScope(block: suspend () -> T): T {
+    val scope = SettleScopes.open()
     var outcome: Result<T>? = null
     try {
         withSettleScope(scope) {
@@ -77,7 +131,7 @@ internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
                 try {
                     runCatching { block() }
                 } finally {
-                    if (joined == null) scope.settle()
+                    scope.settle()
                 }
         }
     } catch (ce: CancellationException) {
@@ -98,7 +152,9 @@ internal suspend fun <T> settlingSuspended(block: suspend () -> T): T {
  * nested `withContext(Dispatchers.X)` inside [block] replaces the
  * interceptor, so a commit fanning out in that section does not see the
  * scope: its derived states settle at that commit's own entry instead (once
- * per commit, not once per outer entry).
+ * per commit, not once per outer entry). A suspending entry started in that
+ * section re-wraps its dispatcher with the carried scope
+ * ([settlingSuspended]), so from there the scope travels again.
  */
 internal expect suspend fun <T> withSettleScope(
     scope: SettleScope,

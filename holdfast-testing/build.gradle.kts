@@ -5,7 +5,7 @@ plugins {
     id("holdfast.quality")
     id("holdfast.dokka")
     id("holdfast.abi")
-    id("holdfast.publish.sonatype")
+    id("holdfast.publish")
 }
 
 kotlin {
@@ -25,7 +25,6 @@ kotlin {
         commonMain.dependencies {
             api(project(":holdfast"))
             api(project(":holdfast-coroutines"))
-            api(libs.kotest.assertions.core)
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.coroutines.test)
             implementation(libs.atomicfu)

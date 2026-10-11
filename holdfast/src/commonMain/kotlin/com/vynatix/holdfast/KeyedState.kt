@@ -127,8 +127,9 @@ sealed interface KeyedState<K : Any, T : Any> {
 
     /**
      * The state of [key]'s live entry, or `null` when it has none; never
-     * creates one. On the thread running an action of this store, an entry
-     * whose eviction the action staged has none.
+     * creates one. On the thread running an action of this store (in a
+     * `suspendAction`/`suspendAtomic`, in its body only — GUIDE §9.7), an
+     * entry whose eviction the action staged has none.
      *
      * @throws IllegalStateException if the store is disposed.
      */
@@ -144,8 +145,9 @@ sealed interface KeyedState<K : Any, T : Any> {
     /**
      * Every live entry, by key, in the order the entries were created (a key
      * evicted and created again comes last): a copy, whose [State]s are live.
-     * On the thread running an action of this store, the entries whose
-     * eviction it staged are left out.
+     * On the thread running an action of this store (in a
+     * `suspendAction`/`suspendAtomic`, in its body only — GUIDE §9.7), the
+     * entries whose eviction it staged are left out.
      *
      * @throws IllegalStateException if the store is disposed.
      */

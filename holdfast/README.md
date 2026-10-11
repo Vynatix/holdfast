@@ -250,13 +250,19 @@ and `com.vynatix.holdfast.crypto`:
 Android, JVM, and iOS are supported tiers — their tests run in CI. **wasmJs is
 experimental**: the artifact is still published for downstream consumers, but
 
-- tests are disabled on wasmJs (the test suite uses `runBlocking` /
-  `newSingleThreadContext`, absent on wasm);
+- only a regression suite runs on wasmJs: the module's own test suite uses
+  `runBlocking` / `newSingleThreadContext`, absent on wasm, so its wasmJs
+  tests are disabled, and the never-published `:wasm-tests` module runs
+  smoke tests through the public API on wasmJs (Node.js) in CI instead;
 - `FileSystemKvStore` throws `UnsupportedOperationException` (no synchronous
   filesystem API in the browser);
 - `suspendDerived` is unusable (its eager initial seed requires `runBlocking`);
 - the platform is single-threaded (`currentThreadId() == 0`), so
-  thread-confinement checks trivially pass.
+  thread-confinement checks trivially pass;
+- a blocking `action`, `atomic`, `reset()` or `restore()` on a store that a
+  suspended `suspendAction`/`suspendAtomic` holds throws an
+  `IllegalStateException` instead of waiting (the holder can only resume
+  once the call returns).
 
 ## Positioning
 
@@ -299,7 +305,8 @@ should pin to an exact version. SemVer guarantees apply once 1.0 is declared.
 ## Building
 
 ```sh
-./gradlew :holdfast:allTests              # tests on Android JVM + iOS sim + JVM + wasmJs
+./gradlew :holdfast:allTests              # tests on Android JVM + iOS sim + JVM
+./gradlew :wasm-tests:allTests            # wasmJs (Node.js) regression suite + its JVM control
 ./gradlew :holdfast:detekt :holdfast:ktlintCheck
 ./gradlew :holdfast:apiCheck              # ABI binary-compat check
 ./gradlew :holdfast:dokkaGenerate         # API doc site at build/dokka/html

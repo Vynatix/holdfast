@@ -28,12 +28,25 @@ private class AutoRegNoopMiddleware : Middleware<AutoRegVault>()
  */
 class AutoRegistrationTest {
     @Test
-    fun actionAutoRegistersAndCommits() =
+    fun trackedActionAutoRegistersAndCommits() =
         storeTest {
             val v = AutoRegVault()
-            val result = v.action { n mutate 5 }
+            val result = v.trackedAction { n mutate 5 }
             result.shouldBeSuccess()
             assertEquals(5, v.read { n.value })
+        }
+
+    @Test
+    fun bareStoreActionDoesNotAutoTrack() =
+        storeTest {
+            val v = AutoRegVault()
+            // Store.action is a member and wins overload resolution, so this
+            // first touch auto-tracks nothing: no recorder, no handle, and the
+            // result never feeds a lastResult slot. (The auto-registering verb
+            // is trackedAction; there is no V.action extension any more.)
+            val result: TransactionResult<Unit> = v.action { n mutate 2 }
+            result.shouldBeSuccess()
+            assertNull(v.lastResult)
         }
 
     @Test
@@ -49,12 +62,11 @@ class AutoRegistrationTest {
     fun timelineReflectsAutoRegisteredAction() =
         storeTest {
             val v = AutoRegVault()
-            // Trigger auto-registration FIRST via a non-conflicting extension so
-            // the recorder is in place when v.action runs. Store.action is a
-            // member function and shadows the V.action extension — the extension
-            // never auto-registers; see StoreAutoRegistration's file KDoc.
-            v.read { } // installs the recorder via auto-registration
-            v.action { n mutate 5 }.shouldBeSuccess()
+            // trackedAction auto-registers before the action runs, so the
+            // recorder is in place to see it. Store.action is a member
+            // function and never auto-registers — see
+            // StoreAutoRegistration's file KDoc.
+            v.trackedAction { n mutate 5 }.shouldBeSuccess()
 
             // Auto-registered handle's timeline should reflect the action.
             assertTrue(v.timeline.isNotEmpty(), "expected timeline to record events, got empty")
@@ -170,7 +182,7 @@ class AutoRegistrationTest {
             assertNull(explicit.lastTransaction, "no action ran yet")
 
             // Store.action goes through the middleware chain (recorder is installed),
-            // so events are captured even though Store.action shadows the extension.
+            // so events are captured even though Store.action never auto-tracks.
             v.action { n mutate 5 }.shouldBeSuccess()
 
             // The explicit handle should reflect the action.
@@ -256,7 +268,8 @@ class AutoRegistrationTest {
         storeTest {
             val v = AutoRegVault()
             // Use the explicit handle for the action so StoreHandle.action records
-            // the result — Store.action (the member, the shadowing function) does
+            // the result — Store.action (the member, which never routes through
+            // the handle) does
             // not feed the handle's lastResult slot. The auto-reg view of
             // lastResult routes through the SAME handle, so it sees the same
             // result.

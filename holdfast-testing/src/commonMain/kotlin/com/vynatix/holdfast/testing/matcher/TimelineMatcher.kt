@@ -105,8 +105,10 @@ class TimelineMatcher<V : Store<V>> internal constructor(
      *
      * **v1 caveat**: see [StoreHandle.middlewareEventsOf] — only the recorder's
      * own self-events are captured. User middlewares pass through with no
-     * lifecycle events, so a `middleware<UserClass>()` block will never match
-     * anything in v1. This is documented and tested via the recorder.
+     * lifecycle events, so a `middleware<UserClass>()` block can never match
+     * a recorded timeline; the handle-receiver combinators refuse such a
+     * predicate with a teaching error (the synthetic `List<StoreEvent>` form
+     * keeps it, so matcher self-tests on hand-built timelines still work).
      */
     inline fun <reified M : Middleware<*>> middleware(): MiddlewareBuilder<V> =
         MiddlewareBuilder(
@@ -118,7 +120,9 @@ class TimelineMatcher<V : Store<V>> internal constructor(
 
     /**
      * Open a [MiddlewareBuilder] scoped to a specific middleware [instance].
-     * Matches by referential equality (`===`).
+     * Matches by referential equality (`===`). Like the reified form, a
+     * handle-receiver combinator refuses an [instance] the recorder's
+     * self-events cannot satisfy (any user instance) with a teaching error.
      */
     fun <M : Middleware<*>> middleware(instance: M): MiddlewareBuilder<V> =
         MiddlewareBuilder(
