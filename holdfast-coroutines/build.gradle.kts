@@ -53,6 +53,13 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+        // For the issue-003 guard tests only (the storeTest harness must
+        // surface StoreSuspendInFlightException raw): jvm/androidHost alone —
+        // :holdfast-testing has no wasmJs target, so a commonTest dependency
+        // would break this module's wasmJs build. Test-only; not published.
+        jvmAndAndroidHostTest.dependencies {
+            implementation(project(":holdfast-testing"))
+        }
     }
 }
 
