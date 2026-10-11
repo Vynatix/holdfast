@@ -48,8 +48,9 @@ import kotlin.time.Clock
  * the body, and again once the test's un-joined child coroutines finish — so a
  * clock a test binds on a long-lived (singleton) store after tracking it does
  * not leak into the next test. Track the store before binding its clock, with
- * `track` or an auto-registering extension such as `store.read { }` (a bare
- * `store.action { }` resolves to the `Store` member and does not track): a
+ * `track` or an auto-registering extension such as `store.read { }` or
+ * `store.trackedAction { }` (a bare `store.action { }` resolves to the
+ * `Store` member and does not track): a
  * clock bound before the first track counts as the pre-test binding and is
  * kept. Work in `backgroundScope` or on a scope outside the test is not waited
  * for, so a binding it makes after the test ends is not undone; join such work
