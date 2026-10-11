@@ -1,0 +1,22 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-lifecycle>
+abstract class <#A: com.vynatix.holdfast/Store<*>> com.vynatix.holdfast.lifecycle/StoreViewModel : androidx.lifecycle/ViewModel { // com.vynatix.holdfast.lifecycle/StoreViewModel|null[0]
+    constructor <init>() // com.vynatix.holdfast.lifecycle/StoreViewModel.<init>|<init>(){}[0]
+
+    final val store // com.vynatix.holdfast.lifecycle/StoreViewModel.store|{}store[0]
+        final fun <get-store>(): #A // com.vynatix.holdfast.lifecycle/StoreViewModel.store.<get-store>|<get-store>(){}[0]
+    open val disposeSubtree // com.vynatix.holdfast.lifecycle/StoreViewModel.disposeSubtree|{}disposeSubtree[0]
+        open fun <get-disposeSubtree>(): kotlin/Boolean // com.vynatix.holdfast.lifecycle/StoreViewModel.disposeSubtree.<get-disposeSubtree>|<get-disposeSubtree>(){}[0]
+
+    abstract fun createStore(): #A // com.vynatix.holdfast.lifecycle/StoreViewModel.createStore|createStore(){}[0]
+    final fun onCleared() // com.vynatix.holdfast.lifecycle/StoreViewModel.onCleared|onCleared(){}[0]
+}
+
+final fun <#A: com.vynatix.holdfast/Store<*>> com.vynatix.holdfast.lifecycle/storeViewModel(kotlin/Function0<#A>): com.vynatix.holdfast.lifecycle/StoreViewModel<#A> // com.vynatix.holdfast.lifecycle/storeViewModel|storeViewModel(kotlin.Function0<0:0>){0§<com.vynatix.holdfast.Store<*>>}[0]
+final fun <#A: com.vynatix.holdfast/Store<*>> com.vynatix.holdfast.lifecycle/treeViewModel(kotlin/Function0<#A>): com.vynatix.holdfast.lifecycle/StoreViewModel<#A> // com.vynatix.holdfast.lifecycle/treeViewModel|treeViewModel(kotlin.Function0<0:0>){0§<com.vynatix.holdfast.Store<*>>}[0]
