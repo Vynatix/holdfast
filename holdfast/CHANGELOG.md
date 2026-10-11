@@ -10,6 +10,21 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **A settle no longer silently drops a thrown exception (issue #30).**
+  `SettleScope.settle()` wrapped each piece of work — a derived state's
+  recompute, or a frame's drain of one store's post-commit queue — in a
+  `runCatching` whose result it discarded. An exception thrown from outside a
+  transaction body (never a failed transaction, which a recompute reports
+  through its host already), such as issue #26's wasmJs unlock bug throwing
+  out of a lock release, was lost: the entry returned normally,
+  `uncaughtObserverHandler` never heard of it and nothing was logged —
+  against the "post-commit failures are never silent" contract. A drain that
+  throws now reports through that store's `uncaughtObserverHandler`, a settle
+  task through its host's (`SettleTask.reportUncaught`, a new internal
+  hook; `DerivedRecompute` and the tree's two dispose tasks forward to their
+  host), the report is guarded so a throwing handler cannot strand the work
+  still queued, and the settle keeps going after the failure, so later tasks
+  and drains still run.
 - **Issue #32 — observer registration identity.** Passing the same handler to
   `effect` twice no longer collapses into one observer: every
   `MutableState.observe` registration now carries its own identity (a fresh
