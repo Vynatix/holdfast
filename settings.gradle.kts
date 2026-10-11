@@ -41,6 +41,10 @@ include(":doc-snippets")
 // :holdfast-coroutines' own suites cannot run on wasmJs, so this one runs
 // there and on the JVM.
 include(":wasm-tests")
+// Internal developer CLI (never published): offline inspection of snapshot
+// artifacts through holdfast's public decode/encode/render surface only —
+// no @StoreInternalApi, no reimplementation of the wire format.
+include(":holdfast-cli")
 
 // The hallmark modules depend on com.vynatix:hallmark, which is not yet on
 // Maven Central and only resolves from mavenLocal (publish the sibling
