@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.checkCrtpSelfTypeAtConstruction
+import com.vynatix.holdfast.platform.crtpSelfCastTeachingOrNull
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.logUncaughtFailure
 import kotlinx.atomicfu.atomic
@@ -93,10 +95,46 @@ class FrameMiddlewareSession internal constructor(
  *     val label by state { "init" }
  * }
  * ```
+ *
+ * ### The Self type (CRTP) contract
+ *
+ * `Self` must be the store's own concrete class: `class Foo : Store<Foo>()`.
+ * A store declared against another type (`class Foo : Store<Bar>()`) compiles,
+ * but every dispatch hands the store to `Self`-typed member-extensions, so the
+ * receiver cast fails on first use. The library surfaces this as early as the
+ * platform allows — enforcement is deliberately divergent, not hidden:
+ *
+ *  - **JVM/Android** — construction fails immediately with a teaching
+ *    [IllegalStateException] (a `java.lang.reflect` walk of the generic
+ *    superclass chain; the check FAILS OPEN when signature data is missing or
+ *    unresolvable — e.g. an R8-minified build that drops holdfast's
+ *    `consumer-rules.pro` `-keepattributes Signature`). The check runs before
+ *    any subclass state-delegate initializer (subclass delegates initialize
+ *    after the superclass constructor).
+ *  - **iOS/Kotlin-Native** — no construction-time reflection: the FIRST
+ *    DISPATCH fails. [action] rethrows the cast failure as a teaching
+ *    [ClassCastException] instead of wrapping it into a possibly-discarded
+ *    [TransactionResult.Error] — a documented exception to `action`'s
+ *    no-throw-result contract, for this programming error only (a user's
+ *    `ClassCastException` from inside the body is never relabeled); [invoke]
+ *    propagates the teaching [ClassCastException] directly.
+ *  - **wasmJs** — not enforced, and no dispatch-time behavior claimed: bridge
+ *    casts may surface as WasmGC runtime traps that cannot be intercepted
+ *    (unverified).
+ *
+ * See `platform/CrtpSelfType.kt` and GUIDE §2.
  */
 @StoreActionDsl
 @Suppress("TooManyFunctions") // The Store DSL is intentionally broad; each member is a single primitive.
 abstract class Store<Self : Store<Self>> {
+    init {
+        // CRTP self-type verification (issue 006): platform-divergent —
+        // enforced here on JVM/Android, first-dispatch on Native, unverified
+        // on wasmJs. See platform/CrtpSelfType.kt and the class KDoc. Reads
+        // only the class hierarchy, never subclass state.
+        checkCrtpSelfTypeAtConstruction(this)
+    }
+
     /**
      * Process-monotonic ordering key, set once at construction. `atomic(v1, v2, …)`
      * sorts its store arguments by this key before acquiring locks, giving
@@ -906,6 +944,15 @@ abstract class Store<Self : Store<Self>> {
      *   where the blocking acquire would wait for the very suspend mutex that
      *   body holds (issue #31). `reset()` and `restore()` run through
      *   `action` and refuse the same way.
+     * @throws ClassCastException when this store violates the CRTP self-type
+     *   contract (`class Foo : Store<Bar>()`): the receiver-bridge cast
+     *   failure is rethrown with a teaching message instead of being wrapped
+     *   into a [TransactionResult.Error] — a documented exception to this
+     *   method's no-throw-result contract, for this programming error only
+     *   (first-dispatch enforcement; see the class KDoc). On JVM/Android the
+     *   construction-time check fires first, so this path means a
+     *   signature-less (e.g. R8-stripped, rules-less) build or a
+     *   non-JVM platform.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
@@ -1139,6 +1186,12 @@ abstract class Store<Self : Store<Self>> {
             }
         } catch (e: Throwable) {
             runCatching { txn.rollback() }
+            // A CRTP self-type violation is a programming error: rethrow the
+            // receiver-bridge cast failure with its teaching message instead
+            // of wrapping it into an Error result that may be discarded
+            // (issue 006 — a documented exception to action's no-throw-result
+            // contract; the gate never relabels a user CCE from the body).
+            crtpSelfCastTeachingOrNull(this, e)?.let { throw it }
             TransactionResult.Error(e, txn)
         } finally {
             _activeTransaction = parent
@@ -1163,8 +1216,18 @@ abstract class Store<Self : Store<Self>> {
      * Plain context block — runs `block(self)` with no locks and no transaction.
      * Provides the `Self` receiver so member-extensions like [effect] and [bridge]
      * can be called fluently: `store { count effect { … } }`.
+     *
+     * @throws ClassCastException when this store violates the CRTP self-type
+     *   contract (`class Foo : Store<Bar>()`): the receiver cast fails and is
+     *   upgraded with a teaching message (first-dispatch enforcement — see the
+     *   class KDoc). Any other [ClassCastException] propagates unchanged.
      */
-    operator fun <R> invoke(block: Self.() -> R): R = block(self)
+    operator fun <R> invoke(block: Self.() -> R): R =
+        try {
+            block(self)
+        } catch (e: ClassCastException) {
+            throw crtpSelfCastTeachingOrNull(this, e) ?: e
+        }
 
     /**
      * Declare a state property. Delegating a property to it

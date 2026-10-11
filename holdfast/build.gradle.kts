@@ -13,6 +13,20 @@ plugins {
 kotlin {
     android {
         namespace = "com.vynatix.holdfast"
+
+        // Publish holdfast's consumer R8 rules (issue 006). The KMP-library
+        // plugin does NOT auto-pick a root `consumer-rules.pro` the way the
+        // legacy com.android.library plugin does — publishing consumer rules
+        // is opt-in (AGP's ConsumerKeepRules.publish). The rules keep the
+        // `Signature` class-file attribute the CRTP self-type construction
+        // check walks; without them a minified app degrades quietly (the
+        // check fails open — see consumer-rules.pro and platform/CrtpSelfType.kt).
+        optimization {
+            consumerKeepRules.apply {
+                publish = true
+                file("consumer-rules.pro")
+            }
+        }
     }
 
     jvm {
