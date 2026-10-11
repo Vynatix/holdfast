@@ -8,6 +8,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`State<T>.observeAsState()`** — the single-mention observation entrypoint
+  (ROADMAP 0.6.0): `val text by store.text.observeAsState()`, named after the
+  value-observation verb Compose muscle memory knows from
+  `LiveData.observeAsState()`. Reads exactly the states `collectAsState`
+  reads (a declared state, `derived`, `derivedState`/`merged`, a store's tree
+  value) through the same `effect` subscription, and documents the
+  equal-value contract as its own: a `distinct` state (the default) never
+  fires its observers for an equal commit, and the Compose state's
+  structural-equality policy skips the invalidation for a `distinct = false`
+  state too — equal values never recompose the reader.
+- **`rememberStore(vararg keys) { … }`** — a composition-owned store: the
+  factory runs on first composition (and again, disposing the old store,
+  when the keys change), the store is disposed when the Composable leaves,
+  and a factory returning an already-disposed store fails fast. Keyed on the
+  explicit keys, never on the factory lambda (which would churn unstable
+  lambdas); the KDoc states the ownership rule — screen-local state only, a
+  store that must outlive the UI is passed in, not remembered.
+- **`Eventful<E>.collectEvents { … }`** — collects an eventful store's
+  events into a callback for the Composable's lifetime: keyed on the store
+  (a different instance restarts the collection), the handler always sees
+  the latest recomposition's lambda, and a store already disposed at
+  composition fails fast instead of silently collecting a flow that can
+  never emit again. The `replay = 0` contract is documented on the
+  entrypoint: collection starts when the composition applies — after the
+  first successful composition — and events emitted before that are never
+  delivered; record must-not-miss events into a state the UI observes.
+- **Behavior tests** — `jvmTest` grows `ObserveAsStateTest`,
+  `RememberStoreTest` and `CollectEventsTest` over the headless `Recomposer`
+  harness (14 tests total in the module): distinct/equal recomposition, the
+  single-mention read shape, make-once/key-change/leave-dispose ownership,
+  handler freshness across recomposition, collection restart on a different
+  store, emission-order delivery, the no-replay contract, and the
+  disposed-store fail-fast. `commonTest`'s compile assert covers the new
+  surface on every target, wasmJs included.
 - **`State<T>.collectAsState()`** — `collectAsState` for a state read
   without its store at hand: any observable state, and a store's tree
   value — `App.tree`, a `State<TreeSnapshot>` (issue #21 PR 21-5,
