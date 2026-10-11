@@ -398,7 +398,9 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  *
  * @throws IllegalStateException like [Store.action]: if the store is
  *   disposed, or when called from inside a state initializer (see
- *   [Store.state]) or a schema migration.
+ *   [Store.state]), a schema migration, or this store's own suspending body —
+ *   a `:holdfast-coroutines` `suspendAction`/`suspendAtomic` holding it, whose
+ *   suspend mutex the blocking restore would wait for (issue #31).
  */
 fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> = runRestore(snapshot, IgnoreUnknown) { }
 
@@ -491,8 +493,10 @@ fun <V : Store<V>> V.restore(snapshot: StoreSnapshot): TransactionResult<Unit> =
  * Experimental (issue #20, R1; schema versions R2; sterile R3).
  *
  * @throws IllegalStateException like [Store.action]: if the store is
- *   disposed, or when called from inside a state initializer or a
- *   [SchemaVersioned.migrate].
+ *   disposed, or when called from inside a state initializer, a
+ *   [SchemaVersioned.migrate], or this store's own suspending body — a
+ *   `:holdfast-coroutines` `suspendAction`/`suspendAtomic` holding it, whose
+ *   suspend mutex the blocking restore would wait for (issue #31).
  */
 @ExperimentalStoreApi
 fun <V : Store<V>> V.restore(

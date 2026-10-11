@@ -104,6 +104,10 @@ import kotlin.uuid.Uuid
  * Limitations:
  *  - Body is non-suspending and must be single-threaded — writes from spawned
  *    threads are not recognized as in-frame (and are not policed either).
+ *  - A participant inside its own suspending body — a `suspendAction` of
+ *    `:holdfast-coroutines` holding it — makes the frame throw
+ *    `IllegalStateException` before any lock is taken: its blocking acquire
+ *    would wait for the very suspend mutex that body holds (issue #31).
  *  - This is in-memory 2PC in one process: bridge/persistence publishes remain
  *    per-store post-commit fanout; there is no crash-consistency across
  *    external stores.
@@ -152,18 +156,25 @@ fun <R> atomic(
     // writing to one of those stores hit a finished transaction.
     val drainOnExit = mutableListOf<Store<*>>()
     val result =
-        refuseFrameUnderAppliedTransaction(sorted, id) ?: settling {
-            try {
-                acquireAndRun(sorted, 0, mutableListOf(), drainOnExit, id, ownerThreadId, marker, body)
-            } finally {
-                // After BOTH the transaction locks and the serializers are
-                // released, and deferred to the settle of the outermost entry
-                // on this thread (this frame's own, unless it is nested in
-                // another action or frame): a recompute opens a fresh
-                // top-level action, which would otherwise find its store still
-                // held. This drain also serves recomputes other threads handed
-                // to this frame while it held the store (Store.tryTopLevelAction).
-                drainOnExit.forEach { it.internalDrainPostCommitTasksWhenSettled() }
+        refuseFrameUnderAppliedTransaction(sorted, id) ?: run {
+            // Also before any lock and any wait: a participant inside its own
+            // suspending body would spin its blocking acquire on the very
+            // mutex that body holds (issue #31) — refuse with the teaching
+            // exception instead, exactly as `action` does.
+            sorted.forEach { it.refuseInsideOwnSuspendingBody("atomic(…)") }
+            settling {
+                try {
+                    acquireAndRun(sorted, 0, mutableListOf(), drainOnExit, id, ownerThreadId, marker, body)
+                } finally {
+                    // After BOTH the transaction locks and the serializers are
+                    // released, and deferred to the settle of the outermost entry
+                    // on this thread (this frame's own, unless it is nested in
+                    // another action or frame): a recompute opens a fresh
+                    // top-level action, which would otherwise find its store still
+                    // held. This drain also serves recomputes other threads handed
+                    // to this frame while it held the store (Store.tryTopLevelAction).
+                    drainOnExit.forEach { it.internalDrainPostCommitTasksWhenSettled() }
+                }
             }
         }
     // A nested frame is an inner unit of the enclosing frame's body: its Error

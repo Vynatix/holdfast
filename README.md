@@ -178,11 +178,15 @@ for when each lands.
   carries the cross-store hazard every observer does (GUIDE §10.2, §17.8).
 
 - **A blocking `action { }` called from inside a `suspendAction { }` body on the
-  same store still spins on JVM/Android/iOS** (on wasmJs it throws an
-  `IllegalStateException` at once instead, issue #27). The serializer is held by
-  the suspending body and the blocking call waits for it. *Workaround:* inside a suspending body use
-  `mutate`/`update` or a nested `suspendAction`, never blocking `action`. A
-  fail-fast guard is next in 0.2.0. (From inside a `suspendAction`'s or
+  same store throws an `IllegalStateException`** naming the store and the
+  working alternative, on every platform (issue #31; it used to spin forever on
+  JVM/Android/iOS — on wasmJs it already threw, with a different message,
+  issue #27). The same refusal covers `reset()`, `restore()` and blocking
+  `atomic(...)` on that store: they all wait on the store's suspend mutex,
+  which the enclosing body itself holds. *Inside a suspending body write with
+  `mutate`/`update`* — it stages into the suspending transaction — *or make
+  the blocking call once the body has returned; a blocking entry on another
+  store is unaffected.* (From inside a `suspendAction`'s or
   `suspendAtomic`'s commit — an observer, a bridge publish, an event collector
   the emit resumes inline, a frame observer — a blocking `action` or `atomic`
   on a store whose transaction that commit has applied — for a

@@ -900,7 +900,12 @@ abstract class Store<Self : Store<Self>> {
      * @throws IllegalStateException when called from inside a state
      *   initializer (see [state]), a schema migration
      *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
-     *   recompute: all three may read states but not write.
+     *   recompute: all three may read states but not write; and when called
+     *   on this store from inside this store's own suspending body — a
+     *   `:holdfast-coroutines` `suspendAction`/`suspendAtomic` holding it —
+     *   where the blocking acquire would wait for the very suspend mutex that
+     *   body holds (issue #31). `reset()` and `restore()` run through
+     *   `action` and refuse the same way.
      */
     @OptIn(ExperimentalUuidApi::class)
     infix fun <R> action(body: Self.() -> R): TransactionResult<R> {
@@ -918,6 +923,12 @@ abstract class Store<Self : Store<Self>> {
         appliedTransactionNestedHere()?.let { applied ->
             return refusedUnderAppliedTransaction(this, applied, actionId(body), "open a nested action")
         }
+        // Also before any wait, and before the serializer: inside this
+        // store's own suspending body the top-level acquire would spin on the
+        // very mutex that body holds (issue #31; the body is recognized by
+        // the settle scope its root was opened in). `reset()` and
+        // `restore()` run through `action`, so the refusal covers them too.
+        refuseInsideOwnSuspendingBody("action { }")
         // An entry: derived states whose sources this action (or anything
         // nested in it) changes settle once the outermost entry on this thread
         // has exited — this action's own settle when it is the outermost.
