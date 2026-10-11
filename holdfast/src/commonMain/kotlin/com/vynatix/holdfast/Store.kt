@@ -6,6 +6,7 @@ import com.vynatix.holdfast.platform.checkCrtpSelfTypeAtConstruction
 import com.vynatix.holdfast.platform.crtpSelfCastTeachingOrNull
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.logUncaughtFailure
+import com.vynatix.holdfast.platform.rethrowIfFatal
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -561,12 +562,15 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Hand [error] to [uncaughtObserverHandler], or, while none is set, log it
      * through the platform's default output under [unhandledMessage]. A
-     * throwing handler propagates.
+     * throwing handler propagates. A fatal [error] is never reported: it is
+     * thrown again (issue #61), so a site that reaches here with one still
+     * fails loudly.
      */
     internal fun reportUncaughtFailure(
         error: Throwable,
         unhandledMessage: () -> String,
     ) {
+        error.rethrowIfFatal()
         val handler = uncaughtObserverHandler
         if (handler != null) handler(error) else logUncaughtFailure(unhandledMessage(), error)
     }

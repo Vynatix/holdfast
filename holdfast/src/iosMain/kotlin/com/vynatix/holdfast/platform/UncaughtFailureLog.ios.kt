@@ -5,5 +5,5 @@ internal actual fun logUncaughtFailure(
     error: Throwable,
 ) {
     // One println, so reports from concurrent commits do not interleave.
-    runCatching { println("$message\n${error.stackTraceToString()}") }
+    runCatching { println("$message\n${error.stackTraceToString()}") }.rethrowFatal()
 }
