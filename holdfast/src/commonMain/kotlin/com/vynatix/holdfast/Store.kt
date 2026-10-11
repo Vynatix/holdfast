@@ -432,6 +432,9 @@ abstract class Store<Self : Store<Self>> {
      *  - a failed [derived] recompute — a throwing `compute`, or a middleware
      *    rejecting it: rolled back, and the derived keeps its value until the
      *    next source commit;
+     *  - a feedback loop a settle or a post-commit drain cut: a derived state
+     *    whose observer keeps writing one of its sources, left in this store's
+     *    post-commit queue for its next holder (issue #37);
      *  - a throwing `onStoreDisposed` of library machinery attached to the
      *    store (an `@StoreInternalApi` [StoreAttachment]), told by [dispose];
      *  - a `:holdfast-coroutines` hydration refresh whose outcome could not be
@@ -458,6 +461,11 @@ abstract class Store<Self : Store<Self>> {
      * handler that throws there ends that commit's fanout early, so the
      * remaining observers, bridge publishes and events are skipped, and the
      * action reports an error; the commit's values stay applied.
+     *
+     * A drain's feedback-loop cut is reported from that drain, after it has
+     * released this store and while it is still draining; a handler that takes
+     * this store then hands its own drain to that one, which leaves the cut
+     * work queued. A handler that throws there is ignored.
      *
      * A failed [derived] recompute is reported after the recompute's own action
      * has released this store, from the post-commit drain. That drain may run
@@ -597,7 +605,7 @@ abstract class Store<Self : Store<Self>> {
      * loop — this avoids re-entering `pendingWrites` while the parent is
      * iterating it.
      */
-    private val postCommitQueue = PostCommitQueue()
+    internal val postCommitQueue = PostCommitQueue(this)
 
     /**
      * Schedule [task] to run after the current top-level transaction's commit
@@ -793,13 +801,15 @@ abstract class Store<Self : Store<Self>> {
      * The lock is probed with [StoreLock.tryAcquire] rather than read: its
      * `locked` flag is written after the mutex is taken and cleared before it
      * is released, so a read can miss a holder. Probing instead of draining
-     * unconditionally is also what keeps this from recursing: while a
-     * lock-only holder keeps the lock, an unconditional drain would re-run the
-     * caller's own handed-off task, which would back out busy and drain again.
-     * With the probe, a nested drain needs the store to change hands in
-     * between. A holder of the serializer alone is not probed for: a drained
-     * task meets it before taking anything, backs out without draining, and
-     * that holder drains after it releases.
+     * unconditionally is also what keeps this from spinning: while a
+     * lock-only holder keeps the lock, an unconditional drain would hand the
+     * caller's own handed-off task back to the drain running it (or run it
+     * again), which would back out busy and drain again, for as long as the
+     * holder keeps the lock. With the probe, a drain nested in a drain of this
+     * queue needs the store to change hands in between. A holder of the
+     * serializer alone is not probed for: a drained task meets it before
+     * taking anything, backs out without draining, and that holder drains
+     * after it releases.
      */
     private fun drainIfUnheld() {
         if (_activeTransaction != null || !transactionLock.tryAcquire()) return

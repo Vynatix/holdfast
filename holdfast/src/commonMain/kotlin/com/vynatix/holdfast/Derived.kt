@@ -57,13 +57,17 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *    store is busy (another action, frame or `suspendAction` holds it, even
  *    one that took it right after the source's commit) the recompute is
  *    handed to that holder and runs on the holder's thread when it releases.
- *    One exception: when the holder, or the committing call for a source on
+ *    Two exceptions. When the holder, or the committing call for a source on
  *    this store, is an `atomic`/`suspendAtomic` frame nested in another
  *    action or frame on the same thread, and this store is one whose root
  *    that frame opened, the queued recompute runs once the outermost action
  *    or frame on that thread has exited and released every store it took
  *    (its settle), not when the frame itself returns; inside the enclosing
- *    entry the derived still shows its old value. So a derived — on its
+ *    entry the derived still shows its old value. And when the committing
+ *    call runs inside work this store's post-commit drain is running on the
+ *    same thread (an observer of a derived state that drain recomputed,
+ *    writing this store), the recompute runs once that work has returned,
+ *    as part of the same drain, not when the call returns. So a derived — on its
  *    sources' store or another — can briefly lag its sources after the
  *    committing call returns, then converges. Read the sources, or use
  *    [computed], when you need the caller's own write.
@@ -190,7 +194,9 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
      * (hand-off first, so a throwing handler cannot skip it). Value-free.
      */
     override fun deferPastSettle(report: Boolean) {
-        host.handOffPostCommit(this)
+        // Not for a drain of the host's queue that ran this settle: it would
+        // start the loop the settle just cut again.
+        host.postCommitQueue.enqueue(this, forNextHolder = true)
         if (report && !host.isDisposed) {
             host.internalReportUncaughtFailure(
                 IllegalStateException(

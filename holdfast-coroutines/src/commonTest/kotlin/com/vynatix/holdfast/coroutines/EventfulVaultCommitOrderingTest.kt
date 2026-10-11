@@ -41,7 +41,11 @@ private class OrderingVault : EventfulStore<OrderingVault, OrderEvent>() {
  *  3. events drain to the `events` SharedFlow.
  */
 class EventfulVaultCommitOrderingTest {
-    private val testScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // One FIFO lane: the collectors are resumed in commit-phase order, and
+    // only a single lane records them in the order they were resumed (on the
+    // multi-threaded pool, which collector records first is up to the
+    // scheduler).
+    private val testScope = CoroutineScope(SupervisorJob() + Dispatchers.Default.limitedParallelism(1))
 
     @AfterTest
     fun tearDown() {
