@@ -23,12 +23,12 @@ internal suspend fun <T> withFanoutMarkerIntercepted(
 /**
  * Run [block] with a core thread-local slot holding [value] on every thread
  * it resumes on, where no `ThreadContextElement` exists (iOS/wasmJs): the
- * fanout marker ([withFanoutMarker]) and the settle scope
- * ([withSettleScope]). `withContext` with a bracketing interceptor would
- * dispatch before [block] starts, so [block] runs as an UNDISPATCHED child
- * instead, with [context] added: its first segment runs right here, with
- * [value] installed by hand (through [install], which returns the prior
- * value) around it, and every later resumption goes through
+ * frame marker ([withFrameMarker]), the fanout marker ([withFanoutMarker])
+ * and the settle scope ([withSettleScope]). `withContext` with a bracketing
+ * interceptor would dispatch before [block] starts, so [block] runs as an
+ * UNDISPATCHED child instead, with [context] added: its first segment runs
+ * right here, with [value] installed by hand (through [install], which
+ * returns the prior value) around it, and every later resumption goes through
  * [SlotBracketingInterceptor], which installs [value] for that resumption —
  * and keeps the dispatcher's timer for the delays inside
  * ([slotBracketingInterceptor]).
