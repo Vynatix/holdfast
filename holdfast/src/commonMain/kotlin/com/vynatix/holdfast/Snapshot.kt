@@ -357,8 +357,11 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  * ignored, and a declared state the snapshot holds no value for keeps its
  * value (its observers do not fire). Implemented as one [action] (its
  * transaction id is `Restore`): on success every restored state's
- * `currentValue` is set to the snapshot's raw value and observers/bridges
- * fire once each; on rollback nothing changes. Called inside another action,
+ * `currentValue` is set to the snapshot's raw value, and a state whose stored
+ * raw value the restore changes fires its observers and its bridge once
+ * each; a state whose value is unchanged (the same `distinct` comparison as
+ * any commit — `==` on the raw value, `true` by default) fires neither. On
+ * rollback nothing changes. Called inside another action,
  * it is a savepoint: its writes commit, or roll back, with the enclosing
  * action.
  *
@@ -392,9 +395,12 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  * than this store's is migrated first, or refused with a
  * [SnapshotMigrationException] (see the experimental [SchemaVersioned]).
  *
- * Bridges that were attached when restore is called WILL receive the restored
- * value via their `publish` (commit-time bridge fanout). To avoid this,
- * detach bridges before calling restore.
+ * Bridges that were attached when restore is called receive, via their
+ * `publish` (commit-time bridge fanout), the restored value of every state
+ * the restore changes; a state whose value is unchanged publishes nothing
+ * (the default `distinct` comparison — a `distinct = false` state re-fires
+ * and re-publishes). To avoid publish-back altogether, detach bridges
+ * before calling restore.
  *
  * @throws IllegalStateException like [Store.action]: if the store is
  *   disposed, or when called from inside a state initializer (see

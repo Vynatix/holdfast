@@ -1176,10 +1176,16 @@ abstract class Store<Self : Store<Self>> {
      * [reset] resets it. Subsequent reads return the same instance.
      *
      *  - Pass a [transformer] to normalize on write or project on read.
-     *  - Pass [distinct] = true to skip observer fanout and bridge publish when a
-     *    commit re-applies the same value (StateFlow-style dedup). Default is
-     *    false — every commit fires observers, matching the library's original
-     *    contract.
+     *  - [distinct] is true by default, matching [kotlinx.coroutines.flow.StateFlow]:
+     *    a commit that re-applies the same value — the stored
+     *    post-[Transformer.set] raw value compared with `==` — skips observer
+     *    fanout and bridge publish. Pass [distinct] = false to re-fire on
+     *    every commit. Two caveats: an in-place-mutated object compares equal
+     *    to itself, so committing the same reference after mutating it is
+     *    silently deduped (mutate immutably, or opt out); and a `set` that is
+     *    not pure — a randomized cipher, where `set(x) != set(x)`, already
+     *    outside the [Transformer] contract — defeats the comparison, so
+     *    every commit of such a state fires.
      *
      * [initialize] runs at most once per materialization, on the thread that
      * first needs the state ([reset] also runs it again; see below). The store
@@ -1237,7 +1243,7 @@ abstract class Store<Self : Store<Self>> {
     @OptIn(ExperimentalStoreApi::class) // Passes "no tags" to the declaration; the stable signature has none.
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
         initialize: Initializer<T>,
     ): StateDelegate<T> = DeclaringStateDelegate(this, transformer, distinct, null, emptySet(), initialize)
 
@@ -1276,7 +1282,7 @@ abstract class Store<Self : Store<Self>> {
     @ExperimentalStoreApi
     fun <T : Any> state(
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
         codec: StateCodec<T>? = null,
         tags: Set<StateTag> = emptySet(),
         initialize: Initializer<T>,
@@ -1298,7 +1304,7 @@ abstract class Store<Self : Store<Self>> {
         name: String,
         initial: T,
         transformer: Transformer<T>? = null,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
     ): MutableState<T> = registry.registerEager(name, initial, transformer, distinct, StateKind.Internal, emptyList())
 
     /**
@@ -1323,7 +1329,7 @@ abstract class Store<Self : Store<Self>> {
         name: String,
         initial: T,
         sources: List<State<*>>,
-        distinct: Boolean = false,
+        distinct: Boolean = true,
     ): MutableState<T> {
         checkNotDisposed()
         return registry.registerEager(name, initial, null, distinct, StateKind.DerivedBacking, sources)

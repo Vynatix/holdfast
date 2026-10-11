@@ -250,9 +250,12 @@ class DerivedTest {
      * applies while the HOST has a transaction active; with the host idle,
      * each changed source's observer runs the recompute inline from the
      * source's commit fanout, so one source commit touching two sources
-     * recomputes (and commits, and fans out) the derived twice. Cross-store
-     * settling (#20 PR 11, `SettleScope`) is expected to change this count to
-     * one — flip the assertions deliberately when it lands.
+     * recomputes (and commits) the derived twice. Since issue #007 the
+     * backing state is `distinct`, so the second, equal-value commit fires
+     * its observers no longer — the fanout dedup, not the recompute count,
+     * is what shrank. Cross-store settling (#20 PR 11, `SettleScope`) is
+     * expected to change the compute count to one — flip the assertions
+     * deliberately when it lands.
      */
     @Test fun derivedWithSourcesOnAnIdleOtherStoreRecomputesOncePerChangedSource() {
         val src = DerivedSourceStore()
@@ -274,7 +277,11 @@ class DerivedTest {
         }
 
         assertEquals(3, computes, "the initial compute plus one per changed source on another store")
-        assertEquals(listOf(3, 3), seen, "the derived commits once per changed source")
+        assertEquals(
+            listOf(3),
+            seen,
+            "the second recompute commits the same value; the distinct backing dedups its fanout",
+        )
         assertEquals(3, sum.value)
         sub.dispose()
     }

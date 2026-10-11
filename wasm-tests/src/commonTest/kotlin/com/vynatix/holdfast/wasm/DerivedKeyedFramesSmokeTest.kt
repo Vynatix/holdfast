@@ -185,7 +185,9 @@ class DerivedKeyedFramesSmokeTest {
         }
 
         assertEquals(3, computes, "the initial compute plus one per changed source")
-        assertEquals(listOf(3, 3), seen)
+        // Issue #007: the backing state is distinct, so the second recompute's
+        // equal-value commit fires its observers no longer.
+        assertEquals(listOf(3), seen)
         assertEquals(3, sum.value)
     }
 

@@ -250,7 +250,7 @@ class KeyedStateProvider<K : Any, T : Any> internal constructor(
 @Suppress("LongParameterList") // One family's policy, as the experimental state(...) overload has one state's.
 fun <K : Any, T : Any> Store<*>.keyedState(
     transformer: Transformer<T>? = null,
-    distinct: Boolean = false,
+    distinct: Boolean = true,
     codec: StateCodec<T>? = null,
     keyCodec: StateCodec<K>? = null,
     tags: Set<StateTag> = emptySet(),

@@ -79,6 +79,13 @@ fun <V : Store<V>, T : Any> V.computed(compute: V.() -> T): State<T> {
  *    recompute back and is reported through this store's
  *    [Store.uncaughtObserverHandler] (logged loudly while no handler is set);
  *    the derived keeps its previous value until the next source commit.
+ *  - The backing state is `distinct` (the state default): a recompute that
+ *    produces the value the derived already holds commits without firing its
+ *    observers, and a source commit the source's own `distinct` dedup skips
+ *    (a same-value commit, by default) schedules no recompute at all — so a
+ *    [compute] that reads state it does not list among [sources] no longer
+ *    refreshes as a side effect of such commits. List everything [compute]
+ *    reads.
  *
  * Example:
  * ```

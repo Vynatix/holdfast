@@ -320,10 +320,10 @@ see §8.2.
 state. It fires:
 
 - **Once immediately** with the current `value` (post-`transformer.get`).
-- **Once per top-level commit** that staged a write to this state. By default
-  (`distinct = false`) a commit that re-applies the same value re-fires
-  observers; declare the state with `state(distinct = true) { … }` to opt into
-  StateFlow-style same-value dedup (see §6).
+- **Once per top-level commit** that staged a write to this state — unless the
+  commit re-applies the same value: by default (`distinct = true`) a same-value
+  commit is deduped, StateFlow-style, and fires nothing (see §6). Declare the
+  state with `state(distinct = false) { … }` to re-fire on every commit.
 
 ```kotlin
 val sub = holdfast { count effect { println("count=$this") } }
@@ -545,13 +545,14 @@ than a state corruptor.
 | `mutate v2` after v1 (same action) | post-`get(v2)` ← pending | committed v0 | (silent) | (silent) |
 | Action body throws | committed v0 | committed v0 | (never fired for v1/v2) | (never published) |
 | Action commits with final = v2 | committed v2 | committed v2 | fires once with `get(v2)` | publishes raw v2 |
-| Action commits with final = v0 (same as start) | committed v0 | committed v0 | fires with `get(v0)` (`distinct = true` skips) | publishes raw v0 (`distinct = true` skips) |
+| Action commits with final = v0 (same as start) | committed v0 | committed v0 | silent — deduped (the default; `distinct = false` re-fires) | silent — deduped (the default; `distinct = false` re-publishes) |
 
 Three things to internalize:
 
 1. **Observers and bridges only ever see committed values.** No mid-transaction
-   leak. No rolled-back leak. Same-value commits re-fire by default; states
-   declared `state(distinct = true) { … }` dedup them.
+   leak. No rolled-back leak. Same-value commits are deduped by default
+   (StateFlow-style); a state declared `state(distinct = false) { … }`
+   re-fires them.
 2. **Read-your-own-writes is owner-thread-only.** The thread executing the
    action sees its own pending writes (except inside a state initializer or
    a schema migration, which read committed values only, or, in an
@@ -569,6 +570,22 @@ Three things to internalize:
 3. **Transformer.get applies to reads and observer payloads alike.**
    `state.value` and the value passed to `effect`'s receiver are the
    same. Asymmetric transformers do not produce two different views.
+
+**The dedup compares the stored raw value.** `distinct` compares the stored
+post-`Transformer.set` raw value with `==` — ciphertext to ciphertext for an
+encrypted state, never the plaintext. Consequences:
+
+- A normalizing transformer (`trim`, `lowercase`) dedupes on the normalized
+  form: `"a "` and `"a"` are one value.
+- An in-place-mutated object compares equal to itself, so committing the same
+  reference after mutating it silently fires nothing — observers never learn
+  of the change. Mutate immutably, or declare the state
+  `state(distinct = false) { … }`.
+- Types with reference equality (`ByteArray`, arrays) never compare equal, so
+  they never dedupe — the flip is a no-op for them.
+- A non-pure `set` — a randomized cipher, where `set(x) != set(x)`, already
+  outside the `Transformer` contract (§4.2) — defeats the comparison: every
+  commit of such a state stores a different raw value and fires.
 
 ---
 
@@ -1325,8 +1342,8 @@ The self-typed base every store extends (`class CounterStore : Store<CounterStor
 
 | Member | Signature | Description |
 |---|---|---|
-| `state` | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, initialize: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `initialize` runs on first need (§4.1); `distinct=true` opts into same-value commit dedup |
-| `state` (with a codec or tags) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, tags: Set<StateTag> = emptySet(), initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with (§16.2) and `StateTag`s the library enforces — `Secret`, `UserAuthored`, `Remote` (§16.4); a call that passes neither resolves to the stable overload and needs no opt-in; throws on a disposed store, and a refused tag combination fails the declaration with `IllegalArgumentException` |
+| `state` | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = true, initialize: Initializer<T>): StateDelegate<T>` | Declares a state property when the store is constructed; `initialize` runs on first need (§4.1); `distinct=true` (the default) dedupes same-value commits — no observer fire, no bridge publish (§6) — and `distinct=false` re-fires on every commit |
+| `state` (with a codec or tags) | `fun <T : Any> state(transformer: Transformer<T>? = null, distinct: Boolean = true, codec: StateCodec<T>? = null, tags: Set<StateTag> = emptySet(), initialize: Initializer<T>): StateDelegate<T>` *(experimental)* | The stable `state` plus a `StateCodec` that `snapshot().encode()` writes the state's raw value with (§16.2) and `StateTag`s the library enforces — `Secret`, `UserAuthored`, `Remote` (§16.4); a call that passes neither resolves to the stable overload and needs no opt-in; throws on a disposed store, and a refused tag combination fails the declaration with `IllegalArgumentException` |
 | `action` | `infix fun <R> action(body: Self.() -> R): TransactionResult<R>` | Runs body in a transaction; body's return value carried in `Success<R>` |
 | `invoke` | `operator fun <R> invoke(block: Self.() -> R): R` | Plain context block |
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
@@ -1344,7 +1361,7 @@ The self-typed base every store extends (`class CounterStore : Store<CounterStor
 | `taggedStates` / `tags` | `fun Store<*>.taggedStates(tag: StateTag): List<State<*>>`; `val State<*>.tags: Set<StateTag>` *(experimental, extensions)* | The one tag lookup: a state's tags (a `derived` with a `Secret` source is `Secret`; a keyed-state entry's are its family's), and the store's states carrying a tag in declaration order, never-read ones materialized first, then the live entries of the keyed state families carrying it (none created, §16.6); `taggedStates` throws on a disposed store, `tags` keeps answering (§16.4) |
 | `derivedState` | `fun <V : Store<V>, T : Any> V.derivedState(vararg sources: State<*>, compute: V.() -> T): DerivedState<T>` *(experimental, extension)* | A read-only `DerivedState` that settles: recomputed once per outermost action or frame that changes a source (sources on any store; not a `computed` one), after it releases every store, from a committed cut of the sources, in a transaction of its own on this store; never waits for a busy store (hands off). Observable like a declared state, usable as a source, declared with `by` or `=`; `mutate`/`update`/`bridge`/`observeFrom` on it throw; not in snapshots, `properties` or `taggedStates`; `dispose()` stops it (§16.5) |
 | `merged` | `fun <V : Store<V>, L : Any, R : Any, T : Any> V.merged(local: State<L>, remote: State<R>, merge: (L, R) -> T): DerivedState<T>` *(experimental, extension)* | A `DerivedState` over two different states this store declares — the user's side (`local`, tag it `UserAuthored`) and sync's (`remote`, tag it `Remote`) — so an adoption writing `remote` never touches `local` and recomputes the merge once; carries neither tag; the input tags are not checked. Another store's, a derived, `computed` or internal input, or the same state twice, is an `IllegalArgumentException` (§16.5) |
-| `keyedState` | `fun <K : Any, T : Any> Store<*>.keyedState(transformer: Transformer<T>? = null, distinct: Boolean = false, codec: StateCodec<T>? = null, keyCodec: StateCodec<K>? = null, tags: Set<StateTag> = emptySet(), initialize: (K) -> T): KeyedStateProvider<K, T>` *(experimental, extension)* | Declares a keyed state family with `val docs by keyedState<K, T> { key -> … }`: one state per key, created from the initializer at the key's first `docs[key]` and the same `State` while it lives; `getOrNull`/`contains`/`entries` never create one. `evict(key)`/`evictAll()` are staged like writes (from this store's own commit fanout, deferred until the commit ends) and leave a stale handle whose writes throw; other entries keep their observers and bridges. Snapshots capture every live entry (`keysOf`), `encode()` writes a family with a `codec` and a `keyCodec` as an object under its name, `restore` creates entries and never evicts, `reset()` re-runs live entries' initializers. Families and states share names; throws on a disposed store (§16.6) |
+| `keyedState` | `fun <K : Any, T : Any> Store<*>.keyedState(transformer: Transformer<T>? = null, distinct: Boolean = true, codec: StateCodec<T>? = null, keyCodec: StateCodec<K>? = null, tags: Set<StateTag> = emptySet(), initialize: (K) -> T): KeyedStateProvider<K, T>` *(experimental, extension)* | Declares a keyed state family with `val docs by keyedState<K, T> { key -> … }`: one state per key, created from the initializer at the key's first `docs[key]` and the same `State` while it lives; `getOrNull`/`contains`/`entries` never create one. `evict(key)`/`evictAll()` are staged like writes (from this store's own commit fanout, deferred until the commit ends) and leave a stale handle whose writes throw; other entries keep their observers and bridges. Snapshots capture every live entry (`keysOf`), `encode()` writes a family with a `codec` and a `keyCodec` as an object under its name, `restore` creates entries and never evicts, `reset()` re-runs live entries' initializers. Families and states share names; throws on a disposed store (§16.6) |
 | `hydrator` | `fun <V : Store<V>> V.hydrator(spec: HydrationSpec<V>.() -> Unit): Hydrator<V>` *(experimental, `:holdfast-coroutines` extension)* | Gives the store its one hydrator: `base { }` seeds it in one transaction that also marks a refresh in flight, `refresh { } adopt { }` fetches once that has committed and adopts into `Remote` states only (a savepoint; any other write fails the adoption, naming the state). `hydrate()` does nothing while `Seeded` or `Hydrated`, retries only the refresh from `Failed`, and seeds and fetches once under concurrent calls; `invalidate()`/`stageInvalidate()` and `reset()` go back to `Detached`. `state` is a read-only, observable `State<Hydration>` no snapshot sees; `hydrate()` and `awaitSettled()` throw inside any action, frame or suspending entry; `hydratorOrNull()`, `hydrateEach(…)`; a second `hydrator { }` throws (§16.7) |
 | `schemaVersion` / `migrate` | `interface SchemaVersioned { val schemaVersion: Int; fun migrate(from: Int, view: EncodedSnapshotView) }` *(experimental; a store subclass implements it)* | Numbers the store's schema (a store without it is version 1) and upcasts an older decoded snapshot's encoded text before a restore reads it; a newer snapshot, a captured one of another version, or a throwing `migrate` fails the restore with `SnapshotMigrationException`, changing nothing. `migrate` may read states but not write any store (§16.3) |
 | `dispose` | `fun dispose()` | Terminal, idempotent teardown — drops observers, detaches bridges, clears middleware; subsequent state APIs throw `IllegalStateException("store disposed")`. A `derivedState`/`merged` recompute still waiting on this store, for a live store, runs inside it, on the calling thread (§16.5) |
@@ -1504,8 +1521,11 @@ holdfast action { count mutate 9999; label mutate "wrong" }
 holdfast.restore(snap)               // count + label back to snapshot values
 ```
 
-Restore-time bridge publish: yes. Detach bridges first if the snapshot
-shouldn't echo back to your persistence layer. A state name the store does not
+Restore-time bridge publish: only for states whose value the restore changes —
+a state the snapshot leaves unchanged fires neither its observers nor its
+bridge (the default `distinct` comparison of §6; a `distinct = false` state
+re-fires and re-publishes). Detach bridges first if the snapshot's changed
+states shouldn't echo back to your persistence layer. A state name the store does not
 declare is ignored, and a declared state the snapshot holds no value for keeps
 its value without its observers firing (`RestorePolicy.IgnoreUnknown`). A value
 the target state cannot hold — a snapshot of another store class with a
@@ -1539,7 +1559,10 @@ fun <V : Store<V>, T : Any> V.derived(
   top-level action on the same store and stages the result in a backing
   `MutableState`.
   The returned `State<T>` is a real observable state — use `effect` to
-  subscribe.
+  subscribe. Backing and sources are `distinct` by default (§6): a same-value
+  source commit schedules no recompute, and a recompute producing the value
+  the derived already holds fires nothing — so list every state `compute`
+  reads among the sources.
 
 The recompute is deferred via `Store.postCommit` (an internal queue) so
 it doesn't re-enter the parent's `pendingWrites` map mid-iteration. It
@@ -1736,7 +1759,7 @@ suspend fun <R> suspendAtomic(vararg vaults: Store<*>, body: suspend () -> R): T
 fun <V : Store<V>, T : Any> V.suspendDerived(
     vararg sources: State<*>,
     compute: suspend V.() -> T,
-): Pair<State<T>, Disposable>
+): Pair<State<T>, Disposable>                        // distinct backings/sources as derived() (§14.2): same-value source commits never recompute
 
 interface SuspendingKvStore                          // suspend get / put / remove / snapshot
 interface SuspendingBridge<T : Any> : Bridge<T>      // suspend fun publishAwaited(value: T)
@@ -2493,7 +2516,7 @@ interface StateCodec<T : Any> {                 // stable; every bridge.Codec is
 @ExperimentalStoreApi
 fun <T : Any> state(
     transformer: Transformer<T>? = null,
-    distinct: Boolean = false,
+    distinct: Boolean = true,
     codec: StateCodec<T>? = null,
     tags: Set<StateTag> = emptySet(),
     initialize: Initializer<T>,
@@ -2822,7 +2845,7 @@ abstract class SnapshotScope { object All; object UserAuthored; object Raw }
 @ExperimentalStoreApi
 fun <T : Any> state(
     transformer: Transformer<T>? = null,
-    distinct: Boolean = false,
+    distinct: Boolean = true,
     codec: StateCodec<T>? = null,
     tags: Set<StateTag> = emptySet(),
     initialize: Initializer<T>,
@@ -3147,7 +3170,7 @@ fun pinThenAdopt(notes: NotesStore) {
 @ExperimentalStoreApi
 fun <K : Any, T : Any> Store<*>.keyedState(
     transformer: Transformer<T>? = null,
-    distinct: Boolean = false,
+    distinct: Boolean = true,
     codec: StateCodec<T>? = null,        // encodes an entry's raw value
     keyCodec: StateCodec<K>? = null,     // encodes its key: a family needs both to be encoded
     tags: Set<StateTag> = emptySet(),    // every entry's tags
@@ -5017,7 +5040,7 @@ rest is the stable surface.
 class V : Store<V>(), SchemaVersioned {                                      // SchemaVersioned: exp.
     val x by state { 0 }
     val s by state(MyTransformer()) { "" }
-    val items by state(distinct = true) { emptyList<Item>() }                // dedup: equal values never fire
+    val items by state { emptyList<Item>() }                                  // distinct default: equal values never fire
     val token by state(EncryptingTransformer(cipher), tags = setOf(StateTag.Secret)) { "" }   // exp.: withheld from every read-out
     val pinned by state(codec = PinsCodec, tags = setOf(StateTag.UserAuthored)) { emptySet<String>() } // exp.: what the user wrote
     val feed by state(codec = ItemsCodec, tags = setOf(StateTag.Remote)) { emptyList<Item>() }         // exp.: synced data
