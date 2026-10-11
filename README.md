@@ -9,8 +9,10 @@ A *holdfast* is the part of a kelp that anchors it to the seabed against the
 tides. This library does the analogous thing for application state: a
 `Store<Self : Store<Self>>` is a state container whose unit of consistency
 is a **transaction** — mutations buffer, observers see only committed values,
-failed transactions never leak, and the type system enforces that a state
-class anchors itself to its own type.
+failed transactions never leak, and the library verifies that a state class
+anchors itself to its own type: at construction on JVM/Android, at first
+dispatch on iOS (see [holdfast/README.md](holdfast/README.md); not enforced on
+wasmJs).
 
 ```kotlin
 class CounterStore : Store<CounterStore>() {

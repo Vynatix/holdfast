@@ -87,6 +87,28 @@ class CounterStore : Store<CounterStore>() {
 }
 ```
 
+### The Self type contract (CRTP)
+
+`Self` must be the store's own class: `class Foo : Store<Foo>()`. Writing
+`class Foo : Store<Bar>()` compiles, but every dispatch hands the store to
+`Self`-typed member-extensions (`mutate`, `effect`, action bodies), so the
+receiver cast fails — a programming error the library surfaces as early as
+the platform allows. Enforcement is platform-divergent, by design:
+
+| Platform | When a mistyped store fails |
+|----------|----------------------------|
+| JVM / Android | **At construction** — `IllegalStateException` naming both the class and the wrong type argument. Uses a `java.lang.reflect` walk of the generic superclass chain (through intermediates like `EventfulStore`); fails **open** when signature data is missing or unresolvable, so an R8-minified build that drops the `Signature` attribute degrades quietly — holdfast's `consumer-rules.pro` keeps it, and the check never breaks a legal store either way. |
+| iOS (Kotlin/Native) | **At first dispatch** — no construction-time reflection. `action { }` rethrows the receiver-cast failure as a `ClassCastException` with a teaching message (a documented exception to `action`'s no-throw-result contract, for this programming error only); `invoke { }` propagates the same teaching exception. |
+| wasmJs | **Not enforced** — bridge casts may surface as WasmGC runtime traps that cannot be intercepted. No construction-time or dispatch-time claim; unverified. |
+
+Two edges worth knowing. On JVM/Android the construction check runs before any
+subclass state-delegate initializer (delegates initialize after the superclass
+constructor); on Native/wasmJs a mistyped store's eager initializers run to
+completion before the first dispatch failure. And the gate on the Native
+rethrow keys on the cast message naming the store's own class as the cast
+source — a `ClassCastException` your action body throws itself keeps today's
+handling (wrapped into `TransactionResult.Error`), never the teaching message.
+
 ### Type hierarchy at a glance
 
 ```
