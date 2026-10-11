@@ -10,6 +10,32 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **The outer body's other coroutines no longer read a nested suspending
+  entry's uncommitted writes (issue #38, with `:holdfast-coroutines`).** A
+  `suspendAction`/`suspendAtomic` nested in another suspending entry's body
+  joined the settle scope the coroutine already carried, so its root recorded
+  the OUTER entry's scope — a scope carried by the outer body and every
+  coroutine it launched — and while the nested entry was parked, all of them
+  passed `readsPendingHere`'s scope check and read its staged writes and
+  evictions, including ones that then rolled back (#35's documented known
+  gap). A nested entry now runs under a settle-scope VIEW of the enclosing
+  one's (`SettleScopes.openJoined`, a `SettleScope` subclass that forwards
+  all work to the real scope and never settles): its root records the view,
+  so only its own body — and the coroutines that body launches, and code
+  resumed inline from it — reads its pending state, while it still settles
+  with the outermost entry and still reads every enclosing body's pending
+  writes (`readsPendingHere` decides on the scope's `within` chain now, as
+  does issue #31's blocking-entry refusal, which the chain strictly
+  widens to calls from inside a nested entry's body). In-frame savepoints
+  (`createSavepointForExternal`) are unchanged. Because the view makes the
+  nested body a new coroutine, `:holdfast-coroutines` now enforces the
+  same-store nested-entry fail-fast (kotlinx's mutex same-owner refusal can
+  no longer see it) with an explicit probe of the caller's `Job` against the
+  store's suspending owner. Code resumed inline from a body
+  (`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
+  `Dispatchers.Main.immediate`) remains a documented gap. Internal seam
+  only: `SettleScope` became `open` for the in-module view and
+  `SettleScopes.openJoined` was added, both `@StoreInternalApi`.
 - **A blocking entry inside a store's own suspending body is refused instead
   of hanging (issue #31).** A blocking `action { }`, `reset()`, `restore()`
   or `atomic(...)` on a store, called from inside that same store's

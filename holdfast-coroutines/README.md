@@ -106,11 +106,13 @@ coroutines through `suspendAction { }`, which suspends until the store is
 free. Reads are isolated: while the body is parked, a coroutine on any
 thread, the body's own included, reads committed values, never the body's
 pending writes or staged evictions (issue #28) — unless it carries the body's
-settle scope. The coroutines the body launches carry it, and a suspending
-entry nested in the body joins it, so the outer body and its children read a
-nested entry's pending writes; code resumed inline from the body
-(`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
-`Dispatchers.Main.immediate`) runs as part of it. The body reads its own
+settle scope: the coroutines the body launches do, and code resumed inline
+from the body (`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
+`Dispatchers.Main.immediate`) runs as part of it. A suspending entry nested
+in the body runs under a scope view of the body's, an identity of its own
+(issue #38): the outer body and its other coroutines read the nested entry's
+pending writes only once committed, while the nested body still reads every
+enclosing body's. The body reads its own
 writes while it runs on the thread that opened it; resumed on another thread,
 or inside a nested `withContext(dispatcher)` on iOS and wasmJs, it reads
 committed values. (`KeyedState.evict`/`evictAll` from

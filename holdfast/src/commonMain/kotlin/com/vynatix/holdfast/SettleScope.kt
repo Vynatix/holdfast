@@ -85,19 +85,25 @@ internal interface SettleTask {
  * refuses more work: a late caller runs its work the way it would with no
  * scope open.
  *
+ * `open` for [JoinedSettleScope] alone (issue #38): the view a suspending
+ * entry nested in another entry's body runs under, which forwards everything
+ * to the real scope. Not part of the extension surface.
+ *
  * `@StoreInternalApi`: `:holdfast-coroutines` opens and carries the scopes of
  * suspending entries, and `:holdfast-testing` opens one around an open
  * transaction's commit.
  */
 @StoreInternalApi
-class SettleScope internal constructor(
+open class SettleScope internal constructor(
     /**
      * The scope open on the opener's thread when this one opened
      * ([SettleScopes.open]): this scope hands its work there while that scope
      * takes it, so everything still settles once, with the outermost entry,
-     * and keeps the work that comes once that scope has settled.
+     * and keeps the work that comes once that scope has settled. It is also
+     * the nesting chain [scopeChainReaches] walks: a scope and everything
+     * handed to the scopes enclosing it belong to entries nested in them.
      */
-    private val within: SettleScope?,
+    internal val within: SettleScope?,
 ) {
     private val lock = SynchronizedObject()
 
@@ -109,7 +115,7 @@ class SettleScope internal constructor(
     private var settled = false
 
     /** Whether this scope still takes work: `false` once it has settled. */
-    val isOpen: Boolean
+    open val isOpen: Boolean
         get() = !settled
 
     /**
@@ -118,7 +124,7 @@ class SettleScope internal constructor(
      * hand it to [within] while that scope takes it. `false`, queueing
      * nothing, once the scope has settled.
      */
-    internal fun enqueue(task: SettleTask): Boolean =
+    internal open fun enqueue(task: SettleTask): Boolean =
         within?.enqueue(task) == true ||
             synchronized(lock) {
                 if (settled) return@synchronized false
@@ -136,7 +142,7 @@ class SettleScope internal constructor(
      * or hand that to [within] while that scope takes it. `false`, queueing
      * nothing, once the scope has settled: drain it now.
      */
-    internal fun drainWhenSettled(store: Store<*>): Boolean =
+    internal open fun drainWhenSettled(store: Store<*>): Boolean =
         within?.drainWhenSettled(store) == true ||
             synchronized(lock) {
                 if (settled) return@synchronized false
@@ -170,7 +176,7 @@ class SettleScope internal constructor(
      * piece of work and settle, through that store's
      * [Store.uncaughtObserverHandler].
      */
-    fun settle() {
+    open fun settle() {
         // Runs per piece of work, by identity (neither Store nor a SettleTask
         // overrides equals): a SettleTask, or a frame's store drain.
         var runs: MutableMap<Any, Int>? = null
@@ -237,6 +243,78 @@ class SettleScope internal constructor(
 }
 
 /**
+ * The settle scope a suspending entry NESTED in another entry's body runs
+ * under (issue #38): a view of [carried] with an identity of its own. The
+ * nested entry's roots record the view as their [Transaction.openedInScope],
+ * so its pending writes and staged evictions are read only by its own body —
+ * not by the enclosing body or the coroutines that one launched, which carry
+ * [carried] — while the nesting still counts the other way
+ * ([scopeChainReaches]): the nested body's chain is the view then [carried],
+ * so it keeps reading every enclosing body's pending writes.
+ *
+ * Everything else delegates: work queued or a drain owed inside the nested
+ * entry goes to [carried] and settles once, with the outermost entry, exactly
+ * as before. The view itself never settles — its [settle] is a no-op, and it
+ * is open exactly while [carried] is, so a nested body that outlives its
+ * opener reads [SettleScopes.current] as none once that one settled, and the
+ * no-scope routing applies, as it would have without the view.
+ *
+ * Built by `:holdfast-coroutines` ([SettleScopes.openJoined]) around each
+ * nested entry's body; never installed anywhere else.
+ */
+internal class JoinedSettleScope(
+    private val carried: SettleScope,
+) : SettleScope(within = carried) {
+    override val isOpen: Boolean
+        get() = carried.isOpen
+
+    override fun enqueue(task: SettleTask): Boolean = carried.enqueue(task)
+
+    override fun drainWhenSettled(store: Store<*>): Boolean = carried.drainWhenSettled(store)
+
+    // A deliberate no-op: settling is owned by the outermost entry, whose
+    // own scope's settle runs everything the view forwarded to it. Closing
+    // this view would only strand work if the base path ever ran — it never
+    // does, every member delegates.
+    override fun settle() = Unit
+}
+
+/**
+ * Whether the settle-scope chain of [current] — the scope itself, then each
+ * scope the one before it hands its work to ([SettleScope.within]) — contains
+ * [target]: the code reading runs inside the entry [target] belongs to, or
+ * inside an entry nested in it. Issue #38: the chain is how
+ * [Transaction.readsPendingHere] keeps a nested suspending entry reading its
+ * enclosing bodies' pending writes while the enclosing bodies' other
+ * coroutines (whose chain stops at their own scope) no longer read the
+ * nested entry's.
+ */
+internal fun scopeChainReaches(
+    current: SettleScope?,
+    target: SettleScope,
+): Boolean {
+    var scope = current
+    while (scope != null) {
+        if (scope === target) return true
+        scope = scope.within
+    }
+    return false
+}
+
+/**
+ * The scope clause of [Transaction.readsPendingHere] (issue #38):
+ * [scopeChainReaches] with the null-root rule folded in — a root that
+ * recorded no scope (`Transaction.openedInScope == null`) deliberately
+ * restores owner-thread semantics and passes. Issue #31's blocking-entry
+ * refusal wants the opposite polarity for `null` and calls
+ * [scopeChainReaches] itself.
+ */
+internal fun scopeChainReachesOrUnscoped(
+    current: SettleScope?,
+    target: SettleScope?,
+): Boolean = target == null || scopeChainReaches(current, target)
+
+/**
  * The settle scope of the current thread. Cross-module surface for
  * `:holdfast-coroutines`, which installs a suspending entry's scope on every
  * thread that entry resumes on; application code has no reason to touch it.
@@ -266,9 +344,18 @@ object SettleScopes {
      * settles it: `:holdfast-coroutines` gives a suspending entry started
      * inside a blocking one such a scope, whose identity its transactions
      * record ([Transaction.readsPendingHere]) for its whole body, which may
-     * outlive the blocking entry.
+     * outlive the blocking entry (#28).
      */
     fun open(): SettleScope = SettleScope(within = current())
+
+    /**
+     * The [JoinedSettleScope] view of [carried] for a suspending entry nested
+     * in another entry's body (issue #38): an identity of its own for the
+     * nested entry's roots, everything the entry queues settled by the
+     * outermost entry through [carried]. The caller (`:holdfast-coroutines`)
+     * installs it around the nested body only, and never settles it.
+     */
+    fun openJoined(carried: SettleScope): SettleScope = JoinedSettleScope(carried)
 }
 
 /**

@@ -22,7 +22,9 @@ package com.vynatix.holdfast
 // dispatch and hands it to the coroutines it launches
 // (`SettleAmbientContext`). A blocking call cannot read the coroutine
 // context, but it CAN read the scope the caller's thread has installed: the
-// call is inside the body exactly when that scope IS the root's.
+// call is inside the body exactly when that scope's chain — itself, or a
+// nested suspending entry's scope view of it (#38, [JoinedSettleScope]) —
+// reaches the root's.
 //
 // Only the SAME store's body is a deadlock. A blocking entry on another
 // store runs; a blocking entry beside a parked suspending holder — from a
@@ -48,13 +50,16 @@ package com.vynatix.holdfast
  * root transaction the body installed recorded the scope its entry opened
  * ([Transaction.openedInScope]), and that scope is installed on every thread
  * the body — and any coroutine it launched or that shares its context —
- * resumes on, and on nothing else. See the top of this file.
+ * resumes on, and on nothing else. A nested suspending entry runs under a
+ * scope VIEW of the enclosing one's (#38), so the check walks the chain
+ * ([scopeChainReaches]): the body's own scope or a view nested in it both
+ * count, an unrelated scope does not. See the top of this file.
  */
 internal fun Store<*>.refuseInsideOwnSuspendingBody(attempt: String) {
     val inOwnBody =
         suspendingOwner != null &&
             // A positive scope match only, per the note at the top of this file.
-            activeTransaction?.root?.openedInScope?.let { SettleScopes.current() === it } == true
+            activeTransaction?.root?.openedInScope?.let { scopeChainReaches(SettleScopes.current(), it) } == true
     if (inOwnBody) throw IllegalStateException(ownSuspendingBodyMessage(displayName, attempt))
 }
 

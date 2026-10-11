@@ -14,6 +14,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -231,6 +232,83 @@ class SuspendingIsolationTest {
             assertEquals(3, nested)
             assertEquals(3, a.n.value)
             assertEquals(3, b.n.value)
+        }
+
+    // Issue #38: the nested entry used to join the outer body's settle scope,
+    // so the outer body's OTHER coroutines — which carry that scope too —
+    // read the nested entry's uncommitted writes, including writes that then
+    // rolled back. A nested entry has a scope identity of its own now (a view
+    // of the outer one), so they read committed values.
+    @Test
+    fun theOuterBodysOtherCoroutinesDoNotReadANestedSuspendActionsPendingWrite() =
+        runTest {
+            val a = IsolationStore()
+            val b = IsolationStore()
+            val parked = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<Unit>()
+            var seen = -1
+            val holder =
+                launch {
+                    a.suspendAction {
+                        coroutineScope {
+                            launch {
+                                b.suspendAction {
+                                    n mutate 5
+                                    parked.complete(Unit)
+                                    gate.await()
+                                    throw IsolationRollback()
+                                }
+                            }
+                            launch {
+                                parked.await()
+                                seen = b.n.value
+                                gate.complete(Unit)
+                            }
+                        }
+                    }
+                }
+            holder.join()
+            assertEquals(0, seen, "the outer body's other coroutine read the nested entry's uncommitted write")
+            assertEquals(0, b.n.value, "the nested entry's write rolled back")
+        }
+
+    // The same shape with a nested suspendAtomic frame: staged writes on two
+    // stores read by the outer body's other coroutine only once committed.
+    @Test
+    fun theOuterBodysOtherCoroutinesDoNotReadANestedSuspendAtomicsPendingWrites() =
+        runTest {
+            val a = IsolationStore()
+            val b = IsolationStore()
+            val c = IsolationStore()
+            val parked = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<Unit>()
+            var seen = -1 to -1
+            val holder =
+                launch {
+                    a.suspendAction {
+                        coroutineScope {
+                            launch {
+                                runCatching {
+                                    suspendAtomic(b, c) {
+                                        b { n mutate 7 }
+                                        c { n mutate 8 }
+                                        parked.complete(Unit)
+                                        gate.await()
+                                        throw IsolationRollback()
+                                    }
+                                }
+                            }
+                            launch {
+                                parked.await()
+                                seen = b.n.value to c.n.value
+                                gate.complete(Unit)
+                            }
+                        }
+                    }
+                }
+            holder.join()
+            assertEquals(0 to 0, seen, "the outer body's other coroutine read the nested frame's uncommitted writes")
+            assertEquals(0 to 0, b.n.value to c.n.value, "the nested frame's writes rolled back")
         }
 
     // An entry started inside a withContext(dispatcher) section of another

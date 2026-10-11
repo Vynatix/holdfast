@@ -112,6 +112,42 @@ internal fun ensureSerializer(store: Store<*>): MutexSerializer {
 }
 
 /**
+ * Refuse a suspending entry on this store when the coroutine CALLING it is
+ * the very one holding the store: a `suspendAction`/`suspendAtomic` whose
+ * body is making this call would wait for the mutex that body itself holds
+ * (issue #38). Until #38 the fail-fast rode kotlinx's own same-owner
+ * refusal — the holder locked the mutex with the `Job` its body's coroutine
+ * read, so a directly-nested entry locking with the same `Job` threw
+ * `IllegalStateException("This mutex is already locked by the specified
+ * owner: …")` instead of suspending forever. A nested entry now runs its
+ * body under its settle-scope VIEW, a new coroutine whose `Job` is not the
+ * caller's, so kotlinx can no longer see the collision — the entry kinds
+ * probe it here instead: [caller] is the `Job` this call's coroutine had
+ * BEFORE its settle handling (exactly the object a directly-nested entry's
+ * enclosing holder locked with, at any nesting depth), and
+ * [Store.suspendingOwner] is what the current suspending holder locked its
+ * mutex with. They are the same object only when this call is made from that
+ * holder's own body coroutine — kotlinx's exact same-owner set — so a
+ * suspending entry from a coroutine the body merely launched (a different
+ * `Job`) still waits for the holder, as before.
+ *
+ * @throws IllegalStateException with kotlinx's wording (and the way out)
+ *   instead of waiting for the caller itself.
+ */
+internal fun Store<*>.refuseOwnSuspendingOwner(caller: Any?) {
+    val holder = suspendingOwner ?: return
+    if (holder !== caller) return
+    val name = this::class.simpleName ?: "Store"
+    throw IllegalStateException(
+        "This mutex is already locked by the specified owner: $holder — this coroutine's own suspending " +
+            "entry (a suspendAction or suspendAtomic body) holds $name's suspend mutex, so a nested " +
+            "suspending entry on the same store would wait for itself. Stage the write with `mutate`/`update`, " +
+            "or make the entry once that body has returned. A suspending entry on another store — and one from " +
+            "a coroutine the body launched, which waits for the holder — is not affected.",
+    )
+}
+
+/**
  * Wait until no blocking holder that read this store's serializer as not
  * installed yet still holds the store under its transaction lock alone:
  * poll [internalTransactionLockFree] politely ([backOffUntil]), never

@@ -966,16 +966,21 @@ single-threaded dispatcher such as `Dispatchers.Main` or `runTest`, and on
 wasmJs); resumed on another thread (`Dispatchers.Default`/`IO`), or inside a
 nested `withContext(dispatcher)` section on iOS and wasmJs, it reads
 committed values. A suspending entry started inside such a section keeps the
-issue #28 isolation: it re-wraps the section's dispatcher with the body's
-settle scope, so its parked writes do not leak either — only the outer
-body's own reads inside the section stay committed. While it is parked,
-another coroutine on its thread reads
+issue #28 isolation: it re-wraps the section's dispatcher with a scope view
+of the body's settle scope, so its parked writes do not leak either — only
+the outer body's own reads inside the section stay committed. While any
+suspending entry is parked, another coroutine on its thread reads
 committed values, as another thread does (issue #28) — except a coroutine
-that carries the body's settle scope: one the body launched, the body of a
-suspending entry nested in it (whose pending writes the outer body and its
-other children read too), and code resumed inline from the body
-(`Dispatchers.Unconfined`, `CoroutineStart.UNDISPATCHED`,
-`Dispatchers.Main.immediate`), which runs as part of it. A state initializer
+that carries that entry's own settle scope: one its body launched, and code
+resumed inline from the body (`Dispatchers.Unconfined`,
+`CoroutineStart.UNDISPATCHED`, `Dispatchers.Main.immediate`), which runs as
+part of it. A suspending entry nested in another entry's body runs under a
+scope VIEW of the enclosing one's — an identity of its own (issue #38): its
+uncommitted writes and staged evictions are read only inside it (its body,
+the coroutines that body launches, code resumed inline from it), while the
+enclosing body and its other coroutines read them once committed; the
+nested body itself still reads every enclosing body's pending writes. A
+state initializer
 (§4.1) and a schema migration (§16.3) are the exceptions on the action's own
 thread. An initializer that runs inside the action, because the action is the
 first to need its state, and a `migrate` that a `restore` called in the action

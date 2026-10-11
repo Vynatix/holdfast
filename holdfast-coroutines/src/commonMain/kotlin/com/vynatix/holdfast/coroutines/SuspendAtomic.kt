@@ -154,11 +154,18 @@ suspend fun <R> suspendAtomic(
     val enclosingMarker = FrameMarkers.current()
     verifyFrameNesting(enclosingMarker, sorted, suspending = true)
 
+    // The coroutine making this call, read BEFORE the entry's settle handling:
+    // a nested entry's join wrap is a new coroutine, so kotlinx's same-owner
+    // mutex refusal can no longer see that the caller IS a suspending holder's
+    // body — takeParticipant's probe compares this against each participant's
+    // suspendingOwner (issue #38, refuseOwnSuspendingOwner).
+    val caller: Any = coroutineContext[Job] ?: SuspendAtomicFallbackOwner()
+
     // An entry: the derived states its participants' commits change a source
     // of settle once the outermost entry — this frame, unless it is nested in
     // another — has released everything, as do the post-commit drains it
     // owes the stores whose roots it opened.
-    val result = settlingSuspended { runSuspendAtomic(sorted, enclosingMarker, policy, body) }
+    val result = settlingSuspended { runSuspendAtomic(sorted, enclosingMarker, policy, caller, body) }
     // A nested frame is an inner unit of the enclosing frame's body: its
     // Error escalates like an inner action's, unless the ENCLOSING policy
     // tolerates inner errors. (Contract exceptions rethrow directly.)
@@ -178,11 +185,15 @@ private suspend fun <R> runSuspendAtomic(
     sorted: List<Store<*>>,
     enclosingMarker: FrameMarker?,
     policy: FramePolicy,
+    caller: Any,
     body: suspend () -> R,
 ): TransactionResult<R> {
     // Resolve the suspending owner: prefer the parent frame's owner so a
     // nested suspendAtomic in the same coroutine sees the same owner key.
-    // Fall back to coroutineContext[Job], then a per-call sentinel.
+    // Fall back to coroutineContext[Job], then a per-call sentinel. This is
+    // the coroutine the frame BODY runs in — what a directly-nested entry's
+    // caller probe recognizes — not [caller]: this call's own body may run in
+    // a new coroutine (its settle join wrap, issue #38).
     val parentFrame = coroutineContext[SuspendAtomicFrame.Key]
     val owner: Any = parentFrame?.owner ?: coroutineContext[Job] ?: SuspendAtomicFallbackOwner()
     val frame = parentFrame ?: SuspendAtomicFrame(owner)
@@ -222,6 +233,7 @@ private suspend fun <R> runSuspendAtomic(
             rootsAcquired = mutableListOf(),
             drainOnExit = drainOnExit,
             ownerKey = owner,
+            caller = caller,
             frame = frame,
             marker = marker,
             id = id,
@@ -265,6 +277,7 @@ private suspend fun <R> acquireAndRun(
     rootsAcquired: MutableList<RootEntry>,
     drainOnExit: MutableList<Store<*>>,
     ownerKey: Any,
+    caller: Any,
     frame: SuspendAtomicFrame,
     marker: FrameMarker,
     id: String,
@@ -279,7 +292,7 @@ private suspend fun <R> acquireAndRun(
     val isNewlyHeld = v in newlyHeldSet
 
     return if (isNewlyHeld) {
-        val serializer = takeParticipant(v, ownerKey, drainOnExit)
+        val serializer = takeParticipant(v, ownerKey, caller, drainOnExit)
         try {
             frame.heldVaults += v
             val priorActive = v.activeTransaction
@@ -302,6 +315,7 @@ private suspend fun <R> acquireAndRun(
                     rootsAcquired = rootsAcquired,
                     drainOnExit = drainOnExit,
                     ownerKey = ownerKey,
+                    caller = caller,
                     frame = frame,
                     marker = marker,
                     id = id,
@@ -339,6 +353,7 @@ private suspend fun <R> acquireAndRun(
                 rootsAcquired = rootsAcquired,
                 drainOnExit = drainOnExit,
                 ownerKey = ownerKey,
+                caller = caller,
                 frame = frame,
                 marker = marker,
                 id = id,
@@ -358,12 +373,21 @@ private suspend fun <R> acquireAndRun(
  * out a blocking holder that read it as not installed yet
  * ([awaitLockOnlyHolders]), before the caller installs a root. On
  * cancellation, releases what it took and owes [v] a drain ([drainOnExit]).
+ *
+ * [caller] is the coroutine the whole [suspendAtomic] call was made in,
+ * read before its settle handling: when it is the body coroutine of a
+ * suspending entry already holding [v], taking the mutex would wait for
+ * that very entry, so it is refused up front instead ([issue #38]; until it,
+ * kotlinx's own same-owner refusal caught this — the entry's settle join
+ * wrap is a new coroutine now, invisible to that check).
  */
 private suspend fun takeParticipant(
     v: Store<*>,
     ownerKey: Any,
+    caller: Any,
     drainOnExit: MutableList<Store<*>>,
 ): MutexSerializer {
+    v.refuseOwnSuspendingOwner(caller)
     val serializer = ensureSerializer(v)
     try {
         serializer.mutex.lock(ownerKey)

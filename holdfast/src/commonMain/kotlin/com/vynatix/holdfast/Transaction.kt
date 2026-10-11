@@ -87,10 +87,14 @@ class Transaction internal constructor(
      * entry carries. `:holdfast-coroutines` installs it on every resumption of
      * that body and of the coroutines that inherit its context, and on no
      * other coroutine. [readsPendingHere] tells those apart from another
-     * coroutine on the owner thread by it. A root made where no scope is
-     * installed records `null`, and `null` deliberately restores
-     * owner-thread semantics ([readsPendingHere] then relies on the thread
-     * check alone).
+     * coroutine on the owner thread by it. A suspending entry nested in
+     * another records a scope VIEW of the outer one's ([JoinedSettleScope],
+     * issue #38): an identity of its own, so the enclosing body's other
+     * coroutines no longer read this root's pending writes, while the nested
+     * body's chain still reaches the enclosing root's scope. A root made
+     * where no scope is installed records `null`, and `null` deliberately
+     * restores owner-thread semantics ([readsPendingHere] then relies on the
+     * thread check alone).
      */
     @OptIn(StoreInternalApi::class)
     internal var openedInScope: SettleScope? = null
@@ -104,11 +108,14 @@ class Transaction internal constructor(
      * cannot tell the body from another coroutine that thread runs while the
      * body is parked: any coroutine on wasmJs (`currentThreadId()` is `0` for
      * all), or one sharing a single-threaded dispatcher elsewhere. Those read
-     * committed values, as another thread does. The scope is the outermost
-     * suspending entry's, so a suspending entry nested in a body shares it
-     * with that body and the coroutines it launched, and code resumed inline
-     * from the body (an unconfined or undispatched start) runs inside it: all
-     * of those read the pending state too. A root made where no scope was
+     * committed values, as another thread does. The check is on the nesting
+     * chain ([scopeChainReaches]): the scope installed here must BE the root's
+     * or enclose it — so the body, the coroutines it launched and code resumed
+     * inline from it (an unconfined or undispatched start) read the pending
+     * state of this entry AND of every entry it is nested in, while a
+     * suspending entry nested in a body has a scope view of its own (#38) that
+     * the body's other coroutines' chain does not reach: they read this
+     * entry's writes only once committed. A root made where no scope was
      * installed records `null` in [openedInScope], and `null` deliberately
      * restores owner-thread semantics (the thread check alone).
      * [MutableState.value] and [evictionView] read through it.
@@ -117,7 +124,7 @@ class Transaction internal constructor(
     internal fun readsPendingHere(store: Store<*>): Boolean =
         ownerThreadId == currentThreadId() &&
             NoWriteRegion.current() == null &&
-            (store.suspendingOwner == null || root.openedInScope.let { it == null || it === SettleScopes.current() })
+            suspendingHolderSharesPendingWrites(store)
 
     private val statusLock = StoreLock()
     private val endTimeLock = StoreLock()
@@ -815,3 +822,14 @@ inline fun <R> TransactionResult<R>.onSuccess(block: (R) -> Unit): TransactionRe
     if (this is TransactionResult.Success) block(value)
     return this
 }
+
+/**
+ * [Transaction.readsPendingHere]'s suspending-holder clause (see there, and
+ * the file-top of `SettleScope.kt` for the chain): with no suspending holder
+ * installed, the owner-thread rules alone apply; with one, the reading
+ * context must run inside the entry that opened the root's settle scope.
+ */
+@OptIn(StoreInternalApi::class)
+private fun Transaction.suspendingHolderSharesPendingWrites(store: Store<*>): Boolean =
+    store.suspendingOwner == null ||
+        scopeChainReachesOrUnscoped(SettleScopes.current(), root.openedInScope)
