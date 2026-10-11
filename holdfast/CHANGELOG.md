@@ -63,6 +63,39 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
   recompute queued by work that drain is running now runs once that work
   returns, not when its committing call does.
 
+- **A parked suspending entry's uncommitted writes no longer leak to other
+  coroutines on its thread (issue #28).** `State.value` and keyed
+  membership (`getOrNull`, `contains`, `entries`) read the active
+  transaction's pending writes and staged evictions whenever the reader's
+  thread id matched the transaction's owner. While a `suspendAction` or
+  `suspendAtomic` was parked, any other coroutine on that thread therefore
+  read what the body had staged, even writes that later rolled back: every
+  coroutine on wasmJs (all report thread id `0`), and on the JVM/Android
+  every coroutine sharing a single-threaded dispatcher (`Dispatchers.Main`,
+  `runBlocking`, `runTest`). A suspending entry's root now records the
+  settle scope it was opened in, and while it holds the store only reads
+  in that scope see its pending state; everyone else reads committed
+  values. Blocking actions and reads from other threads are unchanged. A
+  suspending entry started inside a blocking entry (an undispatched
+  `launch`, `runBlocking`) now opens a settle scope of its own, which hands
+  its derived-state work to the blocking entry's while that one is open, so
+  its body keeps reading its own writes after the blocking entry returns.
+  Still sharing the scope, and reading the pending state: the coroutines
+  the body launches, a suspending entry nested in the body (whose pending
+  writes the outer body and its other children read), and code resumed
+  inline from the body (`Dispatchers.Unconfined`,
+  `CoroutineStart.UNDISPATCHED`, `Dispatchers.Main.immediate`). On iOS and
+  wasmJs a nested `withContext(dispatcher)` section of the body, which
+  already loses the entry's settle scope there, now reads committed values
+  too; a suspending entry started inside such a section re-wraps the
+  section's dispatcher with the carried settle scope, so it is isolated the
+  same way — its root records that scope rather than none, and while it
+  parks, other coroutines read committed values. Behavior change: a bare `update { }` from another coroutine while
+  the body is parked now computes from the committed value; its write
+  still joins the parked transaction, as any thread's bare write does
+  (GUIDE §8.2), so it replaces the body's pending write to that state
+  instead of building on it. From another coroutine, write through
+  `suspendAction { }`.
 - **wasmJs: a `tryLock` that never counted its hold (issue #26).** On
   wasmJs the first read of every declared state threw
   `IllegalStateException: Mutex already unlocked` (replacing a throwing

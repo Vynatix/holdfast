@@ -7,6 +7,7 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.SettleScopes
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.derivedState
 import com.vynatix.holdfast.effect
 import kotlinx.coroutines.CompletableDeferred
@@ -15,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -95,5 +97,48 @@ class SharedThreadIdentityTest {
         assertEquals(0 to 1, fresh, "a derived state created meanwhile catches up to committed values")
         assertEquals(1 to 1, pair.value, "the parked action settled its own commit once it resumed")
         assertEquals(listOf(0 to 0, 0 to 1, 1 to 1), seen)
+    }
+
+    /**
+     * Issue #28: a `suspendAction` started inside a blocking action's
+     * `runBlocking` loop opens a settle scope of its own (handing its work to
+     * the action's while that one is open), so the loop's other coroutines —
+     * which run with the action's scope installed — do not read its parked,
+     * uncommitted write.
+     */
+    @Test fun aSuspendActionInsideABlockingActionsRunBlockingKeepsItsWritesToItself() {
+        val host = SharedHost()
+        val left = SharedLeft()
+        var seenInBody = -1
+        var seenOutside = -1
+        var result: TransactionResult<Unit>? = null
+
+        host
+            .action {
+                runBlocking {
+                    val parked = CompletableDeferred<Unit>()
+                    val gate = CompletableDeferred<Unit>()
+                    val holder =
+                        launch {
+                            result =
+                                left.suspendAction {
+                                    a mutate 5
+                                    seenInBody = a.value
+                                    parked.complete(Unit)
+                                    gate.await()
+                                    throw IllegalStateException("roll back")
+                                }
+                        }
+                    parked.await()
+                    seenOutside = left.a.value
+                    gate.complete(Unit)
+                    holder.join()
+                }
+            }.getOrThrow()
+
+        assertEquals(5, seenInBody, "the body reads its own write")
+        assertEquals(0, seenOutside, "the runBlocking loop's other coroutine read the parked, uncommitted write")
+        assertIs<TransactionResult.Error>(result, "the body threw, so its write rolled back")
+        assertEquals(0, left.a.value)
     }
 }
