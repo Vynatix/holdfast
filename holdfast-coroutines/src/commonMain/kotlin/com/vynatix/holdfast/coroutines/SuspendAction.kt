@@ -32,20 +32,26 @@ import kotlin.uuid.Uuid
  *
  * Concurrency contract for 1.1:
  *  - **Mutually exclusive with blocking [Store.action]** on the same store: a
- *    blocking `action` will block until the in-flight `suspendAction` completes,
- *    and vice versa. On wasmJs, where the in-flight body can only resume on
- *    the one thread the blocking call would wait on, that blocking `action`
- *    (or `atomic`, `reset()`, `restore()`) throws an `IllegalStateException`
- *    instead of waiting (issue #27). Called on THIS store from inside this
- *    body, a blocking `action` (or `atomic(...)`, `reset()`, `restore()`)
- *    throws that `IllegalStateException` on EVERY platform (issue #31): the
- *    body holds the store's suspend mutex, so the wait could never end —
- *    stage the write with `mutate`/`update` instead, or make the blocking
- *    call once the body has returned; a blocking entry on another store is
- *    unaffected. Coordination is via an internal coroutine [Mutex] installed
- *    lazily on first use — also while it is installed: this call waits,
- *    suspending, for a blocking `action`/`atomic` that took the store before
- *    the [Mutex] existed.
+ *    blocking `action` waits for the in-flight `suspendAction` **up to 2
+ *    seconds** — the clock restarts whenever this operation observably
+ *    progresses (it stages a write, starts its commit) — and throws
+ *    [com.vynatix.holdfast.StoreSuspendInFlightException] when it goes quiet for the whole budget
+ *    (issue 003); on expiry the blocking caller is free to retry, and from a
+ *    coroutine should use `suspendAction` instead. Blocking-vs-blocking waits
+ *    (no suspending holder) are never budgeted. On wasmJs, where the
+ *    in-flight body can only resume on the one thread the blocking call would
+ *    wait on, that blocking `action` (or `atomic`, `reset()`, `restore()`)
+ *    throws an `IllegalStateException` instead of waiting (issue #27). Called
+ *    on THIS store from inside this body, a blocking `action` (or
+ *    `atomic(...)`, `reset()`, `restore()`) throws that
+ *    `IllegalStateException` on EVERY platform (issue #31): the body holds
+ *    the store's suspend mutex, so the wait could never end — stage the write
+ *    with `mutate`/`update` instead, or make the blocking call once the body
+ *    has returned; a blocking entry on another store is unaffected.
+ *    Coordination is via an internal coroutine [Mutex] installed lazily on
+ *    first use — also while it is installed: this call waits, suspending, for
+ *    a blocking `action`/`atomic` that took the store before the [Mutex]
+ *    existed.
  *  - **Cancellation**: a `CancellationException` thrown from the body rolls back
  *    the transaction. Cancellation BETWEEN body return and commit is suppressed
  *    via [NonCancellable] on the commit phase — once the body completes, the
@@ -151,6 +157,11 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
         // mutate() inside the body recognizes us as the owner.
         internalSetActiveTransaction(txn)
         suspendingOwner = owner
+        // Observable progress (issue 003): any blocking waiter's budget clock
+        // restarts here, on each staged write (Store.mutate bumps the epoch
+        // while suspendingOwner is set) and again when the commit starts.
+        suspendingProgressEpoch++
+        serializer.suspendingHolderLabel = "suspendAction"
 
         // Snapshot the middleware chain once at the start of the action — same
         // semantics as the blocking path. Concurrent middleware registration
@@ -232,6 +243,9 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                         runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
                     }
                     try {
+                        // Commit-phase start is observable progress for a
+                        // blocking waiter (issue 003).
+                        suspendingProgressEpoch++
                         suspendingCommit(txn)
                         TransactionResult.Success(txn, value)
                     } catch (e: Throwable) {
@@ -241,6 +255,7 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
             } finally {
                 internalSetActiveTransaction(null)
                 suspendingOwner = null
+                serializer.suspendingHolderLabel = null
             }
         outcome
     }

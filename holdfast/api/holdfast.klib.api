@@ -300,6 +300,9 @@ abstract class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast/Store {
     final var suspendingOwner // com.vynatix.holdfast/Store.suspendingOwner|{}suspendingOwner[0]
         final fun <get-suspendingOwner>(): kotlin/Any? // com.vynatix.holdfast/Store.suspendingOwner.<get-suspendingOwner>|<get-suspendingOwner>(){}[0]
         final fun <set-suspendingOwner>(kotlin/Any?) // com.vynatix.holdfast/Store.suspendingOwner.<set-suspendingOwner>|<set-suspendingOwner>(kotlin.Any?){}[0]
+    final var suspendingProgressEpoch // com.vynatix.holdfast/Store.suspendingProgressEpoch|{}suspendingProgressEpoch[0]
+        final fun <get-suspendingProgressEpoch>(): kotlin/Long // com.vynatix.holdfast/Store.suspendingProgressEpoch.<get-suspendingProgressEpoch>|<get-suspendingProgressEpoch>(){}[0]
+        final fun <set-suspendingProgressEpoch>(kotlin/Long) // com.vynatix.holdfast/Store.suspendingProgressEpoch.<set-suspendingProgressEpoch>|<set-suspendingProgressEpoch>(kotlin.Long){}[0]
     final var uncaughtObserverHandler // com.vynatix.holdfast/Store.uncaughtObserverHandler|{}uncaughtObserverHandler[0]
         final fun <get-uncaughtObserverHandler>(): kotlin/Function1<kotlin/Throwable, kotlin/Unit>? // com.vynatix.holdfast/Store.uncaughtObserverHandler.<get-uncaughtObserverHandler>|<get-uncaughtObserverHandler>(){}[0]
         final fun <set-uncaughtObserverHandler>(kotlin/Function1<kotlin/Throwable, kotlin/Unit>?) // com.vynatix.holdfast/Store.uncaughtObserverHandler.<set-uncaughtObserverHandler>|<set-uncaughtObserverHandler>(kotlin.Function1<kotlin.Throwable,kotlin.Unit>?){}[0]
@@ -875,6 +878,10 @@ final class com.vynatix.holdfast/StoreSnapshot { // com.vynatix.holdfast/StoreSn
     final object Companion { // com.vynatix.holdfast/StoreSnapshot.Companion|null[0]
         final fun decode(kotlin/String): com.vynatix.holdfast/StoreSnapshot // com.vynatix.holdfast/StoreSnapshot.Companion.decode|decode(kotlin.String){}[0]
     }
+}
+
+final class com.vynatix.holdfast/StoreSuspendInFlightException : kotlin/IllegalStateException { // com.vynatix.holdfast/StoreSuspendInFlightException|null[0]
+    constructor <init>(kotlin/String) // com.vynatix.holdfast/StoreSuspendInFlightException.<init>|<init>(kotlin.String){}[0]
 }
 
 final class com.vynatix.holdfast/Transaction { // com.vynatix.holdfast/Transaction|null[0]

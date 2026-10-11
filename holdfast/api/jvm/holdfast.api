@@ -542,6 +542,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun getSelfForExternal ()Lcom/vynatix/holdfast/Store;
 	public final fun getState (Ljava/lang/String;)Lcom/vynatix/holdfast/State;
 	public final fun getSuspendingOwner ()Ljava/lang/Object;
+	public final fun getSuspendingProgressEpoch ()J
 	public final fun getUncaughtObserverHandler ()Lkotlin/jvm/functions/Function1;
 	public final fun hasState (Ljava/lang/String;)Z
 	public final fun internalDrainPostCommitTasks ()V
@@ -564,6 +565,7 @@ public abstract class com/vynatix/holdfast/Store {
 	public final fun runUnderLock (Lkotlin/jvm/functions/Function0;)Ljava/lang/Object;
 	public final fun setAsyncSerializer (Lcom/vynatix/holdfast/Store$AsyncSerializer;)V
 	public final fun setSuspendingOwner (Ljava/lang/Object;)V
+	public final fun setSuspendingProgressEpoch (J)V
 	public final fun setUncaughtObserverHandler (Lkotlin/jvm/functions/Function1;)V
 	public final fun snapshotMiddleware ()Ljava/util/List;
 	public final fun state (Lcom/vynatix/holdfast/Transformer;ZLcom/vynatix/holdfast/Initializer;)Lcom/vynatix/holdfast/StateDelegate;
@@ -645,6 +647,10 @@ public final class com/vynatix/holdfast/StoreSnapshot {
 
 public final class com/vynatix/holdfast/StoreSnapshot$Companion {
 	public final fun decode (Ljava/lang/String;)Lcom/vynatix/holdfast/StoreSnapshot;
+}
+
+public final class com/vynatix/holdfast/StoreSuspendInFlightException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
 }
 
 public final class com/vynatix/holdfast/Transaction {
