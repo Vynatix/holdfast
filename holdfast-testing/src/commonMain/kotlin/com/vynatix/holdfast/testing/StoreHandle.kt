@@ -40,16 +40,18 @@ import kotlin.time.Clock
  * pushes [StoreEvent]s into [timeline] for every transaction lifecycle, with
  * [Capture.RingBuffer] truncating to the configured window. See
  * [com.vynatix.holdfast.testing.internal.Recorder] for the hook strategy and its
- * known limits (commit-time errors after the body returns, user middlewares
- * not auto-wrapped, suspendAction not running middleware in 1.1).
+ * known limits (commit-time errors after the body returns; user middlewares
+ * not auto-wrapped — their lifecycle events never reach the timeline, and the
+ * handle-receiver matcher combinators refuse predicates on them).
  *
  * The handle also remembers the store's clock binding (`Store.bindClock`) as
  * it was when the store was first tracked, and teardown puts it back — after
  * the body, and again once the test's un-joined child coroutines finish — so a
  * clock a test binds on a long-lived (singleton) store after tracking it does
  * not leak into the next test. Track the store before binding its clock, with
- * `track` or an auto-registering extension such as `store.read { }` (a bare
- * `store.action { }` resolves to the `Store` member and does not track): a
+ * `track` or an auto-registering extension such as `store.read { }` or
+ * `store.trackedAction { }` (a bare `store.action { }` resolves to the
+ * `Store` member and does not track): a
  * clock bound before the first track counts as the pre-test binding and is
  * kept. Work in `backgroundScope` or on a scope outside the test is not waited
  * for, so a binding it makes after the test ends is not undone; join such work
@@ -264,6 +266,20 @@ class StoreHandle<V : Store<V>> internal constructor(
             )
         return adaptBridge(attached)
     }
+
+    /**
+     * Whether [state]'s bridge publishes reach this handle's timeline: an
+     * install-time [RecordingBridgeWrapper] covers it (the wrapper map, or a
+     * wrapper still attached to the state — a racing handle may have adopted
+     * it). Wrapping happens only in this handle's `init`, so a state whose
+     * bridge is not wrapped by probe time can never produce
+     * [BridgePublished]/[BridgeObserved] events; the handle-receiver matcher
+     * combinators use this to refuse such predicates with a teaching error
+     * instead of letting them pass vacuously.
+     */
+    internal fun isBridgeRecordable(state: State<*>): Boolean =
+        synchronized(handleLock) { state in bridgeWrappers } ||
+            (state as? MutableState<*>)?.bridge is RecordingBridgeWrapper<*>
 
     @Suppress("UNCHECKED_CAST")
     private fun adaptBridge(attached: Bridge<*>): BridgeView<*> =
