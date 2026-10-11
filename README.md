@@ -262,10 +262,20 @@ for when each lands.
   nested `action`/`atomic` returns an `Error` without running — the observer
   must check that result, or the write is still dropped without a log line.
 
-- **Standalone `state.update { }` outside an action is not atomic.** It is a
-  read-modify-write, so concurrent callers overwrite each other — measured, about
-  50% of 10,000 concurrent increments are lost. *Workaround:* wrap the update in
-  `action { }`, which serializes it under the store's transaction lock.
+- **A standalone `state.update { }` is atomic only with respect to blocking
+  actions and one-shot mutates.** The whole read-modify-write now runs inside
+  the one-shot transaction `mutate` synthesizes, under the store's serializer
+  and transaction lock (it used to read outside that transaction — measured,
+  about 50% of 10,000 concurrent increments were lost), and its result is
+  consumed with `getOrThrow`: a throwing block — or a middleware/commit-phase
+  failure — propagates to the caller instead of rolling back silently
+  (stricter than `mutate`), with the block itself running inside the
+  transaction (a slow block holds the store's lock, like an action body).
+  Updates concurrent with an in-flight `suspendAction` on the same store
+  remain undefined (they stage into its transaction), and bridge-inbound
+  writes bypass the transaction machinery by design. *Workaround:* for a
+  defined outcome against a suspending holder, write through
+  `suspendAction { }`.
 
 - **`store { }` (plain invoke) does not open a transaction — `store action { }`
   does.** Writes inside a bare invoke commit one by one, with observers firing
