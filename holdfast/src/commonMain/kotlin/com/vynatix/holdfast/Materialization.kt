@@ -183,7 +183,18 @@ internal class InitializerGraph(
      * Take [latched]'s latch for this thread (`true`), or register this
      * thread as waiting for it (`false`). The owner check comes first: the
      * latch is reentrant on the JVM, so a thread re-entering its own latch
-     * must be caught before `tryLock` would let it in.
+     * must be caught before `lock` would let it in.
+     *
+     * The latch is taken with [Latched.latch.lock] — under [lock], and only
+     * once `latchOwner` reads [NO_LATCH_OWNER], which (every hold and
+     * release of a latch happens under the graph lock) proves the latch is
+     * free, so `lock` returns without blocking. `tryLock` is deliberately
+     * NOT used: atomicfu's wasmJs `SynchronousMutex` is a counting no-op
+     * whose `tryLock` always succeeds without counting, so a
+     * `tryLock`-claim paired with `release`'s `unlock` would decrement a
+     * zero counter and throw "Mutex already unlocked" on the first
+     * composition — `lock`/`unlock` is the one pair balanced on every
+     * target.
      */
     private fun claim(
         latched: Latched,
@@ -191,18 +202,19 @@ internal class InitializerGraph(
     ): Boolean =
         locked {
             if (latched.latchOwner == me) throw IllegalStateException(sameThreadCycleMessage(latched))
-            if (latched.latch.tryLock()) {
-                latched.latchOwner = me
-                MaterializingStack.push(latched)
-                return@locked true
+            if (latched.latchOwner != NO_LATCH_OWNER) {
+                waitingFor[me] = latched
+                val cycle = cycleThrough(latched, me)
+                if (cycle != null) {
+                    waitingFor.remove(me)
+                    throw IllegalStateException(crossThreadCycleMessage(cycle))
+                }
+                return@locked false
             }
-            waitingFor[me] = latched
-            val cycle = cycleThrough(latched, me)
-            if (cycle != null) {
-                waitingFor.remove(me)
-                throw IllegalStateException(crossThreadCycleMessage(cycle))
-            }
-            false
+            latched.latch.lock()
+            latched.latchOwner = me
+            MaterializingStack.push(latched)
+            true
         }
 
     private fun release(latched: Latched) {
