@@ -10,6 +10,29 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **The CRTP self-type contract is enforced now (issue 006).** A store
+  declared against another type (`class Foo : Store<Bar>()`) compiled but
+  failed only at first dispatch — and inside `action { }` the cast failure
+  was wrapped into a possibly-discarded `TransactionResult.Error`, so a bare
+  write on such a store silently dropped. Now: on **JVM/Android**,
+  construction fails immediately with a teaching `IllegalStateException`
+  naming both types (a `java.lang.reflect` walk of the generic superclass
+  chain, substituting through intermediates such as `EventfulStore`; it
+  fails OPEN when signature data is missing or unresolvable, and the module
+  ships a `consumer-rules.pro` keeping the `Signature` attribute so
+  R8-minified apps keep the check — without it nothing breaks, the check
+  just degrades). On **Kotlin/Native**, with no construction-time
+  reflection, the first-dispatch cast failure is rethrown from `action` as a
+  teaching `ClassCastException` instead of being wrapped — a documented
+  exception to `action`'s no-throw-result contract, for this programming
+  error only, gated on the cast message naming the store's own class as the
+  cast source so a user's own `ClassCastException` from an action body is
+  never relabeled; `invoke { }` propagates the same teaching exception. On
+  **wasmJs** nothing is enforced or claimed (bridge casts may surface as
+  uncatchable WasmGC traps). Correct stores — `EventfulStore` intermediates,
+  user generic bases, subclasses of concrete stores, anonymous fakes,
+  generic `G<T> : Store<G<T>>` — construct and dispatch unchanged.
+||||||| 10f96a7
 - **A standalone `update { }` is now an atomic read-modify-write (issue 004,
   spec D2).** `State.update` used to read the current value before `mutate`
   synthesized its one-shot write-side action, so concurrent standalone updates

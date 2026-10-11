@@ -6,8 +6,10 @@ A *holdfast* is the part of a kelp that anchors it to the seabed against the
 tides. This library does the analogous thing for application state: a
 `Store<Self : Store<Self>>` is a state container whose unit of consistency
 is a **transaction**. Mutations buffer, observers see only committed values,
-failed transactions never leak, and the type system enforces that a state class
-anchors itself to its own type via the recursive `Store<Self>` pattern.
+failed transactions never leak, and the library verifies that a state class
+anchors itself to its own type via the recursive `Store<Self>` pattern — at
+construction on JVM/Android, at first dispatch on iOS; not enforced on wasmJs
+(see *Self-type enforcement* below).
 
 Core depends only on `kotlinx-coroutines-core` (as `api` — `CoroutineScope`
 and `SharedFlow` appear in the public surface) and `kotlinx-atomicfu`; there
@@ -71,6 +73,40 @@ The recursive type `Store<Self : Store<Self>>` exists so that the inside
 of a transaction has access to *your* state class's properties without casting.
 Inside `counter action { count update { … } }`, `count` is your `CounterStore`'s
 property, fully typed.
+
+## Self-type enforcement
+
+`Self` must be the store's own class: `class Foo : Store<Foo>()`. Writing
+`class Foo : Store<Bar>()` compiles but is a programming error — the library
+surfaces it as early as the platform allows:
+
+- **JVM/Android**: construction fails with an `IllegalStateException` naming
+  both the class and the wrong type argument (a `java.lang.reflect` walk of
+  the generic superclass chain, through intermediates like `EventfulStore`;
+  correct intermediates, subclasses of concrete stores, anonymous fakes and
+  generic stores all pass). The check **fails open** — it never throws when
+  the signature data it needs is missing or unresolvable.
+- **iOS (Kotlin/Native)**: no construction-time reflection. The violation
+  surfaces at the **first dispatch**: `action { }` rethrows the receiver-cast
+  failure as a `ClassCastException` with a teaching message (a documented
+  exception to `action`'s no-throw-result contract, for this programming
+  error only), and `invoke { }` propagates the same teaching exception. A
+  `ClassCastException` thrown by your own action body keeps today's handling
+  — wrapped into `TransactionResult.Error` — and is never relabeled.
+- **wasmJs**: not enforced. Bridge casts may surface as WasmGC runtime traps
+  that cannot be intercepted; no construction-time or dispatch-time behavior
+  is claimed (unverified).
+
+**R8/ProGuard (Android):** the construction-time check reads the `Signature`
+class-file attribute, which R8 strips by default in minified release builds.
+The module publishes `consumer-rules.pro` (with `-keepattributes Signature`,
+plus keeps for the two inspected base classes) into its AAR — wired through
+AGP's Kotlin-Multiplatform `optimization { consumerKeepRules { publish = true }
+}` DSL, because the KMP-library plugin does not auto-pick a root
+`consumer-rules.pro` the way the legacy Android-library plugin does — so
+minified apps apply the rules automatically. Without the rules nothing breaks
+— the check simply fails open and a mistyped store degrades to a
+first-dispatch `ClassCastException`.
 
 ## Cross-store transactions
 
