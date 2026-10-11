@@ -9,6 +9,9 @@ package com.vynatix.holdfast
  * top-level commit that includes this state in its pending writes.
  *
  * Returns a [Disposable] that removes the observer when called. Double-dispose is safe.
+ * Every call is its own registration: passing the same handler twice creates two
+ * independent subscriptions (two initial fires, two fires per commit), and
+ * disposing one leaves the other live.
  *
  * A handler that throws on a commit fire never undoes the commit. Its exception goes
  * to [Store.uncaughtObserverHandler], or is logged (naming the store) while none is

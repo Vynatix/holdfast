@@ -10,6 +10,17 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Fixed
 
+- **Issue #32 — observer registration identity.** Passing the same handler to
+  `effect` twice no longer collapses into one observer: every
+  `MutableState.observe` registration now carries its own identity (a fresh
+  holder per call), so registering the same handler — or any observers an
+  equality-based set would compare equal, such as `effect`'s bound
+  `handler::invoke` references to one receiver, or a reused non-capturing
+  lambda — yields two observers, two initial fires, two fires per commit and
+  two independent `Disposable`s, each removing exactly its own registration;
+  double-dispose stays safe and disposing one leaves the other live. The
+  parity check pinned while fixing #26 is flipped accordingly.
+
 - **Issue #21 review (PR #24), round 2 — tree.** A keyed `create` overtaken
   by its declaring store's `dispose()` during its attach no longer leaves
   the store retained by that store's tree value (the value refuses
