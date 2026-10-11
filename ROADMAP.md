@@ -11,7 +11,7 @@ Holdfast's differentiator is real and verified — atomic multi-property commit 
 
 ## Release-train principles (the rules each milestone obeys)
 
-1. **One big break.** All cheap API breaks ship across 0.2.0–0.3.0 (the commit-fanout and `@StoreInternalApi` changes, then rename completion, overload removal, result ergonomics) with `@Deprecated(ReplaceWith)` aliases for exactly one minor; aliases are removed **before** the RC is cut, so the RC and 1.0 are byte-identical.
+1. API-shape breaks ship in 0.2.0; behavior-contract breaks ship in 0.3.0.
 2. **Docs cannot rot.** The snippet-test gate (every README/GUIDE code block compiled — and executed where output is claimed) lands before any doc rewriting, and must pass on a **fresh clone** (which forces the hallmark build-decoupling below).
 3. **The serializer contract is one bug, not five.** The livelock was believed to be a deep K/N or kotlinx-`Mutex` race, so it was deferred behind a two-phase plan. It is not: `AsyncSerializer` is non-reentrant, permanently installed on first coroutine use, acquired unconditionally by a reentrant API, and held across the post-commit drain. That single error produced the `derived` deadlock, the broken savepoints, the swallowed sync recompute, the unserialized blocking `atomic()`, and the `action`-under-`suspendAction` livelock. Four of the five are fixed in 0.2.0 by local changes; only the last still needs the fail-fast guard.
 4. **Hallmark is decoupled — build and publish.** `:holdfast-hallmark*` modules become property-gated in `settings.gradle.kts` (excluded by default; included with `-Pholdfast.includeHallmark`), so a fresh clone builds standalone. They ship only after `vynatix/hallmark` itself reaches Central, possibly relocated to that repo. Core 1.0 never blocks on the sibling.
@@ -81,7 +81,7 @@ Issue #20 (snapshot-driven bootstrap: codecs, schema versions, tags, `reset()`, 
 - Observer-exception default: log loudly instead of silent swallow; document `uncaughtObserverHandler` where users will find it (S) — **Done** (#20 PR 3): with no handler, post-commit failures go to standard error (JVM/Android) or standard output (iOS/wasmJs); documented in the `effect` KDoc and GUIDE §4.4, in the pitfalls table and in the module README
 - Remove the 0.3.0 deprecated aliases (the one-minor promise) (S)
 
-**Success criteria:** every footgun from USABILITY-ANALYSIS Theme 2 has a named regression test; the empirical probes (increment loss, rollback verification, overload resolution) run in CI; zero silent-failure paths for the misuse cases in the error-experience lens.
+**Success criteria:** every footgun 0.3.0 fixes has a named regression test; deferred footguns are tested in the release that fixes them; the empirical probes (increment loss, rollback verification, overload resolution) run in the documented local gate — `./gradlew check` + probes on JVM, Android host, and iOS simulator (B5); zero silent-failure paths for the misuse cases in the error-experience lens.
 
 ### 0.5.0 — "The harness earns its claim" *(2–3 weeks)*
 
