@@ -560,6 +560,11 @@ abstract class Store<Self : Store<Self>> {
      * ([internalTransactionLockFree]), outwaiting a caller that read none.
      */
     interface AsyncSerializer {
+        /**
+         * May throw [IllegalStateException] where the wait cannot end — a
+         * single-threaded platform with the mutex held by a parked suspending
+         * entry (see `:holdfast-coroutines`' `MutexSerializer`, issue #27).
+         */
         fun blockingAcquire()
 
         fun blockingRelease()
