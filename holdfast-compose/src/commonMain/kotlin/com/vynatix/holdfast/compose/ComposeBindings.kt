@@ -185,7 +185,10 @@ fun <S : Store<S>> rememberStore(
  * Events are delivered in emission order, with the store's own lossless
  * policy: `events` is the store's `SharedFlow` (replay = 0, `SUSPEND`
  * overflow — see `EventfulStore` for the buffer knobs and what a slow
- * collector does to a suspending commit). Keep [handler] fast — it runs on
+ * collector does to a suspending commit; a blocking `action`'s drain
+ * `tryEmit`s — a collector more than the buffer behind loses the overflow
+ * silently, so keep the handler fast or tune the store's
+ * `extraBufferCapacity`). Keep [handler] fast — it runs on
  * the composition's context; launch heavier work in your own scope.
  *
  * **No replay, and no first-event guarantee** — the honest contract of
@@ -199,7 +202,10 @@ fun <S : Store<S>> rememberStore(
  *
  * A store already disposed when this Composable composes fails fast here:
  * its events flow can never emit again, so this collector would wait
- * forever. One disposed while subscribed simply stops emitting.
+ * forever. One disposed while subscribed stops emitting — and the next
+ * recomposition fails fast here the same way, so a screen still composing
+ * over a disposed owner's store surfaces loudly instead of waiting
+ * forever.
  *
  * Example:
  * ```

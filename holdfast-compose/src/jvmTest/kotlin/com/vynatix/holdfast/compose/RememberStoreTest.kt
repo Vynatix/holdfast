@@ -83,4 +83,26 @@ class RememberStoreTest {
             ui.dispose()
             assertTrue(second.isDisposed, "the replacement is disposed with the composition too")
         }
+
+    @Test
+    fun aFactoryReturningAnAlreadyDisposedStoreFailsFast() =
+        runTest {
+            val ui = HeadlessComposition(this)
+            try {
+                ui.setContent {
+                    rememberStore {
+                        val gone = OwnedStore()
+                        gone.dispose()
+                        gone
+                    }
+                }
+                error("expected the disposed factory result to fail fast")
+            } catch (e: IllegalStateException) {
+                assertTrue(
+                    "already-disposed" in (e.message ?: ""),
+                    "teaching message, got: ${e.message}",
+                )
+            }
+            ui.dispose()
+        }
 }
