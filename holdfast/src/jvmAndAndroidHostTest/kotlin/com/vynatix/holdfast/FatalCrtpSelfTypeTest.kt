@@ -40,7 +40,9 @@ private class FatalCrtpProbeLoader(
         name: String,
         resolve: Boolean,
     ): Class<*> =
-        synchronized(getClassLoadingLock(name)) {
+        // `this`, not `getClassLoadingLock(name)`: Android's ClassLoader has no
+        // such method, and for a loader that is not parallel-capable it is `this`.
+        synchronized(this) {
             when (name) {
                 ANCHOR -> {
                     refuse?.let { throw it }
