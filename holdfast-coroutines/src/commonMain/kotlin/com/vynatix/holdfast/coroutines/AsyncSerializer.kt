@@ -401,7 +401,7 @@ private suspend fun fanOutThenPublish(
                 // the bridge publish too.
                 committed.forEach { (state, value) ->
                     val ms = state as MutableState<Any>
-                    runCatching { ms.fanOutToObservers(value) }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
+                    runCatching { ms.fanOutToObservers(value) }.onFailure(fatal::holdOrThrow)
                     publishQueue += ms to value
                 }
             },
@@ -409,7 +409,7 @@ private suspend fun fanOutThenPublish(
                 eventsQueue.addAll(snapshot)
             },
         )
-    }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
+    }.onFailure(fatal::holdOrThrow)
     // Step 3a: bridge publish phase. SuspendingBridge gets awaited;
     // every other Bridge falls back to fire-and-forget Bridge.publish.
     for ((ms, value) in publishQueue) {
@@ -437,4 +437,9 @@ private suspend fun fanOutThenPublish(
     // A held fatal error outranks whatever the drain threw, carried as suppressed.
     fatal.rethrowHeld(alongside = drained.exceptionOrNull())
     drained.getOrThrow()
+}
+
+/** Hold [error] when it is fatal (issue #61), else throw it at once. */
+private fun FatalHold.holdOrThrow(error: Throwable) {
+    if (!holdIfFatal(error)) throw error
 }
