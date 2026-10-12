@@ -507,6 +507,16 @@ abstract class Store<Self : Store<Self>> {
      * iOS and wasmJs. Set a handler to route them into your own logging or
      * crash reporting, or into a test's failure list; `{ }` silences them.
      *
+     * A fatal error (issue #61: a `VirtualMachineError` such as
+     * `StackOverflowError` or `OutOfMemoryError` on JVM/Android, a
+     * `kotlin.OutOfMemoryError` on iOS/wasmJs) never reaches this handler,
+     * and one the handler throws is never ignored and never ends a fanout
+     * early: it propagates out of the entry that ran the failing code once
+     * that entry's remaining steps have run (the rest of the fanout, the
+     * drain's batch, the settle, `dispose()`'s teardown). "A handler that
+     * throws … is ignored" and "ends that commit's fanout early" below mean a
+     * non-fatal throw.
+     *
      * For an observer callback, a fanout `Transformer.get` or a bridge publish,
      * the handler runs on the committing thread, inside the commit fanout. The
      * store is still held then: under its transaction lock for a blocking
@@ -564,7 +574,10 @@ abstract class Store<Self : Store<Self>> {
      * `:holdfast-coroutines`' suspending bridge publishes. A throwing handler
      * propagates, exactly as when fanout invoked it directly. Works on a
      * disposed store. (A failed dispose notification goes to the same handler
-     * through [reportUncaughtFailure], with a log line of its own.)
+     * through [reportUncaughtFailure], with a log line of its own.) A fatal
+     * [error] is thrown again, never reported (issue #61): a caller in a
+     * sequence that must finish holds it in a [FatalHold] instead of calling
+     * this.
      */
     @StoreInternalApi
     fun internalReportUncaughtFailure(error: Throwable) {

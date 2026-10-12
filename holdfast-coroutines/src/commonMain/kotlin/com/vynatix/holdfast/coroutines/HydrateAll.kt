@@ -32,9 +32,13 @@ import kotlinx.coroutines.CoroutineScope
  * and does not stop the rest — nothing here throws for a store's failure (a
  * fatal error aside: below) or its dispose. Idempotent: a hydrated store's
  * hydrator does nothing. Cancellation propagates at once, and so does a
- * fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`),
- * never reported as a store's outcome, while the refreshes already launched
- * keep running on their scopes. Lists the subtree once, as
+ * fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
+ * that `hydratorOrNull()`, a seed or the await throws — never reported as a
+ * store's outcome — while the refreshes already launched keep running on
+ * their scopes. A refresh's own fatal error is thrown on the refresh's
+ * scope, as [Hydrator] documents, after the hydration settled as
+ * [Hydration.Failed] with it: awaited, that store reports
+ * `Ran(Failed(fatal))`. Lists the subtree once, as
  * [StoreTree.stores] does, so declared children not read yet are
  * materialized first — after the inside-an-entry refusal, never before it.
  * A store whose `hydratorOrNull()` throws is reported

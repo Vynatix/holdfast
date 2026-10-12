@@ -102,6 +102,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A fatal error propagates out of `storeTest` (issue #61).** A
+  `StackOverflowError`/`OutOfMemoryError` thrown inside `storeTest { }`, or
+  during its teardown (a recorder's removal, a tracked tree's reset, a clock
+  restore, an open transaction's rollback), is no longer folded into the
+  teardown's `AssertionError` or recorded as a failure. Every other teardown
+  section still runs, then `storeTest` throws it. When thrown from the test
+  job's completion handler, it reaches the test as kotlinx's
+  `CompletionHandlerException`.
+
 - **`track()` is thread-safe.** The handle registry's `getOrCreate` is
   atomic: `parallel { }` workers tracking one store, or the tree fixture
   tracking a keyed store from the thread that created it, get exactly one

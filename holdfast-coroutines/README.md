@@ -68,7 +68,9 @@ the next store's turn; then each is `awaitSettled` in the same order, the
 refreshes running concurrently. The `HydrateAllReport` holds one entry per
 store — the `Hydration` it settled to, `NoHydrator`, or `Disposed` — with
 `failed`, `skipped` and `isHealthy`; a store's failure (a throwing `base { }`, a
-rejecting middleware, a failed refresh) is reported, never thrown. Inside an
+rejecting middleware, a failed refresh) is reported, never thrown (a fatal
+error aside — `StackOverflowError`, `OutOfMemoryError` — which propagates;
+see GUIDE §18.5). Inside an
 action, frame or suspending body of any store it fails before touching a store;
 a cancellation propagates while the refreshes already launched keep running.
 

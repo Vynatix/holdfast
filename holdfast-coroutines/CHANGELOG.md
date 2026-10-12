@@ -31,6 +31,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (issue #31, unchanged). `suspendAction`/`suspendAtomic` KDoc now state the
   amended wait contract.
 
+### Changed
+
+- **Fatal errors propagate (issue #61, with `:holdfast`).** A
+  `StackOverflowError`/`OutOfMemoryError` (a `kotlin.OutOfMemoryError` on
+  iOS and wasmJs) is no longer reported, converted or dropped:
+  - `suspendAction` and `suspendAtomic` throw it instead of returning
+    `TransactionResult.Error`, once every started middleware got its error
+    hook and the transaction (every frame participant) rolled back. A fatal
+    error from a completed hook fails the transaction; nothing commits.
+  - A suspending commit's fanout lets the commit's other observers, bridge
+    publishes and events run first, as the blocking one does.
+  - A fatal error from `onFrameStarted` rolls a `suspendAtomic` frame back
+    with no middleware hook at all, as `atomic` does.
+  - `hydrate()`, `awaitSettled()` and `hydrateAll` propagate one that a seed
+    or the wait throws. A refresh's own settles the hydration `Failed` and
+    ends the refresh coroutine, so it reaches the scope's
+    `CoroutineExceptionHandler`. The overlay writer and its reports behave
+    the same way.
+  - A `SuspendingKvBridge` never puts one on `errors`. A fire-and-forget
+    save's ends that drainer, so it reaches the scope's handler, and a new
+    drainer takes over. An awaited one propagates out of `publishAwaited`.
+
+  GUIDE §18.5.
+
 ### Fixed
 
 - **The outer body's other coroutines no longer read a nested suspending

@@ -279,7 +279,9 @@ private fun <V : Store<V>> V.encodeOverlay(
 /**
  * Report [failure] through this store's `uncaughtObserverHandler`; a handler
  * that throws is ignored — except a fatal error (issue #61), the handler's or
- * the default log's, which propagates.
+ * the default log's, which propagates. From the writer job's completion
+ * handler (a stopped writer) it reaches the writer's scope as kotlinx's
+ * `CompletionHandlerException`, with the fatal error as its cause.
  */
 internal fun Store<*>.reportOverlay(failure: OverlayException) {
     runCatching { internalReportUncaughtFailure(failure) }.internalRethrowFatal()

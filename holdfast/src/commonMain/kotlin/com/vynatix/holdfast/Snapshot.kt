@@ -372,7 +372,9 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  * materialized yet is materialized then — its initializer sees committed
  * values only, never this restore's writes or those of an enclosing action —
  * and a decoded snapshot's texts are decoded by the states' codecs. A failure
- * there is reported by the action, so it rolls back like one inside it.
+ * there is reported by the action, so it rolls back like one inside it —
+ * except a fatal error (issue #61), which propagates from the plan before
+ * the action opens.
  * Middleware, observers and bridges run in the action, as for any action. (A
  * target that a concurrent `removeState`/`clearStates` drops after that is
  * materialized again inside the action, under its locks; an internal state
@@ -386,14 +388,15 @@ fun <V : Store<V>> V.snapshot(scope: SnapshotScope): StoreSnapshot = captureSnap
  * snapshot does not hold keeps its value — a restore never evicts.
  *
  * Returns [TransactionResult.Error] (nothing changed) if a target's
- * initializer fails, or if an entry this store declares cannot be restored:
- * a value whose class the state cannot hold (see the experimental overload's
- * type witness), or a decoded entry its state has no codec for or cannot
- * decode — a [RestoreRejectedException] naming each such state. Use the
- * experimental overload to choose another [RestorePolicy] and get a
- * [RestoreReport] of what was ignored. A snapshot of another schema version
- * than this store's is migrated first, or refused with a
- * [SnapshotMigrationException] (see the experimental [SchemaVersioned]).
+ * initializer fails (with an ordinary exception: a fatal error propagates),
+ * or if an entry this store declares cannot be restored: a value whose class
+ * the state cannot hold (see the experimental overload's type witness), or a
+ * decoded entry its state has no codec for or cannot decode — a
+ * [RestoreRejectedException] naming each such state. Use the experimental
+ * overload to choose another [RestorePolicy] and get a [RestoreReport] of
+ * what was ignored. A snapshot of another schema version than this store's is
+ * migrated first, or refused with a [SnapshotMigrationException] (see the
+ * experimental [SchemaVersioned]).
  *
  * Bridges that were attached when restore is called receive, via their
  * `publish` (commit-time bridge fanout), the restored value of every state

@@ -47,7 +47,9 @@ fun <T> Result<T>.internalRethrowFatal(): Result<T> {
  * the sequence calls [holdIfFatal] first and skips its normal handling when it
  * answers `true`; the sequence calls [rethrowHeld] after its last step (inside
  * a `finally` it replaces the throwable in flight). A later fatal error is
- * added to the first as suppressed. One per sequence, used on one thread.
+ * added to the first as suppressed. One per sequence. It is not synchronized:
+ * use it from one thread or coroutine at a time (a coroutine may resume on
+ * another thread between uses).
  */
 @StoreInternalApi
 class FatalHold {

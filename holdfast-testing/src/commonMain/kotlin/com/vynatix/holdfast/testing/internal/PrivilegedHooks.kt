@@ -196,7 +196,9 @@ internal object PrivilegedHooks {
      * robust. It must never throw, except a fatal error (issue #61), which
      * teardown holds until its last step: it also runs as the test job's
      * completion handler (see `StoreTestScope`), possibly a second time for
-     * the same handle, where the identity check makes it a no-op.
+     * the same handle, where the identity check makes it a no-op. A fatal
+     * error it throws there reaches the test as kotlinx's
+     * `CompletionHandlerException`, with the fatal error as its cause.
      */
     @OptIn(ExperimentalStoreApi::class)
     fun restoreBoundClock(
