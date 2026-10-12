@@ -43,15 +43,24 @@ open class Middleware<T : Store<T>> {
             next()
             onTransactionCompleted(context)
         } catch (e: Throwable) {
-            // A fatal error (issue #61) outranks whatever this hook throws: it
-            // still propagates, carrying the hook's failure as suppressed.
-            runCatching { onTransactionError(context, e) }
-                .onFailure { hookFailure ->
-                    if (!e.isFatal()) throw hookFailure
-                    if (hookFailure !== e) e.addSuppressed(hookFailure)
-                }
+            deliverError(context, e)
             throw e
         }
+    }
+
+    // Out of [execute], whose frame every middleware of a chain stacks: on
+    // Kotlin/Native debug builds the inlined handling below would grow it.
+    private fun deliverError(
+        context: MiddlewareContext<T>,
+        error: Throwable,
+    ) {
+        // A fatal error (issue #61) outranks whatever this hook throws: it
+        // still propagates, carrying the hook's failure as suppressed.
+        runCatching { onTransactionError(context, error) }
+            .onFailure { hookFailure ->
+                if (!error.isFatal()) throw hookFailure
+                if (hookFailure !== error) error.addSuppressed(hookFailure)
+            }
     }
 
     operator fun invoke(
