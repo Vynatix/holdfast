@@ -25,7 +25,12 @@ kotlin {
 
 dependencies {
     implementation(project(":holdfast"))
+    implementation(project(":holdfast-debug"))
     implementation(libs.clikt)
+    // Trace JSONL parsing (the trace format's reader; :holdfast-debug's writer is its twin).
+    implementation(libs.kotlinx.serialization.json)
+    // `holdfast run repro.kts` — the Kotlin script engine.
+    implementation(libs.kotlin.scripting.jsr223)
     testImplementation(kotlin("test"))
 }
 
