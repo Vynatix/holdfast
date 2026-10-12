@@ -373,7 +373,7 @@ fun Transaction.fanOutApplied(
             holdingFatalErrors {
                 // First, as it runs no user code: a derived state following this
                 // store as a whole queues its recompute (StoreEdges.kt).
-                writes.tellStoreEdges()
+                runHoldingFatal { writes.tellStoreEdges() }
                 var shutdownFailures = emptyList<Pair<MutableState<*>, Throwable>>()
                 if (writes.evicted.isNotEmpty()) runHoldingFatal { shutdownFailures = shutDownEvicted(writes.evicted) }
                 val (sealed, others) = writes.committed.sealedFirst()

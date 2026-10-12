@@ -3,12 +3,12 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
-import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.FrameMarkers
 import com.vynatix.holdfast.SettleScopes
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
+import com.vynatix.holdfast.forEachIsolated
 import com.vynatix.holdfast.internalAttachment
 import com.vynatix.holdfast.platform.rethrowFatal
 import com.vynatix.holdfast.setOuterMiddlewareUnchecked
@@ -122,9 +122,7 @@ internal fun removeTreeMiddleware(
     if (removed) {
         val members =
             runCatching { liveLeavesUnder(attachment.node, attachment.node) }.rethrowFatal().getOrDefault(emptyList())
-        val fatal = FatalHold()
-        for ((leaf, _) in members) runCatching { syncTreeRing(leaf) }.onFailure { fatal.holdIfFatal(it) }
-        fatal.rethrowHeld()
+        members.forEachIsolated { (leaf, _) -> syncTreeRing(leaf) }
     }
     return removed
 }

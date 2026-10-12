@@ -172,20 +172,11 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                 id = body::class.simpleName ?: Uuid.random().toString(),
                 ownerThreadId = currentThreadId(),
             )
-        // We own the serializer; no other action can run on this store until we
-        // release. Set the active transaction and the suspending-owner key so
-        // mutate() inside the body recognizes us as the owner.
-        internalSetActiveTransaction(txn)
-        suspendingOwner = owner
-        // Observable progress (issue 003): any blocking waiter's budget clock
-        // restarts here, on each staged write (Store.mutate bumps the epoch
-        // while suspendingOwner is set) and again when the commit starts.
-        suspendingProgressEpoch++
-        serializer.suspendingHolderLabel = "suspendAction"
-
         // Snapshot the middleware chain once at the start of the action — same
         // semantics as the blocking path. Concurrent middleware registration
-        // during this action does not retroactively apply.
+        // during this action does not retroactively apply. Taken before the
+        // transaction is installed (issue #61): nothing between the install and
+        // the try below may throw and strand it.
         val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
         // One MiddlewareContext per middleware, reused across that middleware's
         // started/completed/error hooks so metadata stashed in one hook is
@@ -197,6 +188,16 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                     transaction = txn,
                 )
             }
+        // We own the serializer; no other action can run on this store until we
+        // release. Set the active transaction and the suspending-owner key so
+        // mutate() inside the body recognizes us as the owner.
+        internalSetActiveTransaction(txn)
+        suspendingOwner = owner
+        // Observable progress (issue 003): any blocking waiter's budget clock
+        // restarts here, on each staged write (Store.mutate bumps the epoch
+        // while suspendingOwner is set) and again when the commit starts.
+        suspendingProgressEpoch++
+        serializer.suspendingHolderLabel = "suspendAction"
 
         val outcome: TransactionResult<R> =
             try {
@@ -329,13 +330,14 @@ private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
             parent = parentTxn,
             frameId = parentTxn.frameId,
         )
-    internalSetActiveTransaction(txn)
-
+    // Before the install (issue #61): nothing between it and the try below may
+    // throw and strand the savepoint over the frame root.
     val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
     val contexts: List<Middleware.MiddlewareContext<V>> =
         middlewareChain.map {
             Middleware.MiddlewareContext(store = selfForExternal, transaction = txn)
         }
+    internalSetActiveTransaction(txn)
 
     val outcome: TransactionResult<R> =
         try {

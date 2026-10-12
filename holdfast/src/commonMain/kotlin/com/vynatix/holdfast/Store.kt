@@ -760,7 +760,7 @@ abstract class Store<Self : Store<Self>> {
      * then rejects the action — and the body runs exactly like a top-level
      * [action] (middleware chain, commit, fanout; failures fold into the
      * [TopLevelAttempt.Ran] result, except a fatal error, issue #61, which
-     * propagates, leaving the queue to the store's next holder), the locks
+     * propagates once the queue has drained, as below), the locks
      * release in `action`'s order, and the post-commit queue drains. No frame policing: callers are library
      * machinery that runs after commits, not user bodies. Like [action] it is
      * an entry: it joins the settle scope open on this thread (a recompute a
@@ -807,7 +807,7 @@ abstract class Store<Self : Store<Self>> {
                 when {
                     isDisposed -> TopLevelAttempt.Disposed
                     active != null -> TopLevelAttempt.Busy(active)
-                    else -> tryTopLevelUnderSerializer(id, onAcquired, body)
+                    else -> drainingOnFatal(::drainPostCommitTasks) { tryTopLevelUnderSerializer(id, onAcquired, body) }
                 }
             if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
             attempt
@@ -1052,19 +1052,17 @@ abstract class Store<Self : Store<Self>> {
         // Re-acquiring there is never correct and is actively fatal: the
         // serializer is not reentrant, so the inner acquire would wait forever
         // for the outer acquire this very call stack holds.
-        val nested = ownsActiveTransaction()
+        if (ownsActiveTransaction()) return runBlockingActionUnderLock(body)
         // Top level: the serializer, if installed, then the lock, re-reading
         // the serializer under the lock (SerializerInstallWindow.kt).
-        val result =
-            if (nested) runBlockingActionUnderLock(body) else holdSerialized { runTransaction(actionId(body), body) }
         // Deferred work (derived recomputes) opens FRESH top-level actions, so it
         // must run only after this call's serializer bracket is released —
         // inside it, the recompute would find the store busy and hand itself
-        // back to this very call. Draining after the release is also what makes
-        // this call a valid hand-off target (see tryTopLevelAction). Same
-        // placement, and same reason, as suspendAtomic's drain.
-        if (!nested) drainPostCommitTasks()
-        return result
+        // back to this very call. Draining after the release — even when a
+        // fatal error propagates (issue #61) — is also what makes this call a
+        // valid hand-off target (see tryTopLevelAction). Same placement, and
+        // same reason, as suspendAtomic's drain.
+        return thenDraining(::drainPostCommitTasks) { holdSerialized { runTransaction(actionId(body), body) } }
     }
 
     /**

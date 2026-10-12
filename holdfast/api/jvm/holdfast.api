@@ -91,6 +91,20 @@ public final class com/vynatix/holdfast/FanoutMarkers {
 	public final fun install (Ljava/util/Set;)Ljava/util/Set;
 }
 
+public final class com/vynatix/holdfast/FatalErrorsKt {
+	public static final fun internalIsFatal (Ljava/lang/Throwable;)Z
+	public static final fun internalRethrowFatal (Ljava/lang/Object;)Ljava/lang/Object;
+	public static final fun internalRethrowIfFatal (Ljava/lang/Throwable;)V
+}
+
+public final class com/vynatix/holdfast/FatalHold {
+	public fun <init> ()V
+	public final fun holdIfFatal (Ljava/lang/Throwable;)Z
+	public final fun isHolding ()Z
+	public final fun rethrowHeld (Ljava/lang/Throwable;)V
+	public static synthetic fun rethrowHeld$default (Lcom/vynatix/holdfast/FatalHold;Ljava/lang/Throwable;ILjava/lang/Object;)V
+}
+
 public final class com/vynatix/holdfast/FrameApply {
 	public final fun getApplied ()Ljava/util/List;
 	public final fun getFailure ()Ljava/lang/Throwable;

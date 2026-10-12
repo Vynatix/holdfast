@@ -373,7 +373,7 @@ class FatalActionTest {
      * Store.kt:812: the drain a fatal error skips is the store's next holder's: what the
      * action queued is not lost.
      */
-    @Test fun aPostCommitTaskQueuedBeforeABodyStackOverflowStillRunsByTheNextHolder() {
+    @Test fun aPostCommitTaskQueuedBeforeABodyStackOverflowRunsBeforeTheErrorLeaves() {
         val store = FatalActionStore()
         val fatal = StackOverflowError()
         var ran = 0
@@ -383,10 +383,11 @@ class FatalActionTest {
                 throw fatal
             }
         }
+        assertEquals(1, ran, "the holder drained its queue after releasing, before the error left (issue #61)")
 
         assertIs<TransactionResult.Success<*>>(store action { a mutate 1 })
 
-        assertEquals(1, ran, "the queued task ran exactly once, by the store's next holder at the latest")
+        assertEquals(1, ran, "the queued task ran exactly once")
     }
 
     /** Reset.kt:116 and NoWriteRegion.kt:130: an initializer's fatal error leaves before the reset opens. */

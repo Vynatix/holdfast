@@ -371,24 +371,32 @@ object SettleScopes {
  * Run [block] as an entry: inside the settle scope open on this thread, or,
  * when none is, inside a new one that settles once [block] has returned or
  * thrown — so the caller must have released everything [block] took by then.
- * A fatal error the settle throws (issue #61) replaces what [block] returned
- * or threw; the scope has settled and closed by then.
+ * A fatal error (issue #61) [block] threw outranks one the settle throws,
+ * which it then carries as suppressed; otherwise a fatal error the settle
+ * throws replaces what [block] returned or threw (carrying a throwable as
+ * suppressed). The scope has settled and closed by then.
  */
 internal inline fun <R> settling(block: () -> R): R {
     if (SettleScopes.current() != null) return block()
     val scope = SettleScope(within = null)
-    val prior = SettleScopes.install(scope)
+    val fatal = FatalHold()
+    var unwinding: Throwable? = null
+    var prior: SettleScope? = null
     try {
-        return block()
+        // Installed inside the try (issue #61, as NoWriteRegion.enter): a
+        // fatal error striking the slot write still settles the scope.
+        prior = SettleScopes.install(scope)
+        return runCatching(block).onFailure { if (!fatal.holdIfFatal(it)) unwinding = it }.getOrThrow()
     } finally {
         try {
-            scope.settle()
+            fatal.runHoldingFatal { scope.settle() }
         } finally {
             // A settled scope reads as none, so with nothing to restore it is
             // left in the slot: the next entry replaces it instead of
             // re-inserting a removed slot, which every outermost action pays.
             if (prior != null) SettleScopes.install(prior)
         }
+        fatal.rethrowHeld(alongside = unwinding)
     }
 }
 

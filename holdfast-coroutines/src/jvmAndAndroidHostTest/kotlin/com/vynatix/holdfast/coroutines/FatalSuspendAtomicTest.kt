@@ -188,7 +188,7 @@ class FatalSuspendAtomicTest {
             assertEquals(listOf("started", "rolledBack"), first.events.toList())
             assertSame(fatal, second.rolledBackCauses.single().unrecovered())
             assertFalse(ran, "the body never ran")
-            assertFalse(log.any { it.endsWith(":started") }, "no middleware started: $log")
+            assertEquals(emptyList(), log.toList(), "no middleware hook at all, as in atomic")
             assertEquals(0, a.x.value)
             assertTrue(reportedA.isEmpty() && reportedB.isEmpty(), "never reported: $reportedA $reportedB")
             assertFramesRunAgain(a, b)

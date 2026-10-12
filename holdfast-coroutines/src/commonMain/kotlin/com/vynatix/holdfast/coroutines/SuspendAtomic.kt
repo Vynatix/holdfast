@@ -482,14 +482,18 @@ private suspend fun <R> executeBody(
             .onFailure { startedFatal.holdIfFatal(it) }
     }
 
+    // Until the middleware `started` phase begins, the unwind fires no
+    // `onTransactionError`: no middleware has seen the frame start (as atomic).
+    var hooksStarted = false
     val value: R =
         try {
             // A fatal error an onFrameStarted callback threw (issue #61), once
-            // every observer has been told: the frame fails before any
-            // middleware or the body runs, and the unwind below rolls it back.
+            // every observer has been told: the frame rolls back before any
+            // middleware or the body runs, with no middleware hook at all.
             startedFatal.rethrowHeld()
             // Per-store middleware `started`, in lock order — BEFORE the marker
             // installs, so middleware is never policed by enrollment enforcement.
+            hooksStarted = true
             roots.forEach { it.session.fireStarted() }
             // The marker context installs the thread-local marker on every
             // resume and restores the previous value on suspend, so enrollment
@@ -498,11 +502,11 @@ private suspend fun <R> executeBody(
             // starts undispatched: the frame holds every participant by now.
             withFrameMarker(marker, frame) { body() }
         } catch (ce: CancellationException) {
-            rollbackAll(roots, ce, observers, marker)
+            rollbackAll(roots, ce, observers, marker, errorHooks = hooksStarted)
             throw ce
         } catch (e: Throwable) {
             // Throws a fatal error (issue #61) once the frame has rolled back.
-            rollbackAll(roots, e, observers, marker)
+            rollbackAll(roots, e, observers, marker, errorHooks = hooksStarted)
             rethrowFrameContractViolation(e)
             return TransactionResult.Error(e, resultTxn)
         }
@@ -625,7 +629,8 @@ private fun rethrowFrameContractViolation(e: Throwable) {
  * applied keeps its values and gets no error hook — per-store middleware
  * `onTransactionError` first, then rollback, then every observer's
  * `onFrameRolledBack` — each step isolated so one store's failure can't
- * strand another's pending writes. A fatal error (issue #61) — [cause]
+ * strand another's pending writes. Without [errorHooks] (no `started` hook
+ * ran yet) no middleware hook fires. A fatal error (issue #61) — [cause]
  * itself, or the first one a step throws — is not isolated: it is thrown
  * once every step has run, carrying [cause] as suppressed when it is not
  * [cause].
@@ -636,6 +641,7 @@ private suspend fun rollbackAll(
     observers: List<com.vynatix.holdfast.FrameObserver>,
     marker: FrameMarker,
     activeOnly: Boolean = false,
+    errorHooks: Boolean = true,
 ) {
     val fatal = FatalHold()
     fatal.holdIfFatal(cause)
@@ -643,7 +649,7 @@ private suspend fun rollbackAll(
         for (i in roots.indices.reversed()) {
             val entry = roots[i]
             if (activeOnly && entry.txn.status != TransactionStatus.Active) continue
-            runCatching { entry.session.fireError(cause) }.onFailure { fatal.holdIfFatal(it) }
+            if (errorHooks) runCatching { entry.session.fireError(cause) }.onFailure { fatal.holdIfFatal(it) }
             runCatching { entry.txn.rollback() }.onFailure { fatal.holdIfFatal(it) }
         }
     }

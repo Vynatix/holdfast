@@ -235,7 +235,7 @@ internal class OverlayBinding<V : Store<V>>(
                     standing.value = Standing(if (poisoned) OverlayStatus.Loaded else standing.value.status)
                     loadedNow = poisoned
                 }
-            }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
+            }.onFailure(fatal::holdOrThrow)
             if (loadedNow) writer.signalIfBehind()
             fatal.rethrowHeld()
         }

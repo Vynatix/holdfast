@@ -5,6 +5,7 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.disposeEach
 import com.vynatix.holdfast.internalAttachment
 import com.vynatix.holdfast.lastStoreLockOrderKey
 

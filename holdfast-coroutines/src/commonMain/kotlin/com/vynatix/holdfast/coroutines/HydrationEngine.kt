@@ -159,8 +159,8 @@ internal class HydrationEngine<V : Store<V>, F>(
         val decided = decision ?: return
         // Once the gate has released the store: the handler — and the writer,
         // which a dispatcher may run inline here — may open an action on it.
-        decided.overlay.failure?.let { failure -> fatal.holdFatal { store.reportOverlay(failure) } }
-        if (decided.overlay.loaded) fatal.holdFatal { overlay?.writer?.signalIfBehind() }
+        decided.overlay.failure?.let { failure -> fatal.holdingFatal { store.reportOverlay(failure) } }
+        if (decided.overlay.loaded) fatal.holdingFatal { overlay?.writer?.signalIfBehind() }
         runCatching { HydrationRefreshRun(this, decided.refresh).start(scope) }
             .onFailure { fatal.rethrowHeld(alongside = it) }
             .getOrThrow()
@@ -393,11 +393,6 @@ private inline fun FatalHold.decisionDespiteFatal(decide: (reach: (Decision?) ->
         if (committed == null || !holdIfFatal(thrown)) throw thrown
         committed
     }
-}
-
-/** Run [step], holding a fatal error it throws (issue #61) in this hold; anything else it throws propagates. */
-private inline fun FatalHold.holdFatal(step: () -> Unit) {
-    runCatching(step).onFailure { if (!holdIfFatal(it)) throw it }
 }
 
 /** This result, its failure kept only when fatal (issue #61), for the caller to handle; any other is thrown again. */

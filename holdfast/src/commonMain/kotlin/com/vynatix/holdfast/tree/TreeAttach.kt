@@ -8,6 +8,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
 import com.vynatix.holdfast.platform.threadYield
+import com.vynatix.holdfast.runHoldingFatal
 
 // The attach of one or more stores under a parent node — a `store { }`
 // child, a `group { }`'s members, a keyed store — once their
@@ -220,7 +221,7 @@ internal class ChildAttach(
         for (leaf in attached) {
             runCatching {
                 for ((member, _) in listingOf(leaf, leaf, includeDisposing = true).shape.leaves()) {
-                    fatal.holdingFatal { syncTreeRing(member) }
+                    fatal.runHoldingFatal { syncTreeRing(member) }
                 }
             }.onFailure(::report)
         }

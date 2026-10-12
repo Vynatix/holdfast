@@ -14,10 +14,26 @@ internal inline fun FatalHold.runIsolated(crossinline step: () -> Unit) {
     runCatching { step() }.onFailure { holdIfFatal(it) }
 }
 
-/** Run one [step] of a sequence: a fatal error it throws is held here, any other failure propagates at once. */
-internal inline fun FatalHold.runHoldingFatal(crossinline step: () -> Unit) {
-    runCatching { step() }.onFailure { if (!holdIfFatal(it)) throw it }
-}
+/**
+ * Run one [step] of a sequence: a fatal error it throws is held here and
+ * `null` answered. Any other failure propagates at once — unless a fatal error
+ * is held already, which is then thrown in its place, carrying it as
+ * suppressed.
+ */
+internal inline fun <T> FatalHold.runHoldingFatal(step: () -> T): T? =
+    runCatching(step).getOrElse { failure ->
+        if (!holdIfFatal(failure)) {
+            rethrowHeld(alongside = failure)
+            throw failure
+        }
+        null
+    }
+
+/** [step]'s answer, or [fallback] when it throws: dropped, except a fatal error, which is held here. */
+internal inline fun <T> FatalHold.runIsolated(
+    fallback: T,
+    step: () -> T,
+): T = runCatching(step).onFailure { holdIfFatal(it) }.getOrDefault(fallback)
 
 /**
  * Call [action] on each element, each call [isolated][runIsolated]: a failure
@@ -28,6 +44,15 @@ internal inline fun <T> Iterable<T>.forEachIsolated(crossinline action: (T) -> U
     val fatal = FatalHold()
     for (element in this) fatal.runIsolated { action(element) }
     fatal.rethrowHeld()
+}
+
+/**
+ * Dispose each of [stores], in order, every one of them even after a
+ * `dispose()` threw a fatal error — which is thrown once every store's ran
+ * (issue #61; `dispose()` throws nothing else).
+ */
+internal fun disposeEach(stores: Iterable<Store<*>>) {
+    holdingFatalErrors { for (store in stores) runHoldingFatal { store.dispose() } }
 }
 
 /**
@@ -59,6 +84,23 @@ internal inline fun cleanUpUnwinding(
     fatal.runIsolated(cleanup)
     fatal.rethrowHeld(alongside = unwinding)
 }
+
+/**
+ * [block], and then — when it threw a fatal error (issue #61) — [drain]
+ * still, before that error is thrown on: a top-level holder drains after
+ * releasing, so the tasks other threads handed it run. Any other throwable
+ * propagates undrained, as before.
+ */
+internal inline fun <R> drainingOnFatal(
+    crossinline drain: () -> Unit,
+    block: () -> R,
+): R = runCatching(block).onFailure { if (it.isFatal()) cleanUpUnwinding(it, drain) }.getOrThrow()
+
+/** [block], then [drain] — whether [block] returned or threw a fatal error ([drainingOnFatal]). */
+internal inline fun <R> thenDraining(
+    crossinline drain: () -> Unit,
+    block: () -> R,
+): R = drainingOnFatal(drain, block).also { drain() }
 
 /**
  * The fatal error among [cause] and [secondary], for a site that RETURNS what

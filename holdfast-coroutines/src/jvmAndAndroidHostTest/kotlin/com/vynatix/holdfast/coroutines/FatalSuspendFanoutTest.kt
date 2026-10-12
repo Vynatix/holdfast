@@ -416,6 +416,57 @@ class FatalSuspendFanoutTest {
             }
         }
 
+    @Test fun aFireAndForgetKvBridgeKeepsSavingAfterAStackOverflow() =
+        runBlocking<Unit> {
+            FatalCatchingScope().use { handled ->
+                val kv = InMemorySuspendingKvStore()
+                val fatal = StackOverflowError()
+                val codec = FatalFailingIntCodec()
+                val bridgeS = kv.bridge("s", codec, handled.scope)
+                val store = FatalKvBridgedStore()
+                store { s bridge bridgeS }
+                codec.encodeFails = fatal
+                store action { s mutate 1 }
+                assertSame(fatal, handled.first())
+                codec.encodeFails = null
+
+                store action { s mutate 2 }
+
+                withTimeout(10.seconds) { while (kv.get("s") == null) yield() }
+                assertEquals(IntCodec.encode(2), kv.get("s"), "a new drainer took over from the one the error ended")
+            }
+        }
+
+    @Test fun aRethrowingHandlerCannotDropAHeldBridgeStackOverflow() =
+        runBlocking<Unit> {
+            val store = FatalFanStore()
+            store.uncaughtObserverHandler = { throw it }
+            val fatal = StackOverflowError()
+            val boom = IllegalStateException("publish")
+            var armed = true
+            store {
+                x bridge FatalFanBridge { if (armed) throw fatal }
+                y bridge FatalFanBridge { if (armed) throw boom }
+            }
+
+            val thrown =
+                assertPropagates<StackOverflowError> {
+                    store.suspendAction {
+                        x mutate 1
+                        y mutate 2
+                    }
+                }
+            armed = false
+
+            assertSame(fatal, thrown, "never the handler's rethrow, never a TransactionResult.Error")
+            assertTrue(thrown.suppressedExceptions.any { it === boom }, "${thrown.suppressedExceptions}")
+            assertEquals(1, store.x.value)
+            assertEquals(2, store.y.value)
+            assertNothingInstalledOn(store)
+            store.uncaughtObserverHandler = null
+            assertIs<TransactionResult.Success<*>>(store.suspendAction { x mutate 5 })
+        }
+
     @Test fun aKvBridgeLoadGetStackOverflowGoesToTheScopesHandlerNotErrors() =
         runBlocking<Unit> {
             FatalCatchingScope().use { handled ->

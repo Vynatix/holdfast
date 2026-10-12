@@ -147,7 +147,7 @@ internal class PostCommitQueue(
             while (batch.isNotEmpty()) {
                 for (task in batch) {
                     run.ran = run.ran.plusOnce(task)
-                    runCatching { task() }.onFailure { fatal.holdIfFatal(it) }
+                    fatal.runIsolated { task() }
                 }
                 // A fatal error: the batch, already out of the queue, has run;
                 // what is still queued waits for the store's next holder.

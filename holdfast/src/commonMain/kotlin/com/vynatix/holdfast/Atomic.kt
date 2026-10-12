@@ -271,8 +271,10 @@ private fun <R> acquireAndRun(
             } else {
                 Transaction.createForExternal(id, ownerThreadId, frameId = id)
             }
-        v.internalSetActiveTransaction(root)
+        // Everything that allocates first (issue #61): nothing between the
+        // install and the try may throw and strand the root.
         roots.add(FrameRoot(v, root, v.internalFrameMiddlewareSession(root)))
+        v.internalSetActiveTransaction(root)
         try {
             acquireAndRun(sorted, index + 1, roots, drainOnExit, id, ownerThreadId, marker, body)
         } finally {
@@ -321,9 +323,12 @@ private fun <R> executeBody(
             // aborts the frame before the body runs.
             hooksStarted = true
             roots.forEach { it.session.fireStarted() }
-            val prior = FrameMarkers.install(marker)
+            val prior = FrameMarkers.current()
             val value: R =
                 try {
+                    // Inside the try (issue #61): a fatal error striking the
+                    // slot write still restores the slot.
+                    FrameMarkers.install(marker)
                     body()
                 } finally {
                     // Clear BEFORE completed/commit/observer fanout: enforcement

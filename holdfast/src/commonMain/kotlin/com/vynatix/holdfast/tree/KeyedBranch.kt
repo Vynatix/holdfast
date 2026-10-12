@@ -6,6 +6,7 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StateCodec
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.disposeEach
 import kotlin.reflect.KClass
 
 /**

@@ -13,6 +13,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.derivedStateOverStores
 import com.vynatix.holdfast.platform.rethrowFatal
+import com.vynatix.holdfast.runHoldingFatal
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -207,12 +208,12 @@ internal class TreeValue(
                     counted = false
                     endSeedLocked()
                     replay.count { (store, added) ->
-                        fatal.holdingFatal { applyEdgeLocked(built, store, added) } == true
+                        fatal.runHoldingFatal { applyEdgeLocked(built, store, added) } == true
                     } > 0
                 }
-            if (replayed) fatal.holdingFatal { built.recomputeForSourceStores() }
+            if (replayed) fatal.runHoldingFatal { built.recomputeForSourceStores() }
             // Disposed while seeding: stop the node at once, keeping its first tree readable.
-            if (synchronized(edgeLock) { disposed }) fatal.holdingFatal { built.dispose() }
+            if (synchronized(edgeLock) { disposed }) fatal.runHoldingFatal { built.dispose() }
             fatal.rethrowHeld()
             return built
         } finally {

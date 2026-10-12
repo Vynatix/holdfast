@@ -248,6 +248,47 @@ class FatalSettleTest {
         assertThreadSettled()
     }
 
+    /** SettleScope.kt settling: a fatal error the block throws outranks the settle's, which it carries. */
+    @Test fun aBlocksFatalErrorOutranksOneTheSettleThrows() {
+        val blockFatal = StackOverflowError()
+        val settleFatal = OutOfMemoryError()
+        val log = CopyOnWriteArrayList<String>()
+        val t1 = FatalSettleTask("t1", log, settleFails = settleFatal)
+
+        val thrown =
+            assertFailsWith<StackOverflowError> {
+                settling {
+                    checkNotNull(SettleScopes.current()).enqueue(t1)
+                    throw blockFatal
+                }
+            }
+
+        assertSame(blockFatal, thrown)
+        assertEquals(listOf<Throwable>(settleFatal), thrown.suppressed.toList())
+        assertEquals(listOf("t1:settle"), log.toList(), "the scope still settled")
+        assertThreadSettled()
+    }
+
+    /** SettleScope.kt settling: a fatal error the settle throws replaces the block's ordinary failure, carrying it. */
+    @Test fun aSettlesFatalErrorReplacesAnOrdinaryBlockFailure() {
+        val failure = IllegalStateException("block")
+        val settleFatal = StackOverflowError()
+        val log = CopyOnWriteArrayList<String>()
+        val t1 = FatalSettleTask("t1", log, settleFails = settleFatal)
+
+        val thrown =
+            assertFailsWith<StackOverflowError> {
+                settling {
+                    checkNotNull(SettleScopes.current()).enqueue(t1)
+                    throw failure
+                }
+            }
+
+        assertSame(settleFatal, thrown)
+        assertEquals(listOf<Throwable>(failure), thrown.suppressed.toList())
+        assertThreadSettled()
+    }
+
     /** SettleScope.kt:217: a task's own fatal error is held too, never handed to its report. */
     @Test fun aSettleTasksStackOverflowIsNeverReported() {
         val fatal = StackOverflowError()

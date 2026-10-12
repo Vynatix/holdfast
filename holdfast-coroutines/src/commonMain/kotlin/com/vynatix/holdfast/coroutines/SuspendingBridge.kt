@@ -7,6 +7,7 @@ import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.bridge.Codec
+import com.vynatix.holdfast.internalIsFatal
 import com.vynatix.holdfast.internalRethrowIfFatal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -133,8 +134,8 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
  * callers MUST attach a collector if they care about persistence failures.
  * A fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
  * is never forwarded: it propagates, out of the save or load coroutine to
- * [scope]'s exception handling (a save's ends the drainer: later publishes
- * are not saved), or out of `publishAwaited`.
+ * [scope]'s exception handling (a new drainer takes over from one a save
+ * ended, so later publishes are still saved), or out of `publishAwaited`.
  *
  * @param key Storage key under which the encoded value is persisted.
  * @param codec String-codec for [T].
@@ -185,12 +186,21 @@ open class SuspendingKvBridge<T : Any> internal constructor(
     val errors: SharedFlow<Throwable> = _errors.asSharedFlow()
 
     init {
-        // One drainer per bridge: pulls conflated values and persists them.
-        // Conflation is structural (Channel.CONFLATED); we do not rate-limit here.
+        launchDrainer()
+    }
+
+    /**
+     * One drainer per bridge: pulls conflated values and persists them.
+     * Conflation is structural (Channel.CONFLATED); we do not rate-limit here.
+     * A fatal error (issue #61) a save throws ends this drainer and goes to
+     * [scope]'s exception handling, once a new drainer has taken over, so
+     * later publishes are still saved (unless that handling cancels [scope]).
+     */
+    private fun launchDrainer() {
         scope.launch {
-            for (value in saves) {
-                putOrEmit(value)
-            }
+            runCatching { for (value in saves) putOrEmit(value) }
+                .onFailure { if (it.internalIsFatal()) launchDrainer() }
+                .getOrThrow()
         }
     }
 

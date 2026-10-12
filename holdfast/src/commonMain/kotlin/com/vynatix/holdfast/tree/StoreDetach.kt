@@ -9,6 +9,8 @@ import com.vynatix.holdfast.SettleTask
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
+import com.vynatix.holdfast.disposeEach
+import com.vynatix.holdfast.runIsolated
 import kotlinx.atomicfu.locks.synchronized
 
 // A store's dispose, as its tree hears it (`TreeLeafAttachment.onStoreDisposed`,
@@ -123,7 +125,7 @@ internal class StoreDetach(
         owned = released.mapNotNull { child -> child.store?.takeIf { child.isOwnedByKeyedBranchOf(registry) } }
         descendants =
             released.associateWith { child ->
-                fatal.listedOr(emptyList()) {
+                fatal.runIsolated(emptyList()) {
                     listingOf(child, child, includeDisposing = true)
                         .shape
                         .leaves()
@@ -207,7 +209,7 @@ internal class StoreDetach(
     private fun resyncReleased() {
         for (child in released) {
             val now =
-                fatal.listedOr(listOf(child)) {
+                fatal.runIsolated(listOf(child)) {
                     listingOf(child, child, includeDisposing = true).shape.leaves().map { it.first }
                 }
             val earlier = descendants[child].orEmpty().filter { leaf -> now.none { it === leaf } }
@@ -239,12 +241,6 @@ private fun FatalHold.collectInto(
 ) {
     if (!holdIfFatal(failure)) failures += failure
 }
-
-/** [listing]'s answer, or [fallback] when it throws: ignored, except a fatal error, which is held. */
-private inline fun <T> FatalHold.listedOr(
-    fallback: T,
-    listing: () -> T,
-): T = runCatching(listing).onFailure { holdIfFatal(it) }.getOrDefault(fallback)
 
 /**
  * Whether this released leaf hangs under a keyed branch of the store whose

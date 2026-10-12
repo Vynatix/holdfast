@@ -404,6 +404,9 @@ private suspend fun fanOutThenPublish(
                     runCatching { ms.fanOutToObservers(value) }.onFailure(fatal::holdOrThrow)
                     publishQueue += ms to value
                 }
+                // Like the blocking fanout: the commit's own steps go on, then end
+                // it Failed, and dispatch throws the error back into this hold.
+                fatal.rethrowHeld()
             },
             { snapshot ->
                 eventsQueue.addAll(snapshot)
@@ -424,7 +427,7 @@ private suspend fun fanOutThenPublish(
             fatal.rethrowHeld(alongside = e)
             throw e
         } catch (e: Throwable) {
-            if (!fatal.holdIfFatal(e)) ms.owningStore.internalReportUncaughtFailure(e)
+            if (!fatal.holdIfFatal(e)) fatal.reportHoldingFatal(ms.owningStore, e)
         }
     }
     // Step 3b: events drain via suspending emit, honoring SUSPEND back-pressure.
@@ -437,9 +440,4 @@ private suspend fun fanOutThenPublish(
     // A held fatal error outranks whatever the drain threw, carried as suppressed.
     fatal.rethrowHeld(alongside = drained.exceptionOrNull())
     drained.getOrThrow()
-}
-
-/** Hold [error] when it is fatal (issue #61), else throw it at once. */
-private fun FatalHold.holdOrThrow(error: Throwable) {
-    if (!holdIfFatal(error)) throw error
 }
