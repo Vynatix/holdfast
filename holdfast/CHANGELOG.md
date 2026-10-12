@@ -9,6 +9,7 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 ## [Unreleased]
 
 ### Added
+- New experimental `:holdfast-lifecycle` module — ViewModel ownership for stores (`StoreViewModel`, `storeViewModel { }`, `treeViewModel { }`), `dispose()` wired to `onCleared()` exactly once; see the module's changelog and GUIDE §20.
 
 - **`StoreSuspendInFlightException` (issue 003, with `:holdfast-coroutines`).**
   The public exception a blocking `action { }` (also `atomic(…)`, `reset()`,

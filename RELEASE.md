@@ -1,6 +1,6 @@
 # Releasing Holdfast
 
-Runbook for publishing `com.vynatix:holdfast{,-coroutines,-compose,-testing}` to
+Runbook for publishing `com.vynatix:holdfast{,-coroutines,-compose,-lifecycle,-testing}` to
 Maven Central. The pipeline is the [vanniktech publication plugin]
 (https://vanniktech.github.io/gradle-maven-publish-plugin/) (`com.vanniktech:
 gradle-maven-publish-plugin`, applied through the `holdfast.publish` buildSrc
@@ -81,9 +81,9 @@ What it does, in order, failing loudly at every step:
    dokka, doc-snippets).
 5. `git tag -s vX.Y.Z` — **signed** tag; the signature is verified immediately.
 6. `./gradlew publishAndReleaseToMavenCentral -Pholdfast.version=X.Y.Z` —
-   uploads all four modules, triggers release, waits for Central validation.
+   uploads all five modules, triggers release, waits for Central validation.
 7. Verifies `https://repo1.maven.org/maven2/com/vynatix/...` serves the `.pom`
-   and `.module` of all four artifacts (retries; Central→repo1 sync usually
+   and `.module` of all five artifacts (retries; Central→repo1 sync usually
    takes a few minutes, default timeout 30 min, `HOLDFAST_VERIFY_TIMEOUT`
    overrides).
 
@@ -98,7 +98,7 @@ ls ~/.m2/repository/com/vynatix/
 
 Pushing a tag `v*` to `origin` triggers `.github/workflows/publish.yml`
 (macos-15 — needed for the iOS artifacts): derives the version from the tag,
-runs the namespace preflight, runs `allTests` + `apiCheck` for the four
+runs the namespace preflight, runs `allTests` + `apiCheck` for the five
 modules, then `publishAndReleaseToMavenCentral`. It uses the same tasks,
 properties and secrets names as the local path. Use `--tag-only` locally to
 delegate the upload to CI.

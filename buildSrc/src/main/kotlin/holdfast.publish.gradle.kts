@@ -59,6 +59,8 @@ val pomMetadata = mapOf(
         "Flow / StateFlow / suspend integration for the Holdfast Store library."),
     "holdfast-compose" to ("Holdfast Compose" to
         "Compose Multiplatform runtime adapter for the Holdfast Store library."),
+    "holdfast-lifecycle" to ("Holdfast Lifecycle" to
+        "ViewModel ownership for the Holdfast Store library: StoreViewModel wiring dispose() to onCleared()."),
     "holdfast-testing" to ("Holdfast Testing" to
         "Testing harness for the Holdfast Store library: storeTest {}, tracked timelines, infix matchers."),
     "holdfast-hallmark" to ("Holdfast Hallmark" to

@@ -55,9 +55,9 @@ jobs:
           ./gradlew \
             "-Pholdfast.version=${HOLDFAST_VERSION}" \
             :holdfast:allTests :holdfast-coroutines:allTests :holdfast-compose:allTests \
-            :holdfast-testing:allTests \
+            :holdfast-testing:allTests :holdfast-lifecycle:allTests \
             :holdfast:apiCheck :holdfast-coroutines:apiCheck :holdfast-compose:apiCheck \
-            :holdfast-testing:apiCheck \
+            :holdfast-testing:apiCheck :holdfast-lifecycle:apiCheck \
             --stacktrace
 
       # `publishAndReleaseToMavenCentral` is provided by the vanniktech
