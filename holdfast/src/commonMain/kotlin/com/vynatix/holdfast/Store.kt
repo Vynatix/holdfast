@@ -1227,21 +1227,40 @@ abstract class Store<Self : Store<Self>> {
     }
 
     /**
-     * Plain context block — runs `block(self)` with no locks and no transaction.
-     * Provides the `Self` receiver so member-extensions like [effect] and [bridge]
-     * can be called fluently: `store { count effect { … } }`.
+     * Read-only/wiring context block — runs `block(self)` with no locks and
+     * no transaction, with the bare-invoke mutation guard armed around the
+     * body (issue 005). Provides the `Self` receiver so member-extensions
+     * like [bridge], [observeFrom], [update] and [mutate] can be called
+     * fluently; [effect] is a top-level extension on [State] and needs no
+     * receiver: `store { count effect { … } }`.
      *
+     * The block looks like a transaction scope but is not one: each bare
+     * `mutate`/`update`/`emit` in it would run as its OWN one-shot action,
+     * so a throw mid-block commits the earlier writes. Those three calls
+     * therefore throw [IllegalStateException] inside a bare invoke, naming
+     * `store action { }` as the mutating form — including through a subclass
+     * method the block calls. An `action { }`/`atomic(...)`/
+     * `suspendAction`/`suspendAtomic` STARTED inside the block is legal and
+     * stages normally (its transaction wins), and so does everything that
+     * is not a bare write: reads, `effect { }`, `bridge`/`observeFrom`
+     * wiring, and `removeState`/`clearStates`, which deliberately stay
+     * legal here. `with(store) { … }` and `store.run { … }` are plain scope
+     * functions, not this operator — a bare write there synthesizes the
+     * one-shot action as usual.
+     *
+     * The guard is per-thread and best-effort, not a guarantee: it travels
+     * with the invoking thread only, and a mutation that hops threads
+     * (e.g. `scope.launch { … }` inside the block) escapes it. Nested
+     * invokes are depth-safe — an inner block's exit does not disarm an
+     * outer one, and a throwing body restores the guard on its way out.
+     *
+     * @throws IllegalStateException if the store is disposed.
      * @throws ClassCastException when this store violates the CRTP self-type
      *   contract (`class Foo : Store<Bar>()`): the receiver cast fails and is
      *   upgraded with a teaching message (first-dispatch enforcement — see the
      *   class KDoc). Any other [ClassCastException] propagates unchanged.
      */
-    operator fun <R> invoke(block: Self.() -> R): R =
-        try {
-            block(self)
-        } catch (e: ClassCastException) {
-            throw crtpSelfCastTeachingOrNull(this, e) ?: e
-        }
+    operator fun <R> invoke(block: Self.() -> R): R = this.runBareInvoke(block)
 
     /**
      * Declare a state property. Delegating a property to it
@@ -1502,8 +1521,9 @@ abstract class Store<Self : Store<Self>> {
      *
      * @throws IllegalStateException per [mutate] — a write a finalized
      *   transaction would refuse, a read-only/foreign/sealed state, a
-     *   no-write region — and whatever [block] or a middleware throws (see
-     *   the strictness note).
+     *   no-write region, a bare [invoke] block with no owned transaction —
+     *   and whatever [block] or a middleware throws (see the strictness
+     *   note).
      */
     infix fun <T : Any> State<T>.update(block: (T) -> T) {
         checkNotDisposed()
@@ -1516,7 +1536,10 @@ abstract class Store<Self : Store<Self>> {
         // action `mutate` synthesizes, so the read is serialized with the
         // write (serializer + transactionLock) instead of racing concurrent
         // commits. `getOrThrow` rethrows the original exception — a throwing
-        // block propagates, never a silent rollback.
+        // block propagates, never a silent rollback. Checked before the
+        // synthesis: a bare-invoke caller must not get its one-shot after
+        // all (issue 005; the staging branch above is the precedence rule).
+        BareInvokeGuard.refuseMutation()
         action { this@update mutate block(this@update.value) }.getOrThrow()
     }
 
@@ -1549,7 +1572,12 @@ abstract class Store<Self : Store<Self>> {
      *   [DerivedState] ([derivedState], [merged]), which is read-only, for
      *   the stale handle of an evicted keyed-state entry ([keyedState]), and
      *   for a state library machinery keeps sealed — a `:holdfast-coroutines`
-     *   hydrator's `state`, which only the hydrator writes.
+     *   hydrator's `state`, which only the hydrator writes. Also thrown
+     *   inside a bare [invoke] block when no transaction this thread owns is
+     *   active (a subclass method called from the block included): the
+     *   message names `store action { }` as the mutating form. An `action`,
+     *   `atomic(...)`, `suspendAction` or `suspendAtomic` started inside the
+     *   block stages as usual and never sees that refusal.
      */
     infix fun <T : Any> State<T>.mutate(that: T) {
         val state = writableState()
@@ -1565,7 +1593,11 @@ abstract class Store<Self : Store<Self>> {
 
         // No active transaction on this thread: wrap in a one-shot action so middleware
         // fires and observers see only the committed value. The recursive call lands
-        // in the branch above on the second pass.
+        // in the branch above on the second pass. Checked before the synthesis: a
+        // bare-invoke caller must be refused here, not handed its one-shot action
+        // (issue 005; the staging branch above is the precedence rule — an entry
+        // owning a transaction stages and never reaches this).
+        BareInvokeGuard.refuseMutation()
         action { this@mutate mutate that }
     }
 

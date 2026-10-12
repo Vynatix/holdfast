@@ -22,7 +22,7 @@ class StandaloneUpdateAtomicityTest {
             val incrementsPerWorker = 1250 // 8 × 1250 = 10 000
             parallel(workers) {
                 repeat(incrementsPerWorker) {
-                    v { count update { it + 1 } } // bare invoke — OUTSIDE any action
+                    with(v) { count update { it + 1 } } // standalone — OUTSIDE any action (issue 005: not `v { }`, which is refused)
                 }
             }
             assertEquals(workers * incrementsPerWorker, v.count.value)
@@ -32,7 +32,7 @@ class StandaloneUpdateAtomicityTest {
     fun standaloneUpdateCommitsThroughItsImplicitTransaction() =
         storeTest {
             val h = track(AtomicUpdateVault())
-            h.store { count update { it + 5 } }
+            with(h.store) { count update { it + 5 } }
             assertEquals(5, h.read { count.value })
         }
 
@@ -57,7 +57,7 @@ class StandaloneUpdateAtomicityTest {
             val h = track(AtomicUpdateVault())
             h.action { count mutate 5 }.shouldBeSuccess()
             val thrown =
-                assertFailsWith<IllegalStateException> { h.store { count update { error("boom") } } }
+                assertFailsWith<IllegalStateException> { with(h.store) { count update { error("boom") } } }
             assertEquals("boom", thrown.message, "the user lambda's original exception propagates (getOrThrow)")
             assertEquals(5, h.read { count.value }, "nothing committed — the rollback left the prior value")
             assertNull(h.read { activeTransaction }, "no transaction is left behind")
@@ -77,12 +77,12 @@ class StandaloneUpdateAtomicityTest {
             // update consumes its one-shot action's result with getOrThrow, so a
             // middleware failure in the commit phase surfaces to the caller.
             val thrown =
-                assertFailsWith<IllegalStateException> { v { count update { it + 1 } } }
+                assertFailsWith<IllegalStateException> { with(v) { count update { it + 1 } } }
             assertEquals("validation failed", thrown.message)
             assertEquals(0, v.count.value, "the rolled-back update committed nothing")
             // mutate discards the same one-shot result — update is deliberately
             // stricter than mutate; this pins the contrast.
-            v { count mutate 7 }
+            with(v) { count mutate 7 }
             assertEquals(0, v.count.value, "mutate stays silent about its rolled-back one-shot action")
         }
 }

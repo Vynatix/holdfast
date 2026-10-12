@@ -134,7 +134,10 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
 
 /**
  * The mutex-bracketed body of [suspendAction], split out so the post-commit
- * drain can sit strictly outside the serializer's critical section.
+ * drain can sit strictly outside the serializer's critical section. The
+ * txn/owner installs sit inside the protected try (issue 002 A6(i)), and the
+ * exit clears the transaction slot BEFORE the suspending owner (A6(ii)) — see
+ * the finally for why that order is load-bearing.
  */
 @OptIn(ExperimentalUuidApi::class)
 private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
@@ -152,44 +155,50 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                 id = body::class.simpleName ?: Uuid.random().toString(),
                 ownerThreadId = currentThreadId(),
             )
-        // We own the serializer; no other action can run on this store until we
-        // release. Set the active transaction and the suspending-owner key so
-        // mutate() inside the body recognizes us as the owner.
-        internalSetActiveTransaction(txn)
-        suspendingOwner = owner
-        // Observable progress (issue 003): any blocking waiter's budget clock
-        // restarts here, on each staged write (Store.mutate bumps the epoch
-        // while suspendingOwner is set) and again when the commit starts.
-        suspendingProgressEpoch++
-        serializer.suspendingHolderLabel = "suspendAction"
-
-        // Snapshot the middleware chain once at the start of the action — same
-        // semantics as the blocking path. Concurrent middleware registration
-        // during this action does not retroactively apply.
-        val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
-        // One MiddlewareContext per middleware, reused across that middleware's
-        // started/completed/error hooks so metadata stashed in one hook is
-        // visible to the next, matching the sync `Middleware.invoke` contract.
-        val contexts: List<Middleware.MiddlewareContext<V>> =
-            middlewareChain.map { _ ->
-                Middleware.MiddlewareContext(
-                    store = selfForExternal,
-                    transaction = txn,
-                )
-            }
-
-        // Concentric outermost-first: iterate REVERSED so the LAST-registered
-        // middleware fires `started` first — matching `Store.middlewares`'s contract
-        // and the sync `action` path's fold-derived nesting (issue 31). Each
-        // invocation is run-caught so one middleware's failure does not abort others.
-        // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
-        // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
-        // sync sibling — interleaved per-middleware so the master ordering is
-        //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
-        fireStartedHooks(middlewareChain, contexts)
-
         val outcome: TransactionResult<R> =
             try {
+                // We own the serializer; no other action can run on this store
+                // until we release. Set the active transaction and the
+                // suspending-owner key so mutate() inside the body recognizes
+                // us as the owner. Installed inside the try, whose finally
+                // clears both: a throw anywhere between the install and the
+                // body — the progress epoch, the holder label, the middleware
+                // snapshot or the started hooks — leaves nothing installed
+                // (issue 002 A6(i)).
+                internalSetActiveTransaction(txn)
+                suspendingOwner = owner
+                // Observable progress (issue 003): any blocking waiter's budget
+                // clock restarts here, on each staged write (Store.mutate bumps
+                // the epoch while suspendingOwner is set) and again when the
+                // commit starts.
+                suspendingProgressEpoch++
+                serializer.suspendingHolderLabel = "suspendAction"
+
+                // Snapshot the middleware chain once at the start of the action — same
+                // semantics as the blocking path. Concurrent middleware registration
+                // during this action does not retroactively apply.
+                val middlewareChain: List<Middleware<V>> = snapshotMiddleware()
+                // One MiddlewareContext per middleware, reused across that middleware's
+                // started/completed/error hooks so metadata stashed in one hook is
+                // visible to the next, matching the sync `Middleware.invoke` contract.
+                val contexts: List<Middleware.MiddlewareContext<V>> =
+                    middlewareChain.map { _ ->
+                        Middleware.MiddlewareContext(
+                            store = selfForExternal,
+                            transaction = txn,
+                        )
+                    }
+
+                // Concentric outermost-first: iterate REVERSED so the LAST-registered
+                // middleware fires `started` first — matching `Store.middlewares`'s contract
+                // and the sync `action` path's fold-derived nesting (issue 31). Each
+                // invocation is run-caught so one middleware's failure does not abort others.
+                // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
+                // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
+                // sync sibling — interleaved per-middleware so the master ordering is
+                //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
+                fireStartedHooks(middlewareChain, contexts)
+
                 val value: R =
                     try {
                         selfForExternal.body()
@@ -253,6 +262,13 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                     }
                 }
             } finally {
+                // Exit order (issue 002 A6(ii)): clear the transaction slot
+                // BEFORE the suspending owner, and both before the mutex
+                // releases — a bare foreign mutate in the residual window
+                // finds no transaction and synthesizes its own one-shot
+                // action, ownsActiveTransaction/appliedTransactionNestedHere
+                // rely on slot-before-owner, and the serializer's
+                // leaked-owner self-heal relies on owner-before-unlock.
                 internalSetActiveTransaction(null)
                 suspendingOwner = null
                 serializer.suspendingHolderLabel = null

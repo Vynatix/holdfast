@@ -37,7 +37,8 @@ class UpdateExtensionTest {
     @Test
     fun updateOutsideActionWrapsInImplicitTransaction() {
         val v = ApiVault()
-        v { n update { it + 5 } }
+        // `with(v)`, not `v { }`: a bare-invoke update is refused (issue 005).
+        with(v) { n update { it + 5 } }
         assertEquals(5, v.n.value)
     }
 

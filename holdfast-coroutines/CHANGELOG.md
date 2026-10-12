@@ -33,6 +33,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A throw between a suspending entry's install and its body no longer
+  strands the store (issue 002 A6(i)).** `suspendAction` and `suspendAtomic`
+  set the active transaction and `suspendingOwner` before the protected `try`
+  began, so anything throwing in the pre-body stretch — the progress-epoch and
+  holder-label bookkeeping, the middleware snapshot, the frame's middleware
+  session — unwound past the clearing `finally`: the dead transaction stayed
+  in the slot (a same-thread follow-up action silently merged into a root
+  nobody commits) and the owner leaked (a budgeted blocker for later blocking
+  calls). The installs now sit inside the try, whose finally clears both on
+  every exit. The exit order itself is unchanged and load-bearing (issue 002
+  A6(ii)): the transaction slot clears before the suspending owner — a bare
+  foreign `mutate` in the residual window finds no transaction and synthesizes
+  its own one-shot action — and both clear before the mutex releases. No
+  user-code path could throw in that stretch (middleware hooks are
+  contract-isolated), so this is hardening for library-internal failures and
+  future edits, pinned by `SuspendEntryHygieneTest` and
+  `SuspendExitWindowTest`.
 - **The outer body's other coroutines no longer read a nested suspending
   entry's uncommitted writes (issue #38, fixed in `:holdfast`).** A
   `suspendAction`/`suspendAtomic` started inside another suspending entry's
@@ -127,6 +144,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `nodeOf` walk per store), and reports a store whose `hydratorOrNull()`
   throws as `Disposed` only when it is disposed — anything else is
   `Ran(Failed(thrown))`, never `NoHydrator`.
+- **The A6(ii) exit-window pin is green on combined main again (issue 002
+  residue; test-only).** `SuspendExitWindowTest`'s original vehicle for "a
+  bare foreign mutate" was `store { n mutate 7 }` — the pre-005 spelling —
+  so #60's defusal (merged between the pin's branch and its merge) made
+  the vehicle throw the teaching refusal the instant it entered the
+  window, deterministically, and the pin's 200 ms "still waiting"
+  checkpoint found the latch already counted down. The exit-window
+  contract itself is intact (verified by probe): the post-005 one-shot
+  spelling (`with(store) { … }`) waits out the serializer's budgeted gate
+  inside the window — never joining the dying transaction, never staging —
+  and commits its own one-shot once the holder's exit completes. The pin
+  now drives the window with that spelling and anchors its waiting half
+  deterministically: the serializer carries a test-shrunk budget (the
+  issue-003 internal-ctor seam) and the foreign mutate retries the
+  documented recovery, so the budget escape — thrown only while the
+  window's owner/label/mutex state holds, and naming the installed holder
+  label — is the waiter's own report from inside the budgeted wait,
+  replacing the grace sleep (the test no longer sleeps at all). A new row
+  pins the interaction itself: inside the window the defused invoke
+  spelling throws the issue-005 refusal to the caller BEFORE the
+  synthesized action ever reaches the serializer wait.
 
 ### Added
 

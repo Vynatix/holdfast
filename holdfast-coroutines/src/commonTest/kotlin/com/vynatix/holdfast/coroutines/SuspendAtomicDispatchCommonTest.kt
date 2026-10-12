@@ -41,7 +41,7 @@ class SuspendAtomicDispatchCommonTest {
     @Test fun aWriteQueuedBeforeARolledBackSuspendAtomicIsNotSwallowedByIt() =
         runTest {
             val store = DispatchCommonStore()
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } } // scope fn: the queued one-shot, not an invoke block (issue 005)
             val frame =
                 suspendAtomic(store) {
                     store { count mutate 1 }
@@ -59,7 +59,7 @@ class SuspendAtomicDispatchCommonTest {
             val store = DispatchCommonStore()
             val seen = mutableListOf<Int>()
             val subscription = store.count effect { seen += this }
-            launch { store { count mutate 7 } }
+            launch { with(store) { count mutate 7 } } // scope fn: the queued one-shot, not an invoke block (issue 005)
             val frame = suspendAtomic(store) { store { count mutate 1 } }
             assertIs<TransactionResult.Success<*>>(frame)
             advanceUntilIdle()
