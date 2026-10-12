@@ -1,9 +1,13 @@
+@file:OptIn(StoreInternalApi::class)
+
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.bridge.Codec
+import com.vynatix.holdfast.internalRethrowIfFatal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -127,6 +131,10 @@ fun <T : Any> SuspendingKvStore.suspendingBridge(
  * is forwarded to [SuspendingKvBridge.errors]. The flow is configured
  * `replay = 0`, `extraBufferCapacity = 16`, with no implicit collection —
  * callers MUST attach a collector if they care about persistence failures.
+ * A fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
+ * is never forwarded: it propagates, out of the save or load coroutine to
+ * [scope]'s exception handling (a save's ends the drainer: later publishes
+ * are not saved), or out of `publishAwaited`.
  *
  * @param key Storage key under which the encoded value is persisted.
  * @param codec String-codec for [T].
@@ -166,7 +174,8 @@ open class SuspendingKvBridge<T : Any> internal constructor(
 
     /**
      * Hot stream of throwables observed by this bridge — `store.put` failures,
-     * `store.get` failures, and decode failures during load-on-attach.
+     * `store.get` failures, and decode failures during load-on-attach. Never
+     * a fatal error (issue #61), which propagates instead: see [bridge].
      *
      * `replay = 0`, `extraBufferCapacity = 16`, no implicit collection. **Callers
      * MUST attach their own collector** if they care about persistence reliability —
@@ -190,12 +199,14 @@ open class SuspendingKvBridge<T : Any> internal constructor(
      * (fire-and-forget) and [Awaiting.publishAwaited] (await-completion).
      * Errors are surfaced to [errors] in both cases — the await-completion
      * caller does not need to attach the errors flow if it tolerates
-     * silent failures, but the recommended pattern is to attach.
+     * silent failures, but the recommended pattern is to attach. A fatal
+     * error (issue #61) is thrown instead.
      */
     protected suspend fun putOrEmit(value: T) {
         try {
             store.put(key, codec.encode(value))
         } catch (t: Throwable) {
+            t.internalRethrowIfFatal()
             _errors.tryEmit(t)
         }
     }
@@ -210,6 +221,7 @@ open class SuspendingKvBridge<T : Any> internal constructor(
                     try {
                         store.get(key)
                     } catch (t: Throwable) {
+                        t.internalRethrowIfFatal()
                         _errors.tryEmit(t)
                         null
                     } ?: return@launch
@@ -217,6 +229,7 @@ open class SuspendingKvBridge<T : Any> internal constructor(
                     try {
                         codec.decode(encoded)
                     } catch (t: Throwable) {
+                        t.internalRethrowIfFatal()
                         _errors.tryEmit(t)
                         return@launch
                     }
@@ -260,6 +273,8 @@ open class SuspendingKvBridge<T : Any> internal constructor(
          * on [errors] (same as the fire-and-forget path) AND the call returns
          * normally — the suspendAction commit phase does not crash on
          * persistence failure today; it relies on the errors-flow contract.
+         * A fatal error (issue #61) is thrown instead: the commit phase
+         * finishes its other publishes and events, then throws it.
          *
          * Wrapped in `withContext(NonCancellable)` by the calling commit phase
          * so cancellation cannot leave the store in an inconsistent state.

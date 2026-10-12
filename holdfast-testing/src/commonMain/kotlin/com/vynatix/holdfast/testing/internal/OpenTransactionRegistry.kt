@@ -42,8 +42,12 @@ internal class OpenTransactionRegistry {
      * variant — because [StoreTestScope.tearDown] is non-suspend. The
      * v1 implementation does no suspending work, so the synchronous variant
      * is faithful to the suspending API.
+     *
+     * A rollback that throws is skipped; a fatal error one throws (issue
+     * #61) is held in [fatal] while every other leaked transaction is still
+     * rolled back, for teardown to throw once its last step has run.
      */
-    fun rollbackAll() {
+    fun rollbackAll(fatal: HeldFatal) {
         val snapshot =
             synchronized(lock) {
                 val copy = openTransactions.toList()
@@ -52,7 +56,7 @@ internal class OpenTransactionRegistry {
             }
         for (open in snapshot) {
             if (!open.isClosed) {
-                runCatching { open.rollbackSilentlyForTearDown() }
+                fatal.isolated { open.rollbackSilentlyForTearDown() }
             }
         }
     }

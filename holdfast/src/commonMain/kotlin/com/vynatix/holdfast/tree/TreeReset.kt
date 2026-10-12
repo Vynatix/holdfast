@@ -6,6 +6,7 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.materializeDeclaredStates
+import com.vynatix.holdfast.platform.rethrowFatal
 import com.vynatix.holdfast.stageResetOfDeclaredStates
 
 // `tree.reset(node)`: every live store of the subtree — the receiver's own
@@ -31,8 +32,9 @@ internal fun resetTree(
         targets = liveLeavesUnder(ownerNode, node),
         // Materialize outside every lock: a never-read state's initializer
         // must not run under the frame's locks. A failure is carried into the
-        // frame, so the reset fails as one transaction there.
-        prepare = { store -> runCatching { store.materializeDeclaredStates() }.exceptionOrNull() },
+        // frame, so the reset fails as one transaction there; a fatal error
+        // propagates now, before any lock is taken (issue #61).
+        prepare = { store -> runCatching { store.materializeDeclaredStates() }.rethrowFatal().exceptionOrNull() },
         stage = { store, txn, failure ->
             failure?.let { throw it }
             store.stageResetOfDeclaredStates(txn)

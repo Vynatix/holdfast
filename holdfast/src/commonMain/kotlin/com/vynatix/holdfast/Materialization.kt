@@ -143,6 +143,10 @@ internal class InitializerGraph(
             val me = threadId()
             if (claim(latched, me)) {
                 return try {
+                    // Marked inside the try: a fatal error (issue #61) the mark
+                    // throws still releases the latch, which would otherwise
+                    // stay held and wedge this state for every thread.
+                    MaterializingStack.push(latched)
                     body()
                 } finally {
                     release(latched)
@@ -167,8 +171,10 @@ internal class InitializerGraph(
         body: () -> R,
     ): R {
         if (MaterializingStack.stack().any { it == step }) throw IllegalStateException(sameThreadCycleMessage(step))
-        MaterializingStack.push(step)
         try {
+            // Inside the try (issue #61): a mark a fatal error leaves behind
+            // would fail every later run of this step on this thread as a cycle.
+            MaterializingStack.push(step)
             return body()
         } finally {
             MaterializingStack.pop(step)
@@ -204,7 +210,9 @@ internal class InitializerGraph(
             if (latched.latchOwner == me) throw IllegalStateException(sameThreadCycleMessage(latched))
             if (latched.latchOwner != NO_LATCH_OWNER) {
                 waitingFor[me] = latched
-                val cycle = cycleThrough(latched, me)
+                // A walk that throws (a fatal error, issue #61) unregisters this
+                // thread too: a stale wait would read as a cycle to other threads.
+                val cycle = runCatching { cycleThrough(latched, me) }.onFailure { waitingFor.remove(me) }.getOrThrow()
                 if (cycle != null) {
                     waitingFor.remove(me)
                     throw IllegalStateException(crossThreadCycleMessage(cycle))
@@ -213,15 +221,15 @@ internal class InitializerGraph(
             }
             latched.latch.lock()
             latched.latchOwner = me
-            MaterializingStack.push(latched)
             true
         }
 
+    /** Release [latched]'s latch, then drop the mark [hold] pushed: the latch first, whatever the pop throws. */
     private fun release(latched: Latched) {
         locked {
-            MaterializingStack.pop(latched)
             latched.latchOwner = NO_LATCH_OWNER
             latched.latch.unlock()
+            MaterializingStack.pop(latched)
         }
     }
 

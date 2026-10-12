@@ -2,6 +2,7 @@ package com.vynatix.holdfast.bridge
 
 import com.vynatix.holdfast.Bridge
 import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.platform.rethrowFatal
 
 /**
  * Generic save-on-commit + load-on-attach [Bridge] backed by a [KvStore].
@@ -28,9 +29,10 @@ class KvBridge<T : Any>(
     private val codec: Codec<T>,
 ) : Bridge<T> {
     override fun observe(observer: (T) -> Unit): Disposable {
-        // Replay the persisted value once on attach (load-on-attach).
+        // Replay the persisted value once on attach (load-on-attach). A value
+        // the codec cannot decode is skipped; a fatal error is not (issue #61).
         kv.get(key)?.let { encoded ->
-            val decoded = runCatching { codec.decode(encoded) }.getOrNull()
+            val decoded = runCatching { codec.decode(encoded) }.rethrowFatal().getOrNull()
             if (decoded != null) observer(decoded)
         }
         // The bridge does not push subsequent values on its own; it's a passive

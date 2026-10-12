@@ -97,8 +97,9 @@ class FrameApply internal constructor(
  * `distinct` state's `equals`), or a savepoint whose merge throws (its
  * parent has applied or ended meanwhile, see [mergeIntoParent]), is marked
  * Failed and ends the pass: [FrameApply.failure] carries the failure (wrapped
- * in a [TransactionException] naming the transaction, store and phase), and
- * the top-level transactions applied before it are in [FrameApply.applied].
+ * in a [TransactionException] naming the transaction, store and phase; a
+ * fatal error, issue #61, as it is), and the top-level transactions applied
+ * before it are in [FrameApply.applied].
  * The ones after it are left active, for the caller to roll back — and so is
  * every savepoint when an apply fails: none has merged yet, so none of its
  * writes survives in the enclosing transaction of a frame that reports an
@@ -135,7 +136,8 @@ fun applyFrameCommit(transactions: List<Transaction>): FrameApply {
  * [fanOutApplied]; `false` when there was nothing to do — the transaction is
  * not active, it is a savepoint (merged here; a savepoint needs no fanout),
  * or its writes have already applied — and throws the apply or merge failure
- * (a [TransactionException], after marking the transaction Failed).
+ * (a [TransactionException], or a fatal error as it is, issue #61, after
+ * marking the transaction Failed).
  *
  * "Already applied" is decided under [Transaction.pendingLock], where
  * [applyWrites] sets it: a frame ([applyFrameCommit]) leaves each root
@@ -349,7 +351,9 @@ private fun Transaction.mergeIntoParent(): Throwable? {
  * this thread. The transaction refuses writes throughout (see
  * [Transaction.commitDispatching]). A throwing [fanout] or [drainEvents]
  * marks it Failed and throws a [TransactionException] naming the phase (a
- * [CancellationException] is rethrown as it is); its values stay applied.
+ * [CancellationException] is rethrown as it is); its values stay applied. A
+ * fatal error (issue #61) ends no step early: the remaining steps still run,
+ * then it marks the transaction Failed and is thrown as it is.
  */
 @StoreInternalApi
 fun Transaction.fanOutApplied(
@@ -362,21 +366,28 @@ fun Transaction.fanOutApplied(
     fanoutThreadId = currentThreadId()
     val failure =
         runCatching {
-            // First, as it runs no user code: a derived state following this
-            // store as a whole queues its recompute (StoreEdges.kt).
-            writes.tellStoreEdges()
-            val shutdownFailures = if (writes.evicted.isEmpty()) emptyList() else shutDownEvicted(writes.evicted)
-            val (sealed, others) = writes.committed.sealedFirst()
-            if (sealed.isNotEmpty()) fanout(sealed)
-            reportShutdownFailures(shutdownFailures)
-            if (others.isNotEmpty()) fanout(others)
-            // Events drain AFTER observer fanout and AFTER bridge publishes: a
-            // collector subscribed to both `state.asFlow()` and `store.events`
-            // sees the state value before the event. Sync `commit()` cannot
-            // suspend, so a full SUSPEND-policy buffer falls back to drop
-            // here; suspending callers pass a drainEvents that honors it.
-            phase = CommitPhase.EVENTS
-            if (writes.events.isNotEmpty()) (drainEvents ?: ::emitEvents)(writes.events)
+            // The values are applied, so a fatal error a step throws (issue
+            // #61) is held while the remaining steps still run, and thrown
+            // after the last one: every observer, bridge and event hears of
+            // the commit.
+            holdingFatalErrors {
+                // First, as it runs no user code: a derived state following this
+                // store as a whole queues its recompute (StoreEdges.kt).
+                writes.tellStoreEdges()
+                var shutdownFailures = emptyList<Pair<MutableState<*>, Throwable>>()
+                if (writes.evicted.isNotEmpty()) runHoldingFatal { shutdownFailures = shutDownEvicted(writes.evicted) }
+                val (sealed, others) = writes.committed.sealedFirst()
+                if (sealed.isNotEmpty()) runHoldingFatal { fanout(sealed) }
+                runHoldingFatal { reportShutdownFailures(shutdownFailures) }
+                if (others.isNotEmpty()) runHoldingFatal { fanout(others) }
+                // Events drain AFTER observer fanout and AFTER bridge publishes: a
+                // collector subscribed to both `state.asFlow()` and `store.events`
+                // sees the state value before the event. Sync `commit()` cannot
+                // suspend, so a full SUSPEND-policy buffer falls back to drop
+                // here; suspending callers pass a drainEvents that honors it.
+                phase = CommitPhase.EVENTS
+                if (writes.events.isNotEmpty()) runHoldingFatal { (drainEvents ?: ::emitEvents)(writes.events) }
+            }
             updateStatus(TransactionStatus.Committed)
         }.exceptionOrNull()
     fanoutThreadId = NOT_FANNING_OUT
@@ -389,24 +400,34 @@ fun Transaction.fanOutApplied(
  * all ([applyFrameCommit]), then fan each out in turn with the blocking
  * fanout. A root whose fanout fails still leaves the others to fan out —
  * every one of them has applied — and the first failure (an apply failure
- * first) is thrown once they have, carrying later ones as suppressed.
+ * first) is thrown once they have, carrying later ones as suppressed. A fatal
+ * error (issue #61), from the apply or a fanout, outranks every other
+ * failure: the first one is thrown, carrying the rest.
  */
 internal fun commitFrame(transactions: List<Transaction>) {
     val apply = applyFrameCommit(transactions)
-    var failure = apply.failure
+    val fatal = FatalHold()
+    var failure = apply.failure?.takeUnless(fatal::holdIfFatal)
     for (txn in apply.applied) {
         val fanoutFailure = runCatching { txn.fanOutApplied(::fanOutBlocking, drainEvents = null) }.exceptionOrNull()
-        if (fanoutFailure != null) failure = failure?.apply { addSuppressed(fanoutFailure) } ?: fanoutFailure
+        if (fanoutFailure == null || fatal.holdIfFatal(fanoutFailure)) continue
+        failure = failure?.apply { if (this !== fanoutFailure) addSuppressed(fanoutFailure) } ?: fanoutFailure
     }
+    fatal.rethrowHeld(alongside = failure)
     if (failure != null) throw failure
 }
 
-/** The blocking commit's fanout: every changed state's observers, then every bridge publish. */
+/**
+ * The blocking commit's fanout: every changed state's observers, then every
+ * bridge publish. A fatal error (issue #61) is thrown once all have run.
+ */
 internal fun fanOutBlocking(committed: List<Pair<MutableState<*>, Any>>) {
     @Suppress("UNCHECKED_CAST")
-    committed.forEach { (state, value) -> (state as MutableState<Any>).fanOutToObservers(value) }
-    @Suppress("UNCHECKED_CAST")
-    committed.forEach { (state, value) -> (state as MutableState<Any>).publishToBridge(value) }
+    val writes = committed as List<Pair<MutableState<Any>, Any>>
+    holdingFatalErrors {
+        writes.forEach { (state, value) -> runHoldingFatal { state.fanOutToObservers(value) } }
+        writes.forEach { (state, value) -> runHoldingFatal { state.publishToBridge(value) } }
+    }
 }
 
 /** The blocking event drain: `tryEmit` each staged event, in stage order. */
@@ -426,6 +447,9 @@ private fun emitEvents(events: List<Pair<MutableSharedFlow<*>, Any>>) {
  * failed" leaves the reader no way to tell which store, state or phase).
  * `Throwable`, not `Exception`: an `Error` escaping would otherwise leave the
  * transaction Active while the caller reports a rollback that never happened.
+ * A fatal error (issue #61) is returned as it is too, never wrapped, so every
+ * catch-all on the way out still sees it as fatal: [cause] when it is one,
+ * else one the status update threw (carrying [cause]).
  */
 private fun Transaction.failCommit(
     phase: CommitPhase,
@@ -433,8 +457,9 @@ private fun Transaction.failCommit(
     storeLabel: String?,
     committed: List<Pair<MutableState<*>, Any>>,
 ): Throwable {
-    runCatching { updateStatus(TransactionStatus.Failed) }
-    if (cause is CancellationException) return cause
+    val statusFailure = runCatching { updateStatus(TransactionStatus.Failed) }.exceptionOrNull()
+    val raw = fatalAmong(cause, statusFailure) ?: cause.takeIf { it is CancellationException }
+    if (raw != null) return raw
     val where = storeLabel?.let { " on $it" } ?: ""
     val frame = frameId?.let { " of frame '$it'" } ?: ""
     val states = if (committed.isEmpty()) "" else " (${committed.size} state(s) already applied)"

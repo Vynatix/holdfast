@@ -1,5 +1,7 @@
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.isFatal
+
 /**
  * Cross-cutting interceptor that wraps every transaction on a [Store]. Subclass and
  * override the hooks of interest:
@@ -10,7 +12,9 @@ package com.vynatix.holdfast
  *    where post-body validation lives — pending writes are visible to the owner
  *    thread via read-your-own-writes.
  *  - [onTransactionError] runs when the body throws. Receives the exception. Cannot
- *    swallow the error — re-throwing is automatic.
+ *    swallow the error — re-throwing is automatic. If it throws, what it throws
+ *    replaces the error, unless the error is fatal (issue #61, such as a
+ *    `StackOverflowError`): that one still propagates, carrying it as suppressed.
  *
  * Multiple middlewares form a chain. The LAST-registered middleware is outermost:
  * its `started` fires first, its `completed`/`error` fires last. Earlier-registered
@@ -39,7 +43,13 @@ open class Middleware<T : Store<T>> {
             next()
             onTransactionCompleted(context)
         } catch (e: Throwable) {
-            onTransactionError(context, e)
+            // A fatal error (issue #61) outranks whatever this hook throws: it
+            // still propagates, carrying the hook's failure as suppressed.
+            runCatching { onTransactionError(context, e) }
+                .onFailure { hookFailure ->
+                    if (!e.isFatal()) throw hookFailure
+                    if (hookFailure !== e) e.addSuppressed(hookFailure)
+                }
             throw e
         }
     }

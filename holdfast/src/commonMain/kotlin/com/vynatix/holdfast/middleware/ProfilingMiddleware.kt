@@ -5,6 +5,7 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreLock
 import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.keyedEntryName
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlin.time.Duration
 import kotlin.time.TimeSource
 
@@ -85,13 +86,15 @@ data class StoreProfile(
  * [reset]; pass an [onSample] callback to also stream every finished
  * transaction (e.g. into a metrics pipeline or a test fixture).
  *
- * Purely observational: it never throws from its own bookkeeping, so attaching
- * it cannot change a transaction's outcome. An [onSample] callback that throws
- * is NOT isolated, and what happens depends on the action flavor: under sync
- * `action` it propagates and rolls the transaction back (like any middleware
- * hook), while under `:holdfast-coroutines.suspendAction` the per-hook
- * `runCatching` isolation swallows it and the commit proceeds. Keep the
- * callback passive either way.
+ * Purely observational: it never throws from its own bookkeeping, except a
+ * fatal error (issue #61), so attaching it cannot change a transaction's
+ * outcome. An [onSample] callback that throws is NOT isolated, and what
+ * happens depends on the action flavor: under sync `action` it propagates and
+ * rolls the transaction back (like any middleware hook), while under
+ * `:holdfast-coroutines.suspendAction` the per-hook `runCatching` isolation
+ * swallows it and the commit proceeds — except a fatal error, which rolls the
+ * transaction back and propagates under either flavor. Keep the callback
+ * passive either way.
  *
  * State-name attribution reads [com.vynatix.holdfast.Transaction.modifiedStates],
  * which is owner-thread-confined. Under `:holdfast-coroutines.suspendAction` a
@@ -227,7 +230,8 @@ class ProfilingMiddleware<V : Store<V>>(
 
     private fun modifiedStateNames(context: MiddlewareContext<V>): Set<String> {
         // modifiedStates throws off the owner thread (possible after a
-        // suspendAction thread hop); a profiler must degrade, never roll back.
+        // suspendAction thread hop); a profiler must degrade, never roll back
+        // — but a fatal error (issue #61) is not a degraded read: it propagates.
         return runCatching {
             val states = context.transaction.modifiedStates
             if (states.isEmpty()) return@runCatching emptySet()
@@ -236,7 +240,7 @@ class ProfilingMiddleware<V : Store<V>>(
                     .associate { (name, state) -> state to name }
             // A keyed entry is not a property: it is named after its family.
             states.mapNotNullTo(mutableSetOf<String>()) { namesByState[it] ?: it.keyedEntryName() }
-        }.getOrElse { emptySet() }
+        }.rethrowFatal().getOrElse { emptySet() }
     }
 
     private companion object {

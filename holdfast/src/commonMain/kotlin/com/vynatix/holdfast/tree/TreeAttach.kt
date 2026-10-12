@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
@@ -28,7 +29,9 @@ import com.vynatix.holdfast.platform.threadYield
 //    (`AttachAnnouncer.kt`).
 //
 // Phases 5 and 6 cannot fail the attach: a failure there is reported through
-// the owner's `uncaughtObserverHandler`.
+// the owner's `uncaughtObserverHandler`. A fatal error there (issue #61) is
+// held instead, both phases still run to their end, and the end of phase 6
+// throws it out of the read or create that attached: the attach stands.
 
 /** One store to attach: its tree state, and the name, origin and key its node takes. */
 internal class AttachTarget(
@@ -69,6 +72,9 @@ internal class ChildAttach(
 
     /** What [link] overwrote, for [unlinkLocked]. */
     private val linked = ArrayList<Linked>()
+
+    /** The first fatal error phases 5 and 6 caught (issue #61): thrown when phase 6 ends. */
+    private val fatal = FatalHold()
 
     private class Linked(
         val target: AttachTarget,
@@ -207,13 +213,14 @@ internal class ChildAttach(
      * live store under it. Listed with the disposing stores: a store that
      * finished disposing since phase 4 lists as nothing (its own dispose
      * retired its ring) instead of failing the listing, and one mid-dispose
-     * syncs to an empty ring — a benign race, never reported.
+     * syncs to an empty ring — a benign race, never reported. A member
+     * whose sync threw a fatal error does not stop the others (issue #61).
      */
     fun syncRings() {
         for (leaf in attached) {
             runCatching {
                 for ((member, _) in listingOf(leaf, leaf, includeDisposing = true).shape.leaves()) {
-                    syncTreeRing(member)
+                    fatal.holdingFatal { syncTreeRing(member) }
                 }
             }.onFailure(::report)
         }
@@ -222,14 +229,22 @@ internal class ChildAttach(
     /**
      * Phase 6. Tell the owner's ancestors, nearest first, that each attached
      * store — and every live store already under it — joined their subtree
-     * (`AttachAnnouncer`).
+     * (`AttachAnnouncer`). The attach's last step: then throw the fatal error
+     * phase 5 or 6 held, if any (issue #61).
      */
     fun announce() {
         val announcer = AttachAnnouncer(ancestorsOf(parentNode), ::report)
         for (leaf in attached) runCatching { announcer.announce(leaf) }.onFailure(::report)
+        fatal.rethrowHeld()
     }
 
+    /**
+     * Report [failure] through the owner's handler; a handler that throws is
+     * ignored. A fatal error — [failure], or one the handler throws — is held
+     * instead, for the end of phase 6 (issue #61).
+     */
     private fun report(failure: Throwable) {
-        runCatching { owner.internalReportUncaughtFailure(failure) }
+        if (fatal.holdIfFatal(failure)) return
+        runCatching { owner.internalReportUncaughtFailure(failure) }.onFailure { fatal.holdIfFatal(it) }
     }
 }

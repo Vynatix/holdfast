@@ -126,20 +126,33 @@ internal class KeyedRegistry(
      * it, holding no lock of the store but the entry's announcement lock
      * ([KeyedEntry.announceLock]) — never after the entry's eviction was
      * announced ([announceEvicted]). Returns whether this call announced it.
+     *
+     * A fatal error a listener throws (issue #61) is thrown once every
+     * listener has heard of the entry and the lock is released, and once
+     * this call has told the store's edges, as its caller does on return.
      */
     fun announceAdded(
         decl: StateDeclaration<*>,
         state: MutableState<*>,
     ): Boolean {
         val entry = decl.keyed ?: return false
-        return entry.announceLock.withLock {
-            val announcing = entry.phase == KeyedEntry.Phase.NEW
-            if (announcing) {
-                entry.phase = KeyedEntry.Phase.ADDED
-                tell(state) { it.onEntryAdded(entry.family.name, entry.key, state) }
-            }
-            announcing
+        var announced = false
+        holdingFatalErrors {
+            val fatal = this
+            announced =
+                entry.announceLock.withLock {
+                    val announcing = entry.phase == KeyedEntry.Phase.NEW
+                    if (announcing) {
+                        entry.phase = KeyedEntry.Phase.ADDED
+                        tell(state, fatal) { it.onEntryAdded(entry.family.name, entry.key, state) }
+                    }
+                    announcing
+                }
+            // The held fatal error leaves this call by a throw, so its caller
+            // never tells the store's edges of the new entry: tell them here.
+            if (fatal.isHolding) registry.store.tellStoreEdges()
         }
+        return announced
     }
 
     /**
@@ -147,29 +160,40 @@ internal class KeyedRegistry(
      * commit's fanout, before its observers, once. An entry no thread has
      * returned yet — so never announced — is announced added first, under the
      * same lock, so a listener always hears an entry added before it hears it
-     * evicted, and never added after.
+     * evicted, and never added after. A fatal error a listener throws
+     * (issue #61) is thrown once both announcements are done and the lock is
+     * released.
      */
     fun announceEvicted(state: MutableState<*>) {
         val entry = state.declaration?.keyed ?: return
+        val fatal = FatalHold()
         entry.announceLock.withLock {
             when (entry.phase) {
                 KeyedEntry.Phase.EVICTED -> return@withLock
-                KeyedEntry.Phase.NEW -> tell(state) { it.onEntryAdded(entry.family.name, entry.key, state) }
+                KeyedEntry.Phase.NEW -> tell(state, fatal) { it.onEntryAdded(entry.family.name, entry.key, state) }
                 KeyedEntry.Phase.ADDED -> Unit
             }
             entry.phase = KeyedEntry.Phase.EVICTED
-            tell(state) { it.onEntryEvicted(entry.family.name, entry.key, state) }
+            tell(state, fatal) { it.onEntryEvicted(entry.family.name, entry.key, state) }
         }
+        fatal.rethrowHeld()
     }
 
-    /** Call [event] on each listener, reporting — not propagating — what one throws, so the others are told. */
+    /**
+     * Call [event] on each listener, reporting — not propagating — what one
+     * throws, so the others are told. A fatal error (issue #61), from a
+     * listener or the handler, is held in [fatal] instead, for the caller to
+     * throw once its announcement is done.
+     */
     private inline fun tell(
         state: MutableState<*>,
+        fatal: FatalHold,
         event: (KeyedMembershipListener) -> Unit,
     ) {
         for (listener in listenersLock.withLock { listeners }) {
             runCatching { event(listener) }.onFailure { failure ->
-                runCatching { state.owningStore.internalReportUncaughtFailure(failure) }
+                if (fatal.holdIfFatal(failure)) return@onFailure
+                fatal.runIsolated { state.owningStore.internalReportUncaughtFailure(failure) }
             }
         }
     }
@@ -261,13 +285,13 @@ internal class KeyedEntry(
     /**
      * Dispose every inbound subscription kept, outside the lock, and keep no
      * more. Each is disposed even when an earlier one throws; the first
-     * failure is rethrown afterwards, with the others suppressed.
+     * failure — the first fatal error (issue #61) when there is one — is
+     * rethrown afterwards, with the others suppressed.
      */
     fun closeInbound() {
         val open = lock.withLock { inbound.also { inbound = null } } ?: return
         val failures = open.mapNotNull { runCatching { it.dispose() }.exceptionOrNull() }
-        val first = failures.firstOrNull() ?: return
-        failures.drop(1).forEach(first::addSuppressed)
+        val first = primaryFailureOf(failures) ?: return
         throw first
     }
 }
@@ -398,7 +422,10 @@ interface KeyedMembershipListener {
  * Tell [listener] of every keyed-state entry this store creates or evicts
  * from now on, until the returned handle is disposed (or the store is). A
  * throwing callback is reported through [Store.uncaughtObserverHandler]
- * (logged while none is set), and the other listeners are still told.
+ * (logged while none is set), and the other listeners are still told. A
+ * fatal error (issue #61) is never reported: once the others are told, it is
+ * thrown to what announced the entry (a `get`, a restore, the evicting
+ * commit — after that commit's fanout).
  *
  * For issue #21, whose tree keeps its view of keyed branches in step with the
  * store's entries.

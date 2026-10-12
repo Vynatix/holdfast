@@ -6,6 +6,9 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.internalIsFatal
+import com.vynatix.holdfast.internalRethrowFatal
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.snapshot
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CancellationException
@@ -51,7 +54,11 @@ import kotlinx.coroutines.sync.withLock
 // `uncaughtObserverHandler` as an OverlayException (logged while none is set;
 // a handler that throws there is ignored). A failed write is retried by the
 // next change; an oversize blob is not written, and the key keeps the last
-// blob written.
+// blob written. A fatal error (issue #61) — the capture's, a codec's, the
+// put's, the launch's or the handler's — is never reported: it propagates,
+// out of the writer's coroutine to its scope, or out of the call that
+// signalled the writer, and the writer is left idle, so the next change
+// writes again.
 //
 // The writer learns of a change from the commit's observer fanout
 // (OverlayWatch.kt), so a commit whose fanout skips the overlay's observer — a
@@ -176,21 +183,29 @@ internal class OverlayWriter<V : Store<V>>(
         if (wasIdle) launchWriter()
     }
 
-    /** Launch the writer on the store's scope, as it resolves now. */
+    /**
+     * Launch the writer on the store's scope, as it resolves now. When that
+     * throws a fatal error (issue #61), the writer is left idle and the error
+     * propagates, unreported.
+     */
     private fun launchWriter() {
         runCatching { store.scope.launch { drain() } }
             .onFailure { failure ->
                 running.value = IDLE
+                failure.internalRethrowIfFatal()
                 store.reportOverlay(stoppedReport(spec.key, storeName, failure))
             }.onSuccess { writing ->
                 job.value = writing
                 writing.invokeOnCompletion { cause ->
                     // Ended before it wrote the latest values: its scope was
                     // cancelled (or the store disposed, which is no failure).
-                    // The next change launches it again.
+                    // The next change launches it again. A fatal error (issue
+                    // #61) is not reported: the failed job hands it to its
+                    // scope's exception handling.
                     if (cause != null && running.value != IDLE) {
                         running.value = IDLE
-                        if (!store.isDisposed) store.reportOverlay(stoppedReport(spec.key, storeName, cause))
+                        val report = !store.isDisposed && !cause.internalIsFatal()
+                        if (report) store.reportOverlay(stoppedReport(spec.key, storeName, cause))
                     }
                 }
             }
@@ -218,6 +233,9 @@ internal class OverlayWriter<V : Store<V>>(
                 val put = runCatching { spec.kv.put(spec.key, blob) }
                 val failure = put.exceptionOrNull()
                 if (failure is CancellationException) throw failure
+                // A fatal error leaves the writer's coroutine unreported (issue
+                // #61); `written` stays behind, so the next change retries.
+                failure?.internalRethrowIfFatal()
                 if (failure != null) {
                     store.reportOverlay(putFailedReport(spec.key, storeName, failure))
                     return@withLock
@@ -232,7 +250,7 @@ internal class OverlayWriter<V : Store<V>>(
 /**
  * This store's UserAuthored values as the overlay's blob, or `null` — reported
  * — when the capture or a codec fails, or the blob is longer than the size
- * limit.
+ * limit. A fatal error (issue #61) the capture or a codec throws propagates.
  */
 private fun <V : Store<V>> V.encodeOverlay(
     spec: OverlaySpec,
@@ -241,7 +259,10 @@ private fun <V : Store<V>> V.encodeOverlay(
     // Outer: the capture, whose failure (an initializer's) may quote anything;
     // inner: encode(), whose IllegalStateException names the state and the
     // codec's exception class, never a value.
-    val encoded = runCatching { snapshot(SnapshotScope.UserAuthored) }.map { runCatching { it.encode() } }
+    val encoded =
+        runCatching { snapshot(SnapshotScope.UserAuthored) }
+            .internalRethrowFatal()
+            .map { runCatching { it.encode() }.internalRethrowFatal() }
     val blob = encoded.getOrNull()?.getOrNull()
     when {
         blob == null -> {
@@ -255,9 +276,13 @@ private fun <V : Store<V>> V.encodeOverlay(
     return null
 }
 
-/** Report [failure] through this store's `uncaughtObserverHandler`; a handler that throws is ignored. */
+/**
+ * Report [failure] through this store's `uncaughtObserverHandler`; a handler
+ * that throws is ignored — except a fatal error (issue #61), the handler's or
+ * the default log's, which propagates.
+ */
 internal fun Store<*>.reportOverlay(failure: OverlayException) {
-    runCatching { internalReportUncaughtFailure(failure) }
+    runCatching { internalReportUncaughtFailure(failure) }.internalRethrowFatal()
 }
 
 private fun tooLargeReport(

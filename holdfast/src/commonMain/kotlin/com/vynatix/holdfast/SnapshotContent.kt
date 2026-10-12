@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlin.reflect.KClass
 
 // What a StoreSnapshot holds (issue #20, R1). A snapshot is one of two kinds:
@@ -123,7 +124,8 @@ internal class DecodedContent(
 
 /**
  * [raw] encoded by [codec], for state [name]. A throwing codec is reported
- * without its exception, whose message may quote the value.
+ * without its exception, whose message may quote the value; a fatal error
+ * it throws propagates as it is (issue #61).
  */
 private fun encodeValue(
     name: String,
@@ -132,7 +134,7 @@ private fun encodeValue(
 ): String {
     @Suppress("UNCHECKED_CAST")
     val typed = codec as StateCodec<Any>
-    return runCatching { typed.encode(raw) }.getOrElse { failure ->
+    return runCatching { typed.encode(raw) }.rethrowFatal().getOrElse { failure ->
         error(
             "Cannot encode state '$name': its codec threw ${failure.describeClass()}. The exception is not " +
                 "attached, because its message may quote the value. Check the state's codec.",

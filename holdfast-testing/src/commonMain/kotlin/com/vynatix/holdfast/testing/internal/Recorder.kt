@@ -235,9 +235,12 @@ internal class Recorder<V : Store<V>>(
         // suspending path, so a throw here used to leave the timeline with
         // started alone — an intermittently "inexplicably empty" timeline for
         // coroutine-first tests. Mirrors ProfilingMiddleware's attribution
-        // degradation.
+        // degradation. A fatal error (issue #61) is no such degradation: it
+        // propagates, and the action rolls back and throws it.
         val modified: Set<State<*>> =
-            runCatching { PrivilegedHooks.modifiedStates(txn) }.getOrElse { emptySet() }
+            runCatching { PrivilegedHooks.modifiedStates(txn) }
+                .onFailure(PrivilegedHooks::rethrowIfFatal)
+                .getOrElse { emptySet() }
         if (modified.isNotEmpty()) {
             val committedSnapshot = PrivilegedHooks.snapshotCommittedStateValues(context.store, modified)
 

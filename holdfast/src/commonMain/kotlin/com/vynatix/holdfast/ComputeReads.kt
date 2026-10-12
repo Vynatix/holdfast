@@ -91,14 +91,21 @@ internal class ComputeReads private constructor(
             reads: ComputeReads,
             compute: () -> R,
         ): R {
-            reads.sources.forEach { it.cutReaders.incrementAndGet() }
             val prior = currentComputeReadsLocal()
-            setComputeReadsLocal(reads)
+            // Every count and the slot write inside the try: a fatal error
+            // (issue #61) thrown while taking them still undoes what was taken,
+            // rather than leave this thread reading a stale cut.
+            var counted = 0
             try {
+                reads.sources.forEach {
+                    it.cutReaders.incrementAndGet()
+                    counted++
+                }
+                setComputeReadsLocal(reads)
                 return compute()
             } finally {
                 setComputeReadsLocal(prior)
-                reads.sources.forEach { it.cutReaders.decrementAndGet() }
+                repeat(counted) { reads.sources[it].cutReaders.decrementAndGet() }
             }
         }
     }

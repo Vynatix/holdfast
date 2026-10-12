@@ -1,6 +1,7 @@
 package com.vynatix.holdfast.testing.concurrency
 
 import com.vynatix.holdfast.testing.StoreTestScope
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -18,6 +19,9 @@ import kotlin.time.Duration.Companion.seconds
  * with the wrapper message
  * `"eventually: gave up after Xms (last: <inner-message>)"` and the most recent
  * failure as its cause.
+ *
+ * A fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
+ * is not a failed check to retry: it propagates at once, as it is.
  *
  * Both [within] and [every] are virtual-time durations under `storeTest`:
  * `delay` and `withTimeoutOrNull` participate in the test scheduler, so a poll
@@ -44,6 +48,7 @@ suspend fun StoreTestScope.eventually(
                 } catch (c: CancellationException) {
                     throw c
                 } catch (t: Throwable) {
+                    PrivilegedHooks.rethrowIfFatal(t)
                     lastError = t
                     delay(every)
                 }

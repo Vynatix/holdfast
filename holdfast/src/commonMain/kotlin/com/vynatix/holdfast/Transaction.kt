@@ -640,6 +640,10 @@ class Transaction internal constructor(
      * every observer already notified — failed its own status transition,
      * and the frame reported an error, and a rollback, for a commit that had
      * applied and fanned out in full.
+     *
+     * A rollback that fails marks the transaction Failed and throws a
+     * [TransactionException] (a cancellation as it is); a fatal error (issue
+     * #61) is thrown as it is, never wrapped.
      */
     fun rollback() {
         val current = statusLock.withLock { _status }
@@ -665,11 +669,13 @@ class Transaction internal constructor(
             if (ending) updateStatus(TransactionStatus.RolledBack)
         } catch (e: CancellationException) {
             ending = true
-            runCatching { updateStatus(TransactionStatus.Failed) }
+            cleanUpUnwinding(e) { updateStatus(TransactionStatus.Failed) }
             throw e
         } catch (e: Throwable) {
             ending = true
-            runCatching { updateStatus(TransactionStatus.Failed) }
+            // A fatal error (issue #61) is thrown as it is, never wrapped: the
+            // rollback's own, else one the status update threw.
+            cleanUpUnwinding(e) { updateStatus(TransactionStatus.Failed) }
             throw TransactionException("Rollback of transaction '$id' failed", e)
         } finally {
             if (ending) recordEndTime()
@@ -746,7 +752,9 @@ class TransactionException(
 /**
  * The outcome of a [Store.action]. Either [Success] (the body returned without
  * throwing and the commit succeeded — carrying the body's computed `value`) or
- * [Error] (the body or commit threw, the transaction is RolledBack).
+ * [Error] (the body or commit threw, the transaction is RolledBack). A fatal
+ * error (issue #61, such as a `StackOverflowError`) is never an [Error]: it
+ * propagates out of the action instead.
  *
  * Generic in `R` (the body's return type) and covariant in it, so a
  * `TransactionResult<Int>` is assignable to `TransactionResult<Number>` and to

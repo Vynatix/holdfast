@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -107,16 +108,22 @@ internal class StoreEdges(
         synchronized(lock) { followers = followers.filterNot { it === follower } }
     }
 
-    /** [store] changed: queue each follower's recompute (never runs one inside a commit's fanout). */
+    /**
+     * [store] changed: queue each follower's recompute (never runs one inside
+     * a commit's fanout). A fatal error one throws (issue #61) — it may run
+     * the recompute at once on an idle host — is thrown once the others are
+     * told.
+     */
     fun changed() {
-        for (follower in followers) follower.onStoreChanged(store)
+        holdingFatalErrors { for (follower in followers) runHoldingFatal { follower.onStoreChanged(store) } }
     }
 
     /**
      * [store] was disposed: drop every follower, and tell each (its node
      * recomputes without the store), each isolated — a failure goes to its
      * host's handler, a handler that throws there is ignored (as `dispose()`
-     * ignores one for an attachment), and the next follower is still told.
+     * ignores one for an attachment), and the next follower is still told. A
+     * fatal error (issue #61) is thrown once every follower has been told.
      */
     override fun onStoreDisposed() {
         val gone =
@@ -124,7 +131,7 @@ internal class StoreEdges(
                 closed = true
                 followers.also { followers = emptyList() }
             }
-        for (follower in gone) runCatching { follower.onSourceStoreDisposed(store) }
+        gone.forEachIsolated { follower -> follower.onSourceStoreDisposed(store) }
     }
 }
 
@@ -251,11 +258,12 @@ internal enum class EdgeAdd {
 
 /**
  * This store's [StoreEdges], attached first when it has none; `null` when the
- * store is disposed, or being disposed.
+ * store is disposed, or being disposed. A fatal error (issue #61) is thrown,
+ * never read as a disposed store.
  */
 internal fun Store<*>.storeEdgesOrNull(): StoreEdges? {
     val attached = runCatching { internalAttachIfAbsent(STORE_EDGES) { StoreEdges(this) } }
-    return attached.getOrNull()
+    return attached.rethrowFatal().getOrNull()
 }
 
 /**
@@ -288,13 +296,17 @@ internal fun Store<*>.tellStoreEdges() {
  * initializers (or, for a legacy derived backing or an internal state, no
  * longer holds them), which changes what it holds. Called outside the
  * registry's lock. The edges are told even when a shutdown throws (a
- * bridge's `dispose`), which then propagates.
+ * bridge's `dispose`), which then propagates. A fatal error (issue #61)
+ * ends no shutdown early: every state is shut down, the edges are told, and
+ * then it is thrown.
  */
 internal fun Store<*>.shutDownDematerialized(states: Collection<MutableState<*>>) {
-    try {
-        states.forEach { it.shutdownSilently() }
-    } finally {
-        if (states.any { it.isCapturedStoreState }) tellStoreEdges()
+    holdingFatalErrors {
+        try {
+            states.forEach { runHoldingFatal { it.shutdownSilently() } }
+        } finally {
+            if (states.any { it.isCapturedStoreState }) runHoldingFatal { tellStoreEdges() }
+        }
     }
 }
 

@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.isFatal
+
 // Committing keyed-entry evictions (issue #20, R7; plan D7, D18).
 //
 // A savepoint's commit merges its evictions into its parent's, the last
@@ -75,17 +77,39 @@ internal fun Transaction.mergeEvictionsInto(parent: Transaction) {
  * reports it once the sealed states' observers have run (FrameCommit.kt).
  * Every entry is shut down before the first report, so a throwing handler,
  * which ends the fanout like any fanout failure, leaves none running.
+ *
+ * A fatal error (issue #61), from a shutdown or a membership listener, is
+ * returned with the shutdown failures, never thrown here: every entry is
+ * still shut down and announced, and [reportShutdownFailures] throws it,
+ * after the sealed states' observers.
  */
 internal fun shutDownEvicted(evicted: List<MutableState<*>>): List<Pair<MutableState<*>, Throwable>> {
     val failures =
-        evicted.mapNotNull { state -> runCatching { state.shutdownSilently() }.exceptionOrNull()?.let { state to it } }
-    for (state in evicted) keyedRegistryOf(state).announceEvicted(state)
+        evicted.mapNotNullTo(ArrayList<Pair<MutableState<*>, Throwable>>()) { state ->
+            runCatching { state.shutdownSilently() }.exceptionOrNull()?.let { state to it }
+        }
+    for (state in evicted) {
+        // announceEvicted reports what a listener throws, and throws only a
+        // fatal error, once its own listeners have all been told.
+        runCatching { keyedRegistryOf(state).announceEvicted(state) }.onFailure { failure ->
+            if (!failure.isFatal()) throw failure
+            failures += state to failure
+        }
+    }
     return failures
 }
 
-/** Report what [shutDownEvicted] caught through each store's `uncaughtObserverHandler` (a throwing one propagates). */
+/**
+ * Report what [shutDownEvicted] caught through each store's
+ * `uncaughtObserverHandler` (a throwing one propagates). A fatal error
+ * (issue #61) is never reported: it is thrown once the others are.
+ */
 internal fun reportShutdownFailures(failures: List<Pair<MutableState<*>, Throwable>>) {
-    for ((state, failure) in failures) state.owningStore.internalReportUncaughtFailure(failure)
+    holdingFatalErrors {
+        for ((state, failure) in failures) {
+            if (!holdIfFatal(failure)) runHoldingFatal { state.owningStore.internalReportUncaughtFailure(failure) }
+        }
+    }
 }
 
 /**

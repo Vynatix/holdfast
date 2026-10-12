@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // Typed reads of a snapshot through State instances (issue #20, R1; plan D8):
 // `snapshot[store.count]` has the state's own type, and no name is written.
 
@@ -133,13 +135,14 @@ private fun <T : Any> codecOf(decl: StateDeclaration<T>): StateCodec<T> =
  * [text] decoded by [codec] for [decl]'s state. A throwing codec becomes a
  * [SnapshotFormatException] that names the state and the exception's class
  * but carries neither the exception nor the text: either may quote the value.
+ * A fatal error the codec throws propagates as it is (issue #61).
  */
 internal fun <T : Any> decodeText(
     decl: StateDeclaration<*>,
     codec: StateCodec<T>,
     text: String,
 ): T =
-    runCatching { codec.decode(text) }.getOrElse { failure ->
+    runCatching { codec.decode(text) }.rethrowFatal().getOrElse { failure ->
         throw SnapshotFormatException(
             "Cannot decode ${decl.qualifiedName} from the snapshot: its codec threw ${failure.describeClass()}. " +
                 "The exception is not attached, because its message may quote the encoded value.",

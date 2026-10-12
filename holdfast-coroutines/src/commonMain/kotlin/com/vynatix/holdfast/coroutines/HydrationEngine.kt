@@ -3,10 +3,12 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
+import com.vynatix.holdfast.internalIsFatal
 import com.vynatix.holdfast.internalSealedState
 import com.vynatix.holdfast.internalStageSealed
 import com.vynatix.holdfast.internalStagesHere
@@ -59,9 +61,10 @@ private class RunningRefresh(
 /**
  * What a decision committed to: the refresh to launch, what its
  * transaction's fanout failed with after the commit applied, if anything
- * (an observer failing through a rethrowing `uncaughtObserverHandler`), and
- * where its seed left the overlay: the report of a blob it could not apply,
- * or whether it stands LOADED, so its writer is signalled.
+ * (an observer failing through a rethrowing `uncaughtObserverHandler`, or a
+ * fatal error, issue #61), and where its seed left the overlay: the report
+ * of a blob it could not apply, or whether it stands LOADED, so its writer
+ * is signalled.
  */
 private class Decision(
     val refresh: Long,
@@ -131,12 +134,18 @@ internal class HydrationEngine<V : Store<V>, F>(
      * [Hydrator.hydrate]: decide under the gate, then launch the refresh the
      * decision committed to — only after its transaction committed (applied:
      * a fanout failure after that still launches it, then throws).
+     *
+     * A fatal error (issue #61) thrown once the decision committed — by the
+     * gate's release (its drain, its settle), the overlay's report or its
+     * writer — is held until the refresh has launched, then thrown: nothing
+     * else would ever settle the refresh the decision marked in flight.
      */
     suspend fun hydrate(scope: CoroutineScope) {
         check(!store.isDisposed) { "store disposed" }
         refuseInsideEntry(store, "hydrate()", ::insideEntryMessage)
         var inbound: OverlayInbound? = null
         var decision: Decision? = Decision.REREAD
+        val fatal = FatalHold()
         while (decision === Decision.REREAD) {
             // A committed phase that decides nothing needs no gate: the call is
             // ordered as if it ran before whatever commits next. (A phase staged
@@ -145,14 +154,17 @@ internal class HydrationEngine<V : Store<V>, F>(
             if (!phase.value.decides(stranded.value)) return
             // What a seed would put back, read outside the gate.
             if (overlay != null && phase.value == HydrationPhase.Detached) inbound = overlay.current(inbound)
-            decision = gate.hold { decide(inbound) }
+            decision = fatal.decisionDespiteFatal { reach -> gate.hold { decide(inbound).also(reach) } }
         }
         val decided = decision ?: return
         // Once the gate has released the store: the handler — and the writer,
         // which a dispatcher may run inline here — may open an action on it.
-        decided.overlay.failure?.let { store.reportOverlay(it) }
-        if (decided.overlay.loaded) overlay?.writer?.signalIfBehind()
-        HydrationRefreshRun(this, decided.refresh).start(scope)
+        decided.overlay.failure?.let { failure -> fatal.holdFatal { store.reportOverlay(failure) } }
+        if (decided.overlay.loaded) fatal.holdFatal { overlay?.writer?.signalIfBehind() }
+        runCatching { HydrationRefreshRun(this, decided.refresh).start(scope) }
+            .onFailure { fatal.rethrowHeld(alongside = it) }
+            .getOrThrow()
+        fatal.rethrowHeld(alongside = decided.fanoutFailure)
         decided.fanoutFailure?.let { throw it }
     }
 
@@ -200,6 +212,10 @@ internal class HydrationEngine<V : Store<V>, F>(
      * [hydrate] to report, or to signal the writer, once the gate has
      * released the store.
      *
+     * A fatal error (issue #61) the transaction throws is its failure like
+     * any other: thrown when the transaction rolled back, else — its fanout
+     * threw it after the commit applied — returned with the decision.
+     *
      * @throws Throwable what the deciding transaction failed with when it
      *   rolled back (a throwing `base { }`, a middleware rejecting it):
      *   nothing is launched.
@@ -211,34 +227,39 @@ internal class HydrationEngine<V : Store<V>, F>(
     ): Decision? {
         var decided = 0L
         var load: OverlayLoad<V>? = null
-        val result =
-            store.internalTopLevelAction(id) {
-                if (phase.value != seen) return@internalTopLevelAction null
-                if (seen == HydrationPhase.Detached) {
-                    // Base, then the overlay, in this one transaction: the
-                    // overlay wins over whatever base wrote or restored.
-                    val opened = inbound?.let { overlay?.open(it) }
-                    load = opened
-                    plan.base(this)
-                    opened?.apply()
+        val outcome =
+            runCatching {
+                store.internalTopLevelAction(id) {
+                    if (phase.value != seen) return@internalTopLevelAction null
+                    if (seen == HydrationPhase.Detached) {
+                        // Base, then the overlay, in this one transaction: the
+                        // overlay wins over whatever base wrote or restored.
+                        val opened = inbound?.let { overlay?.open(it) }
+                        load = opened
+                        plan.base(this)
+                        opened?.apply()
+                    }
+                    val refresh = refreshes.incrementAndGet()
+                    decided = refresh
+                    stagePhase(HydrationPhase.Seeded(refresh))
+                    refresh
                 }
-                val refresh = refreshes.incrementAndGet()
-                decided = refresh
-                stagePhase(HydrationPhase.Seeded(refresh))
-                refresh
-            }
+            }.keepingOnlyFatal()
+        val result = outcome.getOrNull()
+        val failure = outcome.exceptionOrNull() ?: (result as? TransactionResult.Error)?.exception
         // No transaction of this thread is open here, so this reads the
         // committed phase: Seeded(decided) only if the commit applied, since
         // the number is new.
         val applied =
             when (result) {
                 is TransactionResult.Success -> result.value != null
-                is TransactionResult.Error -> decided != 0L && isInFlight(decided)
+                // A TransactionResult.Error, or a fatal error thrown (`null`).
+                else -> decided != 0L && isInFlight(decided)
             }
         val settled = load?.let { checkNotNull(overlay).settle(it, applied) } ?: OverlaySettled.NONE
         return when {
-            !applied -> if (result is TransactionResult.Error) throw result.exception else null
-            else -> Decision(decided, (result as? TransactionResult.Error)?.exception, settled)
+            !applied -> if (failure != null) throw failure else null
+            else -> Decision(decided, failure, settled)
         }
     }
 
@@ -357,6 +378,30 @@ private fun HydrationPhase?.isSeededAs(refresh: Long): Boolean = (this as? Hydra
  */
 private fun HydrationPhase.decides(stranded: Long): Boolean =
     this == HydrationPhase.Detached || this is HydrationPhase.Failed || isSeededAs(stranded)
+
+/**
+ * [decide] — the gate's hold of a decision, which passes the decision it
+ * reached to `reach` — or, when the gate's release throws a fatal error
+ * (issue #61) after a decision committed a refresh (a drained task's, a
+ * settled recompute's), that decision, with the error held in this hold:
+ * the caller must still launch the refresh it marked in flight.
+ */
+private inline fun FatalHold.decisionDespiteFatal(decide: (reach: (Decision?) -> Unit) -> Decision?): Decision? {
+    var reached: Decision? = null
+    return runCatching { decide { reached = it } }.getOrElse { thrown ->
+        val committed = reached?.takeIf { it !== Decision.REREAD }
+        if (committed == null || !holdIfFatal(thrown)) throw thrown
+        committed
+    }
+}
+
+/** Run [step], holding a fatal error it throws (issue #61) in this hold; anything else it throws propagates. */
+private inline fun FatalHold.holdFatal(step: () -> Unit) {
+    runCatching(step).onFailure { if (!holdIfFatal(it)) throw it }
+}
+
+/** This result, its failure kept only when fatal (issue #61), for the caller to handle; any other is thrown again. */
+private fun <T> Result<T>.keepingOnlyFatal(): Result<T> = onFailure { if (!it.internalIsFatal()) throw it }
 
 /** What a write to a hydrator's state throws: whose it is, and what to call instead. */
 private fun sealedRefusal(storeName: String): String =

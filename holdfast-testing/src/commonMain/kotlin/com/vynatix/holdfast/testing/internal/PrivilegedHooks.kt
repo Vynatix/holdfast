@@ -4,6 +4,7 @@ package com.vynatix.holdfast.testing.internal
 
 import com.vynatix.holdfast.Disposable
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.KeyedState
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.State
@@ -12,8 +13,11 @@ import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.displayValue
+import com.vynatix.holdfast.internalIsFatal
 import com.vynatix.holdfast.internalKeyedFamily
 import com.vynatix.holdfast.internalRemoveMiddleware
+import com.vynatix.holdfast.internalRethrowFatal
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.internalSettling
 import com.vynatix.holdfast.internalTransactionLockFree
 import com.vynatix.holdfast.observableBacking
@@ -30,7 +34,12 @@ import kotlin.time.Clock
  * for these helpers rather than opt in directly — that way new dependencies on
  * store internals are visible at PR time.
  *
- * Five clusters of hooks live here:
+ * Six clusters of hooks live here:
+ *  - **Fatal errors** (issue #61) — [isFatal] and [rethrowIfFatal], plus
+ *    [HeldFatal] below: a harness catch-all never records, reports, retries
+ *    or drops a fatal error (a `StackOverflowError`, an `OutOfMemoryError`);
+ *    it propagates — after the remaining steps when the catch-all is one
+ *    step of a sequence that must finish, such as teardown.
  *  - **Recorder reads** — [snapshotCommittedStateValues] and [modifiedStates]
  *    let the timeline recorder observe committed values from inside a
  *    middleware hook without re-entering the read-your-own-writes overlay.
@@ -57,6 +66,22 @@ import kotlin.time.Clock
  */
 @Suppress("TooManyFunctions") // The module's one opt-in funnel: it grows with every core seam used.
 internal object PrivilegedHooks {
+    /**
+     * Whether [error] means the runtime itself is failing (issue #61: a
+     * `VirtualMachineError` on JVM/Android, such as a `StackOverflowError`;
+     * an `OutOfMemoryError` on iOS). Judged on [error] alone, never its causes.
+     */
+    fun isFatal(error: Throwable): Boolean = error.internalIsFatal()
+
+    /**
+     * Throw [error] again if it [isFatal] (issue #61): the first thing a
+     * harness catch-all around one call does, before it records, converts,
+     * retries or drops what it caught.
+     */
+    fun rethrowIfFatal(error: Throwable) {
+        error.internalRethrowIfFatal()
+    }
+
     /**
      * Read every state currently registered on [store] mapped to its committed
      * post-`transformer.get` value, bypassing the active transaction's
@@ -168,9 +193,10 @@ internal object PrivilegedHooks {
      * if the binding has changed since. Skips a disposed store — `bindClock`
      * throws on one, and a disposed store has no next test to leak into — and
      * swallows the throw of a store disposed concurrently, so teardown stays
-     * robust. It must never throw: it also runs as the test job's completion
-     * handler (see `StoreTestScope`), possibly a second time for the same
-     * handle, where the identity check makes it a no-op.
+     * robust. It must never throw, except a fatal error (issue #61), which
+     * teardown holds until its last step: it also runs as the test job's
+     * completion handler (see `StoreTestScope`), possibly a second time for
+     * the same handle, where the identity check makes it a no-op.
      */
     @OptIn(ExperimentalStoreApi::class)
     fun restoreBoundClock(
@@ -178,7 +204,7 @@ internal object PrivilegedHooks {
         clock: Clock?,
     ) {
         if (store.isDisposed || store.internalBoundClock === clock) return
-        runCatching { store.bindClock(clock) }
+        runCatching { store.bindClock(clock) }.internalRethrowFatal()
     }
 
     /**
@@ -236,24 +262,32 @@ internal object PrivilegedHooks {
             store.selfForExternal.body()
         } catch (e: Throwable) {
             // Body threw — leave the store in a clean state for the next test.
-            // An entry of its own, like commit/rollbackOpenTransaction.
-            internalSettling {
-                try {
-                    store.runUnderLock {
-                        if (store.activeTransaction === txn) {
-                            store.internalSetActiveTransaction(null)
+            // An entry of its own, like commit/rollbackOpenTransaction. A fatal
+            // error (issue #61) — `e`, else one the rollback, the drain or the
+            // settle threw — is held until the store is clean and thrown
+            // instead of `e`, carrying it.
+            val fatal = HeldFatal()
+            fatal.holdIfFatal(e)
+            fatal.holding {
+                internalSettling {
+                    try {
+                        store.runUnderLock {
+                            if (store.activeTransaction === txn) {
+                                store.internalSetActiveTransaction(null)
+                            }
                         }
+                        fatal.isolated { txn.rollback() }
+                    } finally {
+                        // This exit releases the active-transaction slot too, so it is a
+                        // hand-off holder like commit/rollbackOpenTransaction: drain the
+                        // post-commit work queued behind the open transaction
+                        // (Store.tryTopLevelAction). The drain swallows task failures,
+                        // except a fatal error, so otherwise `e` propagates unchanged.
+                        fatal.holding { store.internalDrainPostCommitTasks() }
                     }
-                    runCatching { txn.rollback() }
-                } finally {
-                    // This exit releases the active-transaction slot too, so it is a
-                    // hand-off holder like commit/rollbackOpenTransaction: drain the
-                    // post-commit work queued behind the open transaction
-                    // (Store.tryTopLevelAction). The drain swallows task failures, so
-                    // `e` still propagates unchanged.
-                    store.internalDrainPostCommitTasks()
                 }
             }
+            fatal.rethrowHeld(alongside = e)
             throw e
         }
         return txn
@@ -318,7 +352,8 @@ internal object PrivilegedHooks {
      * Used both by the user-facing [com.vynatix.holdfast.testing.concurrency.OpenTransaction.rollback]
      * and by the test-scope `tearDown` auto-rollback path. Catches and
      * swallows rollback exceptions to keep teardown robust under partially
-     * failed tests.
+     * failed tests — except a fatal error (issue #61), thrown once the slot
+     * is cleared and the queue drained.
      */
     fun rollbackOpenTransaction(
         store: Store<*>,
@@ -327,13 +362,15 @@ internal object PrivilegedHooks {
         // An entry, like commitOpenTransaction: what the drain runs settles
         // once the lock is released.
         internalSettling {
-            store.runUnderLock {
-                runCatching { transaction.rollback() }
-                if (store.activeTransaction === transaction) {
-                    store.internalSetActiveTransaction(null)
+            holdingFatal {
+                store.runUnderLock {
+                    isolated { transaction.rollback() }
+                    if (store.activeTransaction === transaction) {
+                        store.internalSetActiveTransaction(null)
+                    }
                 }
+                store.internalDrainPostCommitTasks()
             }
-            store.internalDrainPostCommitTasks()
         }
     }
 
@@ -408,4 +445,63 @@ internal object PrivilegedHooks {
         internalSettling { store.internalDrainPostCommitTasks() }
         return taken
     }
+}
+
+/**
+ * The harness's hold for fatal errors (issue #61, core's `FatalHold`), for a
+ * sequence whose every step must run — teardown, an unwind — even after one
+ * throws a fatal error: the first is held (a later one added to it as
+ * suppressed) and thrown once the last step has run ([rethrowHeld],
+ * [holdingFatal]), never recorded or reported. One per sequence, used on one
+ * thread.
+ */
+internal class HeldFatal {
+    private val hold = FatalHold()
+
+    /** Whether [error] is fatal. A fatal one is now held, and the caller must not record, report or drop it. */
+    fun holdIfFatal(error: Throwable): Boolean = hold.holdIfFatal(error)
+
+    /** Run [step], a best-effort one: a fatal error it throws is held, any other failure dropped. */
+    fun isolated(step: () -> Unit) {
+        runCatching { step() }.onFailure { hold.holdIfFatal(it) }
+    }
+
+    /** Run [step]: a fatal error it throws is held, any other failure propagates at once. */
+    fun holding(step: () -> Unit) {
+        runCatching { step() }.onFailure { if (!hold.holdIfFatal(it)) throw it }
+    }
+
+    /** Throw the held fatal error, if any, carrying [alongside] (what the sequence unwound for) as suppressed. */
+    fun rethrowHeld(alongside: Throwable? = null) {
+        hold.rethrowHeld(alongside)
+    }
+}
+
+/**
+ * Run [steps] with a [HeldFatal], then throw the fatal error it holds (issue
+ * #61). A failure escaping [steps] still propagates, unless a fatal error is
+ * held: that one is thrown instead, carrying it as suppressed.
+ */
+internal fun <R> holdingFatal(steps: HeldFatal.() -> R): R {
+    val fatal = HeldFatal()
+    val outcome = runCatching { fatal.steps() }
+    fatal.rethrowHeld(alongside = outcome.exceptionOrNull())
+    return outcome.getOrThrow()
+}
+
+/**
+ * Run [cleanup], each step [isolated][HeldFatal.isolated], while [unwinding]
+ * is in flight, then throw a fatal error if one is (issue #61): [unwinding]
+ * itself, carrying a fatal error a step threw as suppressed; else that step's,
+ * carrying [unwinding]. With none this returns, and the caller goes on
+ * throwing [unwinding].
+ */
+internal fun cleanUpUnwinding(
+    unwinding: Throwable,
+    vararg cleanup: () -> Unit,
+) {
+    val fatal = HeldFatal()
+    fatal.holdIfFatal(unwinding)
+    for (step in cleanup) fatal.isolated(step)
+    fatal.rethrowHeld(alongside = unwinding)
 }

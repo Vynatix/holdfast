@@ -1,5 +1,6 @@
 package com.vynatix.holdfast.bridge
 
+import com.vynatix.holdfast.platform.rethrowFatal
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -13,7 +14,8 @@ actual class FileSystemKvStore actual constructor(
     actual override fun get(key: String): String? {
         val file = root.resolve(encodeKey(key))
         if (!file.exists()) return null
-        return runCatching { file.readText(StandardCharsets.UTF_8) }.getOrNull()
+        // A file that cannot be read reads as absent; a fatal error does not (issue #61).
+        return runCatching { file.readText(StandardCharsets.UTF_8) }.rethrowFatal().getOrNull()
     }
 
     actual override fun put(

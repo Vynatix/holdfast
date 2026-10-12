@@ -247,7 +247,8 @@ private class TreeWalker(
  * Tell every store in [chain] (nearest first; a store whose tree state is
  * gone is skipped) that each of [leaves] joined its subtree, leaf by leaf,
  * outside every registry lock. A throwing listener is handed to [failed]
- * and the others are still told.
+ * and the others are still told — a fatal error too: every [failed] sink
+ * holds one for the end of its sequence (issue #61).
  */
 internal fun announceAttached(
     chain: List<LeafNode>,

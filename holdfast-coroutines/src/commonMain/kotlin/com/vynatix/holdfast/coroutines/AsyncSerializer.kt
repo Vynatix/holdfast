@@ -3,12 +3,14 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.FanoutMarkers
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreSuspendInFlightException
 import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.coroutines.platform.blockingWaitCanEnd
 import com.vynatix.holdfast.fanOutApplied
+import com.vynatix.holdfast.internalRethrowFatal
 import com.vynatix.holdfast.internalTransactionLockFree
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -153,7 +155,9 @@ internal class MutexSerializer(
     override fun blockingRelease() {
         val token = blockingHolder ?: return
         blockingHolder = null
-        runCatching { mutex.unlock(token) }
+        // A fatal error (issue #61) the release throws propagates: the mutex
+        // may still be locked, and a silent one would wedge the store.
+        runCatching { mutex.unlock(token) }.internalRethrowFatal()
     }
 }
 
@@ -306,7 +310,9 @@ internal suspend fun Store<*>.awaitLockOnlyHolders() {
  * [com.vynatix.holdfast.Store.uncaughtObserverHandler] (logged loudly while no
  * handler is set), matching the sync path: a bridge is external sync, so a
  * failed write cannot undo values that are already committed, nor stop the
- * remaining states from publishing.
+ * remaining states from publishing. Except a fatal error (issue #61): it is
+ * never reported, but thrown once the remaining states have published and
+ * the events have gone out.
  *
  * The transaction stays installed as the store's active one until
  * [suspendAction]/[suspendAtomic] unwinds, but from the end of the apply pass it
@@ -398,7 +404,10 @@ private suspend fun fanOutThenPublish(
         },
     )
     // Step 3a: bridge publish phase. SuspendingBridge gets awaited;
-    // every other Bridge falls back to fire-and-forget Bridge.publish.
+    // every other Bridge falls back to fire-and-forget Bridge.publish. A fatal
+    // error (issue #61) is held instead of reported, and thrown once the
+    // remaining states have published and the events have gone out.
+    val fatal = FatalHold()
     for ((ms, value) in publishQueue) {
         val br = ms.bridge ?: continue
         try {
@@ -408,13 +417,20 @@ private suspend fun fanOutThenPublish(
                 br.publish(value)
             }
         } catch (e: CancellationException) {
+            fatal.rethrowHeld(alongside = e)
             throw e
         } catch (e: Throwable) {
-            ms.owningStore.internalReportUncaughtFailure(e)
+            if (!fatal.holdIfFatal(e)) ms.owningStore.internalReportUncaughtFailure(e)
         }
     }
     // Step 3b: events drain via suspending emit, honoring SUSPEND back-pressure.
-    for ((channel, event) in eventsQueue) {
-        (channel as MutableSharedFlow<Any>).emit(event)
-    }
+    val drained =
+        runCatching {
+            for ((channel, event) in eventsQueue) {
+                (channel as MutableSharedFlow<Any>).emit(event)
+            }
+        }
+    // A held fatal error outranks whatever the drain threw, carried as suppressed.
+    fatal.rethrowHeld(alongside = drained.exceptionOrNull())
+    drained.getOrThrow()
 }

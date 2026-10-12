@@ -1,5 +1,7 @@
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // reset(): put every declared state back to what its retained initializer
 // computes, as one transaction (issue #20, R4).
 //
@@ -83,7 +85,9 @@ package com.vynatix.holdfast
  * never-read one, or one dropped with [Store.removeState]/[Store.clearStates])
  * stays materialized, at the value its initializer computed then, as after
  * [snapshot]: after a failed reset, a state dropped with `removeState` is
- * live again.
+ * live again. A fatal error (issue #61) is never returned as an `Error`: one
+ * thrown while materializing propagates before the reset's transaction
+ * opens, one thrown inside it once the reset has rolled back.
  *
  * The re-run initializers run inside the reset's action, under this store's
  * action locks, so other actions on this store wait for the reset.
@@ -107,8 +111,9 @@ fun <V : Store<V>> V.reset(): TransactionResult<Unit> {
     // Materialize every declared state BEFORE the transaction opens, the way
     // its first read would: taking no lock of this store, so a never-read
     // state's initializer does not run under the reset's own locks. A failure
-    // is carried into the action, which reports it like one inside the reset.
-    val materializeFailure = runCatching { materializeDeclaredStates() }.exceptionOrNull()
+    // is carried into the action, which reports it like one inside the reset;
+    // a fatal error (issue #61) is thrown here, before the reset takes a lock.
+    val materializeFailure = runCatching { materializeDeclaredStates() }.rethrowFatal().exceptionOrNull()
     return action(Reset(materializeFailure))
 }
 

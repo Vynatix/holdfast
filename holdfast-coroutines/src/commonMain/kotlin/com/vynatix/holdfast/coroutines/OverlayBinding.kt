@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.RestorePolicy
 import com.vynatix.holdfast.RestoreRejectedException
 import com.vynatix.holdfast.SnapshotFormatException
@@ -15,6 +16,7 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreSnapshot
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.internalRestoreTagged
+import com.vynatix.holdfast.internalRethrowFatal
 import com.vynatix.holdfast.snapshot
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.NonCancellable
@@ -159,13 +161,15 @@ internal class OverlayBinding<V : Store<V>>(
      * has loaded; else the blob under [key], read now (suspending, outside
      * every lock of the store) and decoded.
      *
-     * @throws Throwable what the key-value store's `get` threw.
+     * @throws Throwable what the key-value store's `get` threw, and a fatal
+     *   error (issue #61) the decode threw — never kept as the blob's failure,
+     *   which would poison the overlay.
      */
     suspend fun read(): OverlayInbound {
         val at = standing.value
         if (at.status == OverlayStatus.Loaded) return OverlayInbound.Held(at)
         val text = writer.read()
-        return OverlayInbound.Stored(at, text?.let { runCatching { StoreSnapshot.decode(it) } })
+        return OverlayInbound.Stored(at, text?.let { runCatching { StoreSnapshot.decode(it) }.internalRethrowFatal() })
     }
 
     /** Whether [inbound] was read under the standing that holds now: a seed may put it back. Under the gate. */
@@ -219,15 +223,21 @@ internal class OverlayBinding<V : Store<V>>(
         refuseInsideEntry(store, "clearOverlay()", ::clearInsideEntryMessage)
         writer.remove()
         withContext(NonCancellable) {
-            val loadedNow =
+            var loadedNow = false
+            // A fatal error (issue #61) the gate's release throws once the
+            // overlay stands anew is thrown after the writer is signalled.
+            val fatal = FatalHold()
+            runCatching {
                 gate.hold {
                     // The removal covers every change counted until it: while
                     // the overlay stood POISONED nothing was written since.
                     val poisoned = standing.value.status == OverlayStatus.Poisoned
                     standing.value = Standing(if (poisoned) OverlayStatus.Loaded else standing.value.status)
-                    poisoned
+                    loadedNow = poisoned
                 }
+            }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
             if (loadedNow) writer.signalIfBehind()
+            fatal.rethrowHeld()
         }
     }
 

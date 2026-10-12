@@ -160,7 +160,12 @@ class HydrationSpec<V : Store<V>> internal constructor(
      * quote the value), as are a capture or codec that fails while writing
      * and a writer whose scope was cancelled; the next change writes again.
      * No report is made while the hydration gate holds the store, and a
-     * handler that throws for any of these reports is ignored.
+     * handler that throws for any of these reports is ignored. A fatal error
+     * (issue #61: a `StackOverflowError`, an `OutOfMemoryError`) is never
+     * one of these reports — whether a decode, a capture, a codec, a `put`
+     * or the handler threw it — and never poisons a blob: it propagates, out
+     * of `hydrate()`, the writer's coroutine (to its scope's exception
+     * handling), or the commit that could not launch the writer.
      *
      * The writer stops when the store is disposed. [key] is pinned: it never
      * derives from the store's class or state names, so renaming either

@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlinx.atomicfu.atomic
 
 // The machinery behind DerivedState (DerivedState.kt): checking its inputs,
@@ -249,10 +250,14 @@ internal class SourceFollower<V : Store<V>>(
      * recompute without it. Never throws: a failure goes to the host's
      * handler, and a handler that throws there is ignored, so [StoreEdges]
      * tells the next follower. The store is forgotten first, whatever fails.
+     * Except a fatal error (issue #61), from the recompute or the handler,
+     * which is thrown at once: [StoreEdges] still tells the next follower,
+     * then throws it.
      */
     fun onSourceStoreDisposed(store: Store<*>) {
-        runCatching { if (followed.forget(store)) onStoreChanged(host) }
-            .onFailure { failure -> if (!host.isDisposed) runCatching { host.internalReportUncaughtFailure(failure) } }
+        val failure = runCatching { if (followed.forget(store)) onStoreChanged(host) }.rethrowFatal().exceptionOrNull()
+        if (failure == null || host.isDisposed) return
+        runCatching { host.internalReportUncaughtFailure(failure) }.rethrowFatal()
     }
 
     private fun follow(source: MutableState<*>): Disposable {

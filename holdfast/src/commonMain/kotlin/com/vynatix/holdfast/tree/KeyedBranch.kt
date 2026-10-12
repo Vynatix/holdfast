@@ -163,13 +163,15 @@ class KeyedBranch<K : Any, S : Store<S>> internal constructor(
 
     /**
      * Dispose every live store of the branch, in creation order (as
-     * [entries] lists them); a store created meanwhile stays.
+     * [entries] lists them); a store created meanwhile stays. Every store is
+     * disposed even after one's `dispose()` threw a fatal error, which is
+     * thrown then (issue #61).
      *
      * @throws IllegalStateException if the declaring store is disposed.
      */
     fun disposeAll() {
         owner.checkNotDisposed()
-        for ((_, store) in entriesKeyed()) store.dispose()
+        disposeEach(entriesKeyed().map { (_, store) -> store })
     }
 
     /** The live leaf under [key]; `null` on a closed registry, never a throw. */

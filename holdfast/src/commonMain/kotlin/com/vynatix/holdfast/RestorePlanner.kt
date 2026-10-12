@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // restore(): decide everything first, then stage raw in one action (issue #20,
 // R1; plan D10).
 //
@@ -145,7 +147,8 @@ internal fun <V : Store<V>, R> V.runRestore(
  * action of this store), the failures it returns as
  * [TransactionResult.Error] — a [SnapshotMigrationException], a
  * [RestoreRejectedException], a target's initializer failure — with nothing
- * changed (no entry evicted either).
+ * changed (no entry evicted either), except a fatal error, which propagates
+ * from the plan before the action opens (issue #61).
  *
  * For `:holdfast-coroutines`' persisted overlay, which applies only the
  * [StateTag.UserAuthored] entries of the blob it reads, whatever else the blob
@@ -186,7 +189,9 @@ private class Restore<V : Store<V>, R>(
  * ([restoreInOneFrame]). What the plan throws (a target's initializer, the
  * schema check), else the failure [policy] makes of the issues it found, is
  * kept for [stage] to throw, so a rejected restore fails inside its
- * transaction, having changed nothing.
+ * transaction, having changed nothing. A fatal error the plan throws (a
+ * codec's, `migrate`'s, an initializer's) is not kept: the construction
+ * throws it, before any transaction opens (issue #61).
  */
 internal class PlannedRestore(
     val store: Store<*>,
@@ -199,8 +204,9 @@ internal class PlannedRestore(
     private val planner = RestorePlanner(store, content, sterile, only, targets)
 
     // A failing target initializer is carried into the transaction, which
-    // reports it like one inside the restore, whatever the policy.
-    private val failure = runCatching { planner.plan() }.exceptionOrNull() ?: planner.rejection(policy)
+    // reports it like one inside the restore, whatever the policy; a fatal
+    // error is thrown now, holding no lock and having staged nothing.
+    private val failure = runCatching { planner.plan() }.rethrowFatal().exceptionOrNull() ?: planner.rejection(policy)
 
     /** For a sterile restore, which non-Remote declared states it brought to life (see [RestorePlanner.cameToLife]). */
     private val sterileReset: ((StateDeclaration<*>) -> Boolean)? = if (sterile) planner::cameToLife else null
@@ -429,6 +435,7 @@ internal class RestorePlanner(
             codec == null -> issues += RestoreIssue.NoCodec(name)
             else ->
                 runCatching { codec.decode(text) }
+                    .rethrowFatal()
                     .onSuccess { write(decl, it) }
                     .onFailure { issues += RestoreIssue.Undecodable(name, "its codec threw ${it.describeClass()}") }
         }

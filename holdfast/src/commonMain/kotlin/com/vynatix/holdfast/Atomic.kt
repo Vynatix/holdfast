@@ -33,6 +33,18 @@ import kotlin.uuid.Uuid
  * [FrameInteropException]) are programming errors: the frame rolls back and
  * RETHROWS them rather than folding them into an ignorable `Error` result.
  *
+ * **Fatal errors propagate** (issue #61). A fatal error — a
+ * `VirtualMachineError` such as `StackOverflowError` on JVM/Android, a
+ * `kotlin.OutOfMemoryError` on iOS/wasmJs — is never folded into `Error`,
+ * wherever it strikes: the body, a middleware hook, the commit or its fanout,
+ * a [FrameObserver] callback. The frame still finishes what keeps its
+ * participants consistent — every root still open rolls back (after its
+ * `onTransactionError` hooks), every applied store fans out, every frame
+ * observer is told — and then throws the first one. One thrown by
+ * `onFrameStarted` rolls the frame back before any middleware or the body
+ * runs; one thrown by `onFrameCommitted` is thrown once every observer has
+ * been told that the frame committed.
+ *
  * Locking: [stores] are de-duplicated and sorted by [Store.lockOrderKey]
  * before acquisition, giving a deadlock-safe global order across any store
  * combination. Each store's blocking `transactionLock` is held for the whole
@@ -296,48 +308,63 @@ private fun <R> executeBody(
 ): TransactionResult<R> {
     val observers = FrameObservers.snapshot()
     val resultTxn = roots.last().txn
-    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, roots.map(FrameRoot::store)) } }
-    return try {
-        // Phase 1: middleware `started` per store, in lock order. A throw here
-        // aborts the frame before the body runs.
-        roots.forEach { it.session.fireStarted() }
-        val prior = FrameMarkers.install(marker)
-        val value: R =
-            try {
-                body()
-            } finally {
-                // Clear BEFORE completed/commit/observer fanout: enforcement
-                // polices the body only.
-                FrameMarkers.install(prior)
+    // Until the middleware `started` phase begins, the unwind fires no
+    // `onTransactionError`: no middleware has seen the frame start.
+    var hooksStarted = false
+    val result: TransactionResult<R> =
+        try {
+            // A throwing observer cannot abort the frame, unless it throws a
+            // fatal error (issue #61): once every observer has been told, the
+            // frame rolls back before any middleware or the body runs.
+            observers.forEachIsolated { it.onFrameStarted(marker.frameId, roots.map(FrameRoot::store)) }
+            // Phase 1: middleware `started` per store, in lock order. A throw here
+            // aborts the frame before the body runs.
+            hooksStarted = true
+            roots.forEach { it.session.fireStarted() }
+            val prior = FrameMarkers.install(marker)
+            val value: R =
+                try {
+                    body()
+                } finally {
+                    // Clear BEFORE completed/commit/observer fanout: enforcement
+                    // polices the body only.
+                    FrameMarkers.install(prior)
+                }
+            // Phase 2: ALL stores' `completed` hooks fire before ANY store commits,
+            // so a validation middleware throwing on the last store still rolls
+            // every store back.
+            roots.forEach { it.session.fireCompleted() }
+            // Phase 3: apply EVERY store inside one write bracket, then fan each
+            // out in lock order: A's observers already see B applied.
+            commitFrame(roots.map(FrameRoot::txn))
+            TransactionResult.Success(resultTxn, value)
+        } catch (e: Throwable) {
+            // Reverse lock-order unwind of every root still open: per-store error
+            // hooks, then rollback. Each step is isolated so one store's failure
+            // can't strand another's pending writes. A root that already applied
+            // (it committed, or failed in its own fanout) gets no error hook — its
+            // values stand, as after a single action's commit failure — and
+            // neither does one whose own apply failed; only the roots the commit
+            // never reached (and every root, when the body or a hook threw) do.
+            // A fatal error (issue #61) — the failure itself, or one a step
+            // throws — is held through the unwind and thrown after it.
+            val fatal = FatalHold()
+            fatal.holdIfFatal(e)
+            for (entry in roots.asReversed()) {
+                if (entry.txn.status != TransactionStatus.Active) continue
+                if (hooksStarted) fatal.runIsolated { entry.session.fireError(e) }
+                fatal.runIsolated { entry.txn.rollback() }
             }
-        // Phase 2: ALL stores' `completed` hooks fire before ANY store commits,
-        // so a validation middleware throwing on the last store still rolls
-        // every store back.
-        roots.forEach { it.session.fireCompleted() }
-        // Phase 3: apply EVERY store inside one write bracket, then fan each
-        // out in lock order: A's observers already see B applied.
-        commitFrame(roots.map(FrameRoot::txn))
-        observers.forEach { runCatching { it.onFrameCommitted(marker.frameId) } }
-        TransactionResult.Success(resultTxn, value)
-    } catch (e: Throwable) {
-        // Reverse lock-order unwind of every root still open: per-store error
-        // hooks, then rollback. Each step is isolated so one store's failure
-        // can't strand another's pending writes. A root that already applied
-        // (it committed, or failed in its own fanout) gets no error hook — its
-        // values stand, as after a single action's commit failure — and
-        // neither does one whose own apply failed; only the roots the commit
-        // never reached (and every root, when the body or a hook threw) do.
-        for (i in roots.indices.reversed()) {
-            val entry = roots[i]
-            if (entry.txn.status == TransactionStatus.Active) {
-                runCatching { entry.session.fireError(e) }
-                runCatching { entry.txn.rollback() }
-            }
+            observers.forEach { fatal.runIsolated { it.onFrameRolledBack(marker.frameId, e) } }
+            fatal.rethrowHeld(alongside = e)
+            // Contract violations are programming errors — fail loud instead of
+            // folding into an ignorable Error result.
+            if (e is FrameContractException) throw e
+            TransactionResult.Error(e, resultTxn)
         }
-        observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, e) } }
-        // Contract violations are programming errors — fail loud instead of
-        // folding into an ignorable Error result.
-        if (e is FrameContractException) throw e
-        TransactionResult.Error(e, resultTxn)
-    }
+    // After the try, so its unwind never tells an observer that a frame that
+    // committed rolled back: a fatal error (issue #61) an observer throws here
+    // is thrown once every observer has been told.
+    if (result is TransactionResult.Success) observers.forEachIsolated { it.onFrameCommitted(marker.frameId) }
+    return result
 }

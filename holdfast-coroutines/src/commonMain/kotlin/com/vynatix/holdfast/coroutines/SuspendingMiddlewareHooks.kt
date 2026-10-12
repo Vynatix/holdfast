@@ -51,6 +51,13 @@ import com.vynatix.holdfast.Store
  * other middlewares' started hooks, the body, or the unwind path. This matches
  * the sync chain's contract.
  *
+ * Except a fatal error (issue #61) — a `VirtualMachineError` such as
+ * `StackOverflowError` on JVM/Android, a `kotlin.OutOfMemoryError` on
+ * iOS/wasmJs — thrown by any hook, which is never isolated: it fails the
+ * transaction, which runs its error hooks and rolls back (it never commits),
+ * and `suspendAction` then throws it instead of returning a
+ * `TransactionResult.Error`.
+ *
  * ## Cancellation
  *
  * Async hooks called inside the body window (`onTransactionStartedAsync` and

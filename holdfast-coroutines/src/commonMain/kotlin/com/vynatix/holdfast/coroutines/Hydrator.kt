@@ -11,6 +11,8 @@ import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.internalAttachIfAbsent
 import com.vynatix.holdfast.internalAttachment
+import com.vynatix.holdfast.internalIsFatal
+import com.vynatix.holdfast.internalRethrowIfFatal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
@@ -50,7 +52,13 @@ import kotlinx.coroutines.CoroutineScope
  * a middleware rejects the `HydrationFailure` record too, the phase stays
  * [Hydration.Seeded] with nothing in flight: the failure goes to the store's
  * `uncaughtObserverHandler`, [awaitSettled] returns [Hydration.Failed], and
- * the next [hydrate] retries the refresh (id `HydrationRetry`).
+ * the next [hydrate] retries the refresh (id `HydrationRetry`). A fatal error
+ * (issue #61: a `StackOverflowError`, an `OutOfMemoryError`) a refresh meets
+ * is never reported: a fetch's moves the phase to [Hydration.Failed] as
+ * above; one that fails the adoption (adopt's own, a middleware's) leaves it
+ * [Hydration.Seeded] with nothing in flight, as a rejected record does; and
+ * either way the error is then thrown out of the refresh's coroutine, to its
+ * scope's exception handling.
  *
  * - **Idempotent.** [hydrate] while [Hydration.Seeded] (a refresh is in
  *   flight) or [Hydration.Hydrated] does nothing: no `base { }`, no refresh.
@@ -140,7 +148,8 @@ class Hydrator<V : Store<V>> internal constructor(
      * yet, a call that will seed first reads the overlay's key, before it
      * takes the store; a blob the seed cannot apply is reported through the
      * store's `uncaughtObserverHandler` (a handler that throws there is
-     * ignored) and the seed commits without it.
+     * ignored, unless it throws a fatal error: see below) and the seed
+     * commits without it.
      *
      * @throws IllegalStateException if the store is disposed; inside a state
      *   initializer, a schema migration or a derived state's compute; and
@@ -151,7 +160,10 @@ class Hydrator<V : Store<V>> internal constructor(
      *   nothing is launched; or a failure after the commit (an observer
      *   failing through a rethrowing `uncaughtObserverHandler`) — the phase
      *   moved on, the refresh is launched, then this throws. Also what the
-     *   overlay's key-value store's `get` threw: nothing changed then.
+     *   overlay's key-value store's `get` threw: nothing changed then. A
+     *   fatal error (issue #61: a `StackOverflowError`, an
+     *   `OutOfMemoryError`) is never reported, and is thrown the same way:
+     *   at once when nothing committed, else once the refresh is launched.
      */
     suspend fun hydrate(scope: CoroutineScope = engine.store.scope) {
         engine.hydrate(scope)
@@ -304,7 +316,8 @@ fun Store<*>.hydratorOrNull(): Hydrator<*>? {
  * `Store.scope`: every seed has committed, and every refresh is launched, when
  * this returns. A hydrator that throws does not stop the rest; the first
  * failure is thrown once all have run, the others added to it as suppressed.
- * A cancellation stops at once.
+ * A cancellation stops at once, and so does a fatal error (issue #61), thrown
+ * with the failure collected so far added to it as suppressed.
  *
  * This hydrates an explicit list of stores; for a store and its declared
  * children, `store.tree.hydrateAll()` drives the whole subtree and reports
@@ -318,6 +331,8 @@ suspend fun hydrateEach(vararg hydrators: Hydrator<*>) {
     for (hydrator in hydrators) {
         runCatching { hydrator.hydrate() }.onFailure { thrown ->
             if (thrown is CancellationException) throw thrown
+            if (thrown.internalIsFatal()) failure?.let { thrown.addSuppressed(it) }
+            thrown.internalRethrowIfFatal()
             failure?.addSuppressed(thrown) ?: run { failure = thrown }
         }
     }

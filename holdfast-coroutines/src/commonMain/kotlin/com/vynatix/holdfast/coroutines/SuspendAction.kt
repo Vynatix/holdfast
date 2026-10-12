@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.FrameContractException
 import com.vynatix.holdfast.FrameInteropException
 import com.vynatix.holdfast.FrameMarker
@@ -12,6 +13,8 @@ import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.UnenrolledStoreException
 import com.vynatix.holdfast.internalRefuseInitializerWrite
+import com.vynatix.holdfast.internalRethrowFatal
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.platform.currentThreadId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -68,7 +71,19 @@ import kotlin.uuid.Uuid
  *    or `onTransactionError` (throw / cancellation) unwind in chain order
  *    (innermost-first), so the outermost middleware sees `completed`/`error`
  *    last. Each hook invocation is wrapped in `runCatching`: one middleware's
- *    failure does not abort other middlewares' hooks.
+ *    failure does not abort other middlewares' hooks — except a fatal error
+ *    (below).
+ *  - **Fatal errors propagate** (issue #61): a fatal error (a
+ *    `VirtualMachineError` such as `StackOverflowError` on the JVM and
+ *    Android, an `OutOfMemoryError` on iOS and wasmJs) is never returned as
+ *    a [TransactionResult.Error]. One the body or a middleware hook throws
+ *    fails the transaction — a `started` hook's skips the remaining `started`
+ *    hooks and the body; a `completed` hook's lets the remaining `completed`
+ *    hooks run, and the transaction never commits after it — then every
+ *    middleware's error hooks run, the transaction rolls back, and this call
+ *    throws it; one an error hook or the rollback throws is thrown once that
+ *    unwind has finished, in place of the Error or the cancellation. One the
+ *    commit throws propagates as it is.
  *  - **Concurrent threads inside the body**: undefined. Stick to single-flight
  *    bodies.
  *  - **Derived states settle once**: this call is an entry, like `action`. The
@@ -117,18 +132,23 @@ suspend fun <V : Store<V>, R> V.suspendAction(body: suspend V.() -> R): Transact
         // coroutine, so the probe recognizes it at any nesting depth.
         val owner: Any = coroutineContext[Job] ?: SuspendActionFallbackOwner
         refuseOwnSuspendingOwner(caller)
-        try {
-            suspendActionUnderMutex(serializer, owner, body)
-        } finally {
-            // Deferred post-commit work (derived recomputes) drains AFTER the mutex
-            // releases — a recompute opens a fresh top-level action, which cannot
-            // run while this call still holds the mutex. Draining after the release
-            // also makes this call a valid hand-off target for recomputes that found
-            // the store busy (Store.tryTopLevelAction). Same placement, and same
-            // reason, as suspendAtomic's drain. `finally`, so the cancellation path
-            // drains too.
-            internalDrainPostCommitTasks()
+        val ran = runCatching { suspendActionUnderMutex(serializer, owner, body) }
+        // Deferred post-commit work (derived recomputes) drains AFTER the mutex
+        // releases — a recompute opens a fresh top-level action, which cannot
+        // run while this call still holds the mutex. Draining after the release
+        // also makes this call a valid hand-off target for recomputes that found
+        // the store busy (Store.tryTopLevelAction). Same placement, and same
+        // reason, as suspendAtomic's drain. Whatever the outcome, so the
+        // cancellation path drains too. A fatal error the action threw (issue
+        // #61) outranks whatever the drain throws, which it then carries as
+        // suppressed, instead of being replaced.
+        val fatal = FatalHold()
+        ran.exceptionOrNull()?.let(fatal::holdIfFatal)
+        runCatching { internalDrainPostCommitTasks() }.onFailure { drainFailure ->
+            fatal.rethrowHeld(alongside = drainFailure)
+            throw drainFailure
         }
+        ran.getOrThrow()
     }
 }
 
@@ -178,51 +198,32 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                 )
             }
 
-        // Concentric outermost-first: iterate REVERSED so the LAST-registered
-        // middleware fires `started` first — matching `Store.middlewares`'s contract
-        // and the sync `action` path's fold-derived nesting (issue 31). Each
-        // invocation is run-caught so one middleware's failure does not abort others.
-        // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
-        // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
-        // sync sibling — interleaved per-middleware so the master ordering is
-        //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
-        fireStartedHooks(middlewareChain, contexts)
-
         val outcome: TransactionResult<R> =
             try {
                 val value: R =
                     try {
+                        // Concentric outermost-first: iterate REVERSED so the LAST-registered
+                        // middleware fires `started` first — matching `Store.middlewares`'s contract
+                        // and the sync `action` path's fold-derived nesting (issue 31). Each
+                        // invocation is run-caught so one middleware's failure does not abort others.
+                        // For middlewares that ALSO implement `SuspendingMiddlewareHooks<V>` (issue
+                        // 09), the async `onTransactionStartedAsync` fires IMMEDIATELY AFTER its
+                        // sync sibling — interleaved per-middleware so the master ordering is
+                        //   B.sync.started, B.async.startedAsync, A.sync.started, A.async.startedAsync, body, ...
+                        // Inside this try (issue #61): a fatal error from a started hook
+                        // fails the transaction through the unwind below, and the finally
+                        // still uninstalls it.
+                        fireStartedHooks(middlewareChain, contexts)
                         selfForExternal.body()
                     } catch (ce: CancellationException) {
-                        // Concentric forward (innermost-first) on the error path so the
-                        // outermost middleware that ran `started` first sees `error` last —
-                        // mirrors the sync `Middleware.invoke` unwind order. Cancellation is
-                        // propagated after rollback; error hooks run for symmetry with the
-                        // throwing path so middleware sees one consistent "errored
-                        // transaction" view. Per-middleware async-then-sync interleave:
-                        //   A.async.errorAsync, A.sync.error, B.async.errorAsync, B.sync.error
-                        for (i in middlewareChain.indices) {
-                            val mw = middlewareChain[i]
-                            if (mw is SuspendingMiddlewareHooks<*>) {
-                                @Suppress("UNCHECKED_CAST")
-                                val async = mw as SuspendingMiddlewareHooks<V>
-                                runCatching { async.onTransactionErrorAsync(contexts[i], ce) }
-                            }
-                            runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], ce) }
-                        }
-                        runCatching { txn.rollback() }
+                        // Cancellation is propagated after rollback; error hooks run for
+                        // symmetry with the throwing path so middleware sees one consistent
+                        // "errored transaction" view (in fireErrorHooks' order).
+                        unwindFailed(middlewareChain, contexts, txn, ce)
                         throw ce
                     } catch (e: Throwable) {
-                        for (i in middlewareChain.indices) {
-                            val mw = middlewareChain[i]
-                            if (mw is SuspendingMiddlewareHooks<*>) {
-                                @Suppress("UNCHECKED_CAST")
-                                val async = mw as SuspendingMiddlewareHooks<V>
-                                runCatching { async.onTransactionErrorAsync(contexts[i], e) }
-                            }
-                            runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], e) }
-                        }
-                        runCatching { txn.rollback() }
+                        // Throws a fatal error after the unwind instead of returning it.
+                        unwindFailed(middlewareChain, contexts, txn, e)
                         return@withLock TransactionResult.Error(e, txn)
                     }
                 // Body returned. Commit under NonCancellable so observer/bridge
@@ -230,18 +231,12 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                 // Sync `Middleware.invoke` runs `onTransactionCompleted` BEFORE
                 // commit; we preserve that ordering here, with innermost-first
                 // unwind so the outermost middleware sees `completed` last.
-                // Per-middleware async-then-sync interleave:
-                //   A.async.completedAsync, A.sync.completed, B.async.completedAsync, B.sync.completed
                 withContext(NonCancellable) {
-                    for (i in middlewareChain.indices) {
-                        val mw = middlewareChain[i]
-                        if (mw is SuspendingMiddlewareHooks<*>) {
-                            @Suppress("UNCHECKED_CAST")
-                            val async = mw as SuspendingMiddlewareHooks<V>
-                            runCatching { async.onTransactionCompletedAsync(contexts[i]) }
-                        }
-                        runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
-                    }
+                    // A fatal error from a completed hook fails the transaction like
+                    // the body's: it never commits after one (issue #61).
+                    runCatching { fireCompletedHooks(middlewareChain, contexts) }
+                        .onFailure { unwindFailed(middlewareChain, contexts, txn, it) }
+                        .getOrThrow()
                     try {
                         // Commit-phase start is observable progress for a
                         // blocking waiter (issue 003).
@@ -249,6 +244,7 @@ private suspend fun <V : Store<V>, R> V.suspendActionUnderMutex(
                         suspendingCommit(txn)
                         TransactionResult.Success(txn, value)
                     } catch (e: Throwable) {
+                        e.internalRethrowIfFatal()
                         TransactionResult.Error(e, txn)
                     }
                 }
@@ -305,13 +301,15 @@ private fun <V : Store<V>> V.frameGateAllowsOnlySavepoint(frame: FrameMarker): B
  *
  * Middleware fires per savepoint exactly like a nested blocking action would:
  * sync + [SuspendingMiddlewareHooks] async hooks, concentric order, per-hook
- * `runCatching` isolation.
+ * `runCatching` isolation — except a fatal error, as in [suspendAction].
  *
  * Error escalation: a [TransactionResult.Error] from this savepoint aborts the
  * whole frame (the exception is rethrown so the frame's unwind rolls every
  * participant back) unless the frame's policy is
  * [FramePolicy.tolerateInnerErrors]. [FrameContractException]s always
- * escalate.
+ * escalate, and a fatal error is never an Error (issue #61): once the error
+ * hooks have run and the savepoint has rolled back, it is thrown whatever the
+ * policy.
  */
 @OptIn(ExperimentalUuidApi::class)
 private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
@@ -338,31 +336,29 @@ private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
         middlewareChain.map {
             Middleware.MiddlewareContext(store = selfForExternal, transaction = txn)
         }
-    fireStartedHooks(middlewareChain, contexts)
 
     val outcome: TransactionResult<R> =
         try {
+            // Inside the try (issue #61): a fatal error from a started hook fails
+            // the savepoint through the unwind below, and the finally still
+            // reinstalls the parent.
+            fireStartedHooks(middlewareChain, contexts)
             val value: R = selfForExternal.body()
-            for (i in middlewareChain.indices) {
-                val mw = middlewareChain[i]
-                if (mw is SuspendingMiddlewareHooks<*>) {
-                    @Suppress("UNCHECKED_CAST")
-                    val async = mw as SuspendingMiddlewareHooks<V>
-                    runCatching { async.onTransactionCompletedAsync(contexts[i]) }
-                }
-                runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
-            }
+            // Throws a fatal error from a completed hook once every completed hook
+            // has run: the catch below fails the savepoint, which never merges
+            // after one (issue #61).
+            fireCompletedHooks(middlewareChain, contexts)
             // Savepoint commit: merge into the frame root — non-suspending,
             // no fanout (that happens once, at frame commit).
             txn.commit()
             TransactionResult.Success(txn, value)
         } catch (ce: CancellationException) {
-            fireErrorHooks(middlewareChain, contexts, ce)
-            runCatching { txn.rollback() }
+            unwindFailed(middlewareChain, contexts, txn, ce)
             throw ce
         } catch (e: Throwable) {
-            fireErrorHooks(middlewareChain, contexts, e)
-            runCatching { txn.rollback() }
+            // Throws a fatal error after the unwind, whatever the frame's
+            // policy, instead of returning it.
+            unwindFailed(middlewareChain, contexts, txn, e)
             TransactionResult.Error(e, txn)
         } finally {
             internalSetActiveTransaction(parentTxn)
@@ -378,38 +374,100 @@ private suspend fun <V : Store<V>, R> V.suspendActionInFrame(
 /**
  * Concentric outermost-first `started` dispatch (reversed chain order), sync
  * hook then async [SuspendingMiddlewareHooks] sibling per middleware, each
- * `runCatching`-isolated. Shared by the mutex path and the in-frame
- * savepoint path so the ordering contract is single-sourced.
+ * `runCatching`-isolated — except a fatal error (issue #61), which propagates
+ * at once, like a throwing `started` in the blocking chain: the callers run
+ * this inside the try whose unwind fails the transaction. Shared by the mutex
+ * path and the in-frame savepoint path so the ordering contract is
+ * single-sourced.
  */
 private suspend fun <V : Store<V>> fireStartedHooks(
     middlewareChain: List<Middleware<V>>,
     contexts: List<Middleware.MiddlewareContext<V>>,
 ) {
     for (i in middlewareChain.indices.reversed()) {
-        runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }
+        runCatching { middlewareChain[i].invokeOnTransactionStarted(contexts[i]) }.internalRethrowFatal()
         val mw = middlewareChain[i]
         if (mw is SuspendingMiddlewareHooks<*>) {
             @Suppress("UNCHECKED_CAST")
             val async = mw as SuspendingMiddlewareHooks<V>
-            runCatching { async.onTransactionStartedAsync(contexts[i]) }
+            runCatching { async.onTransactionStartedAsync(contexts[i]) }.internalRethrowFatal()
         }
     }
 }
 
+/**
+ * The `completed` dispatch before a commit or a savepoint merge, in chain
+ * order (innermost-first, so the outermost middleware sees `completed` last),
+ * async [SuspendingMiddlewareHooks] sibling then sync hook per middleware:
+ *   A.async.completedAsync, A.sync.completed, B.async.completedAsync, B.sync.completed
+ * Each is `runCatching`-isolated; the first fatal error one throws (issue #61)
+ * is thrown once every hook has run, so the caller fails the transaction
+ * instead of committing it.
+ */
+private suspend fun <V : Store<V>> fireCompletedHooks(
+    middlewareChain: List<Middleware<V>>,
+    contexts: List<Middleware.MiddlewareContext<V>>,
+) {
+    val fatal = FatalHold()
+    for (i in middlewareChain.indices) {
+        val mw = middlewareChain[i]
+        if (mw is SuspendingMiddlewareHooks<*>) {
+            @Suppress("UNCHECKED_CAST")
+            val async = mw as SuspendingMiddlewareHooks<V>
+            runCatching { async.onTransactionCompletedAsync(contexts[i]) }.onFailure { fatal.holdIfFatal(it) }
+        }
+        runCatching { middlewareChain[i].invokeOnTransactionCompleted(contexts[i]) }
+            .onFailure { fatal.holdIfFatal(it) }
+    }
+    fatal.rethrowHeld()
+}
+
+/**
+ * The error dispatch, in chain order (innermost-first, so the outermost
+ * middleware that ran `started` first sees `error` last — the sync
+ * `Middleware.invoke` unwind order), async [SuspendingMiddlewareHooks] sibling
+ * then sync hook per middleware:
+ *   A.async.errorAsync, A.sync.error, B.async.errorAsync, B.sync.error
+ * Each is `runCatching`-isolated; a fatal error one throws is held in [fatal]
+ * (issue #61) so the caller can still roll back before throwing it.
+ */
 private suspend fun <V : Store<V>> fireErrorHooks(
     middlewareChain: List<Middleware<V>>,
     contexts: List<Middleware.MiddlewareContext<V>>,
     error: Throwable,
+    fatal: FatalHold,
 ) {
     for (i in middlewareChain.indices) {
         val mw = middlewareChain[i]
         if (mw is SuspendingMiddlewareHooks<*>) {
             @Suppress("UNCHECKED_CAST")
             val async = mw as SuspendingMiddlewareHooks<V>
-            runCatching { async.onTransactionErrorAsync(contexts[i], error) }
+            runCatching { async.onTransactionErrorAsync(contexts[i], error) }.onFailure { fatal.holdIfFatal(it) }
         }
         runCatching { middlewareChain[i].invokeOnTransactionError(contexts[i], error) }
+            .onFailure { fatal.holdIfFatal(it) }
     }
+}
+
+/**
+ * Fail [txn] with [error]: every middleware's error hooks ([fireErrorHooks]),
+ * then the rollback, each isolated. Returns normally unless a fatal error
+ * (issue #61) is involved — [error] itself, or one a hook or the rollback
+ * threw — which it throws once both steps have run, with [error] added to it
+ * as suppressed when it is another throwable (a cancellation, a body's
+ * failure): the caller then neither returns an Error nor rethrows [error].
+ */
+private suspend fun <V : Store<V>> unwindFailed(
+    middlewareChain: List<Middleware<V>>,
+    contexts: List<Middleware.MiddlewareContext<V>>,
+    txn: Transaction,
+    error: Throwable,
+) {
+    val fatal = FatalHold()
+    fatal.holdIfFatal(error)
+    fireErrorHooks(middlewareChain, contexts, error, fatal)
+    runCatching { txn.rollback() }.onFailure { fatal.holdIfFatal(it) }
+    fatal.rethrowHeld(alongside = error)
 }
 
 /** Owner sentinel for suspendAction calls that have no enclosing Job. */

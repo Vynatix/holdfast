@@ -64,7 +64,8 @@ internal class TreeFixtures {
         val winner = synchronized(lock) { trees.firstOrNull { it.root === owner } ?: fresh.also { trees.add(it) } }
         if (winner !== fresh) {
             fresh.listener.dispose()
-            runCatching { fresh.tree.removeMiddleware(fresh.recorder) }
+            // The last step: a fatal error (issue #61) loses nothing by propagating now.
+            runCatching { fresh.tree.removeMiddleware(fresh.recorder) }.onFailure(PrivilegedHooks::rethrowIfFatal)
         }
         return winner
     }
@@ -93,27 +94,33 @@ internal class TreeFixtures {
      * subtree materializes declared children not read yet; a child lambda
      * that throws there is reported as a reset failure, never a silent
      * skip.
+     *
+     * A fatal error (issue #61) a step throws — a child lambda's
+     * `StackOverflowError` while listing, a reset's — is never reported: it
+     * is held in [fatal] while this tree's remaining steps and every later
+     * tree still run, for the scope's teardown to throw after its last step.
      */
-    fun tearDown(): TreeTeardownReport {
+    fun tearDown(fatal: HeldFatal): TreeTeardownReport {
         val all = synchronized(lock) { trees.toList().also { trees.clear() } }
         val resetFailures = mutableListOf<String>()
         val skippedResets = mutableListOf<String>()
         for (handle in all) {
-            runCatching { handle.listener.dispose() }
+            fatal.isolated { handle.listener.dispose() }
             if (handle.resetAtTeardown && !handle.root.isDisposed) {
-                tearDownReset(handle, resetFailures, skippedResets)
+                tearDownReset(handle, resetFailures, skippedResets, fatal)
             }
-            runCatching { handle.tree.removeMiddleware(handle.recorder) }
+            fatal.isolated { handle.tree.removeMiddleware(handle.recorder) }
             handle.recorder.dispose()
         }
         return TreeTeardownReport(resetFailures, skippedResets)
     }
 
-    /** The reset step of [tearDown] for one tracked tree. */
+    /** The reset step of [tearDown] for one tracked tree; a fatal error is held in [fatal], never reported. */
     private fun tearDownReset(
         handle: TreeHandle,
         resetFailures: MutableList<String>,
         skippedResets: MutableList<String>,
+        fatal: HeldFatal,
     ) {
         // Any throw while listing (a child lambda's own exception, a group's
         // `require`) is recorded, so one tree never skips the unwinding of
@@ -121,16 +128,18 @@ internal class TreeFixtures {
         val listed = runCatching { heldLeaves(handle.tree) }
         val listing = listed.exceptionOrNull()
         if (listing != null) {
-            resetFailures +=
-                "tree '${handle.tree.node.name}': reset skipped — listing the subtree threw " +
-                "${listing::class.simpleName}: ${listing.message}"
+            if (!fatal.holdIfFatal(listing)) {
+                resetFailures +=
+                    "tree '${handle.tree.node.name}': reset skipped — listing the subtree threw " +
+                    "${listing::class.simpleName}: ${listing.message}"
+            }
             return
         }
         val held = listed.getOrNull()
         when {
             held == null -> Unit // the receiver was disposed meanwhile: nothing left to reset
             held.isNotEmpty() -> skippedResets += describeSkippedReset(handle, held)
-            else -> resetFailureOf(handle)?.let { resetFailures += it }
+            else -> resetFailureOf(handle, fatal)?.let { resetFailures += it }
         }
     }
 
@@ -168,17 +177,29 @@ internal class TreeFixtures {
     private fun leafName(
         tree: StoreTree,
         store: Store<*>,
-    ): String = runCatching { tree.nodeOf(store)?.name }.getOrNull() ?: (store::class.simpleName ?: "a leaf")
+    ): String {
+        // A fatal error (issue #61) is no missing name: it propagates, held by tearDownReset.
+        val name = runCatching { tree.nodeOf(store)?.name }.onFailure(PrivilegedHooks::rethrowIfFatal).getOrNull()
+        return name ?: (store::class.simpleName ?: "a leaf")
+    }
 
-    /** Reset [handle]'s tree and describe the failure, or `null` when it committed. */
-    private fun resetFailureOf(handle: TreeHandle): String? {
+    /**
+     * Reset [handle]'s tree and describe the failure, or `null` when it
+     * committed — or failed with a fatal error (issue #61), now held in
+     * [fatal] instead of described.
+     */
+    private fun resetFailureOf(
+        handle: TreeHandle,
+        fatal: HeldFatal,
+    ): String? {
         val outcome = runCatching { handle.tree.reset() }
-        val thrown = outcome.exceptionOrNull()
-        if (thrown != null) {
-            return "tree '${handle.tree.node.name}': reset threw ${thrown::class.simpleName}: ${thrown.message}"
+        val result = outcome.getOrNull()
+        val failure = outcome.exceptionOrNull() ?: (result as? TransactionResult.Error)?.exception
+        return when {
+            failure == null || fatal.holdIfFatal(failure) -> null
+            result is TransactionResult.Error -> describeResetFailure(handle, result)
+            else -> "tree '${handle.tree.node.name}': reset threw ${failure::class.simpleName}: ${failure.message}"
         }
-        val result = outcome.getOrThrow()
-        return if (result is TransactionResult.Error) describeResetFailure(handle, result) else null
     }
 
     private fun describeSkippedReset(

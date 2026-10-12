@@ -5,12 +5,14 @@ package com.vynatix.holdfast.tree
 import com.vynatix.holdfast.CaptureStats
 import com.vynatix.holdfast.DerivedStateNode
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.NoWriteRegion
 import com.vynatix.holdfast.SettleScopes
 import com.vynatix.holdfast.SnapshotScope
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.derivedStateOverStores
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -159,7 +161,10 @@ internal class TreeValue(
         return null
     }
 
-    /** Under [edgeLock]: change the edge without its recompute; whether it changed. */
+    /**
+     * Under [edgeLock]: change the edge without its recompute; whether it
+     * changed. A fatal error propagates (issue #61).
+     */
     private fun applyEdgeLocked(
         node: DerivedStateNode<TreeSnapshot>,
         store: Store<*>,
@@ -167,7 +172,7 @@ internal class TreeValue(
     ): Boolean =
         if (added) {
             // Disposed between the attach and here: its edges are gone with it.
-            !store.isDisposed && runCatching { node.addSourceStoreQuietly(store) }.getOrDefault(false)
+            !store.isDisposed && runCatching { node.addSourceStoreQuietly(store) }.rethrowFatal().getOrDefault(false)
         } else {
             node.removeSourceStoreQuietly(store)
         }
@@ -192,17 +197,23 @@ internal class TreeValue(
                 return checkNotNull(nodeRef.value)
             }
             // Replayed under the edge lock, so a later event for the same store
-            // applies after its replay, never before.
+            // applies after its replay, never before. A fatal error one edge
+            // throws is held until every edge replayed and the seed finished
+            // (issue #61): the replay's events are gone once taken.
+            val fatal = FatalHold()
             val replayed =
                 synchronized(edgeLock) {
                     val replay = pendingEdges.orEmpty().also { pendingEdges = null }
                     counted = false
                     endSeedLocked()
-                    replay.count { (store, added) -> applyEdgeLocked(built, store, added) } > 0
+                    replay.count { (store, added) ->
+                        fatal.holdingFatal { applyEdgeLocked(built, store, added) } == true
+                    } > 0
                 }
-            if (replayed) built.recomputeForSourceStores()
+            if (replayed) fatal.holdingFatal { built.recomputeForSourceStores() }
             // Disposed while seeding: stop the node at once, keeping its first tree readable.
-            if (synchronized(edgeLock) { disposed }) built.dispose()
+            if (synchronized(edgeLock) { disposed }) fatal.holdingFatal { built.dispose() }
+            fatal.rethrowHeld()
             return built
         } finally {
             if (counted) synchronized(edgeLock) { endSeedLocked() }

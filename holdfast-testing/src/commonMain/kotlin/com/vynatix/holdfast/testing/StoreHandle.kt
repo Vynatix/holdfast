@@ -15,6 +15,7 @@ import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.Recorder
 import com.vynatix.holdfast.testing.internal.RecordingBridgeWrapper
+import com.vynatix.holdfast.testing.internal.holdingFatal
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.reflect.KProperty1
@@ -411,21 +412,26 @@ class StoreHandle<V : Store<V>> internal constructor(
      * winner records, or, when it records nothing (`Capture.None`), unwrapped
      * so the state's own bridge is back. Then the recorder comes off as at
      * teardown. Without this the wrappers would feed this handle's cleared
-     * recorder and the winner would never see their publishes.
+     * recorder and the winner would never see their publishes. A fatal error
+     * (issue #61) one hand-over throws — a delegate bridge's `observe` on
+     * unwrapping — is held while every other wrapper is handed over and the
+     * recorder comes off, then thrown.
      */
     internal fun yieldToInternal(winner: StoreHandle<V>) {
         val mine = synchronized(handleLock) { bridgeWrappers.toMap() }
         val target = winner.recorder
-        for ((state, wrapper) in mine) {
-            if (!wrapper.isAttached()) continue
-            if (target == null) {
-                wrapper.unwrap()
-            } else {
-                wrapper.redirectTo(target)
-                winner.adoptWrapperInternal(state, wrapper)
+        holdingFatal {
+            for ((state, wrapper) in mine) {
+                if (!wrapper.isAttached()) continue
+                if (target == null) {
+                    holding { wrapper.unwrap() }
+                } else {
+                    wrapper.redirectTo(target)
+                    winner.adoptWrapperInternal(state, wrapper)
+                }
             }
+            disposeRecorderInternal()
         }
-        disposeRecorderInternal()
     }
 
     /** List [wrapper], installed by a losing racer and now feeding this handle's recorder, for [bridge]. */
@@ -446,13 +452,16 @@ class StoreHandle<V : Store<V>> internal constructor(
      * installed on the store — before or after `track(v)` — and a tree's
      * `StoreTree.middlewares` ring stay in place, so a store that outlives the
      * `storeTest` block keeps behaving as the test left it.
+     *
+     * Never throws, except a fatal error (issue #61) the removal threw, once
+     * the buffer is dropped.
      */
     internal fun disposeRecorderInternal() {
         val r = recorder ?: return
         // Order: remove the recorder from the store first (so no subsequent
         // action on this store can fire it), then drop its buffer. Catch any
         // throw so teardown stays robust under leaked handles.
-        runCatching { PrivilegedHooks.removeMiddleware(store, r) }
+        val removal = runCatching { PrivilegedHooks.removeMiddleware(store, r) }
         // Drop the wrapper map; the wrappers remain attached to states (the
         // store still references them) but they hold a reference to a
         // recorder we are about to clear, so future publishes from a leaked
@@ -461,5 +470,6 @@ class StoreHandle<V : Store<V>> internal constructor(
         // leaked handle does not retain wrappers indefinitely.
         synchronized(handleLock) { bridgeWrappers.clear() }
         r.dispose()
+        removal.onFailure(PrivilegedHooks::rethrowIfFatal)
     }
 }

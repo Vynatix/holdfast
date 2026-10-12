@@ -27,16 +27,18 @@ internal class RunBuilt private constructor(
      * Dispose each of [stores] that the run built and nothing else holds: not
      * one in [keep] (a winner's store), not one that existed before the run,
      * not one that hangs under a tree parent (whoever attached it owns it),
-     * not one already disposed. Called holding no lock of the tree.
+     * not one already disposed. Called holding no lock of the tree. Each is
+     * disposed even after one threw a fatal error, thrown then (issue #61).
      */
     fun disposeOrphans(
         stores: Iterable<Store<*>>,
         keep: Collection<Store<*>> = emptyList(),
     ) {
-        stores
-            .filter { store -> !store.isDisposed && builtDuringRun(store) && keep.none { it === store } }
-            .filter { store -> store.internalAttachment(treeMembershipKey)?.parentEdge?.value == null }
-            .forEach { it.dispose() }
+        disposeEach(
+            stores
+                .filter { store -> !store.isDisposed && builtDuringRun(store) && keep.none { it === store } }
+                .filter { store -> store.internalAttachment(treeMembershipKey)?.parentEdge?.value == null },
+        )
     }
 
     companion object {

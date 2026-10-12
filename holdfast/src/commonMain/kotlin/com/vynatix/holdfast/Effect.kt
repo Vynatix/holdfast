@@ -17,8 +17,11 @@ package com.vynatix.holdfast
  * to [Store.uncaughtObserverHandler], or is logged (naming the store) while none is
  * set, and the other observers still run — unless [Store.uncaughtObserverHandler]
  * itself throws, which ends that commit's fanout early and makes the action return an
- * Error (the values stay applied). The initial fire is different: it runs inside
- * `effect` and throws to the caller.
+ * Error (the values stay applied). A fatal error (issue #61: a `VirtualMachineError`
+ * such as `StackOverflowError` on JVM/Android, a `kotlin.OutOfMemoryError` on
+ * iOS/wasmJs) is never reported: the other observers, bridges and events of that
+ * commit still run, then the committing call throws it (the values stay applied).
+ * The initial fire is different: it runs inside `effect` and throws to the caller.
  *
  * On a commit fire the handler must not write back into the state's own store: that
  * commit has already applied, so the write could never land. `mutate`/`update`/`emit`
