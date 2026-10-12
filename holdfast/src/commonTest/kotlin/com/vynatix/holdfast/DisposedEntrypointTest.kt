@@ -50,6 +50,9 @@ class DisposedEntrypointTest {
     private val gated =
         listOf(
             Entrypoint("action") { p, _ -> p action { } },
+            // Bare invoke is read-only/wiring, but it gates on dispose like
+            // every other entrypoint (issue 005).
+            Entrypoint("invoke") { p, _ -> p { } },
             Entrypoint("mutate") { p, s -> p { s mutate 1 } },
             Entrypoint("update") { p, s -> p { s update { it + 1 } } },
             Entrypoint("effect") { _, s -> s effect { } },

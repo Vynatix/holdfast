@@ -310,7 +310,7 @@ class SerializerContractTest {
         val sub =
             total effect {
                 val t = this
-                other { count mutate t }
+                with(other) { count mutate t } // scope fn: one-shot, not bare-invoke (issue 005)
             }
         try {
             completesWithin(10, "a cancelled multi-store suspendAtomic waiter and a derived on one event-loop thread") {
@@ -346,7 +346,7 @@ class SerializerContractTest {
         val sub =
             total effect {
                 val t = this
-                other { count mutate t }
+                with(other) { count mutate t } // scope fn: one-shot, not bare-invoke (issue 005)
             }
         try {
             completesWithin(10, "a two-store suspendAtomic whose derived writes to the earlier store") {

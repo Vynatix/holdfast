@@ -34,6 +34,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 17. [The store tree (experimental)](#17-the-store-tree-experimental) — declaring children with `store { }`/`group { }`/`keyed { }`, keyed stores through a declared factory, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
 18. [Threading & Scopes](#18-threading--scopes) — the four levels every entry passes through, why a slow observer is a slow store, the three refusals, scopes and their lifetimes
 19. [Lifecycle & Events](#19-lifecycle--events) — who calls `dispose()`, what it tears down and what it keeps, behavior after dispose, `EventfulStore` patterns
+20. [ViewModel ownership (`holdfast-lifecycle`, experimental)](#20-viewmodel-ownership-holdfast-lifecycle-experimental) — a store per ViewModel, a tree per ViewModel, process death
 
 ---
 
@@ -331,12 +332,19 @@ other threads still see the committed value, never the pending one.
 
 **Outside any transaction (or on a non-owner thread)**: synthesizes a
 one-shot `action { this@mutate mutate that }`. Middleware fires; observers
-see only the committed value. This means standalone `holdfast { x mutate v }`
-is equivalent to `holdfast action { x mutate v }` — never a "raw" write that
-skips observers, middleware, or commit semantics — except while a
-`suspendAction`/`suspendAtomic` holds the store: then a bare write from any
-thread stages into (or, once it has applied, is refused by) that transaction;
-see §8.2.
+see only the committed value — never a "raw" write that skips observers,
+middleware, or commit semantics — except while a `suspendAction`/
+`suspendAtomic` holds the store: then a bare write from any thread stages
+into (or, once it has applied, is refused by) that transaction; see §8.2.
+
+One spelling of "outside any transaction" is refused outright: inside a
+bare `store { … }` block (§4.7) `mutate` throws an `IllegalStateException`
+naming `store action { }` as the mutating form. The block looks like a
+scope but each bare write there would run as its own one-shot action, so a
+mid-block throw commits the earlier writes — the partial-commit trap the
+refusal defuses. The scope functions `with(store) { … }` and
+`store.run { … }` are NOT that block: a bare write inside them takes the
+one-shot path described above.
 
 ### 4.4 `effect { … }` — Observe
 
@@ -465,18 +473,37 @@ later, with that store's node.
 
 ### 4.7 `invoke { … }` — Context block
 
-`store { … }` — the operator on `Store` — runs `block(self)` with no locks
-and no transaction. It exists so store-extension members like `effect` and
-`bridge` can be called with store-as-receiver:
+`store { … }` — the operator on `Store` — runs `block(self)` with no locks and
+no transaction: the **read-only/wiring scope**. It exists so the store's
+member-extensions (`mutate`, `update`, `bridge`, `observeFrom`) resolve with
+the store as receiver — `effect` is a top-level extension on `State` and
+needs no receiver:
 
 ```kotlin
-val d = holdfast { count effect { … } }      // effect is an extension on Store<Self>
+val d = holdfast { count effect { … } }      // wiring: subscribe with the receiver in scope
 val v = holdfast { count.value }             // plain read
 ```
 
-`holdfast { x mutate y }` is a special case — `mutate` itself synthesizes an
-implicit action when there is no active transaction. So this form still
-goes through middleware and observers.
+**Mutations inside the block throw.** `mutate`, `update` and `emit` (on an
+`EventfulStore`) throw an `IllegalStateException` naming
+`store action { }` as the mutating form. Each of them would otherwise run as
+its own one-shot action, so a mid-block throw would commit the earlier
+writes — the exact non-atomicity `action` exists to prevent. This holds
+dynamically too: a subclass method that mutates, called from inside the
+block, throws the same way.
+
+What stays legal inside the block: reads, `effect { }`, `bridge`/
+`observeFrom` wiring, and `removeState`/`clearStates` (deliberately —
+dropping a state is not a transactional write; see §13). An `action { }` (or `atomic(...)`, `suspendAction`, `suspendAtomic`)
+**started** inside the block is legal and stages normally — its transaction
+wins over the block's guard. `with(store) { … }` and `store.run { … }` are
+plain Kotlin scope functions, not this operator: a bare `mutate` inside them
+synthesizes the one-shot action as usual (§4.3).
+
+The guard is per-thread and best-effort, not a guarantee: it travels with
+the invoking thread only, and a mutation that hops threads
+(`scope.launch { … }` inside the block) escapes it. The block also refuses
+on a disposed store, like every entrypoint.
 
 ---
 
@@ -1270,7 +1297,7 @@ never T1's pending writes.
     v.middlewares(object : Middleware<CounterStore>() {
         override fun onTransactionStarted(c: MiddlewareContext<CounterStore>) { calls++ }
     })
-    v { count mutate 42 }
+    with(v) { count mutate 42 } // scope fn, not `v { }`: bare-invoke mutations throw (§4.7)
     assertEquals(1, calls)
 }
 ```
@@ -1852,13 +1879,46 @@ store.
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
+fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
+
+@Composable
+fun <T : Any> State<T>.observeAsState(): androidx.compose.runtime.State<T>
+
+@Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
+
+@Composable
+fun <S : Store<S>> rememberStore(vararg keys: Any?, make: () -> S): S
+
+@Composable
+fun <E : Any> Eventful<E>.collectEvents(handler: (E) -> Unit)
 ```
 
 Bridges holdfast state into Compose's snapshot system as a
 `androidx.compose.runtime.State<T>`, triggering recomposition on every
 successful commit. Backed by `produceState`; subscription's lifecycle is
 tied to the surrounding Composable.
+
+`State<T>.observeAsState()` is the recommended single-mention spelling —
+`val text by store.text.observeAsState()` (the `collectAsState` pair reads
+the same states under the flow-shaped name). A commit that leaves the value
+equal does not recompose the reader: a `distinct` state (the default) never
+fires its observers for an equal value, and the Compose state itself is
+structural-equality policy.
+
+`rememberStore(vararg keys) { … }` makes the composition the owner of a
+store: the factory runs on first composition (and again, disposing the old
+store, when the keys change) and the store is disposed when the Composable
+leaves. Use it for screen-local state; a store that must outlive the UI is
+passed in, not remembered.
+
+`Eventful<E>.collectEvents { … }` collects a store's events into a callback
+for the Composable's lifetime, keyed on the store, always calling the latest
+recomposition's lambda. The `replay = 0` contract is the one to read before
+relying on it: collection starts when the composition applies — after the
+first successful composition — and events emitted before that are never
+delivered. An event that must not be missed belongs in a state the UI
+observes, not in a race against the UI.
 
 ### 14.10 The cookbook: 1.1 idioms
 
@@ -4985,9 +5045,19 @@ else:
   never disposed: a store that lives as long as the process needs no
   teardown, and process death is the OS's business.
 - **Feature- or screen-owned stores** are disposed by their owner when the
+  feature goes away — a ViewModel's `onCleared` (§20's `StoreViewModel` wires
+  it for you), a screen's disposal (§14.9's `rememberDisposable` for
+  Compose). Owners without either wire call `dispose()` directly.
+||||||| f37200b
   feature goes away — a ViewModel's `onCleared`, a screen's disposal
   (§14.9's `rememberDisposable` for Compose). The 0.6.0 plan formalizes
   this in a `holdfast-lifecycle` module; until then the owner calls
+  `dispose()` directly.
+  feature goes away — a ViewModel's `onCleared`, or in Compose the
+  composition itself (§14.9's `rememberStore`: the store it made is disposed
+  when the Composable leaves; anything else the screen owns, it disposes
+  through `rememberDisposable`). The 0.6.0 plan formalizes the ViewModel
+  pattern in a `holdfast-lifecycle` module; until then the owner calls
   `dispose()` directly.
 - **Trees**: dispose the *parent*. Disposing a parent releases its
   `store { }`/`group { }` children as independent subtree roots and — by
@@ -5103,6 +5173,80 @@ The guarantees, each of them contractual:
 
 ---
 
+## 20. ViewModel ownership (`holdfast-lifecycle`, experimental)
+
+The `holdfast-lifecycle` module turns §19.1's "the owner calls `dispose()`"
+into a wired guarantee for the one owner shape the ecosystem standardized
+on: a `ViewModel`. It is built on the Jetpack Lifecycle ViewModel KMP
+artifact (`org.jetbrains.androidx.lifecycle:lifecycle-viewmodel`), so it
+works on Android, JVM/desktop and iOS; everything in it is
+`@ExperimentalStoreApi` and the code examples live in the module README.
+
+### 20.1 The ownership pattern
+
+`StoreViewModel<S : Store<*>>` is a `ViewModel` that owns one store:
+`createStore()` builds it, the first `store` read runs that factory at most
+once (never from a constructor, and never at all when the ViewModel is
+cleared before a first read — then there is nothing to dispose), and a
+**final** `onCleared()` disposes it — exactly once, whether the store was
+read or not. The wiring is idempotent (a repeated `onCleared` is a no-op)
+and stacks on `dispose()`'s own idempotence (§19.1); reading `store` after
+clear throws a teaching error naming both facts. `storeViewModel { }` is the
+no-boilerplate factory; `treeViewModel { }` (below) the tree-owning one.
+Both compose with the platform's factory machinery — `viewModel {
+storeViewModel { … } }`.
+
+For teardown work of your own, don't fight the final `onCleared()`: use the
+platform's `addCloseable`, whose closeables run *before* `onCleared()` —
+which is also what makes the persist-on-clear recipe work: a closeable
+reads the still-live store, `onCleared()` disposes it moments later.
+
+### 20.2 A store per ViewModel, a tree per ViewModel
+
+When the owned store is a tree root (§17), the two factory helpers differ in
+the ownership claim they make:
+
+| Factory | `onCleared` disposes | `store { }`/`group { }` children |
+|---|---|---|
+| `storeViewModel { }` | the root store | released as subtree roots (§17.3), deliberately not disposed |
+| `treeViewModel { }` | every store of the subtree, then the root | disposed |
+
+`storeViewModel` is the tree-agnostic default: it applies §17.3 unchanged,
+so a child the screen shared with a longer-lived owner keeps working after
+the screen goes away — the tree does not assume it owns plain children. The
+cost is the mirror image: a released child that observes anything
+longer-lived than the ViewModel (another store, a bridge) keeps those
+subscriptions until something disposes it. `treeViewModel` makes the
+opposite claim — the subtree is the screen's private tree — and disposes it
+all. Its teardown listing materializes never-read `store { }`/`group { }`
+children (their declaring lambdas run at teardown; keep them
+side-effect-free — a keyed factory runs only on `create`/`getOrCreate`, so
+an unread keyed entry simply does not exist), and a child lambda that
+throws there does not break the guarantee: the root is still disposed, and
+the failure is reported through the root store's `uncaughtObserverHandler`
+(§4.4), wrapped in an exception naming the cause — reported, not thrown, in
+line with §19.2's teardown philosophy. Your own ViewModel base class can
+make either claim by overriding `disposeSubtree`.
+
+### 20.3 Process death, and scopes
+
+`onCleared` never runs on process death — the ViewModel, its store and any
+unsaved state die with the process, and a restored ViewModel builds a fresh
+store. The module persists nothing and adds no leak vector of its own: a
+ViewModel whose host never clears its `ViewModelStore` (an app-level leak)
+leaks with its store exactly as it would without the module. What survives
+process death is what you persisted — the snapshot pipeline of §16.2 and,
+for hydration-backed stores, the persisted overlay of §16.8; a closeable
+(§20.1) is the natural "persist at clear" hook.
+
+Scopes stay exactly as §18.4 leaves them: `dispose()` never cancels any
+scope, and the wiring does not bind one for you. Bind the store to
+`viewModelScope` in `createStore()` when its post-commit work (derived-state
+recomputes, hydration writers) should stop with the ViewModel — the
+platform cancels that scope independently of the dispose wiring.
+
+---
+
 ## Appendix A — One-page cheatsheet
 
 Lines marked `exp.` are `@ExperimentalStoreApi` (§16 and §17 have the detail); the
@@ -5132,8 +5276,9 @@ val r = v action { x update { it + 1 }; "${x.value} done" }
 // Failed atomic mutation: rolled back whole, observers never fire.
 v action { x mutate 99; error("nope") }.onError { … }
 
-// Bare mutation — same outcome as a one-mutate action.
-v { x mutate 2 }                                       // → x=2
+// Bare mutation outside any block — same outcome as a one-mutate action. Not
+// `v { x mutate 2 }`: bare-invoke mutations throw (§4.7); use a scope function.
+with(v) { x mutate 2 }                                // → x=2
 
 // Keyed entries (exp.): created on first get, evicted like a write.
 v action { drafts["a"] mutate "hello"; drafts.evict("b") }

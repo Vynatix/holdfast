@@ -213,7 +213,7 @@ class FanoutWriteTest {
         val s = FanoutStore()
         val t = FanoutTarget()
         val failures = s.collectFailures()
-        onCommit(s.trigger) { value -> t { copy mutate value } }
+        onCommit(s.trigger) { value -> with(t) { copy mutate value } } // scope fn: one-shot, not bare-invoke (issue 005)
         onCommit(s.echo) { value -> t action { copy update { it + value } } }
 
         s action { trigger mutate 4 }

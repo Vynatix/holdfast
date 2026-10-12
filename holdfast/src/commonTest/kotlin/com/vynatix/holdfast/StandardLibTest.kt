@@ -294,7 +294,7 @@ class ProfilingMiddlewareTest {
         val v = StdLibVault()
         val profiler = ProfilingMiddleware<StdLibVault>()
         v.middlewares(profiler)
-        v { n mutate 7 }
+        with(v) { n mutate 7 } // scope fn: the one-shot path, not a bare-invoke refusal (issue 005)
         val profile = profiler.profile()
         assertEquals(1L, profile.transactionCount, "bare mutate synthesizes a one-shot action")
         assertEquals(mapOf("n" to 1L), profile.stateWriteCounts)

@@ -1,0 +1,13 @@
+public abstract class com/vynatix/holdfast/lifecycle/StoreViewModel : androidx/lifecycle/ViewModel {
+	public fun <init> ()V
+	protected abstract fun createStore ()Lcom/vynatix/holdfast/Store;
+	protected fun getDisposeSubtree ()Z
+	public final fun getStore ()Lcom/vynatix/holdfast/Store;
+	protected final fun onCleared ()V
+}
+
+public final class com/vynatix/holdfast/lifecycle/StoreViewModelFactoryKt {
+	public static final fun storeViewModel (Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/lifecycle/StoreViewModel;
+	public static final fun treeViewModel (Lkotlin/jvm/functions/Function0;)Lcom/vynatix/holdfast/lifecycle/StoreViewModel;
+}
+

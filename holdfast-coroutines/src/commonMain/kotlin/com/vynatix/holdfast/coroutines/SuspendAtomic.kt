@@ -323,8 +323,12 @@ private suspend fun <R> acquireAndRun(
                 // partway through still restores the store below.
                 frame.heldVaults += v
                 // Install a fresh root transaction for this store. Subsequent
-                // mutate / update / suspendAction calls inside the body stage into
-                // this root's pendingWrites.
+                // mutate / update / suspendAction calls inside the body stage
+                // into this root's pendingWrites. Installed inside the try,
+                // whose finally restores what was there before: a throw
+                // anywhere between the install and the recursion — the
+                // progress epoch or the middleware session — leaves nothing
+                // of this frame installed (issue 002 A6(i)).
                 val root = Transaction.createForExternal(id, ownerThreadId, frameId = id)
                 v.internalSetActiveTransaction(root)
                 v.suspendingOwner = ownerKey

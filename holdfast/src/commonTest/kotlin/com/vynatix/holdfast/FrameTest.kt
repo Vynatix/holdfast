@@ -68,7 +68,7 @@ class FrameEnrollmentTest {
         val c = FrameAccount()
         assertFailsWith<UnenrolledStoreException> {
             atomic(a, b) {
-                c { balance mutate 5L }
+                with(c) { balance mutate 5L } // scope fn: exercise the unenrolled one-shot path (issue 005)
             }
         }
         assertEquals(0L, c.balance.value)
@@ -161,7 +161,7 @@ class FrameEscalationTest {
             atomic(a, b, policy = FramePolicy.TolerateInnerErrors) {
                 // The violation happens INSIDE an inner action, whose Error
                 // result would otherwise be tolerated and silently dropped.
-                a.action { c { balance mutate 1L } }
+                a.action { with(c) { balance mutate 1L } } // scope fn: exercise the unenrolled one-shot path (issue 005)
             }
         }
         assertEquals(0L, a.balance.value)

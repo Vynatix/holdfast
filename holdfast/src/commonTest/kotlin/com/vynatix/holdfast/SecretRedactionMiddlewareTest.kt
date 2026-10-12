@@ -109,7 +109,7 @@ class SecretRedactionMiddlewareTest {
 
         store.writeSecrets().getOrThrow()
         val undo = store.snapshot()
-        store { token mutate "rotated-$API_TOKEN" }
+        with(store) { token mutate "rotated-$API_TOKEN" } // scope fn: one-shot, not bare-invoke (issue 005)
         assertIs<TransactionResult.Error>(
             store action {
                 token mutate API_TOKEN

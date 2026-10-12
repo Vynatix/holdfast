@@ -368,7 +368,8 @@ class HydrationInvalidateTest {
         val attempts =
             listOf<() -> Unit>(
                 { store { state mutate Hydration.Hydrated } },
-                { store { state update { Hydration.Hydrated } } },
+                // Scope fn so the hydrator refusal, not the invoke defusal, answers (issue 005).
+                { with(store) { state update { Hydration.Hydrated } } },
                 { store { state bridge null } },
                 { store { state observeFrom Observable { Disposable { } } } },
             )

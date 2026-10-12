@@ -185,7 +185,14 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 ### `:holdfast-compose` extension
 
 - **`@Composable` `collectAsState`** for bridging `State<T>` into Compose recomposition.
+- **`@Composable` `State<T>.observeAsState()`** — the single-mention spelling of the same bridge.
 - **`rememberDisposable`** for tying subscription lifetime to a Composable's scope.
+- **`rememberStore`** for composition-owned stores (disposed on leave/key change).
+- **`collectEvents`** for `Eventful` events into a handler (replay = 0).
+
+### `:holdfast-lifecycle` extension
+
+- **`StoreViewModel`** / **`storeViewModel`** / **`treeViewModel`** — ViewModel ownership: `dispose()` wired to `onCleared()` exactly once (see GUIDE §20).
 
 ### `:holdfast-testing` extension
 
@@ -283,6 +290,10 @@ and `com.vynatix.holdfast.crypto`:
 | `com.vynatix:holdfast` | Core. |
 | `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` + `hydrator { … }` (experimental). |
 | `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
+| `com.vynatix:holdfast-lifecycle` | ViewModel ownership — `StoreViewModel`, `storeViewModel`/`treeViewModel`. |
+||||||| f37200b
+| `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
+| `com.vynatix:holdfast-compose` | `@Composable` `State<T>.observeAsState()` / `collectAsState`, `rememberDisposable`, `rememberStore`, `collectEvents` (Eventful events, replay = 0). |
 | `com.vynatix:holdfast-testing` | Test scope, handle, timeline, matchers. |
 | `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |
 | `com.vynatix:holdfast-hallmark-coroutines` | Suspend-side Hallmark bridge — `Store.suspendValidateAndMutate`. |

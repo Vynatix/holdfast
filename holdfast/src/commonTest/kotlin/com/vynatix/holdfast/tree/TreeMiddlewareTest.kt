@@ -353,7 +353,7 @@ class TreeMiddlewareTest {
         }
         assertEquals(listOf("tree started a", "tree started a", "tree completed a", "tree completed a"), trace.events)
         trace.events.clear()
-        a { n mutate 3 }
+        with(a) { n mutate 3 } // scope fn: one-shot, not a bare-invoke refusal (issue 005)
         assertEquals(listOf("tree started a", "tree completed a"), trace.events, "a bare mutate is a one-shot action")
         trace.events.clear()
         val doubled = a.derivedState(a.n) { n.value * 2 }
