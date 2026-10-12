@@ -3,6 +3,8 @@
 package com.vynatix.holdfast.compose
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import com.vynatix.holdfast.EventfulStore
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.tree.store
@@ -16,6 +18,10 @@ private class ComposeBindingsVault : Store<ComposeBindingsVault>() {
 
 private class ComposeBindingsParent : Store<ComposeBindingsParent>() {
     val leaf by store { ComposeBindingsVault() }
+}
+
+private class ComposeBindingsEvents : EventfulStore<ComposeBindingsEvents, String>() {
+    val n by state { 0 }
 }
 
 /**
@@ -50,6 +56,31 @@ class ComposeBindingsCompileTest {
             }
         }
         // Reference render to keep the closure in scope.
+        @Suppress("UNUSED_EXPRESSION")
+        ::render
+    }
+
+    @Test
+    fun ownershipAndEventsSurfaceCompiles() {
+        // Same contract as apiSurfaceCompiles: the references below are the
+        // assertion — the E1 surface (observeAsState / rememberStore /
+        // collectEvents) must resolve and type-check on every target,
+        // wasmJs included (this suite runs there as a compile assert).
+        @Composable
+        fun render() {
+            val v = ComposeBindingsVault()
+            // Single-mention observation, both read shapes.
+            val n by v.n.observeAsState()
+            val s = v.s.observeAsState()
+            // Composition-owned stores: unkeyed and keyed forms.
+            val owned = rememberStore { ComposeBindingsVault() }
+            val keyed = rememberStore("screen") { ComposeBindingsVault() }
+            // Event collection with the callback shape.
+            val events = ComposeBindingsEvents()
+            events.collectEvents { /* record it */ }
+            // Avoid unused warnings.
+            n + s.value.length + owned.n.value + keyed.n.value + events.n.value
+        }
         @Suppress("UNUSED_EXPRESSION")
         ::render
     }

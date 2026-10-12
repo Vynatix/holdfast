@@ -1,6 +1,9 @@
 public final class com/vynatix/holdfast/compose/ComposeBindingsKt {
 	public static final fun collectAsState (Lcom/vynatix/holdfast/State;Landroidx/compose/runtime/Composer;I)Landroidx/compose/runtime/State;
 	public static final fun collectAsState (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;Landroidx/compose/runtime/Composer;I)Landroidx/compose/runtime/State;
+	public static final fun collectEvents (Lcom/vynatix/holdfast/Eventful;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;I)V
+	public static final fun observeAsState (Lcom/vynatix/holdfast/State;Landroidx/compose/runtime/Composer;I)Landroidx/compose/runtime/State;
 	public static final fun rememberDisposable (Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)Lcom/vynatix/holdfast/Disposable;
+	public static final fun rememberStore ([Ljava/lang/Object;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)Lcom/vynatix/holdfast/Store;
 }
 
