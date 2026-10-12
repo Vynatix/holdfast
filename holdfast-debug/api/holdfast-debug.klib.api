@@ -1,0 +1,19 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <com.vynatix:holdfast-debug>
+abstract fun interface com.vynatix.holdfast.debug/TraceSink { // com.vynatix.holdfast.debug/TraceSink|null[0]
+    abstract fun write(kotlin/String) // com.vynatix.holdfast.debug/TraceSink.write|write(kotlin.String){}[0]
+
+    final object Companion { // com.vynatix.holdfast.debug/TraceSink.Companion|null[0]
+        final fun standardOutput(): com.vynatix.holdfast.debug/TraceSink // com.vynatix.holdfast.debug/TraceSink.Companion.standardOutput|standardOutput(){}[0]
+    }
+}
+
+final class <#A: com.vynatix.holdfast/Store<#A>> com.vynatix.holdfast.debug/DebugTraceMiddleware : com.vynatix.holdfast/Middleware<#A> { // com.vynatix.holdfast.debug/DebugTraceMiddleware|null[0]
+    constructor <init>(kotlin/String, com.vynatix.holdfast.debug/TraceSink) // com.vynatix.holdfast.debug/DebugTraceMiddleware.<init>|<init>(kotlin.String;com.vynatix.holdfast.debug.TraceSink){}[0]
+}
