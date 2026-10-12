@@ -1875,13 +1875,46 @@ store.
 fun <V : Store<V>, T : Any> V.collectAsState(state: State<T>): androidx.compose.runtime.State<T>
 
 @Composable
+fun <T : Any> State<T>.collectAsState(): androidx.compose.runtime.State<T>
+
+@Composable
+fun <T : Any> State<T>.observeAsState(): androidx.compose.runtime.State<T>
+
+@Composable
 fun rememberDisposable(make: () -> Disposable): Disposable
+
+@Composable
+fun <S : Store<S>> rememberStore(vararg keys: Any?, make: () -> S): S
+
+@Composable
+fun <E : Any> Eventful<E>.collectEvents(handler: (E) -> Unit)
 ```
 
 Bridges holdfast state into Compose's snapshot system as a
 `androidx.compose.runtime.State<T>`, triggering recomposition on every
 successful commit. Backed by `produceState`; subscription's lifecycle is
 tied to the surrounding Composable.
+
+`State<T>.observeAsState()` is the recommended single-mention spelling —
+`val text by store.text.observeAsState()` (the `collectAsState` pair reads
+the same states under the flow-shaped name). A commit that leaves the value
+equal does not recompose the reader: a `distinct` state (the default) never
+fires its observers for an equal value, and the Compose state itself is
+structural-equality policy.
+
+`rememberStore(vararg keys) { … }` makes the composition the owner of a
+store: the factory runs on first composition (and again, disposing the old
+store, when the keys change) and the store is disposed when the Composable
+leaves. Use it for screen-local state; a store that must outlive the UI is
+passed in, not remembered.
+
+`Eventful<E>.collectEvents { … }` collects a store's events into a callback
+for the Composable's lifetime, keyed on the store, always calling the latest
+recomposition's lambda. The `replay = 0` contract is the one to read before
+relying on it: collection starts when the composition applies — after the
+first successful composition — and events emitted before that are never
+delivered. An event that must not be missed belongs in a state the UI
+observes, not in a race against the UI.
 
 ### 14.10 The cookbook: 1.1 idioms
 
@@ -4974,6 +5007,17 @@ else:
   feature goes away — a ViewModel's `onCleared` (§20's `StoreViewModel` wires
   it for you), a screen's disposal (§14.9's `rememberDisposable` for
   Compose). Owners without either wire call `dispose()` directly.
+||||||| f37200b
+  feature goes away — a ViewModel's `onCleared`, a screen's disposal
+  (§14.9's `rememberDisposable` for Compose). The 0.6.0 plan formalizes
+  this in a `holdfast-lifecycle` module; until then the owner calls
+  `dispose()` directly.
+  feature goes away — a ViewModel's `onCleared`, or in Compose the
+  composition itself (§14.9's `rememberStore`: the store it made is disposed
+  when the Composable leaves; anything else the screen owns, it disposes
+  through `rememberDisposable`). The 0.6.0 plan formalizes the ViewModel
+  pattern in a `holdfast-lifecycle` module; until then the owner calls
+  `dispose()` directly.
 - **Trees**: dispose the *parent*. Disposing a parent releases its
   `store { }`/`group { }` children as independent subtree roots and — by
   default — disposes its keyed stores (§17.3). Disposing a child detaches
