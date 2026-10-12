@@ -162,11 +162,15 @@ class SuspendGuardBudgetTest {
 
     @Test
     fun `observable progress extends the wait past many budgets`() {
-        // A body that stages a write every 100 ms for ~1 s — 5x the budget.
-        // Each staged write bumps the epoch and restarts any waiter's clock,
-        // so the waiter must keep waiting, never throw, and run at the end.
+        // A body that stages a write every 100 ms for ~5 s — 5× the budget,
+        // with a 10× gap between cadence and budget: a starved CI runner
+        // (where delay(100) overshoots well past its nominal wall time, as on
+        // GitHub's shared 2-vCPU macos-15 images) must still never leave the
+        // holder "quiet" for a whole budget. Each staged write bumps the
+        // epoch and restarts any waiter's clock, so the waiter must keep
+        // waiting, never throw, and run at the end.
         val s = GuardCounter()
-        serializerWithBudget(s, 200.milliseconds)
+        serializerWithBudget(s, 1.seconds)
         val entered = CountDownLatch(1)
         val worker =
             Thread {
@@ -174,7 +178,7 @@ class SuspendGuardBudgetTest {
                     s.suspendAction<GuardCounter, Unit> {
                         count mutate 1L
                         entered.countDown()
-                        repeat(10) {
+                        repeat(50) {
                             delay(100)
                             count mutate count.value + 1L
                         }
@@ -187,15 +191,15 @@ class SuspendGuardBudgetTest {
         assertTrue(entered.await(10, TimeUnit.SECONDS), "the progressing body never started")
 
         val before = s.suspendingProgressEpoch
-        completesWithin(15, "cross-thread action beside a progressing suspendAction") {
+        completesWithin(20, "cross-thread action beside a progressing suspendAction") {
             val r = s action { count mutate count.value + 100L }
             assertIs<TransactionResult.Success<*>>(r)
         }
         val after = s.suspendingProgressEpoch
         // Epoch pinned: one bump per staged write (the entry and commit bumps
-        // may land before/after `before`/`after` — 10 is the floor).
-        assertTrue(after - before >= 10L, "epoch advanced only ${after - before} for 10 staged writes")
-        assertEquals(111L, s.count.value, "1 + 10 from the body, 100 from the waiter that waited 5x its budget")
+        // may land before/after `before`/`after` — 50 is the floor).
+        assertTrue(after - before >= 50L, "epoch advanced only ${after - before} for 50 staged writes")
+        assertEquals(151L, s.count.value, "1 + 50 from the body, 100 from the waiter that waited 5x its budget")
         worker.join(10_000)
     }
 
