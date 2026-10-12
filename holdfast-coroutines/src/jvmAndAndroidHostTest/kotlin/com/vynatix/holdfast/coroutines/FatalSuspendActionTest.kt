@@ -155,7 +155,8 @@ private suspend fun FsaStore.assertNotWedged() {
     assertNothingLeftOnThisThread()
     val before = y.value
     assertIs<TransactionResult.Success<*>>(this action { y mutate before + 1 })
-    this { y mutate before + 2 }
+    // `with`, not a bare `this { }`: a bare-invoke mutation is refused (issue 005).
+    with(this) { y mutate before + 2 }
     assertIs<TransactionResult.Success<*>>(suspendAction { y mutate before + 3 })
     assertEquals(before + 3, y.value)
 }

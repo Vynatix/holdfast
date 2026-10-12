@@ -4,6 +4,7 @@ package com.vynatix.holdfast.lifecycle
 
 import androidx.lifecycle.ViewModel
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.tree.tree
@@ -40,7 +41,9 @@ import com.vynatix.holdfast.tree.tree
  *   `uncaughtObserverHandler` (or the default failure log), wrapped in a
  *   [StoreTreeTeardownException]; the children follow the tree's release
  *   semantics (GUIDE §17.3), so key the screen's disposable children as
- *   keyed branches or materialize them during the ViewModel's life.
+ *   keyed branches or materialize them during the ViewModel's life. A fatal
+ *   error (GUIDE §18.5) is never wrapped or reported: every store is still
+ *   disposed, then `onCleared` throws it.
  *
  * Reading [store] after `onCleared` throws an [IllegalStateException]: the
  * ViewModel is dead and its store disposed. To run code at clear time while
@@ -116,16 +119,29 @@ abstract class StoreViewModel<S : Store<*>> : ViewModel() {
     }
 }
 
-/** Disposes every store of [root]'s subtree, then [root] itself. */
+/**
+ * Disposes every store of [root]'s subtree, then [root] itself. A fatal error
+ * (issue #61: a `StackOverflowError`, an `OutOfMemoryError`) from the listing
+ * or a `dispose()` is never reported: every store still disposes, then it is
+ * thrown.
+ */
 private fun disposeTreeOf(root: Store<*>) {
+    val fatal = FatalHold()
     val members =
         runCatching { root.tree.stores() }
-            .onFailure { error -> root.internalReportUncaughtFailure(StoreTreeTeardownException(error)) }
-            .getOrDefault(emptyList())
+            .onFailure { error ->
+                if (!fatal.holdIfFatal(error)) root.internalReportUncaughtFailure(StoreTreeTeardownException(error))
+            }.getOrDefault(emptyList())
     for (member in members) {
-        if (member !== root) member.dispose()
+        if (member !== root) fatal.disposing(member)
     }
-    root.dispose()
+    fatal.disposing(root)
+    fatal.rethrowHeld()
+}
+
+/** Dispose [store], holding a fatal error it throws (`dispose()` throws nothing else). */
+private fun FatalHold.disposing(store: Store<*>) {
+    runCatching { store.dispose() }.onFailure { if (!holdIfFatal(it)) throw it }
 }
 
 /**

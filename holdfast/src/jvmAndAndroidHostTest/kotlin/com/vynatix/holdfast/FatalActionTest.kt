@@ -304,7 +304,10 @@ class FatalActionTest {
         assertNull(store.activeTransaction)
     }
 
-    /** Store.kt:1604/1230: a bare mutate's one-shot action used to drop the fatal error with its result. */
+    /**
+     * Store.kt:1604/1230: a bare mutate's one-shot action used to drop the fatal error with its result.
+     * Spelled `with(store)`: a mutation inside a bare `store { }` block is refused (issue 005).
+     */
     @Test fun aBareMutatePropagatesAnObserversStackOverflowAndTheValueStands() {
         val store = FatalActionStore()
         val reported = store.recordedReports()
@@ -313,7 +316,7 @@ class FatalActionTest {
         val effect = store.a effect { if (armed) throw fatal }
         armed = true
 
-        val thrown = assertFailsWith<StackOverflowError> { store { a mutate 9 } }
+        val thrown = assertFailsWith<StackOverflowError> { with(store) { a mutate 9 } }
 
         assertSame(fatal, thrown)
         assertEquals(9, store.a.value, "the commit's value stands")
@@ -321,7 +324,7 @@ class FatalActionTest {
         assertEquals(emptyList(), reported.toList())
         assertNothingLeftOnThisThread()
         armed = false
-        store { a mutate 10 }
+        with(store) { a mutate 10 }
         assertEquals(10, store.a.value)
         effect.dispose()
     }
@@ -331,17 +334,17 @@ class FatalActionTest {
         val reported = store.recordedReports()
         val fatal = StackOverflowError()
 
-        assertSame(fatal, assertFailsWith<StackOverflowError> { store { a update { throw fatal } } })
+        assertSame(fatal, assertFailsWith<StackOverflowError> { with(store) { a update { throw fatal } } })
         assertEquals(0, store.a.value, "the block's update was rolled back")
 
         var armed = true
         val effect = store.a effect { if (armed && this == 4) throw fatal }
-        val fromCommit = assertFailsWith<StackOverflowError> { store { a update { 4 } } }
+        val fromCommit = assertFailsWith<StackOverflowError> { with(store) { a update { 4 } } }
         assertSame(fatal, fromCommit, "a commit-phase fatal error arrives raw, never as a TransactionException")
         assertEquals(4, store.a.value)
         assertEquals(emptyList(), reported.toList())
         armed = false
-        store { a update { it + 1 } }
+        with(store) { a update { it + 1 } }
         assertEquals(5, store.a.value)
         effect.dispose()
     }
