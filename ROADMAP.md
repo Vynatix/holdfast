@@ -144,7 +144,7 @@ Issue #20 (snapshot-driven bootstrap: codecs, schema versions, tags, `reset()`, 
 - `holdfast-hallmark*` GA once `vynatix/hallmark` reaches Central — likely relocated to the hallmark repo to end the coupled train permanently
 - wasmJs parity (re-enable tests, `FileSystemKvStore`, `suspendDerived`) gated on demand evidence
 - Static enforcement: lint/compiler plugin promoting the 0.4.0 runtime checks (CRTP, invoke-vs-action) to compile time
-- DevTools: transaction-timeline inspector reusing the harness recorder — the one time-travel-adjacent feature that fits the model
+- DevTools: transaction-timeline inspector reusing the harness recorder — the one time-travel-adjacent feature that fits the model *(the offline-artifact phases landed early as experimental tooling — `:holdfast-debug` traces + `:holdfast-cli` rendering, issues 015/016; the interactive/live-attach parts stay here)*
 - Community bridges (SQLDelight, DataStore, KStore) accepted as contributions against the stable Bridge/KvStore SPI
 - JVM-target floor review (21 → 17) if real adopters ask — a deliberate post-1.0 decision
 
@@ -164,7 +164,11 @@ Issue #20 (snapshot-driven bootstrap: codecs, schema versions, tags, `reset()`, 
 
 - No new platform targets and no wasmJs parity work before 1.0
 - No compiler/IDE plugin in 0.x — runtime checks first, static enforcement post-1.0
-- No DevTools/time-travel, speculative bridges, or middleware library before 1.0
+- No DevTools/time-travel, speculative bridges, or middleware library before 1.0 — **exception
+  (2026-10-12, issues 015/016):** the *offline-artifact* debug tooling ships now as experimental
+  tooling outside the frozen surface — `:holdfast-debug` (JSONL tracing, `@ExperimentalStoreApi`,
+  boundary-only internals) and the internal `:holdfast-cli` (snapshot forensics, trace rendering,
+  repro scripts). Interactive DevTools, live attach and time-travel remain post-1.0.
 - No hallmark feature work inside this repo; core never blocks on the sibling
 - No toolchain-floor lowering to chase older consumers before 1.0
 - No marketing before the 0.4.0 footgun pass — the launch is fired exactly once

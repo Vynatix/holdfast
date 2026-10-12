@@ -2,6 +2,7 @@ package com.vynatix.holdfast.middleware
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 
 /**
  * Drop-in middleware that logs every transaction's lifecycle to a sink. Default
@@ -26,6 +27,7 @@ class LoggingMiddleware<V : Store<V>>(
     private val tag: String,
     private val log: (String) -> Unit = ::println,
 ) : Middleware<V>() {
+    @OptIn(StoreInternalApi::class)
     override fun onTransactionStarted(context: MiddlewareContext<V>) {
         val parent = context.transaction.parent?.id
         val parentSuffix = if (parent != null) " (savepoint of $parent)" else ""

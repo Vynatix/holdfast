@@ -15,12 +15,14 @@ public fun main(args: Array<String>) {
     HoldfastRootCommand()
         .subcommands(
             SnapshotCommand().subcommands(InspectCommand(), ValidateCommand(), DiffCommand()),
+            TraceCommand().subcommands(RenderTraceCommand(), TraceStatsCommand()),
+            RunCommand(),
             DoctorCommand(),
         ).main(args)
 }
 
 private class HoldfastRootCommand : CliktCommand(name = "holdfast") {
-    override fun help(context: Context): String = "Offline debugging of holdfast snapshot artifacts."
+    override fun help(context: Context): String = "Offline debugging of holdfast artifacts (snapshots and traces)."
 
     override fun run() {
         // Invoked without a subcommand: clikt prints help and exits non-zero.
