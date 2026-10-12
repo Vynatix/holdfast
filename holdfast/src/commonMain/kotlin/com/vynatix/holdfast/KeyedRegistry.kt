@@ -285,9 +285,11 @@ internal fun MutableState<*>.trackInbound(subscription: Disposable): Disposable 
 /**
  * How middleware and logs name this state when it is an entry of a keyed
  * state family: `docs[*]`, after its family — never its key, which can be
- * data; `null` for any other state.
+ * data; `null` for any other state. Exposed for companion debug tooling
+ * (`:holdfast-debug` traces) through the cross-module boundary.
  */
-internal fun State<*>.keyedEntryName(): String? {
+@StoreInternalApi
+fun State<*>.keyedEntryName(): String? {
     val decl = (this as? MutableState<*>)?.declaration
     return decl?.takeIf { it.keyed != null }?.name
 }

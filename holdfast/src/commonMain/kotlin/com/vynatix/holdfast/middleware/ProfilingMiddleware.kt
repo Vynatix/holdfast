@@ -2,6 +2,7 @@ package com.vynatix.holdfast.middleware
 
 import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
+import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.StoreLock
 import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.keyedEntryName
@@ -184,6 +185,7 @@ class ProfilingMiddleware<V : Store<V>>(
             drained
         }
 
+    @OptIn(StoreInternalApi::class)
     private fun record(
         context: MiddlewareContext<V>,
         status: TransactionStatus,
@@ -225,6 +227,7 @@ class ProfilingMiddleware<V : Store<V>>(
         onSample?.invoke(sample)
     }
 
+    @OptIn(StoreInternalApi::class)
     private fun modifiedStateNames(context: MiddlewareContext<V>): Set<String> {
         // modifiedStates throws off the owner thread (possible after a
         // suspendAction thread hop); a profiler must degrade, never roll back.
