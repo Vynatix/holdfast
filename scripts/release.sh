@@ -41,7 +41,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO_ROOT"
 
 GROUP_PATH="com/vynatix"
-ARTIFACTS=(holdfast holdfast-coroutines holdfast-compose holdfast-testing)
+ARTIFACTS=(holdfast holdfast-coroutines holdfast-compose holdfast-lifecycle holdfast-testing)
 
 usage() { grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'; }
 

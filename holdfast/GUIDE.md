@@ -34,6 +34,7 @@ a techniques cookbook, the concurrency model, and a terse API reference.
 17. [The store tree (experimental)](#17-the-store-tree-experimental) — declaring children with `store { }`/`group { }`/`keyed { }`, keyed stores through a declared factory, dispose and detach, declaration rules, tree snapshots and typed reads, restore and reset over a subtree, encoding and the persisted-name self-check, the tree value, tree middleware, testing a tree, hydrating a tree
 18. [Threading & Scopes](#18-threading--scopes) — the four levels every entry passes through, why a slow observer is a slow store, the three refusals, scopes and their lifetimes
 19. [Lifecycle & Events](#19-lifecycle--events) — who calls `dispose()`, what it tears down and what it keeps, behavior after dispose, `EventfulStore` patterns
+20. [ViewModel ownership (`holdfast-lifecycle`, experimental)](#20-viewmodel-ownership-holdfast-lifecycle-experimental) — a store per ViewModel, a tree per ViewModel, process death
 
 ---
 
@@ -5003,6 +5004,14 @@ else:
   never disposed: a store that lives as long as the process needs no
   teardown, and process death is the OS's business.
 - **Feature- or screen-owned stores** are disposed by their owner when the
+  feature goes away — a ViewModel's `onCleared` (§20's `StoreViewModel` wires
+  it for you), a screen's disposal (§14.9's `rememberDisposable` for
+  Compose). Owners without either wire call `dispose()` directly.
+||||||| f37200b
+  feature goes away — a ViewModel's `onCleared`, a screen's disposal
+  (§14.9's `rememberDisposable` for Compose). The 0.6.0 plan formalizes
+  this in a `holdfast-lifecycle` module; until then the owner calls
+  `dispose()` directly.
   feature goes away — a ViewModel's `onCleared`, or in Compose the
   composition itself (§14.9's `rememberStore`: the store it made is disposed
   when the Composable leaves; anything else the screen owns, it disposes
@@ -5119,6 +5128,80 @@ The guarantees, each of them contractual:
   state holds what *is* (`count`) — a collector that needs the current
   value should read the state, not fold events. That is what keeps the
   replay-free, lossless policy affordable.
+
+---
+
+## 20. ViewModel ownership (`holdfast-lifecycle`, experimental)
+
+The `holdfast-lifecycle` module turns §19.1's "the owner calls `dispose()`"
+into a wired guarantee for the one owner shape the ecosystem standardized
+on: a `ViewModel`. It is built on the Jetpack Lifecycle ViewModel KMP
+artifact (`org.jetbrains.androidx.lifecycle:lifecycle-viewmodel`), so it
+works on Android, JVM/desktop and iOS; everything in it is
+`@ExperimentalStoreApi` and the code examples live in the module README.
+
+### 20.1 The ownership pattern
+
+`StoreViewModel<S : Store<*>>` is a `ViewModel` that owns one store:
+`createStore()` builds it, the first `store` read runs that factory at most
+once (never from a constructor, and never at all when the ViewModel is
+cleared before a first read — then there is nothing to dispose), and a
+**final** `onCleared()` disposes it — exactly once, whether the store was
+read or not. The wiring is idempotent (a repeated `onCleared` is a no-op)
+and stacks on `dispose()`'s own idempotence (§19.1); reading `store` after
+clear throws a teaching error naming both facts. `storeViewModel { }` is the
+no-boilerplate factory; `treeViewModel { }` (below) the tree-owning one.
+Both compose with the platform's factory machinery — `viewModel {
+storeViewModel { … } }`.
+
+For teardown work of your own, don't fight the final `onCleared()`: use the
+platform's `addCloseable`, whose closeables run *before* `onCleared()` —
+which is also what makes the persist-on-clear recipe work: a closeable
+reads the still-live store, `onCleared()` disposes it moments later.
+
+### 20.2 A store per ViewModel, a tree per ViewModel
+
+When the owned store is a tree root (§17), the two factory helpers differ in
+the ownership claim they make:
+
+| Factory | `onCleared` disposes | `store { }`/`group { }` children |
+|---|---|---|
+| `storeViewModel { }` | the root store | released as subtree roots (§17.3), deliberately not disposed |
+| `treeViewModel { }` | every store of the subtree, then the root | disposed |
+
+`storeViewModel` is the tree-agnostic default: it applies §17.3 unchanged,
+so a child the screen shared with a longer-lived owner keeps working after
+the screen goes away — the tree does not assume it owns plain children. The
+cost is the mirror image: a released child that observes anything
+longer-lived than the ViewModel (another store, a bridge) keeps those
+subscriptions until something disposes it. `treeViewModel` makes the
+opposite claim — the subtree is the screen's private tree — and disposes it
+all. Its teardown listing materializes never-read `store { }`/`group { }`
+children (their declaring lambdas run at teardown; keep them
+side-effect-free — a keyed factory runs only on `create`/`getOrCreate`, so
+an unread keyed entry simply does not exist), and a child lambda that
+throws there does not break the guarantee: the root is still disposed, and
+the failure is reported through the root store's `uncaughtObserverHandler`
+(§4.4), wrapped in an exception naming the cause — reported, not thrown, in
+line with §19.2's teardown philosophy. Your own ViewModel base class can
+make either claim by overriding `disposeSubtree`.
+
+### 20.3 Process death, and scopes
+
+`onCleared` never runs on process death — the ViewModel, its store and any
+unsaved state die with the process, and a restored ViewModel builds a fresh
+store. The module persists nothing and adds no leak vector of its own: a
+ViewModel whose host never clears its `ViewModelStore` (an app-level leak)
+leaks with its store exactly as it would without the module. What survives
+process death is what you persisted — the snapshot pipeline of §16.2 and,
+for hydration-backed stores, the persisted overlay of §16.8; a closeable
+(§20.1) is the natural "persist at clear" hook.
+
+Scopes stay exactly as §18.4 leaves them: `dispose()` never cancels any
+scope, and the wiring does not bind one for you. Bind the store to
+`viewModelScope` in `createStore()` when its post-commit work (derived-state
+recomputes, hydration writers) should stop with the ViewModel — the
+platform cancels that scope independently of the dispose wiring.
 
 ---
 

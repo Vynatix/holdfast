@@ -189,6 +189,10 @@ opt-outs via `FramePolicy`). The suspending peer `suspendAtomic` ships in
 - **`rememberStore`** for composition-owned stores (disposed on leave/key change).
 - **`collectEvents`** for `Eventful` events into a handler (replay = 0).
 
+### `:holdfast-lifecycle` extension
+
+- **`StoreViewModel`** / **`storeViewModel`** / **`treeViewModel`** — ViewModel ownership: `dispose()` wired to `onCleared()` exactly once (see GUIDE §20).
+
 ### `:holdfast-testing` extension
 
 - **`storeTest { }`** scope with auto-tracking, `StoreHandle.timeline` for ordered events, `TimelineMatcher` and `StateMatcher` DSLs for assertions. Teardown puts each tracked store's clock binding (`bindClock`) back to what it was when the store was first tracked, including bindings made by the test's un-joined child coroutines, so a test clock does not leak into the next test through a singleton store. Track the store before binding its clock, with `track(store)` or an auto-tracking call such as `store.read { }` (a bare `store.action { }` resolves to the `Store` member and does not track): a clock bound before the first track, or on a store the test never tracks, is kept. Work in `backgroundScope` or on scopes outside the test is not waited for, so join it before the body ends. A `StateTag.Secret` state's values are recorded as `Redacted` in the timeline and in bridge views, value matchers on it (`emitted(prop, value)`, `shouldHavePublished`) are refused with a teaching error while `emitted(prop)` and counts still work, and `shouldMatch`/`shouldMatchSnapshotOf` compare it without printing it.
@@ -284,6 +288,10 @@ and `com.vynatix.holdfast.crypto`:
 |---|---|
 | `com.vynatix:holdfast` | Core. |
 | `com.vynatix:holdfast-coroutines` | `Flow` / `StateFlow` / `first` / `awaitValue` adapters + `suspendAction { … }` + `hydrator { … }` (experimental). |
+| `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
+| `com.vynatix:holdfast-lifecycle` | ViewModel ownership — `StoreViewModel`, `storeViewModel`/`treeViewModel`. |
+||||||| f37200b
+| `com.vynatix:holdfast-compose` | `@Composable` `collectAsState` / `rememberDisposable`. |
 | `com.vynatix:holdfast-compose` | `@Composable` `State<T>.observeAsState()` / `collectAsState`, `rememberDisposable`, `rememberStore`, `collectEvents` (Eventful events, replay = 0). |
 | `com.vynatix:holdfast-testing` | Test scope, handle, timeline, matchers. |
 | `com.vynatix:holdfast-hallmark` | [Hallmark](https://github.com/vynatix/hallmark) bridge — `ValidatingTransformer`, `Store.boxed { }`, `BoxedCodec`, `BoxedHandle`. |

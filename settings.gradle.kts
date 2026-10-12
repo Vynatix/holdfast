@@ -33,6 +33,7 @@ rootProject.name = "Holdfast"
 include(":holdfast")
 include(":holdfast-coroutines")
 include(":holdfast-compose")
+include(":holdfast-lifecycle")
 include(":holdfast-testing")
 // Internal doc-snippet harness (never published): compiles every fenced Kotlin
 // block of the user-facing docs and fails `check` when docs and twins drift.
