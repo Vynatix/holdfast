@@ -388,26 +388,30 @@ private suspend fun fanOutThenPublish(
 ) {
     val publishQueue = mutableListOf<Pair<MutableState<Any>, Any>>()
     val eventsQueue = mutableListOf<Pair<MutableSharedFlow<*>, Any>>()
-    dispatch(
-        { committed ->
-            // Step 2: observers for every state whose value actually changed.
-            // Deduped `distinct` states never reach here, so they correctly skip
-            // the bridge publish too.
-            committed.forEach { (state, value) ->
-                val ms = state as MutableState<Any>
-                ms.fanOutToObservers(value)
-                publishQueue += ms to value
-            }
-        },
-        { snapshot ->
-            eventsQueue.addAll(snapshot)
-        },
-    )
-    // Step 3a: bridge publish phase. SuspendingBridge gets awaited;
-    // every other Bridge falls back to fire-and-forget Bridge.publish. A fatal
-    // error (issue #61) is held instead of reported, and thrown once the
-    // remaining states have published and the events have gone out.
+    // A fatal error (issue #61) — from one state's observers, the commit's own
+    // fanout steps or a publish — is held instead of reported, and thrown once
+    // every other state's observers have run, every state has published and
+    // the events have gone out: the commit has applied.
     val fatal = FatalHold()
+    runCatching {
+        dispatch(
+            { committed ->
+                // Step 2: observers for every state whose value actually changed.
+                // Deduped `distinct` states never reach here, so they correctly skip
+                // the bridge publish too.
+                committed.forEach { (state, value) ->
+                    val ms = state as MutableState<Any>
+                    runCatching { ms.fanOutToObservers(value) }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
+                    publishQueue += ms to value
+                }
+            },
+            { snapshot ->
+                eventsQueue.addAll(snapshot)
+            },
+        )
+    }.onFailure { if (!fatal.holdIfFatal(it)) throw it }
+    // Step 3a: bridge publish phase. SuspendingBridge gets awaited;
+    // every other Bridge falls back to fire-and-forget Bridge.publish.
     for ((ms, value) in publishQueue) {
         val br = ms.bridge ?: continue
         try {
