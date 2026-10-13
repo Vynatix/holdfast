@@ -231,12 +231,18 @@ class NestedActionSavepointTest {
         val inner = innerCapture.value
         assertNotNull(outer)
         assertNotNull(inner)
+
+        @OptIn(StoreInternalApi::class)
+        val innerParent = inner.parent
+
+        @OptIn(StoreInternalApi::class)
+        val outerParent = outer.parent
         assertSame(
             outer,
-            inner.parent,
+            innerParent,
             "inner transaction's parent must be the outer transaction",
         )
-        assertNull(outer.parent, "top-level outer transaction has no parent")
+        assertNull(outerParent, "top-level outer transaction has no parent")
     }
 }
 

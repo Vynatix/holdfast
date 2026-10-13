@@ -23,7 +23,12 @@ import kotlin.time.Clock
  */
 class Transaction internal constructor(
     val id: String,
-    internal val parent: Transaction?,
+    /**
+     * The enclosing transaction of this savepoint, `null` for a top-level
+     * transaction. The savepoint chain; exposed for companion debug tooling
+     * (transaction trees in traces) through the cross-module boundary.
+     */
+    @StoreInternalApi val parent: Transaction?,
     internal val ownerThreadId: Long,
     /**
      * Identity of the cross-store atomic frame this transaction belongs to, or
@@ -338,6 +343,7 @@ class Transaction internal constructor(
      * — as do a savepoint's merge into it (`mergeIntoParent`, FrameCommit.kt)
      * and `restore`'s staging ([stagePendingRaw]).
      */
+    @OptIn(StoreInternalApi::class)
     internal val closedToWrites: Boolean
         get() {
             var t = this
@@ -353,6 +359,7 @@ class Transaction internal constructor(
      * when it is open or closed because the root applied. Picks the wording of
      * the refusal message.
      */
+    @OptIn(StoreInternalApi::class)
     internal val rolledBackIn: Transaction?
         get() {
             if (rootApplied) return null
@@ -366,6 +373,7 @@ class Transaction internal constructor(
         }
 
     /** The top of this transaction's savepoint chain: itself when it is top-level. */
+    @OptIn(StoreInternalApi::class)
     internal val root: Transaction
         get() {
             var top = this
@@ -516,6 +524,7 @@ class Transaction internal constructor(
      * the apply pass takes under the pending lock (see [pendingLock]).
      */
     @Suppress("UNCHECKED_CAST")
+    @OptIn(StoreInternalApi::class)
     internal fun <T : Any> findPendingValue(state: MutableState<T>): T? {
         var current: Transaction? = this
         while (current != null) {
@@ -733,6 +742,7 @@ internal const val NOT_FANNING_OUT = Long.MIN_VALUE
  * the reverse.
  */
 internal fun <R> Transaction?.holdingPendingLocks(block: () -> R): R =
+    @OptIn(StoreInternalApi::class)
     if (this == null) block() else pendingLock.withLock { parent.holdingPendingLocks(block) }
 
 /** Lifecycle status of a [Transaction]. Active is the only non-terminal state. */

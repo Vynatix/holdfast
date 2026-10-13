@@ -1,0 +1,14 @@
+public final class com/vynatix/holdfast/debug/DebugTraceMiddleware : com/vynatix/holdfast/Middleware {
+	public static final field KEY_START_MARK Ljava/lang/String;
+	public fun <init> (Ljava/lang/String;Lcom/vynatix/holdfast/debug/TraceSink;)V
+}
+
+public abstract interface class com/vynatix/holdfast/debug/TraceSink {
+	public static final field Companion Lcom/vynatix/holdfast/debug/TraceSink$Companion;
+	public abstract fun write (Ljava/lang/String;)V
+}
+
+public final class com/vynatix/holdfast/debug/TraceSink$Companion {
+	public final fun standardOutput ()Lcom/vynatix/holdfast/debug/TraceSink;
+}
+

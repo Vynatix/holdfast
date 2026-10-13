@@ -42,6 +42,15 @@ include(":doc-snippets")
 // :holdfast-coroutines' own suites cannot run on wasmJs, so this one runs
 // there and on the JVM.
 include(":wasm-tests")
+// Internal developer CLI (never published): offline inspection of snapshot
+// artifacts through holdfast's public decode/encode/render surface only —
+// no @StoreInternalApi, no reimplementation of the wire format.
+include(":holdfast-cli")
+// Experimental library module: transaction tracing (JSONL) for app developers'
+// debugging; consumed by :holdfast-cli's `trace` commands. Uses the
+// @StoreInternalApi boundary (Transaction.parent, keyedEntryName) — never
+// application-facing API.
+include(":holdfast-debug")
 
 // The hallmark modules depend on com.vynatix:hallmark, which is not yet on
 // Maven Central and only resolves from mavenLocal (publish the sibling

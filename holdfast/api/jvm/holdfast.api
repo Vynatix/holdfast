@@ -216,6 +216,7 @@ public final class com/vynatix/holdfast/KeyedRegistryKt {
 	public static final fun internalKeyedAddress (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/State;)Lcom/vynatix/holdfast/KeyedAddress;
 	public static final fun internalKeyedFamily (Lcom/vynatix/holdfast/Store;Ljava/lang/String;)Lcom/vynatix/holdfast/KeyedState;
 	public static final fun internalObserveKeyedMembership (Lcom/vynatix/holdfast/Store;Lcom/vynatix/holdfast/KeyedMembershipListener;)Lcom/vynatix/holdfast/Disposable;
+	public static final fun keyedEntryName (Lcom/vynatix/holdfast/State;)Ljava/lang/String;
 }
 
 public abstract interface class com/vynatix/holdfast/KeyedState {
@@ -676,6 +677,7 @@ public final class com/vynatix/holdfast/Transaction {
 	public final fun getFrameId ()Ljava/lang/String;
 	public final fun getId ()Ljava/lang/String;
 	public final fun getModifiedStates ()Ljava/util/Set;
+	public final fun getParent ()Lcom/vynatix/holdfast/Transaction;
 	public final fun getStagedEvictions ()Ljava/util/Set;
 	public final fun getStatus ()Lcom/vynatix/holdfast/TransactionStatus;
 	public final fun rollback ()V

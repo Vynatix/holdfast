@@ -8,6 +8,14 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal boundary: `Transaction.parent` and `State.keyedEntryName` are now
+  `@StoreInternalApi`** (previously plain `internal`), the documented cross-module
+  boundary, so the experimental `:holdfast-debug` module's `DebugTraceMiddleware`
+  can link savepoints and name keyed families in its traces. Not application API —
+  application code must not opt in.
+
 ### Added
 - New experimental `:holdfast-lifecycle` module — ViewModel ownership for stores (`StoreViewModel`, `storeViewModel { }`, `treeViewModel { }`), `dispose()` wired to `onCleared()` exactly once; see the module's changelog and GUIDE §20.
 
