@@ -175,13 +175,19 @@ open class SettleScope internal constructor(
      * may lag its sources until then — and so the cut is reported, once per
      * piece of work and settle, through that store's
      * [Store.uncaughtObserverHandler].
+     *
+     * A fatal error (issue #61) — from the work, or from a handler a report
+     * reaches — is never reported: the settle holds the first, keeps going
+     * until nothing is queued, so the scope closes and none of its work is
+     * stranded, and then throws it.
      */
     open fun settle() {
         // Runs per piece of work, by identity (neither Store nor a SettleTask
         // overrides equals): a SettleTask, or a frame's store drain.
         var runs: MutableMap<Any, Int>? = null
+        val fatal = FatalHold()
         while (true) {
-            val next = synchronized(lock) { takeNext() } ?: return
+            val next = synchronized(lock) { takeNext() } ?: break
             val counts = runs ?: HashMap<Any, Int>().also { runs = it }
             val times = (counts[next] ?: 0) + 1
             counts[next] = times
@@ -208,8 +214,9 @@ open class SettleScope internal constructor(
                         }
                     is SettleTask -> if (loop) next.deferPastSettle(report = firstCut) else next.settle()
                 }
-            }.onFailure { error -> reportUncaught(next, error) }
+            }.onFailure { error -> if (!fatal.holdIfFatal(error)) reportUncaught(next, error, fatal) }
         }
+        fatal.rethrowHeld()
     }
 
     /**
@@ -220,18 +227,20 @@ open class SettleScope internal constructor(
      * through [SettleTask.reportUncaught] to its host. Guarded, and the
      * settle keeps going after the failure: a throwing handler must not
      * strand the work still queued, nor mask the entry's own exception
-     * ([settle] runs in a finally).
+     * ([settle] runs in a finally) — but a fatal error it throws (issue #61)
+     * is held in [fatal], for the settle to throw once it has settled.
      */
     private fun reportUncaught(
         next: Any,
         error: Throwable,
+        fatal: FatalHold,
     ) {
         runCatching {
             when (next) {
                 is Store<*> -> if (!next.isDisposed) next.internalReportUncaughtFailure(error)
                 is SettleTask -> next.reportUncaught(error)
             }
-        }
+        }.onFailure { fatal.holdIfFatal(it) }
     }
 
     /** The next piece of work, or `null` after closing the scope. The caller holds [lock]. */
@@ -362,22 +371,32 @@ object SettleScopes {
  * Run [block] as an entry: inside the settle scope open on this thread, or,
  * when none is, inside a new one that settles once [block] has returned or
  * thrown — so the caller must have released everything [block] took by then.
+ * A fatal error (issue #61) [block] threw outranks one the settle throws,
+ * which it then carries as suppressed; otherwise a fatal error the settle
+ * throws replaces what [block] returned or threw (carrying a throwable as
+ * suppressed). The scope has settled and closed by then.
  */
 internal inline fun <R> settling(block: () -> R): R {
     if (SettleScopes.current() != null) return block()
     val scope = SettleScope(within = null)
-    val prior = SettleScopes.install(scope)
+    val fatal = FatalHold()
+    var unwinding: Throwable? = null
+    var prior: SettleScope? = null
     try {
-        return block()
+        // Installed inside the try (issue #61, as NoWriteRegion.enter): a
+        // fatal error striking the slot write still settles the scope.
+        prior = SettleScopes.install(scope)
+        return runCatching(block).onFailure { if (!fatal.holdIfFatal(it)) unwinding = it }.getOrThrow()
     } finally {
         try {
-            scope.settle()
+            fatal.runHoldingFatal { scope.settle() }
         } finally {
             // A settled scope reads as none, so with nothing to restore it is
             // left in the slot: the next entry replaces it instead of
             // re-inserting a removed slot, which every outermost action pays.
             if (prior != null) SettleScopes.install(prior)
         }
+        fatal.rethrowHeld(alongside = unwinding)
     }
 }
 

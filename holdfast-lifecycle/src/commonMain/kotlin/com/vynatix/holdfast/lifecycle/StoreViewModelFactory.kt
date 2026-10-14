@@ -39,7 +39,8 @@ fun <S : Store<*>> storeViewModel(create: () -> S): StoreViewModel<S> =
  * children, so their declaring lambdas run at teardown — keep tree-child
  * lambdas side-effect-free. A child lambda that throws there is reported
  * through the root store's `uncaughtObserverHandler` (wrapped in a teardown
- * exception) and the root is disposed regardless.
+ * exception) and the root is disposed regardless — a fatal error aside
+ * (GUIDE §18.5), which `onCleared` throws once every store is disposed.
  *
  * ```kotlin
  * val vm = treeViewModel { ScreenStore() }   // ScreenStore declares the screen's children

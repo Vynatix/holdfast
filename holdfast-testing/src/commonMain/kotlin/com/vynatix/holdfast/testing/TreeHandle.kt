@@ -7,6 +7,7 @@ import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.TreeRecorder
+import com.vynatix.holdfast.testing.internal.cleanUpUnwinding
 import com.vynatix.holdfast.testing.matcher.StoreHandleGroup
 import com.vynatix.holdfast.tree.LeafNode
 import com.vynatix.holdfast.tree.StoreNode
@@ -69,17 +70,17 @@ class TreeHandle internal constructor(
         // must leave nothing behind. Then hear of later joins, then adopt the
         // current members (the receiver first): a store attaching in between
         // is adopted twice, harmlessly (track is idempotent). A later step
-        // that throws unwinds the earlier ones.
+        // that throws unwinds the earlier ones: every unwind step runs, and a
+        // fatal error (issue #61) an unwind step throws is never dropped — it
+        // is thrown instead of a non-fatal failure of the step, carrying it.
         tree.middlewares(recorder)
         listener =
             runCatching { PrivilegedHooks.addMembershipListener(root) { leaf -> leaf.store?.let(::adopt) } }
-                .onFailure { runCatching { tree.removeMiddleware(recorder) } }
+                .onFailure { cleanUpUnwinding(it, { tree.removeMiddleware(recorder) }) }
                 .getOrThrow()
         runCatching { tree.stores().forEach(::adopt) }
-            .onFailure {
-                runCatching { listener.dispose() }
-                runCatching { tree.removeMiddleware(recorder) }
-            }.getOrThrow()
+            .onFailure { cleanUpUnwinding(it, { listener.dispose() }, { tree.removeMiddleware(recorder) }) }
+            .getOrThrow()
     }
 
     private fun adopt(store: Store<*>) {

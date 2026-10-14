@@ -206,8 +206,13 @@ object FrameMarkers {
  * [Transaction.frameId]); this interface adds the frame-scoped view.
  *
  * Callbacks are invoked synchronously on the frame's thread, each wrapped so a
- * throwing observer cannot abort the frame. Nested frames fire their own
- * started/committed/rolledBack triple.
+ * throwing observer cannot abort the frame — except a fatal error (issue #61;
+ * a `VirtualMachineError` such as `StackOverflowError` on JVM/Android, a
+ * `kotlin.OutOfMemoryError` on iOS/wasmJs): the other observers are still
+ * told, then the frame throws it — from [onFrameStarted] after rolling back
+ * before any middleware or the body runs, from [onFrameCommitted] with the
+ * frame committed, from [onFrameRolledBack] with the frame rolled back.
+ * Nested frames fire their own started/committed/rolledBack triple.
  */
 @ExperimentalStoreApi
 interface FrameObserver {

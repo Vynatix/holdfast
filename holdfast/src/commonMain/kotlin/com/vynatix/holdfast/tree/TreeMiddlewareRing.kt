@@ -8,7 +8,9 @@ import com.vynatix.holdfast.SettleScopes
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
+import com.vynatix.holdfast.forEachIsolated
 import com.vynatix.holdfast.internalAttachment
+import com.vynatix.holdfast.platform.rethrowFatal
 import com.vynatix.holdfast.setOuterMiddlewareUnchecked
 import kotlinx.atomicfu.locks.synchronized
 
@@ -35,7 +37,8 @@ import kotlinx.atomicfu.locks.synchronized
  * middleware is still wanted is kept (an observation it started keeps its
  * mark), a new one is made, a surplus one retired. A store that is gone or
  * disposed (its ring refuses) has every adapter retired — self-healing when
- * its dispose has not reached the ring yet.
+ * its dispose has not reached the ring yet. A fatal error (issue #61)
+ * propagates, leaving the adapters as they were: the next sync converges.
  */
 internal fun syncTreeRing(leaf: LeafNode) {
     val attachment = leaf.attachment ?: return
@@ -50,7 +53,7 @@ internal fun syncTreeRing(leaf: LeafNode) {
                     desiredRing(leaf).map { mw ->
                         current.firstOrNull { it.middleware === mw } ?: TreeMiddlewareAdapter(leaf, mw)
                     }
-                wanted.takeIf { runCatching { store.setOuterMiddlewareUnchecked(it) }.isSuccess }
+                wanted.takeIf { runCatching { store.setOuterMiddlewareUnchecked(it) }.rethrowFatal().isSuccess }
             }
         current.filter { adapter -> next == null || next.none { it === adapter } }.forEach { it.retire() }
         attachment.adapters = next.orEmpty()
@@ -100,7 +103,8 @@ internal fun installTreeMiddleware(
  * never installed it — or is disposed (the documented no-check exception:
  * its dispose already removed everything) — else remove it and sync
  * [owner]'s subtree (a member disposing meanwhile is left to its own
- * dispose).
+ * dispose). A fatal error a member's sync throws is thrown once every
+ * member synced (issue #61).
  *
  * @throws IllegalStateException as [guard] refuses.
  */
@@ -116,8 +120,9 @@ internal fun removeTreeMiddleware(
             (next.size != attachment.installed.size).also { attachment.installed = next }
         }
     if (removed) {
-        val members = runCatching { liveLeavesUnder(attachment.node, attachment.node) }.getOrDefault(emptyList())
-        for ((leaf, _) in members) runCatching { syncTreeRing(leaf) }
+        val members =
+            runCatching { liveLeavesUnder(attachment.node, attachment.node) }.rethrowFatal().getOrDefault(emptyList())
+        members.forEachIsolated { (leaf, _) -> syncTreeRing(leaf) }
     }
     return removed
 }

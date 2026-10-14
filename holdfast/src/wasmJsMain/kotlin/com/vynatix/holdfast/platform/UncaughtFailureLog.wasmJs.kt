@@ -5,5 +5,5 @@ internal actual fun logUncaughtFailure(
     error: Throwable,
 ) {
     // println reaches the browser console (console.log) on wasmJs.
-    runCatching { println("$message\n${error.stackTraceToString()}") }
+    runCatching { println("$message\n${error.stackTraceToString()}") }.rethrowFatal()
 }

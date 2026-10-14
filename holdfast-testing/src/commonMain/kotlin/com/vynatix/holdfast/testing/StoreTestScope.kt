@@ -10,6 +10,7 @@ import com.vynatix.holdfast.testing.internal.OpenTransactionRegistry
 import com.vynatix.holdfast.testing.internal.PendingErrorRegistry
 import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import com.vynatix.holdfast.testing.internal.TreeFixtures
+import com.vynatix.holdfast.testing.internal.holdingFatal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -213,27 +214,38 @@ class StoreTestScope internal constructor(
      * so tests must join it. Recorder disposal and clock restoration swallow
      * exceptions (a disposed store is skipped) to keep teardown robust even
      * when [bodyAlreadyFailed] is `true`.
+     *
+     * A fatal error (issue #61: a `StackOverflowError`, an
+     * `OutOfMemoryError`) is never swallowed, reported or turned into a
+     * section of the report: every later step still runs — the other
+     * rollbacks, recorders, clocks and trees, and the registry clear — and
+     * then it is thrown, instead of the report, whether or not the body
+     * failed.
      */
     internal fun tearDown(bodyAlreadyFailed: Boolean) {
-        barriers.cancelAll()
-        awaitings.cancelAll()
-        openTransactions.rollbackAll()
+        var unconsumed: List<Pair<StoreHandle<*>, TransactionResult.Error>> = emptyList()
+        val trees =
+            holdingFatal {
+                barriers.cancelAll()
+                awaitings.cancelAll()
+                openTransactions.rollbackAll(this)
 
-        val handles = registry.allHandles()
-        val unconsumed: List<Pair<StoreHandle<*>, TransactionResult.Error>> =
-            handles.flatMap { handle -> handle.pendingErrors.map { handle to it } }
+                val handles = registry.allHandles()
+                unconsumed = handles.flatMap { handle -> handle.pendingErrors.map { handle to it } }
 
-        for (handle in handles) {
-            // Detach + drop recorder before clearing the rest so leaked actions
-            // beyond this point don't push more events into the (already
-            // teardown-snapshot) timeline.
-            handle.disposeRecorderInternal()
-            PendingErrorRegistry.unregisterAll(handle)
-            handle.clearPendingErrorsInternal()
-            PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack)
-        }
-        val trees = treeFixtures.tearDown()
-        registry.clear()
+                for (handle in handles) {
+                    // Detach + drop recorder before clearing the rest so leaked actions
+                    // beyond this point don't push more events into the (already
+                    // teardown-snapshot) timeline.
+                    holding { handle.disposeRecorderInternal() }
+                    PendingErrorRegistry.unregisterAll(handle)
+                    handle.clearPendingErrorsInternal()
+                    holding { PrivilegedHooks.restoreBoundClock(handle.store, handle.clockAtTrack) }
+                }
+                val report = treeFixtures.tearDown(this)
+                registry.clear()
+                report
+            }
 
         if (bodyAlreadyFailed) return
         // One report for all three, the unconsumed errors first: a test that

@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.SettleScope
 import com.vynatix.holdfast.SettleScopes
 import kotlinx.coroutines.CancellationException
@@ -145,12 +146,17 @@ private suspend fun <T> settlingInOwnScope(block: suspend () -> T): T {
     var outcome: Result<T>? = null
     try {
         withSettleScope(scope) {
-            outcome =
-                try {
-                    runCatching { block() }
-                } finally {
-                    scope.settle()
-                }
+            val ran = runCatching { block() }
+            // The settle runs whatever [block]'s outcome. A fatal error
+            // [block] threw (issue #61) outranks whatever the settle throws,
+            // which it then carries as suppressed, instead of being replaced.
+            val fatal = FatalHold()
+            ran.exceptionOrNull()?.let(fatal::holdIfFatal)
+            runCatching { scope.settle() }.onFailure { settleFailure ->
+                fatal.rethrowHeld(alongside = settleFailure)
+                throw settleFailure
+            }
+            outcome = ran
         }
     } catch (ce: CancellationException) {
         // The settle-scope child was cancelled with the caller. Before [block]

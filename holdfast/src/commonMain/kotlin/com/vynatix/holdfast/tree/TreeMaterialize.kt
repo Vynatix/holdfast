@@ -241,7 +241,8 @@ private fun duplicateLeafMessage(
 /**
  * Phases 3–6 of [attach]: link, register (running [registryStep] over the
  * leaves registered), tell [registered] (the attach is irrevocable from
- * here), sync the rings, announce.
+ * here), sync the rings, announce — then throw a fatal error the last two
+ * held (issue #61), the attach standing.
  */
 internal fun attachUnder(
     attach: ChildAttach,

@@ -4,12 +4,14 @@ package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.platform.isFatal
 
 /**
  * Attach phase 6 (`TreeAttach.kt`): tell [chain] — the store nodes from the
  * new parent's store up, nearest first — that a store joined their subtree,
  * outside every lock; a throwing listener is handed to [report] and the
- * others are still told.
+ * others are still told. [report] (the attach's) holds a fatal error until
+ * the attach's last phase ends (issue #61).
  */
 internal class AttachAnnouncer(
     private val chain: List<LeafNode>,
@@ -25,14 +27,18 @@ internal class AttachAnnouncer(
      * listener heard Attached and reset the phase.
      */
     fun announce(leaf: LeafNode) {
-        val below =
+        val listing =
             runCatching {
                 listingOf(leaf, leaf)
                     .shape
                     .leaves()
                     .drop(1)
                     .map { it.first }
-            }.getOrDefault(emptyList())
+            }
+        // A failed listing announces [leaf] alone. A fatal error goes to
+        // [report], which holds it (issue #61): the phase below still ends.
+        listing.exceptionOrNull()?.let { if (it.isFatal()) report(it) }
+        val below = listing.getOrDefault(emptyList())
         val announced = listOf(leaf) + below
         try {
             announceAttached(chain, listOf(leaf), report)

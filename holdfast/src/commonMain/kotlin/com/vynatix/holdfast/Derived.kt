@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlinx.atomicfu.atomic
 
 /**
@@ -233,7 +234,9 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
      * the recompute in [host]'s post-commit queue for its next holder rather
      * than run it in the middle of that code, and report that its value may
      * lag until then (hand-off first). Value-free; never throws — a handler
-     * that throws here is ignored, so the store's other followers are told.
+     * that throws here is ignored, so the store's other followers are told —
+     * except a fatal error the handler throws (issue #61), which
+     * [StoreEdges.changed] holds while it tells the others.
      */
     fun handOffLagging(changed: Store<*>) {
         host.handOffPostCommit(this)
@@ -247,7 +250,7 @@ internal class DerivedRecompute<V : Store<V>, T : Any>(
                         "${changed.displayName} until then",
                 ),
             )
-        }
+        }.rethrowFatal()
     }
 
     fun dispose() {

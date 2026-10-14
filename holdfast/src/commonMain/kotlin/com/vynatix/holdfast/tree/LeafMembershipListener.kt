@@ -42,7 +42,9 @@ import com.vynatix.holdfast.StoreInternalApi
  * leaf it is told about (re-adopting a leaf from inside its own `onDetached`
  * is unsupported). A throwing callback is reported through the
  * attaching or disposing store's `uncaughtObserverHandler`; the other
- * listeners are still told.
+ * listeners are still told. A fatal error is never reported (issue #61):
+ * the other listeners are still told, and the attach or dispose throws it
+ * once its last step ran.
  */
 @StoreInternalApi
 abstract class LeafMembershipListener {

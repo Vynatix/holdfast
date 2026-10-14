@@ -101,7 +101,7 @@ the platform allows. Enforcement is platform-divergent, by design:
 | Platform | When a mistyped store fails |
 |----------|----------------------------|
 | JVM / Android | **At construction** — `IllegalStateException` naming both the class and the wrong type argument. Uses a `java.lang.reflect` walk of the generic superclass chain (through intermediates like `EventfulStore`); fails **open** when signature data is missing or unresolvable, so an R8-minified build that drops the `Signature` attribute degrades quietly — holdfast's `consumer-rules.pro` keeps it, and the check never breaks a legal store either way. |
-| iOS (Kotlin/Native) | **At first dispatch** — no construction-time reflection. `action { }` rethrows the receiver-cast failure as a `ClassCastException` with a teaching message (a documented exception to `action`'s no-throw-result contract, for this programming error only); `invoke { }` propagates the same teaching exception. |
+| iOS (Kotlin/Native) | **At first dispatch** — no construction-time reflection. `action { }` rethrows the receiver-cast failure as a `ClassCastException` with a teaching message (a documented exception to `action`'s no-throw-result contract, for this programming error and for a fatal error, §18.5); `invoke { }` propagates the same teaching exception. |
 | wasmJs | **Not enforced** — bridge casts may surface as WasmGC runtime traps that cannot be intercepted. No construction-time or dispatch-time claim; unverified. |
 
 Two edges worth knowing. On JVM/Android the construction check runs before any
@@ -284,10 +284,12 @@ when (result) {
 
 **Returns** `TransactionResult` (sealed: `Success | Error`). A failure inside
 the body, a middleware hook or the commit is captured into `Error`, not
-thrown. `action` itself throws `IllegalStateException` when called on a
-disposed store or from inside a state initializer (§4.1) or a schema
-migration (`SchemaVersioned.migrate`, §16.3), and inside an `atomic(...)`
-frame it can throw the frame's contract exceptions or escalate an inner error
+thrown — except a fatal error (`StackOverflowError`, `OutOfMemoryError`,
+§18.5), which `action` throws once the transaction has rolled back.
+`action` itself throws `IllegalStateException` when called on a disposed
+store or from inside a state initializer (§4.1) or a schema migration
+(`SchemaVersioned.migrate`, §16.3), and inside an `atomic(...)` frame it can
+throw the frame's contract exceptions or escalate an inner error
 (§15.1–15.2).
 
 **Nested actions** form a savepoint chain. The inner `action` becomes a
@@ -401,9 +403,11 @@ the action return an `Error`). Its exception goes to the store's
 `derived` recomputes go. With no handler set, it is logged: a line naming the
 store, then the stack trace, on standard error (JVM/Android) or standard output
 (iOS/wasmJs). Set `store.uncaughtObserverHandler = { e -> crashReporter.log(e) }`
-at app init to route these failures yourself, or `{ }` to silence them. The
-initial fire on subscribe is different: it runs inside `effect` and throws to
-its caller.
+at app init to route these failures yourself, or `{ }` to silence them. A
+fatal error (§18.5) is never handed to the handler: the commit's other
+effects, bridges and events still run, then the committing call throws it.
+The initial fire on subscribe is different: it runs inside `effect` and
+throws to its caller.
 
 ### 4.5 `bridge(b)` — External sync
 
@@ -1398,7 +1402,7 @@ The self-typed base every store extends (`class CounterStore : Store<CounterStor
 | `middlewares` | `fun middlewares(vararg middleware: Middleware<Self>)` | Registers middleware (LAST argument is outermost) |
 | `clearMiddleware` | `fun clearMiddleware()` | Removes all registered middleware |
 | `activeTransaction` | `val activeTransaction: Transaction?` | Volatile read of in-flight transaction |
-| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action. Also receives a throwing dispose notification of library machinery attached to the store (an internal `StoreAttachment`), reported as `dispose()`'s last step on the disposing thread, holding no lock `dispose()` took; a throwing handler is ignored there, as `dispose()` never throws. And a `:holdfast-coroutines` hydration refresh whose outcome could not be recorded (a middleware rejected its `HydrationFailure` record too, or its settle threw), reported on the refresh's coroutine once the hydration gate has released the store; the hydration stays `Seeded` with nothing in flight, the next `hydrate()` retries it, and a throwing handler is ignored there (§16.7). And what a hydrator's persisted overlay could not do — apply the blob it read (kept, never written over), or write one (over its size limit, a failing capture or codec, a failing `put`, a cancelled scope) — as an `OverlayException`, never under the hydration gate; a throwing handler is ignored there too (§16.8) |
+| `uncaughtObserverHandler` | `var uncaughtObserverHandler: ((Throwable) -> Unit)?` | Handler for post-commit failures: observer callbacks (including a write back into this store during its own commit fanout), fanout `Transformer.get`, `Bridge.publish` / `SuspendingBridge.publishAwaited`, `derived` recomputes. Default null = logged to standard error (JVM/Android) or standard output (iOS/wasmJs), naming the store; `{ }` silences. Observer/`Transformer.get`/bridge failures are reported on the committing thread inside the fanout, where a throwing handler ends the fanout and fails the action; `derived` failures are reported after the recompute releases the store, where a throwing handler fails no action. Also receives a throwing dispose notification of library machinery attached to the store (an internal `StoreAttachment`), reported as `dispose()`'s last step on the disposing thread, holding no lock `dispose()` took; a throwing handler is ignored there, as `dispose()` never throws (but a fatal error, §18.5). And a `:holdfast-coroutines` hydration refresh whose outcome could not be recorded (a middleware rejected its `HydrationFailure` record too, or its settle threw), reported on the refresh's coroutine once the hydration gate has released the store; the hydration stays `Seeded` with nothing in flight, the next `hydrate()` retries it, and a throwing handler is ignored there (§16.7). And what a hydrator's persisted overlay could not do — apply the blob it read (kept, never written over), or write one (over its size limit, a failing capture or codec, a failing `put`, a cancelled scope) — as an `OverlayException`, never under the hydration gate; a throwing handler is ignored there too (§16.8). A fatal error is never handed to it, and one it throws is never ignored: it propagates (§18.5) |
 | `lockOrderKey` | `val lockOrderKey: Long` *(opt-in)* | Process-monotonic ordering key used by `atomic(...)` for deadlock-safe lock acquisition |
 | `scope` | `open val scope: CoroutineScope` | Scope for the store's async work; resolution order: per-call parameter → subclass override → `bindToScope` binding → `Store.defaultScope` |
 | `bindToScope` | `fun bindToScope(scope: CoroutineScope)` | Binds the store to a scope (level 3 of the resolution chain); rebindable, never cancels the previous or new scope |
@@ -3525,7 +3529,7 @@ What moves the phase, and the transaction middleware sees it in:
 | `Seeded` | the refresh returned, and `adopt { }` succeeded | `Hydrated` | `HydrationAdopt`, with `adopt { }` as its savepoint `Adopt` |
 | `Seeded` | `adopt { }` threw, or wrote a state that is not `Remote` | `Failed(cause)` | `HydrationAdopt` (its savepoint rolled back whole) |
 | `Seeded` | the refresh threw (a cancelled `scope` included), or a middleware rejected `HydrationAdopt` | `Failed(cause)` | `HydrationFailure` |
-| `Seeded` | as above, and a middleware rejected `HydrationFailure` too | stays `Seeded`, nothing in flight | none: the rejection goes to the store's `uncaughtObserverHandler` (reported once the gate has released the store; a throwing handler is ignored), `awaitSettled()` returns `Failed(cause)`, and the next `hydrate()` retries (`HydrationRetry`) |
+| `Seeded` | as above, and a middleware rejected `HydrationFailure` too | stays `Seeded`, nothing in flight | none: the rejection goes to the store's `uncaughtObserverHandler` (reported once the gate has released the store; a throwing handler is ignored, unless it throws a fatal error, §18.5), `awaitSettled()` returns `Failed(cause)`, and the next `hydrate()` retries (`HydrationRetry`) |
 | any | `invalidate()`, `stageInvalidate()`, the store's `reset()` | `Detached` | `HydrationInvalidate` (a savepoint inside an action), the caller's action, `Reset` |
 
 - **One decision at a time.** Every hydration decision — seed, retry, adopt,
@@ -3785,7 +3789,8 @@ Where the overlay stands decides both directions:
   that throws) is reported the same way — the codec's
   `IllegalStateException` from `encode()` is the only cause chained — the
   key keeps the last blob written, and the next change writes again. A
-  handler that throws for any of these reports is ignored. No report is made
+  handler that throws for any of these reports is ignored (a fatal error
+  aside, which propagates — §18.5). No report is made
   while the hydration gate holds the store, so a handler may open an action
   on it (inside a commit's fanout, where a writer a dispatcher runs inline
   reports, a blocking action on the store returns an `Error`).
@@ -4728,7 +4733,9 @@ suspend fun hydrateTheTree() {
   so the refreshes run concurrently. A store without a hydrator is
   `NoHydrator`, one disposed meanwhile `Disposed`; a store whose seed or
   refresh failed is `Ran(Failed(cause))` — reported, never thrown, and the
-  other stores still hydrate. A hydrated store's hydrator does nothing, so
+  other stores still hydrate (a fatal error a seed throws propagates, §18.5;
+  a refresh's own is thrown on the refresh's scope and, awaited, reported as
+  `Ran(Failed(fatal))`). A hydrated store's hydrator does nothing, so
   the call is idempotent; a failed one retries its refresh, as
   `Hydrator.hydrate` does. The receiver's entry is named by its class
   (`Feeds`), since nobody declared it.
@@ -4991,6 +4998,40 @@ once, before anything else runs, and treat it as process-global
 configuration rather than per-test state. (The harness *does* restore
 `bindClock` bindings at teardown — §11 — but scopes are yours.)
 
+### 18.5 Fatal errors are never caught
+
+Holdfast catches what your code throws in many places: a body becomes a
+`TransactionResult.Error`, an observer's exception goes to
+`uncaughtObserverHandler`, a failed teardown step is collected while the
+others run. None of that applies to a **fatal error**: a
+`VirtualMachineError` (`StackOverflowError`, `OutOfMemoryError`, …) on the
+JVM and Android, a `kotlin.OutOfMemoryError` on iOS and wasmJs. A stack
+overflow never reaches Kotlin code there: Kotlin/Native dies on the guard
+page, and V8 makes it uncatchable by wasm code. A fatal error is never
+reported, never converted into a result, and never dropped. It propagates
+out of the call that ran the failing code, once the library has kept its own
+state consistent:
+
+| Where it is thrown | What still happens first | Then |
+|---|---|---|
+| An `action`/`atomic`/`suspendAction`/`suspendAtomic` body, or a middleware hook | Every middleware that started gets its `onTransactionError`; the transaction (every frame participant) rolls back — nothing commits after a fatal error | The call throws it instead of returning `TransactionResult.Error` |
+| An effect, a fanout `Transformer.get`, a bridge publish, an event collector, `uncaughtObserverHandler` itself | The commit's other effects, bridge publishes and events run; the commit stands | The committing call throws it |
+| A `derived`/`derivedState` recompute, a post-commit task | The drain finishes its current batch (the rest stays queued for the store's next holder); the settle runs every other queued recompute | The entry that ran it throws it |
+| `dispose()` (an attachment's `onStoreDisposed`, the tree's detach, an owned keyed store) | Every teardown step runs: the store ends disposed | `dispose()` throws it |
+| A refresh, an overlay writer, a fire-and-forget `SuspendingKvBridge` save | The hydration settles `Failed` with it; a new save drainer takes over | It ends that coroutine, so it reaches the scope's `CoroutineExceptionHandler` |
+
+When two fatal errors meet, the first one wins and carries the later ones as
+suppressed exceptions. A fatal error also outranks an ordinary failure or a
+cancellation in flight, carrying it the same way. `storeTest`'s teardown
+follows the same rule: its other sections still run, then the fatal error
+propagates out of `storeTest` instead of being folded into the teardown's
+`AssertionError`.
+
+Nothing to do in your code: let the error reach your crash reporting. Do
+not catch `Throwable` around a store call to keep going after one; the
+runtime itself is failing. (`AssertionError`, `NotImplementedError` and
+`CancellationException` are not fatal and keep their usual handling.)
+
 ---
 
 ## 19. Lifecycle & Events
@@ -5027,7 +5068,8 @@ else:
   initializers (§11.6); dispose only in a test that is *about* disposal.
 
 `dispose()` is idempotent, never throws (internal failures are reported,
-not thrown — §12), and may be called from inside the store's own action or
+not thrown — §12; a fatal error is the exception, thrown once every teardown
+step has run — §18.5), and may be called from inside the store's own action or
 commit fanout: the lock it needs is reentrant, and the notifications that
 follow run under no lock `dispose()` took.
 

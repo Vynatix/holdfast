@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowIfFatal
+
 // The schema-version gate of restore (issue #20, R2; plan D12).
 //
 // A restore compares the snapshot's schema version with the target store's
@@ -45,7 +47,8 @@ internal class StoreSchema(
      * already; upcast by [SchemaVersioned.migrate] when it is older.
      *
      * @throws SnapshotMigrationException if [body] is newer, or `migrate`
-     *   throws.
+     *   throws — except a fatal error, which propagates as it is once the
+     *   view is closed (issue #61).
      */
     fun upcast(body: StoreBody): StoreBody {
         val from = body.schema
@@ -58,6 +61,8 @@ internal class StoreSchema(
         val failure =
             runCatching { NoWriteRegion.runMigration(frame) { migrating.migrate(from, view) } }.exceptionOrNull()
         val upcast = view.close(version)
+        // Closed first, so a view migrate leaked cannot be edited afterwards.
+        failure?.rethrowIfFatal()
         if (failure != null) {
             // The library exception migrate threw, when it threw one; else the last one it caught.
             val safe = listOfNotNull(frame.refused, view.misuse)

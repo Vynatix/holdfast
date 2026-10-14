@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // Restoring keyed state families (issue #20, R7; plan D10, D18).
 //
 // A snapshot's family restores into the store's family of the same name,
@@ -108,7 +110,7 @@ internal class KeyedRestorePlanner(
         encodedKey: String,
         text: String?,
     ): Any? {
-        val key = runCatching { keyCodec.decode(encodedKey) }
+        val key = runCatching { keyCodec.decode(encodedKey) }.rethrowFatal()
         val failure = key.exceptionOrNull()
         if (failure != null) {
             issues += RestoreIssue.Undecodable(name, "an entry's key cannot be decoded: ${threw(failure, KEYS)}")
@@ -126,6 +128,7 @@ internal class KeyedRestorePlanner(
     ) {
         val codec = checkNotNull(decl.codec)
         runCatching { codec.decode(text) }
+            .rethrowFatal()
             .onSuccess { write(decl, it) }
             .onFailure { failure ->
                 val reason = "an entry's value cannot be decoded: ${threw(failure, VALUES)}"

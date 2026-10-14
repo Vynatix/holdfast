@@ -144,7 +144,9 @@ fun Store<*>.internalStagesHere(): Boolean = activeTransaction?.let { stagesInto
  * taking the serializer: the transaction opens under `transactionLock`, runs
  * [body] through the middleware chain (which sees it under [id]), commits
  * and fans out, or rolls back, and a failure folds into the returned
- * [TransactionResult.Error]. Like `action` it is an entry: it joins the
+ * [TransactionResult.Error] — except a fatal error (issue #61), which is
+ * thrown once the transaction has rolled back, or, from the fanout, once the
+ * commit has fanned out. Like `action` it is an entry: it joins the
  * settle scope open on this thread, else opens one that settles when it
  * returns ([SettleScope]); a caller that holds the store across several of
  * these opens one around its hold, so derived states settle once it has

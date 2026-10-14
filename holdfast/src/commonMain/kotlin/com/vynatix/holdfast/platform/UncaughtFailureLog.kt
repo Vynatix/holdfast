@@ -7,9 +7,10 @@ package com.vynatix.holdfast.platform
  * Android (logcat's `System.err` tag), standard output on iOS (the Xcode
  * console) and wasmJs (the browser console).
  *
- * Never throws: it runs inside commit fanout, where a throw would skip the
- * remaining observers, bridges and events of a commit that already applied,
- * and inside `dispose()`, which never throws.
+ * Never throws, except a fatal error (issue #61): it runs inside commit
+ * fanout, where a throw would skip the remaining observers, bridges and
+ * events of a commit that already applied, and inside `dispose()`, which
+ * never throws otherwise.
  */
 internal expect fun logUncaughtFailure(
     message: String,

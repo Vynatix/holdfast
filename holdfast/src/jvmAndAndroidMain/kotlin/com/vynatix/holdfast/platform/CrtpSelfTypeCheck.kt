@@ -61,9 +61,15 @@ private val verdicts = ConcurrentHashMap<Class<*>, CrtpVerdict>()
 
 private fun verdictFor(javaClass: Class<*>): CrtpVerdict = verdicts.getOrPut(javaClass) { resolveVerdict(javaClass) }
 
-/** The resolution itself never throws: every failure mode fails open. */
+/**
+ * The resolution itself never throws: every failure mode fails open — the
+ * reflection `Error`s (`GenericSignatureFormatError`, a `LinkageError`)
+ * included — except a fatal error (issue #61), which propagates out of the
+ * store's constructor and caches no verdict for the class.
+ */
 private fun resolveVerdict(javaClass: Class<*>): CrtpVerdict =
     runCatching { resolveVerdictOrThrow(javaClass) }
+        .rethrowFatal()
         .getOrElse { CrtpVerdict.Open }
 
 private fun resolveVerdictOrThrow(javaClass: Class<*>): CrtpVerdict {

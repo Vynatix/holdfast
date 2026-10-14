@@ -11,6 +11,8 @@ import com.vynatix.holdfast.Transaction
 import com.vynatix.holdfast.TransactionResult
 import com.vynatix.holdfast.internalForbidStructuralWrites
 import com.vynatix.holdfast.internalQualifiedName
+import com.vynatix.holdfast.internalRethrowFatal
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.internalTopLevelAction
 import com.vynatix.holdfast.tags
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +47,12 @@ import kotlinx.coroutines.withContext
 // release: a waiter awaitSettled() resumes inline (Dispatchers.Unconfined,
 // Main.immediate) may open a blocking action on the store, which would spin
 // on the serializer the gate holds.
+//
+// A fatal error (issue #61) is never reported: the fetch's is settled as the
+// refresh's failure, and one the settle meets (an adopt's, a middleware's,
+// an observer's, the handler's) strands the refresh, before it propagates
+// out of the refresh's coroutine — so the hydration it marked in flight never
+// stays in flight with nothing running.
 //
 // What it fetched is adopted in one transaction (id HydrationAdopt): `adopt`
 // runs as a SAVEPOINT of it (id Adopt), checked when it returns — every write
@@ -94,6 +102,8 @@ internal class HydrationRefreshRun<V : Store<V>, F>(
         // launching scope was cancelled), is the refresh's failure.
         val fetched = runCatching { engine.plan.fetch(store) }
         withContext(NonCancellable) { settle(fetched) }
+        // A fatal error, settled above, now propagates (issue #61).
+        fetched.internalRethrowFatal()
     }
 
     /**
@@ -104,7 +114,8 @@ internal class HydrationRefreshRun<V : Store<V>, F>(
      * the post-commit side effect it is — both once the gate has released
      * the store (see the top of this file). A handler that throws there is
      * ignored: the refresh is already stranded, and the next hydrate()
-     * retries it.
+     * retries it. A fatal error (issue #61) — what the settle threw, or the
+     * handler — is not reported: it propagates once the refresh is stranded.
      *
      * Nothing is lost between the release and the strand: a hydrate() there
      * finds Seeded, not yet stranded, and does nothing, as if it ran first;
@@ -118,7 +129,10 @@ internal class HydrationRefreshRun<V : Store<V>, F>(
                 engine.gate.hold { if (!store.isDisposed && engine.isInFlight(refresh)) commit(fetched) else null }
             }.getOrElse { thrown -> Unrecorded(thrown, thrown) } ?: return
         engine.strand(refresh, unrecorded.cause)
-        if (!store.isDisposed) runCatching { store.internalReportUncaughtFailure(unrecorded.refusal) }
+        unrecorded.refusal.internalRethrowIfFatal()
+        if (!store.isDisposed) {
+            runCatching { store.internalReportUncaughtFailure(unrecorded.refusal) }.internalRethrowFatal()
+        }
     }
 
     /**

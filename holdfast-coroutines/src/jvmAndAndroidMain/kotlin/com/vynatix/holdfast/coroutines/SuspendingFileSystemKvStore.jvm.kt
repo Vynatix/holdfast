@@ -1,5 +1,9 @@
+@file:OptIn(StoreInternalApi::class)
+
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.internalRethrowFatal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -22,7 +26,8 @@ actual class SuspendingFileSystemKvStore actual constructor(
             if (!file.exists()) {
                 null
             } else {
-                runCatching { file.readText(StandardCharsets.UTF_8) }.getOrNull()
+                // A fatal error (issue #61) is no absent key: it propagates.
+                runCatching { file.readText(StandardCharsets.UTF_8) }.internalRethrowFatal().getOrNull()
             }
         }
 

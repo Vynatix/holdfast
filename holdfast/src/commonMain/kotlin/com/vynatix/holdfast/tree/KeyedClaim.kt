@@ -110,7 +110,8 @@ internal fun <K : Any, S : Store<S>> KeyedBranch<K, S>.attachClaimed(
         attach.link()
         attach.publish { registry.promoteLocked(entry, produced) }
         promoted = true
-        // Phases 5 and 6 cannot fail the create.
+        // Phases 5 and 6 cannot fail the create: a fatal error they held is
+        // thrown once they ran (issue #61), the store attached.
         attach.syncRings()
         attach.announce()
         return produced

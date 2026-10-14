@@ -12,5 +12,5 @@ internal actual fun logUncaughtFailure(
             err.println(message)
             error.printStackTrace(err)
         }
-    }
+    }.rethrowFatal()
 }

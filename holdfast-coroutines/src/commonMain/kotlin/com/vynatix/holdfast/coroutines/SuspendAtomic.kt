@@ -2,6 +2,7 @@
 
 package com.vynatix.holdfast.coroutines
 
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.FrameContractException
 import com.vynatix.holdfast.FrameMarker
 import com.vynatix.holdfast.FrameMarkers
@@ -15,6 +16,7 @@ import com.vynatix.holdfast.TransactionStatus
 import com.vynatix.holdfast.applyFrameCommit
 import com.vynatix.holdfast.internalDrainPostCommitTasksWhenSettled
 import com.vynatix.holdfast.internalRefuseInitializerWrite
+import com.vynatix.holdfast.internalRethrowFatal
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.verifyFrameNesting
 import kotlinx.coroutines.CancellationException
@@ -123,6 +125,18 @@ import kotlin.uuid.Uuid
  * fires instead of `onFrameCommitted`, although the applied participants'
  * values stand. Only the participants that roll back get
  * `onTransactionError`.
+ *
+ * **Fatal errors** (issue #61) — a `VirtualMachineError` such as
+ * `StackOverflowError` on JVM/Android, a `kotlin.OutOfMemoryError` on
+ * iOS/wasmJs — are never folded into a [TransactionResult.Error], wherever
+ * they strike: the body, a middleware hook, a
+ * [com.vynatix.holdfast.FrameObserver] callback, the commit or its fanout.
+ * The frame still finishes what keeps its participants consistent — every
+ * root still open rolls back after its `onTransactionError` hooks, every
+ * applied root fans out, every frame observer is told — and then
+ * `suspendAtomic` throws the first fatal error, carrying any other failure as
+ * suppressed. One thrown by `onFrameCommitted` is thrown once every observer
+ * has been told that the frame committed.
  *
  * Middleware caveat: frame-driven hooks are the SYNC `Middleware` hooks;
  * [SuspendingMiddlewareHooks] async siblings do not fire for the frame's
@@ -299,13 +313,15 @@ private suspend fun <R> acquireAndRun(
     return if (isNewlyHeld) {
         val serializer = takeParticipant(v, ownerKey, caller, drainOnExit)
         try {
-            frame.heldVaults += v
             val priorActive = v.activeTransaction
             val priorOwner = v.suspendingOwner
             // A fresh top-level root makes this frame the store's holder. A store
             // that already had a transaction leaves the drain to its holder.
             if (priorActive == null) drainOnExit += v
             try {
+                // Installed inside this try, so a fatal error (issue #61)
+                // partway through still restores the store below.
+                frame.heldVaults += v
                 // Install a fresh root transaction for this store. Subsequent
                 // mutate / update / suspendAction calls inside the body stage
                 // into this root's pendingWrites. Installed inside the try,
@@ -343,10 +359,12 @@ private suspend fun <R> acquireAndRun(
                 frame.heldVaults -= v
             }
         } finally {
+            // A fatal error (issue #61) the release throws propagates: the
+            // mutex may still be locked, and a silent one would wedge the store.
             runCatching {
                 serializer.suspendingHolderLabel = null
                 serializer.mutex.unlock(ownerKey)
-            }
+            }.internalRethrowFatal()
         }
     } else {
         // Held by the outer frame: no mutex acquire. Open a SAVEPOINT of the
@@ -359,9 +377,12 @@ private suspend fun <R> acquireAndRun(
                         "but its activeTransaction is null. Did the outer frame abort without unwinding?",
                 )
         val savepoint = Transaction.createSavepointForExternal(id, ownerThreadId, outerRoot, frameId = id)
-        v.internalSetActiveTransaction(savepoint)
-        rootsAcquired += RootEntry(store = v, txn = savepoint, session = v.internalFrameMiddlewareSession(savepoint))
         try {
+            // Installed inside this try, so a fatal error (issue #61) partway
+            // through still restores the outer root below.
+            v.internalSetActiveTransaction(savepoint)
+            val session = v.internalFrameMiddlewareSession(savepoint)
+            rootsAcquired += RootEntry(store = v, txn = savepoint, session = session)
             acquireAndRun(
                 sorted = sorted,
                 newlyHeldSet = newlyHeldSet,
@@ -388,7 +409,9 @@ private suspend fun <R> acquireAndRun(
  * re-acquire a mutex we already hold via this frame's owner key — then wait
  * out a blocking holder that read it as not installed yet
  * ([awaitLockOnlyHolders]), before the caller installs a root. On
- * cancellation, releases what it took and owes [v] a drain ([drainOnExit]).
+ * cancellation — or any other failure of the wait-out, a fatal error
+ * included (issue #61) — releases what it took and owes [v] a drain
+ * ([drainOnExit]).
  *
  * [caller] is the coroutine the whole [suspendAtomic] call was made in,
  * read before its settle handling: when it is the body coroutine of a
@@ -421,15 +444,19 @@ private suspend fun takeParticipant(
         throw ce
     }
     serializer.suspendingHolderLabel = "suspendAtomic"
-    try {
-        v.awaitLockOnlyHolders()
-    } catch (ce: CancellationException) {
+    runCatching { v.awaitLockOnlyHolders() }.exceptionOrNull()?.let { failure ->
         // We held the serializer while we waited: release it and owe the
-        // store a drain, for the same reason as above.
+        // store a drain, for the same reason as above. On any failure, not
+        // only a cancellation: a fatal error (issue #61) that left the
+        // serializer locked would wedge the store for good. A fatal error is
+        // thrown once that is done, the wait's own first.
         serializer.suspendingHolderLabel = null
-        runCatching { serializer.mutex.unlock(ownerKey) }
+        val fatal = FatalHold()
+        fatal.holdIfFatal(failure)
+        runCatching { serializer.mutex.unlock(ownerKey) }.onFailure { fatal.holdIfFatal(it) }
         drainOnExit += v
-        throw ce
+        fatal.rethrowHeld(alongside = failure)
+        throw failure
     }
     return serializer
 }
@@ -453,12 +480,24 @@ private suspend fun <R> executeBody(
     // Pick the LAST entry's txn for the TransactionResult's `transaction`
     // handle — a stable terminal-state reference.
     val resultTxn: Transaction = roots.last().txn
-    observers.forEach { runCatching { it.onFrameStarted(marker.frameId, roots.map { r -> r.store }) } }
+    val startedFatal = FatalHold()
+    observers.forEach { observer ->
+        runCatching { observer.onFrameStarted(marker.frameId, roots.map { r -> r.store }) }
+            .onFailure { startedFatal.holdIfFatal(it) }
+    }
 
+    // Until the middleware `started` phase begins, the unwind fires no
+    // `onTransactionError`: no middleware has seen the frame start (as atomic).
+    var hooksStarted = false
     val value: R =
         try {
+            // A fatal error an onFrameStarted callback threw (issue #61), once
+            // every observer has been told: the frame rolls back before any
+            // middleware or the body runs, with no middleware hook at all.
+            startedFatal.rethrowHeld()
             // Per-store middleware `started`, in lock order — BEFORE the marker
             // installs, so middleware is never policed by enrollment enforcement.
+            hooksStarted = true
             roots.forEach { it.session.fireStarted() }
             // The marker context installs the thread-local marker on every
             // resume and restores the previous value on suspend, so enrollment
@@ -467,10 +506,11 @@ private suspend fun <R> executeBody(
             // starts undispatched: the frame holds every participant by now.
             withFrameMarker(marker, frame) { body() }
         } catch (ce: CancellationException) {
-            rollbackAll(roots, ce, observers, marker)
+            rollbackAll(roots, ce, observers, marker, errorHooks = hooksStarted)
             throw ce
         } catch (e: Throwable) {
-            rollbackAll(roots, e, observers, marker)
+            // Throws a fatal error (issue #61) once the frame has rolled back.
+            rollbackAll(roots, e, observers, marker, errorHooks = hooksStarted)
             rethrowFrameContractViolation(e)
             return TransactionResult.Error(e, resultTxn)
         }
@@ -478,31 +518,32 @@ private suspend fun <R> executeBody(
     // Body returned. Commit under NonCancellable so fanout completes even if
     // the surrounding scope cancels here.
     return withContext(NonCancellable) {
-        try {
-            // ALL stores' `completed` hooks fire before ANY store commits, so a
-            // validation middleware throwing on the last store still rolls
-            // every store back.
-            roots.forEach { it.session.fireCompleted() }
-            // Commit-phase start is observable progress for blocking waiters
-            // on every participant (issue 003).
-            roots.forEach { it.store.suspendingProgressEpoch++ }
-            commitInLockOrder(roots, observers, marker.frameId)
-            TransactionResult.Success(resultTxn, value)
-        } catch (e: Throwable) {
-            // Commit/completed failure: unwind in reverse. Entries that already
-            // committed stay committed — same in-memory-2PC limitation on
-            // commit failure as sync `atomic`.
-            for (i in roots.indices.reversed()) {
-                val entry = roots[i]
-                if (entry.txn.status == TransactionStatus.Active) {
-                    runCatching { entry.session.fireError(e) }
-                    runCatching { entry.txn.rollback() }
-                }
+        // A fatal error an onFrameCommitted callback throws (issue #61) is
+        // thrown past the unwind below, which would tell every observer that a
+        // frame that committed rolled back.
+        val committedFatal = FatalHold()
+        val outcome: TransactionResult<R> =
+            try {
+                // ALL stores' `completed` hooks fire before ANY store commits, so a
+                // validation middleware throwing on the last store still rolls
+                // every store back.
+                roots.forEach { it.session.fireCompleted() }
+                // Commit-phase start is observable progress for blocking waiters
+                // on every participant (issue 003).
+                roots.forEach { it.store.suspendingProgressEpoch++ }
+                commitInLockOrder(roots, observers, marker.frameId, committedFatal)
+                TransactionResult.Success(resultTxn, value)
+            } catch (e: Throwable) {
+                // Commit/completed failure: unwind in reverse. Entries that already
+                // committed stay committed — same in-memory-2PC limitation on
+                // commit failure as sync `atomic`. A fatal error is thrown once
+                // the unwind is done.
+                rollbackAll(roots, e, observers, marker, activeOnly = true)
+                rethrowFrameContractViolation(e)
+                TransactionResult.Error(e, resultTxn)
             }
-            observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, e) } }
-            rethrowFrameContractViolation(e)
-            TransactionResult.Error(e, resultTxn)
-        }
+        committedFatal.rethrowHeld()
+        outcome
     }
 }
 
@@ -519,35 +560,62 @@ private suspend fun <R> executeBody(
  * failure (an apply failure first) is thrown once they have. A
  * [CancellationException] from one root's fanout (a [SuspendingBridge] whose
  * `publishAwaited` times out, say) is no exception: the others still fan out,
- * and it is thrown after them, carrying any other failure as suppressed.
+ * and it is thrown after them, carrying any other failure as suppressed. A
+ * fatal error (issue #61) outranks both: the first one, from the apply or a
+ * fanout, is thrown once every applied root has fanned out, carrying the
+ * rest. One an `onFrameCommitted` callback throws is held in
+ * [committedFatal] for the caller, which throws it once it has decided the
+ * frame committed; the remaining observers are still told.
  */
 private suspend fun commitInLockOrder(
     roots: List<RootEntry>,
     observers: List<com.vynatix.holdfast.FrameObserver>,
     frameId: String,
+    committedFatal: FatalHold,
 ) {
     inSuspendingCommitOf(roots.map { it.txn }) {
         val apply = applyFrameCommit(roots.map { it.txn })
-        var failure = apply.failure
-        var cancellation: CancellationException? = null
+        val failures = CommitFailures(apply.failure)
         for (txn in apply.applied) {
             // Under NonCancellable: a CancellationException here came from user
             // code (a bridge's publishAwaited using withTimeout, say), not from
             // this coroutine being cancelled, so every other applied root can,
             // and must, still fan out — its values are already assigned.
-            val fanoutFailure = runCatching { suspendingFanOut(txn) }.exceptionOrNull() ?: continue
-            if (fanoutFailure is CancellationException && cancellation == null) {
-                cancellation = fanoutFailure
-            } else {
-                failure = failure?.apply { addSuppressed(fanoutFailure) } ?: fanoutFailure
-            }
+            runCatching { suspendingFanOut(txn) }.onFailure(failures::add)
         }
-        cancellation?.let { ce ->
-            failure?.let(ce::addSuppressed)
-            throw ce
+        failures.throwIfAny()
+        observers.forEach { observer ->
+            runCatching { observer.onFrameCommitted(frameId) }.onFailure { committedFatal.holdIfFatal(it) }
         }
-        if (failure != null) throw failure
-        observers.forEach { runCatching { it.onFrameCommitted(frameId) } }
+    }
+}
+
+/**
+ * What [commitInLockOrder]'s apply and fanouts failed with: the first fatal
+ * error (issue #61), the first [CancellationException] and the first other
+ * failure, each later one suppressed into the first of its kind.
+ */
+private class CommitFailures(
+    applyFailure: Throwable?,
+) {
+    private val fatal = FatalHold()
+    private var failure: Throwable? = applyFailure?.takeUnless(fatal::holdIfFatal)
+    private var cancellation: CancellationException? = null
+
+    fun add(fanoutFailure: Throwable) {
+        if (fatal.holdIfFatal(fanoutFailure)) return
+        if (fanoutFailure is CancellationException && cancellation == null) {
+            cancellation = fanoutFailure
+        } else {
+            failure = failure?.apply { addSuppressed(fanoutFailure) } ?: fanoutFailure
+        }
+    }
+
+    /** Throw the fatal error, else the cancellation, carrying the other failure, else that failure. */
+    fun throwIfAny() {
+        val thrown = cancellation?.also { ce -> failure?.let(ce::addSuppressed) } ?: failure
+        fatal.rethrowHeld(alongside = thrown)
+        if (thrown != null) throw thrown
     }
 }
 
@@ -560,24 +628,39 @@ private fun rethrowFrameContractViolation(e: Throwable) {
 }
 
 /**
- * Reverse lock-order unwind of every frame entry under [NonCancellable]:
- * per-store middleware `onTransactionError` first, then rollback — each step
- * isolated so one store's failure can't strand another's pending writes.
+ * Reverse lock-order unwind of every frame entry under [NonCancellable] —
+ * with [activeOnly] (a failed commit), of every entry still Active: one that
+ * applied keeps its values and gets no error hook — per-store middleware
+ * `onTransactionError` first, then rollback, then every observer's
+ * `onFrameRolledBack` — each step isolated so one store's failure can't
+ * strand another's pending writes. Without [errorHooks] (no `started` hook
+ * ran yet) no middleware hook fires. A fatal error (issue #61) — [cause]
+ * itself, or the first one a step throws — is not isolated: it is thrown
+ * once every step has run, carrying [cause] as suppressed when it is not
+ * [cause].
  */
 private suspend fun rollbackAll(
     roots: List<RootEntry>,
     cause: Throwable,
     observers: List<com.vynatix.holdfast.FrameObserver>,
     marker: FrameMarker,
+    activeOnly: Boolean = false,
+    errorHooks: Boolean = true,
 ) {
+    val fatal = FatalHold()
+    fatal.holdIfFatal(cause)
     withContext(NonCancellable) {
         for (i in roots.indices.reversed()) {
             val entry = roots[i]
-            runCatching { entry.session.fireError(cause) }
-            runCatching { entry.txn.rollback() }
+            if (activeOnly && entry.txn.status != TransactionStatus.Active) continue
+            if (errorHooks) runCatching { entry.session.fireError(cause) }.onFailure { fatal.holdIfFatal(it) }
+            runCatching { entry.txn.rollback() }.onFailure { fatal.holdIfFatal(it) }
         }
     }
-    observers.forEach { runCatching { it.onFrameRolledBack(marker.frameId, cause) } }
+    observers.forEach { observer ->
+        runCatching { observer.onFrameRolledBack(marker.frameId, cause) }.onFailure { fatal.holdIfFatal(it) }
+    }
+    fatal.rethrowHeld(alongside = cause)
 }
 
 /**

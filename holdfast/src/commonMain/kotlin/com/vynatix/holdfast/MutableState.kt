@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.isFatal
+import com.vynatix.holdfast.platform.rethrowFatal
 import kotlinx.atomicfu.atomic
 
 /**
@@ -287,10 +289,16 @@ class MutableState<T : Any>(
      * skips this state's observers. Commit
      * fanout is post-commit side effect, so it must not be able to abort a
      * commit whose values are already applied.
+     *
+     * Except a fatal error (issue #61), which is never reported: one from
+     * `transformer.get` is thrown at once, one from an observer once every
+     * observer of this state has run. The caller still fans out its other
+     * states, then throws it.
      */
     @StoreInternalApi
     fun fanOutToObservers(processedValue: T) {
         runCatching { afterGet(processedValue) }
+            .rethrowFatal()
             .fold(
                 onSuccess = { notifyObservers(it) },
                 onFailure = { reportFanoutFailure(it) },
@@ -305,11 +313,14 @@ class MutableState<T : Any>(
      * A bridge is external sync, not a transaction participant — `atomic`'s KDoc
      * already states that persistence publishes carry no crash-consistency — so
      * a failed publish cannot undo an applied value, and must not prevent the
-     * remaining states of the same transaction from publishing.
+     * remaining states of the same transaction from publishing. A fatal error
+     * (issue #61) is never reported but thrown, once `bridgeLock` is released;
+     * the caller still publishes its other states, then throws it.
      */
     @StoreInternalApi
     fun publishToBridge(processedValue: T) {
         runCatching { bridgeLock.withLock { currentBridge?.publish(processedValue) } }
+            .rethrowFatal()
             .onFailure { reportFanoutFailure(it) }
     }
 
@@ -354,10 +365,14 @@ class MutableState<T : Any>(
         } finally {
             writesEnded.incrementAndGet()
         }
-        notifyObservers(afterGet(processed))
-        // A change of the store's state with no commit: derived states that
-        // follow the store as a whole recompute (StoreEdges.kt).
-        owningStore.tellStoreEdges()
+        // A fatal error an observer throws (issue #61) is thrown once the
+        // store's edges are told too: the value is written either way.
+        holdingFatalErrors {
+            runHoldingFatal { notifyObservers(afterGet(processed)) }
+            // A change of the store's state with no commit: derived states that
+            // follow the store as a whole recompute (StoreEdges.kt).
+            owningStore.tellStoreEdges()
+        }
     }
 
     /**
@@ -385,14 +400,21 @@ class MutableState<T : Any>(
      * into its own store while that store's commit is notifying it. The one
      * exception is a handler that itself throws: that propagates, ending the
      * commit's fanout early (the commit's values stay applied).
+     *
+     * A fatal error (issue #61), from an observer or the handler, is never
+     * reported: the first is held while the remaining observers still run —
+     * a derived state's follower among them queues its recompute — and then
+     * thrown.
      */
     private fun notifyObservers(value: T) {
         val snapshot = observersLock.withLock { observers.toList() }
-        snapshot.forEach { registration ->
-            try {
-                registration.observer(value)
-            } catch (e: Throwable) {
-                owningStore.internalReportUncaughtFailure(e)
+        holdingFatalErrors {
+            snapshot.forEach { registration ->
+                try {
+                    registration.observer(value)
+                } catch (e: Throwable) {
+                    if (!holdIfFatal(e)) runHoldingFatal { owningStore.internalReportUncaughtFailure(e) }
+                }
             }
         }
     }
@@ -494,7 +516,8 @@ class MutableState<T : Any>(
      * Every step runs even when an earlier one throws (a bridge subscription's
      * `dispose`, say): the bridge is detached before its subscription is
      * disposed. The first failure is rethrown afterwards, the others
-     * suppressed.
+     * suppressed — the first fatal error (issue #61) when there is one, so a
+     * caller that reports what this throws never reports a fatal one.
      */
     internal fun shutdownSilently() {
         observersLock.withLock { observers.clear() }
@@ -508,10 +531,21 @@ class MutableState<T : Any>(
                 }
             }.exceptionOrNull()
         val inboundFailure = runCatching { declaration?.keyed?.closeInbound() }.exceptionOrNull()
-        val first = bridgeFailure ?: inboundFailure ?: return
-        if (inboundFailure != null && inboundFailure !== first) first.addSuppressed(inboundFailure)
+        val first = primaryFailureOf(listOfNotNull(bridgeFailure, inboundFailure)) ?: return
         throw first
     }
+}
+
+/**
+ * The one failure a sequence that ran every step throws for [failures], the
+ * others suppressed on it: the first fatal error (issue #61) when there is one
+ * — a caller reports or wraps a non-fatal one, never a fatal one — else the
+ * first; `null` without failures.
+ */
+internal fun primaryFailureOf(failures: List<Throwable>): Throwable? {
+    val primary = failures.firstOrNull { it.isFatal() } ?: failures.firstOrNull() ?: return null
+    for (other in failures) if (other !== primary) primary.addSuppressed(other)
+    return primary
 }
 
 /**

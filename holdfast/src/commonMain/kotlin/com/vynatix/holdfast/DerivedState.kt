@@ -74,11 +74,15 @@ import kotlin.reflect.KProperty
  * [computed] state, when you need the caller's own write. A throwing compute
  * (or a middleware rejecting the recompute) rolls that recompute back and is
  * reported through the host's [Store.uncaughtObserverHandler]; the value
- * stays as it was until the next source commit. A feedback loop through its
- * observers — one writing a source of it — is cut after 1,000 recomputes in
- * one settle and reported through the host's [Store.uncaughtObserverHandler];
- * the next recompute waits in the host's post-commit queue, so the value may
- * lag its sources until the host is next used or a source changes again.
+ * stays as it was until the next source commit — except a fatal error
+ * (issue #61), which is never reported: the recompute rolls back and the
+ * error propagates out of the call that ran it (the settle of the entry that
+ * committed the source, or a holder's post-commit drain). A feedback loop
+ * through its observers — one writing a source of it — is cut after 1,000
+ * recomputes in one settle and reported through the host's
+ * [Store.uncaughtObserverHandler]; the next recompute waits in the host's
+ * post-commit queue, so the value may lag its sources until the host is next
+ * used or a source changes again.
  *
  * **Not store state.** Its value lives in memory only, computed from its
  * sources: [snapshot] does not capture it, `restore`, [reset] and

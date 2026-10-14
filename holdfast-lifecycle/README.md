@@ -90,7 +90,9 @@ what `onCleared` disposes:
   child lambda that throws there does not break the guarantee — the root is
   still disposed — and the failure is reported through the root store's
   `uncaughtObserverHandler` (or the default failure log), wrapped in a
-  teardown exception naming the cause.
+  teardown exception naming the cause. A fatal error (`StackOverflowError`,
+  `OutOfMemoryError`; GUIDE §18.5) is never wrapped or reported: every store
+  is still disposed, then `onCleared` throws it.
 
 ## Process death, honestly
 

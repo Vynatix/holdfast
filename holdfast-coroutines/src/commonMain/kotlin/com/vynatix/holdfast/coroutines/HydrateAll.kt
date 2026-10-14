@@ -5,6 +5,7 @@ package com.vynatix.holdfast.coroutines
 import com.vynatix.holdfast.ExperimentalStoreApi
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.tree.LeafNode
 import com.vynatix.holdfast.tree.StoreNode
 import com.vynatix.holdfast.tree.StoreTree
@@ -28,10 +29,16 @@ import kotlinx.coroutines.CoroutineScope
  * [HydrateAllReport.Outcome.Disposed], under the node it sat at when
  * listed; a hydrator that throws from `hydrate()` (a throwing `base { }`, a
  * rejecting middleware) is reported [Hydration.Failed] with what it threw,
- * and does not stop the rest — nothing here throws for a store's failure or
- * its dispose. Idempotent: a hydrated store's hydrator does nothing.
- * Cancellation propagates at once, while the refreshes already launched
- * keep running on their scopes. Lists the subtree once, as
+ * and does not stop the rest — nothing here throws for a store's failure (a
+ * fatal error aside: below) or its dispose. Idempotent: a hydrated store's
+ * hydrator does nothing. Cancellation propagates at once, and so does a
+ * fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
+ * that `hydratorOrNull()`, a seed or the await throws — never reported as a
+ * store's outcome — while the refreshes already launched keep running on
+ * their scopes. A refresh's own fatal error is thrown on the refresh's
+ * scope, as [Hydrator] documents, after the hydration settled as
+ * [Hydration.Failed] with it: awaited, that store reports
+ * `Ran(Failed(fatal))`. Lists the subtree once, as
  * [StoreTree.stores] does, so declared children not read yet are
  * materialized first — after the inside-an-entry refusal, never before it.
  * A store whose `hydratorOrNull()` throws is reported
@@ -107,7 +114,7 @@ private class LiveLeaf(
 /**
  * One step of a leaf's hydration — [step] on [store]'s hydrator — as an
  * outcome: [ran] over what it answered, else [disposedOrFailed] with what
- * it threw. A cancellation propagates.
+ * it threw. A cancellation, or a fatal error (issue #61), propagates.
  */
 private suspend inline fun <T> stepOutcome(
     store: Store<*>,
@@ -120,8 +127,9 @@ private suspend inline fun <T> stepOutcome(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (
-            @Suppress("TooGenericExceptionCaught") thrown: Throwable, // A leaf's failure is reported, never rethrown.
+            @Suppress("TooGenericExceptionCaught") thrown: Throwable, // A leaf's failure is reported, never rethrown,
         ) {
+            thrown.internalRethrowIfFatal() // unless it is a fatal error (issue #61).
             return disposedOrFailed(store, thrown)
         }
     return ran(answer)

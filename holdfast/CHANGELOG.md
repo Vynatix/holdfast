@@ -36,6 +36,41 @@ changes may land in any 0.x bump; consumers should pin to an exact version.
 
 ### Changed
 
+- **Fatal errors propagate past every catch-all (issue #61).** A
+  `VirtualMachineError` (`StackOverflowError`, `OutOfMemoryError`, …) on JVM
+  and Android, or a `kotlin.OutOfMemoryError` on iOS and wasmJs, is no longer
+  reported, converted or dropped. Before, it was caught like any other
+  exception: #37's swallowed `StackOverflowError` surfaced only as a
+  misleading refusal on the thread's next action. Each of these now throws it
+  instead:
+  - `action`, `atomic`, `reset()`, `restore()` and the one-shot `mutate`/
+    `update` throw it once the transaction has rolled back and every started
+    middleware got its `onTransactionError`. This is a second exception to
+    `action`'s no-throw-result contract, beside issue 006's self-type rethrow.
+    Nothing commits after one.
+  - A commit's fanout (an observer, a fanout `Transformer.get`, a bridge
+    publish, `uncaughtObserverHandler` itself) holds it while the commit's
+    other observers, bridges and events run, then the committing call throws
+    it. The commit stands.
+  - A post-commit drain finishes its current batch, leaves the rest queued
+    for the store's next holder, and throws it. A blocking holder still
+    drains before it propagates. A settle runs every other queued recompute
+    first.
+  - `dispose()` runs every teardown step (attachments, the store tree's
+    detach, owned keyed stores), then throws it. `dispose()` throws nothing
+    else.
+  - Snapshots, restore planning, codecs, schema migration, initializers, the
+    store tree's materialization, keyed families and `FrameObserver`
+    callbacks let it through.
+  - `uncaughtObserverHandler` never receives one. The internal report path
+    and the default log rethrow one instead of printing it.
+
+  When two meet, the first wins and carries the rest as suppressed; one also
+  outranks an ordinary failure or a cancellation in flight. The predicate and
+  the step holder are `@StoreInternalApi` for the companion modules
+  (`internalIsFatal`, `internalRethrowIfFatal`, `internalRethrowFatal`,
+  `FatalHold`). GUIDE §18.5.
+
 - **A mutation inside a bare `store { }` block now throws (issue 005).**
   `store { x mutate v }` looked like a scope but was a plain pass-through:
   each bare `mutate`/`update` there synthesized its OWN one-shot action, so

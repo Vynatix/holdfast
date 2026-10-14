@@ -3,11 +3,14 @@
 package com.vynatix.holdfast.tree
 
 import com.vynatix.holdfast.ExperimentalStoreApi
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.SettleScopes
 import com.vynatix.holdfast.SettleTask
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.displayName
+import com.vynatix.holdfast.disposeEach
+import com.vynatix.holdfast.runIsolated
 import kotlinx.atomicfu.locks.synchronized
 
 // A store's dispose, as its tree hears it (`TreeLeafAttachment.onStoreDisposed`,
@@ -27,7 +30,9 @@ import kotlinx.atomicfu.locks.synchronized
 // Every step runs in its own `runCatching`; failures are collected and
 // thrown together at the end, so `AttachmentSlot.notifyDisposed` reports
 // them through the store's `uncaughtObserverHandler` (else its default log
-// line) — the same route every attachment's dispose failure takes.
+// line) — the same route every attachment's dispose failure takes. A fatal
+// error (issue #61) is held instead, never wrapped or collected: every later
+// step still runs, and the end throws it, carrying the collected failures.
 
 /** One run of [TreeLeafAttachment.onStoreDisposed] for [attachment]. */
 internal class StoreDetach(
@@ -36,6 +41,9 @@ internal class StoreDetach(
     private val node = attachment.node
     private val store = attachment.storeRef
     private val failures = ArrayList<Throwable>()
+
+    /** The first fatal error a step threw (issue #61): thrown after the last step, in place of [failures]. */
+    private val fatal = FatalHold()
 
     /** The parent edge as of the start: what the detach goes through even while it is being cleared. */
     private val edge = attachment.parentEdge.value
@@ -75,7 +83,9 @@ internal class StoreDetach(
         name: String,
         body: () -> Unit,
     ) {
-        runCatching(body).onFailure { failures += IllegalStateException("tree dispose step '$name' failed", it) }
+        runCatching(body).onFailure {
+            if (!fatal.holdIfFatal(it)) failures += IllegalStateException("tree dispose step '$name' failed", it)
+        }
     }
 
     /**
@@ -88,7 +98,7 @@ internal class StoreDetach(
     private fun closeOwnRing() {
         synchronized(attachment.installLock) { attachment.installed = emptyList() }
         val members = listingOf(node, node, includeDisposing = true).shape.leaves()
-        for ((leaf, _) in members) runCatching { syncTreeRing(leaf) }.onFailure { failures += it }
+        for ((leaf, _) in members) runCatching { syncTreeRing(leaf) }.onFailure { fatal.collectInto(failures, it) }
     }
 
     /** Step 2: leave the parent's registry, then drop the store (so `onDetached` for this leaf sees none). */
@@ -115,13 +125,13 @@ internal class StoreDetach(
         owned = released.mapNotNull { child -> child.store?.takeIf { child.isOwnedByKeyedBranchOf(registry) } }
         descendants =
             released.associateWith { child ->
-                runCatching {
+                fatal.runIsolated(emptyList()) {
                     listingOf(child, child, includeDisposing = true)
                         .shape
                         .leaves()
                         .drop(1)
                         .map { it.first }
-                }.getOrDefault(emptyList())
+                }
             }
     }
 
@@ -138,7 +148,7 @@ internal class StoreDetach(
         // would wait on it forever).
         if (wasLive && node.claimDetach()) {
             try {
-                announceDetached(chain, listOf(node)) { failures += it }
+                announceDetached(chain, listOf(node)) { fatal.collectInto(failures, it) }
             } finally {
                 node.attachPhase.compareAndSet(DETACHED, ATTACH_UNANNOUNCED)
             }
@@ -146,7 +156,9 @@ internal class StoreDetach(
         for (child in released) {
             if (!child.claimDetach()) continue
             try {
-                announceDetached(chain, listOf(child) + descendants[child].orEmpty()) { failures += it }
+                announceDetached(chain, listOf(child) + descendants[child].orEmpty()) {
+                    fatal.collectInto(failures, it)
+                }
             } finally {
                 child.attachPhase.compareAndSet(DETACHED, ATTACH_UNANNOUNCED)
             }
@@ -197,26 +209,37 @@ internal class StoreDetach(
     private fun resyncReleased() {
         for (child in released) {
             val now =
-                runCatching { listingOf(child, child, includeDisposing = true).shape.leaves().map { it.first } }
-                    .getOrDefault(listOf(child))
+                fatal.runIsolated(listOf(child)) {
+                    listingOf(child, child, includeDisposing = true).shape.leaves().map { it.first }
+                }
             val earlier = descendants[child].orEmpty().filter { leaf -> now.none { it === leaf } }
             for (leaf in now + earlier) {
-                runCatching { syncTreeRing(leaf) }.onFailure { failures += it }
+                runCatching { syncTreeRing(leaf) }.onFailure { fatal.collectInto(failures, it) }
             }
         }
     }
 
+    /** Throw what the steps failed with: the fatal error one held (issue #61), carrying the rest, else the rest. */
     private fun reportFailures() {
-        val first = failures.firstOrNull() ?: return
         val reported =
-            IllegalStateException(
-                "Holdfast: the store tree could not fully detach ${store?.displayName ?: "a store"} on dispose " +
-                    "(${failures.size} failure(s)); the store is disposed regardless",
-                first,
-            )
-        for (other in failures.drop(1)) reported.addSuppressed(other)
-        throw reported
+            failures.firstOrNull()?.let { first ->
+                IllegalStateException(
+                    "Holdfast: the store tree could not fully detach ${store?.displayName ?: "a store"} on dispose " +
+                        "(${failures.size} failure(s)); the store is disposed regardless",
+                    first,
+                ).apply { failures.drop(1).forEach { addSuppressed(it) } }
+            }
+        fatal.rethrowHeld(alongside = reported)
+        if (reported != null) throw reported
     }
+}
+
+/** Collect [failure] into [failures] for the end of a detach — a fatal error is held instead. */
+private fun FatalHold.collectInto(
+    failures: MutableList<Throwable>,
+    failure: Throwable,
+) {
+    if (!holdIfFatal(failure)) failures += failure
 }
 
 /**
@@ -233,24 +256,24 @@ private fun LeafNode.isOwnedByKeyedBranchOf(registry: ChildRegistry): Boolean {
 /**
  * The keyed stores a disposed store's branches owned, disposed once — when
  * the settle scope the parent's dispose ran in settles, or by whoever runs
- * it directly. `Store.dispose()` never throws and is idempotent.
+ * it directly. `Store.dispose()` is idempotent and never throws, except a
+ * fatal error (issue #61): every store is still disposed, then the first
+ * such error is thrown.
  */
 internal class OwnedKeyedDisposeTask(
     private val stores: List<Store<*>>,
 ) : SettleTask {
     override val settleRank: Int get() = 0
 
-    override fun settle() {
-        for (store in stores) store.dispose()
-    }
+    override fun settle() = disposeEach(stores)
 
     override fun deferPastSettle(report: Boolean) = settle()
 
     /**
      * Report through the first store of the list, the one this task was
-     * disposing when it threw (`dispose()` never throws, so this is a
-     * backstop — a library bug, but not a silent one). Works on a store the
-     * task already disposed.
+     * disposing when it threw (`dispose()` throws nothing but a fatal error,
+     * which a settle never reports, so this is a backstop — a library bug,
+     * but not a silent one). Works on a store the task already disposed.
      */
     override fun reportUncaught(error: Throwable) {
         stores.first().internalReportUncaughtFailure(error)

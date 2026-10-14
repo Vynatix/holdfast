@@ -1,5 +1,6 @@
 package com.vynatix.holdfast.testing
 
+import com.vynatix.holdfast.testing.internal.PrivilegedHooks
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlin.time.Duration
@@ -26,6 +27,11 @@ import kotlin.time.Duration.Companion.seconds
  * test. The check is suppressed when the body already threw so the
  * root-cause exception is what the runner reports.
  *
+ * A fatal error (issue #61: a `StackOverflowError`, an `OutOfMemoryError`)
+ * wins: one the body threw stays what the runner reports, a teardown failure
+ * added to it as suppressed; one teardown threw replaces the body's failure,
+ * carrying it as suppressed.
+ *
  * The default [timeout] of 60 seconds matches `runTest`'s own default; pass a
  * larger value when exercising long virtual-time delays.
  */
@@ -35,16 +41,39 @@ fun storeTest(
 ): TestResult =
     runTest(timeout = timeout) {
         val scope = StoreTestScope(this)
-        var bodyFailed = false
+        var bodyFailure: Throwable? = null
         try {
             scope.body()
         } catch (t: Throwable) {
-            bodyFailed = true
+            bodyFailure = t
             throw t
         } finally {
-            scope.tearDown(bodyFailed)
+            scope.tearDownAfter(bodyFailure)
         }
     }
+
+/**
+ * [StoreTestScope.tearDown] in [storeTest]'s `finally`, after a body that
+ * threw [bodyFailure] (`null`: it returned). A teardown failure replaces the
+ * body's, as a `finally` that throws does, unless the body's is a fatal error
+ * (issue #61): that one stays in flight, carrying the teardown's as
+ * suppressed. A fatal teardown failure carries the body's.
+ */
+private fun StoreTestScope.tearDownAfter(bodyFailure: Throwable?) {
+    if (bodyFailure == null) {
+        tearDown(bodyAlreadyFailed = false)
+        return
+    }
+    val teardownFailure = runCatching { tearDown(bodyAlreadyFailed = true) }.exceptionOrNull()
+    when {
+        teardownFailure == null || teardownFailure === bodyFailure -> Unit
+        PrivilegedHooks.isFatal(bodyFailure) -> bodyFailure.addSuppressed(teardownFailure)
+        else -> {
+            if (PrivilegedHooks.isFatal(teardownFailure)) teardownFailure.addSuppressed(bodyFailure)
+            throw teardownFailure
+        }
+    }
+}
 
 /** Deprecated alias for [storeTest], kept for one minor release. */
 @Deprecated(

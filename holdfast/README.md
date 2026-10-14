@@ -90,7 +90,8 @@ surfaces it as early as the platform allows:
   surfaces at the **first dispatch**: `action { }` rethrows the receiver-cast
   failure as a `ClassCastException` with a teaching message (a documented
   exception to `action`'s no-throw-result contract, for this programming
-  error only), and `invoke { }` propagates the same teaching exception. A
+  error and for a fatal error such as `StackOverflowError` — see GUIDE
+  §18.5), and `invoke { }` propagates the same teaching exception. A
   `ClassCastException` thrown by your own action body keeps today's handling
   — wrapped into `TransactionResult.Error` — and is never relabeled.
 - **wasmJs**: not enforced. Bridge casts may surface as WasmGC runtime traps

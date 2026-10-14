@@ -37,7 +37,9 @@ interface StoreAttachment {
      * another store or wait for another thread's store work. After that this
      * attachment hears nothing more from the store. A throwing callback goes
      * to the store's `uncaughtObserverHandler` (else the default log, with a
-     * line of its own) and the other attachments are still told.
+     * line of its own) and the other attachments are still told. A fatal
+     * error (issue #61) is never reported: the other attachments are still
+     * told, then [Store.dispose] throws it.
      */
     fun onStoreDisposed() {}
 
@@ -269,14 +271,19 @@ internal class AttachmentSlot(
      * `uncaughtObserverHandler` (else the default log, with a dispose line of
      * its own, not the post-commit one), a handler that throws for it is
      * ignored — `dispose()` never throws — and the next one is told either way.
+     * A fatal error (issue #61), from a callback or the handler, is never
+     * reported: the first is thrown once every attachment has been told.
      */
     fun notifyDisposed(attachments: List<StoreAttachment>) {
+        val fatal = FatalHold()
         for (attachment in attachments) {
             runCatching { attachment.onStoreDisposed() }
                 .onFailure { failure ->
-                    runCatching { store.reportUncaughtFailure(failure) { disposeFailureMessage(attachment) } }
+                    if (fatal.holdIfFatal(failure)) return@onFailure
+                    fatal.runIsolated { store.reportUncaughtFailure(failure) { disposeFailureMessage(attachment) } }
                 }
         }
+        fatal.rethrowHeld()
     }
 
     private fun disposeFailureMessage(attachment: StoreAttachment): String =

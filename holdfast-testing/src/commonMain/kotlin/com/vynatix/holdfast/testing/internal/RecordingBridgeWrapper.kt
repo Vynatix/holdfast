@@ -128,11 +128,14 @@ internal class RecordingBridgeWrapper<T : Any>(
      * Put [delegate] back as [state]'s bridge, if this wrapper still is it. A
      * re-attach like the wrap was: the delegate's `observe` runs again, a
      * load-on-attach replay included. Never throws (a state that refuses a
-     * bridge now keeps the wrapper, which forwards as before).
+     * bridge now keeps the wrapper, which forwards as before), except a fatal
+     * error (issue #61), such as one the delegate's `observe` threw.
      */
     fun unwrap() {
         val mutable = mutableState() ?: return
-        if (mutable.bridge === this) runCatching { mutable.bridge = delegate }
+        if (mutable.bridge === this) {
+            runCatching { mutable.bridge = delegate }.onFailure(PrivilegedHooks::rethrowIfFatal)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

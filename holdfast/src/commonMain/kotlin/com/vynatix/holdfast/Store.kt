@@ -6,6 +6,7 @@ import com.vynatix.holdfast.platform.checkCrtpSelfTypeAtConstruction
 import com.vynatix.holdfast.platform.crtpSelfCastTeachingOrNull
 import com.vynatix.holdfast.platform.currentThreadId
 import com.vynatix.holdfast.platform.logUncaughtFailure
+import com.vynatix.holdfast.platform.rethrowIfFatal
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +50,10 @@ class FrameMiddlewareSession internal constructor(
     /** Fire every middleware's `onTransactionCompleted`, innermost-first. */
     fun fireCompleted() = completed()
 
-    /** Fire every middleware's `onTransactionError`, innermost-first, each isolated. */
+    /**
+     * Fire every middleware's `onTransactionError`, innermost-first, each
+     * isolated; a fatal error (issue #61) one throws is thrown once all have run.
+     */
     fun fireError(error: Throwable) = errored(error)
 }
 
@@ -325,6 +329,12 @@ abstract class Store<Self : Store<Self>> {
      *    holds, e.g. the `transactionLock` of an action of this store that
      *    calls `dispose()`); a throwing one is reported to
      *    [uncaughtObserverHandler].
+     *  - `dispose()` never throws, except a fatal error (issue #61: a
+     *    `VirtualMachineError` such as `StackOverflowError` on JVM/Android, a
+     *    `kotlin.OutOfMemoryError` on iOS/wasmJs) from what it runs — a
+     *    drained recompute, a bridge's or subscription's dispose, [onDispose],
+     *    an attachment: every later teardown step still runs, and then the
+     *    first one is thrown.
      *
      * Subclasses with additional resources (e.g. `EventfulStore`'s events SharedFlow)
      * should override [onDispose] to release them. Always call `super.onDispose()`.
@@ -346,31 +356,36 @@ abstract class Store<Self : Store<Self>> {
                 // below is the last call every attachment gets.
                 attachmentSlot.close()
             }
-        // Drain, not clear, outside the lock: this store's queue can hold the
-        // recomputes of derived states hosted on OTHER, live stores (a
-        // DerivedState's recompute can wait for a holder of its source's
-        // store there), which must still see this store's last commit. A task
-        // hosted here refuses itself (tryTopLevelAction answers Disposed), and
-        // one hosted elsewhere never blocks: a busy host is handed the task.
-        drainPostCommitTasks()
-        // Drop every state and declaration under the registry's lock, then call
-        // shutdownSilently outside any store-side lock — `shutdownSilently` takes
-        // the per-state observer + bridge locks, and we don't want to invert
-        // ordering.
-        val toShutdown = registry.releaseAll()
-        toShutdown.forEach { runCatching { it.shutdownSilently() } }
-        // Drop middleware so a stray reference to a disposed store can't keep
-        // captured state alive. Both lists: the outer ring is not a consumer
-        // registration and clearMiddleware() never reaches it, but dispose()
-        // tears down everything.
-        middlewareLock.withLock { middlewareList.clear() }
-        outerMiddleware.clear()
-        // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
-        runCatching { onDispose() }
-        // Last, holding no lock dispose() took (a caller inside an action of
-        // this store still holds its transactionLock and middlewareLock): an
-        // attachment hears of a store that is completely torn down.
-        attachmentSlot.notifyDisposed(attachments)
+        // A fatal error (issue #61) a step throws is held while the later steps
+        // still run — a second dispose() is a no-op, so a skipped step would
+        // never run — and thrown after the last.
+        holdingFatalErrors {
+            // Drain, not clear, outside the lock: this store's queue can hold the
+            // recomputes of derived states hosted on OTHER, live stores (a
+            // DerivedState's recompute can wait for a holder of its source's
+            // store there), which must still see this store's last commit. A task
+            // hosted here refuses itself (tryTopLevelAction answers Disposed), and
+            // one hosted elsewhere never blocks: a busy host is handed the task.
+            runHoldingFatal { drainPostCommitTasks() }
+            // Drop every state and declaration under the registry's lock, then call
+            // shutdownSilently outside any store-side lock — `shutdownSilently` takes
+            // the per-state observer + bridge locks, and we don't want to invert
+            // ordering.
+            val toShutdown = registry.releaseAll()
+            toShutdown.forEach { runIsolated { it.shutdownSilently() } }
+            // Drop middleware so a stray reference to a disposed store can't keep
+            // captured state alive. Both lists: the outer ring is not a consumer
+            // registration and clearMiddleware() never reaches it, but dispose()
+            // tears down everything.
+            middlewareLock.withLock { middlewareList.clear() }
+            outerMiddleware.clear()
+            // Subclass hook: EventfulStore uses this to reset its events SharedFlow.
+            runIsolated { onDispose() }
+            // Last, holding no lock dispose() took (a caller inside an action of
+            // this store still holds its transactionLock and middlewareLock): an
+            // attachment hears of a store that is completely torn down.
+            runHoldingFatal { attachmentSlot.notifyDisposed(attachments) }
+        }
     }
 
     /**
@@ -380,7 +395,8 @@ abstract class Store<Self : Store<Self>> {
      * (e.g. `EventfulStore` resets its events SharedFlow). Default no-op.
      *
      * Always wrapped in `runCatching` by [dispose] so a misbehaving override can't
-     * leave the store half-disposed.
+     * leave the store half-disposed. A fatal error it throws (issue #61) is not
+     * swallowed: [dispose] still tells the attachments, then throws it.
      */
     protected open fun onDispose() {}
 
@@ -491,6 +507,16 @@ abstract class Store<Self : Store<Self>> {
      * iOS and wasmJs. Set a handler to route them into your own logging or
      * crash reporting, or into a test's failure list; `{ }` silences them.
      *
+     * A fatal error (issue #61: a `VirtualMachineError` such as
+     * `StackOverflowError` or `OutOfMemoryError` on JVM/Android, a
+     * `kotlin.OutOfMemoryError` on iOS/wasmJs) never reaches this handler,
+     * and one the handler throws is never ignored and never ends a fanout
+     * early: it propagates out of the entry that ran the failing code once
+     * that entry's remaining steps have run (the rest of the fanout, the
+     * drain's batch, the settle, `dispose()`'s teardown). "A handler that
+     * throws … is ignored" and "ends that commit's fanout early" below mean a
+     * non-fatal throw.
+     *
      * For an observer callback, a fanout `Transformer.get` or a bridge publish,
      * the handler runs on the committing thread, inside the commit fanout. The
      * store is still held then: under its transaction lock for a blocking
@@ -527,7 +553,8 @@ abstract class Store<Self : Store<Self>> {
      * A failed dispose notification is reported by [dispose] as its last step,
      * on the disposing thread, holding no lock `dispose()` took (but under any
      * lock its caller holds). A handler that throws there is ignored, since
-     * `dispose()` never throws, and the store's other attachments are still
+     * `dispose()` never throws (except a fatal error, issue #61, which is
+     * never reported here), and the store's other attachments are still
      * told. With no handler, it is logged with a line of its own, naming the
      * attachment.
      *
@@ -547,7 +574,10 @@ abstract class Store<Self : Store<Self>> {
      * `:holdfast-coroutines`' suspending bridge publishes. A throwing handler
      * propagates, exactly as when fanout invoked it directly. Works on a
      * disposed store. (A failed dispose notification goes to the same handler
-     * through [reportUncaughtFailure], with a log line of its own.)
+     * through [reportUncaughtFailure], with a log line of its own.) A fatal
+     * [error] is thrown again, never reported (issue #61): a caller in a
+     * sequence that must finish holds it in a [FatalHold] instead of calling
+     * this.
      */
     @StoreInternalApi
     fun internalReportUncaughtFailure(error: Throwable) {
@@ -561,12 +591,15 @@ abstract class Store<Self : Store<Self>> {
     /**
      * Hand [error] to [uncaughtObserverHandler], or, while none is set, log it
      * through the platform's default output under [unhandledMessage]. A
-     * throwing handler propagates.
+     * throwing handler propagates. A fatal [error] is never reported: it is
+     * thrown again (issue #61), so a site that reaches here with one still
+     * fails loudly.
      */
     internal fun reportUncaughtFailure(
         error: Throwable,
         unhandledMessage: () -> String,
     ) {
+        error.rethrowIfFatal()
         val handler = uncaughtObserverHandler
         if (handler != null) handler(error) else logUncaughtFailure(unhandledMessage(), error)
     }
@@ -739,8 +772,9 @@ abstract class Store<Self : Store<Self>> {
      * taken — before the middleware chain, so it runs even when a middleware
      * then rejects the action — and the body runs exactly like a top-level
      * [action] (middleware chain, commit, fanout; failures fold into the
-     * [TopLevelAttempt.Ran] result), the locks release in `action`'s order, and
-     * the post-commit queue drains. No frame policing: callers are library
+     * [TopLevelAttempt.Ran] result, except a fatal error, issue #61, which
+     * propagates once the queue has drained, as below), the locks
+     * release in `action`'s order, and the post-commit queue drains. No frame policing: callers are library
      * machinery that runs after commits, not user bodies. Like [action] it is
      * an entry: it joins the settle scope open on this thread (a recompute a
      * settle runs), else opens one that settles once it has released the
@@ -786,7 +820,7 @@ abstract class Store<Self : Store<Self>> {
                 when {
                     isDisposed -> TopLevelAttempt.Disposed
                     active != null -> TopLevelAttempt.Busy(active)
-                    else -> tryTopLevelUnderSerializer(id, onAcquired, body)
+                    else -> drainingOnFatal(::drainPostCommitTasks) { tryTopLevelUnderSerializer(id, onAcquired, body) }
                 }
             if (attempt is TopLevelAttempt.Ran) drainPostCommitTasks()
             attempt
@@ -954,6 +988,16 @@ abstract class Store<Self : Store<Self>> {
      * sources ([SettleScope]). Inside the action they reflect none of its
      * writes.
      *
+     * A fatal error (issue #61: a `VirtualMachineError` such as
+     * `StackOverflowError` on JVM/Android, a `kotlin.OutOfMemoryError` on
+     * iOS/wasmJs) is never folded into a [TransactionResult.Error] — a
+     * documented exception to the no-throw-result contract. One thrown by
+     * [body] or a middleware hook propagates once the transaction has rolled
+     * back and its middleware's `onTransactionError` hooks have run; one
+     * thrown during the commit's fanout (an observer, a bridge publish), once
+     * every observer, bridge and event of that commit has run — its values
+     * stand.
+     *
      * @throws IllegalStateException when called from inside a state
      *   initializer (see [state]), a schema migration
      *   (`SchemaVersioned.migrate`) or the compute of a [derivedState]/[merged]
@@ -1021,19 +1065,17 @@ abstract class Store<Self : Store<Self>> {
         // Re-acquiring there is never correct and is actively fatal: the
         // serializer is not reentrant, so the inner acquire would wait forever
         // for the outer acquire this very call stack holds.
-        val nested = ownsActiveTransaction()
+        if (ownsActiveTransaction()) return runBlockingActionUnderLock(body)
         // Top level: the serializer, if installed, then the lock, re-reading
         // the serializer under the lock (SerializerInstallWindow.kt).
-        val result =
-            if (nested) runBlockingActionUnderLock(body) else holdSerialized { runTransaction(actionId(body), body) }
         // Deferred work (derived recomputes) opens FRESH top-level actions, so it
         // must run only after this call's serializer bracket is released —
         // inside it, the recompute would find the store busy and hand itself
-        // back to this very call. Draining after the release is also what makes
-        // this call a valid hand-off target (see tryTopLevelAction). Same
-        // placement, and same reason, as suspendAtomic's drain.
-        if (!nested) drainPostCommitTasks()
-        return result
+        // back to this very call. Draining after the release — even when a
+        // fatal error propagates (issue #61) — is also what makes this call a
+        // valid hand-off target (see tryTopLevelAction). Same placement, and
+        // same reason, as suspendAtomic's drain.
+        return thenDraining(::drainPostCommitTasks) { holdSerialized { runTransaction(actionId(body), body) } }
     }
 
     /**
@@ -1196,10 +1238,14 @@ abstract class Store<Self : Store<Self>> {
                 @Suppress("UNCHECKED_CAST")
                 TransactionResult.Success(txn, box[0] as R)
             } catch (e: Throwable) {
+                e.rethrowIfFatal()
                 TransactionResult.Error(e, txn)
             }
         } catch (e: Throwable) {
-            runCatching { txn.rollback() }
+            // Rolled back first (a no-op after a failed commit), then a fatal
+            // error (issue #61) — this failure, or one the rollback threw — is
+            // thrown, never folded into an Error result.
+            cleanUpUnwinding(e) { txn.rollback() }
             // A CRTP self-type violation is a programming error: rethrow the
             // receiver-bridge cast failure with its teaching message instead
             // of wrapping it into an Error result that may be discarded
@@ -1873,7 +1919,9 @@ abstract class Store<Self : Store<Self>> {
      *    the whole frame back — for frames, `completed` does NOT mean
      *    durably-committed.
      *  - [FrameMiddlewareSession.fireError] — innermost-first, each hook
-     *    `runCatching`-isolated, matching the suspending action path.
+     *    `runCatching`-isolated, matching the suspending action path; a
+     *    fatal error (issue #61) a hook throws is thrown once every hook has
+     *    run.
      *
      * One [Middleware.MiddlewareContext] per middleware is reused across the
      * session so metadata stashed in `started` is readable in `completed`/`error`.
@@ -1893,7 +1941,7 @@ abstract class Store<Self : Store<Self>> {
                 for (i in chain.indices) chain[i].invokeOnTransactionCompleted(contexts[i])
             },
             errored = { e ->
-                for (i in chain.indices) runCatching { chain[i].invokeOnTransactionError(contexts[i], e) }
+                chain.indices.forEachIsolated { i -> chain[i].invokeOnTransactionError(contexts[i], e) }
             },
         )
     }

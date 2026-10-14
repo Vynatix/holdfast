@@ -76,6 +76,9 @@ class OpenTransaction internal constructor(
      *    observer body raises, or [Transaction.commit] hits a status
      *    transition error). Mirrors the production action contract — the
      *    returned [Transaction] in the result is the same as [transaction].
+     *    A fatal error (issue #61, such as a `StackOverflowError`) is never
+     *    a [TransactionResult.Error]: it propagates, as out of an action,
+     *    with the store's active transaction already cleared.
      *
      * Subsequent calls to [commit] or [rollback] throw
      * [IllegalStateException] "OpenTransaction already closed".
@@ -89,6 +92,7 @@ class OpenTransaction internal constructor(
             PrivilegedHooks.commitOpenTransaction(handle.store, transaction)
             TransactionResult.Success(transaction, Unit)
         } catch (e: Throwable) {
+            PrivilegedHooks.rethrowIfFatal(e)
             TransactionResult.Error(e, transaction)
         } finally {
             onClose(this)

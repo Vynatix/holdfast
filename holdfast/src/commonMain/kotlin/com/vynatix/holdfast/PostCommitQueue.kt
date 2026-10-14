@@ -3,6 +3,7 @@
 package com.vynatix.holdfast
 
 import com.vynatix.holdfast.platform.currentThreadId
+import com.vynatix.holdfast.platform.rethrowFatal
 
 /**
  * One store's queue of deferred work: tasks that must run only after the
@@ -90,7 +91,10 @@ internal class PostCommitQueue(
     /**
      * Run every queued task, including tasks queued by the tasks it runs, on
      * the calling thread and outside the queue lock. A throwing task is
-     * swallowed; callers that need its failure report it themselves.
+     * swallowed; callers that need its failure report it themselves. Except
+     * a fatal error (issue #61): the drain still runs the rest of the batch it
+     * took out of the queue, then stops — everything still queued stays there
+     * for the store's next holder — and throws it once it has deregistered.
      *
      * A drain runs each task instance at most once and leaves one that comes
      * back queued, because whoever queued it again owns its next run: either
@@ -127,22 +131,27 @@ internal class PostCommitQueue(
      *   [MAX_SETTLE_RUNS] such passes in a row, the drain cuts the next one:
      *   leaves its tasks queued for the store's next holder and reports the
      *   cut once, through [owner]'s `uncaughtObserverHandler` (a handler that
-     *   throws there is ignored: a drain never throws). It reports while still
-     *   draining, so a handler that takes the store again hands its drain to
-     *   this one, which skips what it cut. A pass with any task another thread
-     *   queued starts the count again: that loop ends when the other thread
-     *   stops.
+     *   throws there is ignored: a drain never throws — except a fatal error,
+     *   thrown at once, with everything not run still queued). It reports
+     *   while still draining, so a handler that takes the store again hands
+     *   its drain to this one, which skips what it cut. A pass with any task
+     *   another thread queued starts the count again: that loop ends when the
+     *   other thread stops.
      */
     fun drain() {
         val me = currentThreadId()
         var batch = beginDrain(me) ?: return
         val run = Run(me)
+        val fatal = FatalHold()
         try {
             while (batch.isNotEmpty()) {
                 for (task in batch) {
                     run.ran = run.ran.plusOnce(task)
-                    runCatching { task() }
+                    fatal.runIsolated { task() }
                 }
+                // A fatal error: the batch, already out of the queue, has run;
+                // what is still queued waits for the store's next holder.
+                if (fatal.isHolding) break
                 batch = lock.withLock { run.next() }
                 if (batch.isEmpty() && run.reportCutOnce()) batch = lock.withLock { run.next() }
             }
@@ -156,6 +165,7 @@ internal class PostCommitQueue(
                 }
             }
         }
+        fatal.rethrowHeld()
     }
 
     /**
@@ -243,7 +253,7 @@ internal class PostCommitQueue(
                                 "state it hosts may lag its sources until then",
                         ),
                     )
-                }
+                }.rethrowFatal()
             }
             return true
         }

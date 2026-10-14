@@ -121,8 +121,13 @@ internal object NoWriteRegion {
         frame: NoWriteFrame,
         block: () -> R,
     ): R {
-        setInitializerLocal(frame)
         try {
+            // Inside the try: a fatal error (issue #61) the slot write throws
+            // after storing the frame (a JVM ThreadLocal rehashing) still
+            // restores the parent — the value before the write, every frame's
+            // parent being `current()` — rather than leave a stale frame that
+            // refuses every later write on this thread (#37).
+            setInitializerLocal(frame)
             return block()
         } finally {
             setInitializerLocal(frame.parent)

@@ -3,6 +3,7 @@
 package com.vynatix.holdfast.coroutines
 
 import com.vynatix.holdfast.Disposable
+import com.vynatix.holdfast.FatalHold
 import com.vynatix.holdfast.MutableState
 import com.vynatix.holdfast.State
 import com.vynatix.holdfast.Store
@@ -51,7 +52,13 @@ import kotlinx.coroutines.launch
  * any caller — install a middleware that logs/handles errors if you need
  * visibility. (`Throwable`s thrown synchronously from the initial eager
  * compute DO propagate to the caller of [suspendDerived]; that path runs
- * [runBlocking] to seed the backing state.)
+ * [runBlocking] to seed the backing state.) A fatal error (issue #61) — a
+ * `VirtualMachineError` such as `StackOverflowError` on JVM/Android — is the
+ * exception: the launched `suspendAction` throws it, after the error hooks
+ * and the rollback, instead of returning an `Error`, so it fails the launched
+ * coroutine, which `store.scope` handles like any failed child: its
+ * `CoroutineExceptionHandler`, else the platform's uncaught-exception handler
+ * (a scope with a plain `Job` is cancelled by it).
  *
  * **Initial value**: seeded synchronously by running [compute] once via
  * [runBlocking] on the calling thread. The same call-site contract as sync
@@ -154,8 +161,12 @@ fun <V : Store<V>, T : Any> V.suspendDerived(
     val composite =
         Disposable {
             if (!disposed.compareAndSet(expect = false, update = true)) return@Disposable
-            subs.forEach { runCatching { it.dispose() } }
-            latestJob.value?.let { runCatching { it.cancel() } }
+            // After the flip no second dispose() runs these steps, so a fatal
+            // error (issue #61) is held until every one has run, then thrown.
+            val fatal = FatalHold()
+            subs.forEach { sub -> runCatching { sub.dispose() }.onFailure { fatal.holdIfFatal(it) } }
+            latestJob.value?.let { job -> runCatching { job.cancel() }.onFailure { fatal.holdIfFatal(it) } }
+            fatal.rethrowHeld()
         }
     return backingState to composite
 }

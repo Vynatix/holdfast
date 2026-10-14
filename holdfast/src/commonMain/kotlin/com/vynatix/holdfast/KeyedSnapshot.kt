@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // Keyed state families in snapshots (issue #20, R7; plan D8, D9, D11, D18).
 //
 // A capture holds every family its scope captures — [SnapshotScope.UserAuthored]
@@ -149,7 +151,7 @@ internal fun <K : Any> SnapshotContent.keysOf(family: KeyedState<K, *>): Set<K> 
             val texts = familyTexts(impl)?.takeIf { it.isNotEmpty() } ?: return emptySet()
             val codec = keyCodecOf(impl)
             texts.keys.mapTo(LinkedHashSet()) { text ->
-                runCatching { codec.decode(text) }.getOrElse { failure ->
+                runCatching { codec.decode(text) }.rethrowFatal().getOrElse { failure ->
                     throw SnapshotFormatException(
                         "Cannot decode a key of ${impl.qualifiedName} from the snapshot: its keyCodec threw " +
                             "${failure.describeClass()}. The exception is not attached, because its message may " +
@@ -190,14 +192,15 @@ private fun <K : Any> keyCodecOf(family: KeyedFamily<K, *>): StateCodec<K> =
 /**
  * [value] encoded by [codec]. A throwing codec is reported naming [what]
  * ("a key of …: its keyCodec") and the exception's class, without the
- * exception, whose message may quote the value.
+ * exception, whose message may quote the value; a fatal error it throws
+ * propagates as it is (issue #61).
  */
 private inline fun <V : Any> encodeWith(
     codec: StateCodec<V>,
     value: V,
     what: () -> String,
 ): String =
-    runCatching { codec.encode(value) }.getOrElse { failure ->
+    runCatching { codec.encode(value) }.rethrowFatal().getOrElse { failure ->
         error(
             "Cannot encode ${what()} threw ${failure.describeClass()}. The exception is not attached, because its " +
                 "message may quote the value.",

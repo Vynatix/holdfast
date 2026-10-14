@@ -2,6 +2,8 @@
 
 package com.vynatix.holdfast
 
+import com.vynatix.holdfast.platform.rethrowFatal
+
 // Staging keyed-entry evictions (issue #20, R7; plan D16, D18).
 //
 // `evict`/`evictAll` stage like `mutate`: into the store's transaction open on
@@ -152,7 +154,9 @@ private fun Transaction.stageEviction(states: List<MutableState<*>>): Boolean =
  * attempt withdraws a handed-off copy first, so no later drain runs it
  * again. Its failure — a middleware rejecting it, say — is reported through
  * the store's `uncaughtObserverHandler`, as the post-commit side effect it
- * is; on a store disposed meanwhile it does nothing.
+ * is; on a store disposed meanwhile it does nothing. A fatal error
+ * (issue #61) is thrown, never reported, to the drain or settle running the
+ * task.
  */
 private class DeferredEviction(
     private val store: Store<*>,
@@ -174,7 +178,7 @@ private class DeferredEviction(
                     val txn = checkNotNull(store.activeTransaction)
                     check(txn.stageEviction(states.filterNot { it.retired }))
                 }
-            }
+            }.rethrowFatal()
         val failure =
             outcome.fold(
                 onSuccess = { ((it as? TopLevelAttempt.Ran)?.result as? TransactionResult.Error)?.exception },
