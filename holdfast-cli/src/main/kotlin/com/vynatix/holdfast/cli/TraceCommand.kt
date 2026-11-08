@@ -1,5 +1,6 @@
 package com.vynatix.holdfast.cli
 
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.core.Context
@@ -44,7 +45,7 @@ internal fun parseTrace(text: String): TraceFile {
     var total = 0
     for (raw in text.lineSequence().filterNot(String::isBlank)) {
         total++
-        val event = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull()
+        val event = runCatching { Json.parseToJsonElement(raw).jsonObject }.onFailure { it.internalRethrowIfFatal() }.getOrNull()
         if (event == null || !applyEvent(txns, event)) malformed++
     }
     return TraceFile(txns = txns.values.toList(), malformedLines = malformed, totalLines = total)
@@ -103,25 +104,25 @@ private fun startedTxn(
 private fun JsonObject.stringOf(name: String): String? =
     when (val element = get(name)) {
         null, is JsonNull -> null
-        else -> runCatching { element.jsonPrimitive.content }.getOrNull()
+        else -> runCatching { element.jsonPrimitive.content }.onFailure { it.internalRethrowIfFatal() }.getOrNull()
     }
 
 private fun JsonObject.booleanOf(name: String): Boolean? =
     when (val element = get(name)) {
         null, is JsonNull -> null
-        else -> runCatching { element.jsonPrimitive.booleanOrNull }.getOrNull()
+        else -> runCatching { element.jsonPrimitive.booleanOrNull }.onFailure { it.internalRethrowIfFatal() }.getOrNull()
     }
 
 private fun JsonObject.longOf(name: String): Long? =
     when (val element = get(name)) {
         null, is JsonNull -> null
-        else -> runCatching { element.jsonPrimitive.longOrNull }.getOrNull()
+        else -> runCatching { element.jsonPrimitive.longOrNull }.onFailure { it.internalRethrowIfFatal() }.getOrNull()
     }
 
 private fun JsonObject.stringsOf(name: String): List<String> =
     runCatching {
-        get(name)?.jsonArray?.mapNotNull { runCatching { it.jsonPrimitive.content }.getOrNull() }
-    }.getOrNull() ?: emptyList()
+        get(name)?.jsonArray?.mapNotNull { runCatching { it.jsonPrimitive.content }.onFailure { it.internalRethrowIfFatal() }.getOrNull() }
+    }.onFailure { it.internalRethrowIfFatal() }.getOrNull() ?: emptyList()
 
 /** The `trace` command group: render, stats. */
 internal class TraceCommand : CliktCommand(name = "trace") {

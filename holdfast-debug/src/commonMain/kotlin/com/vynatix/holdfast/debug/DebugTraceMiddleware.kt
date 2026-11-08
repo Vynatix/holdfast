@@ -5,6 +5,7 @@ import com.vynatix.holdfast.Middleware
 import com.vynatix.holdfast.Store
 import com.vynatix.holdfast.StoreInternalApi
 import com.vynatix.holdfast.Transaction
+import com.vynatix.holdfast.internalRethrowIfFatal
 import com.vynatix.holdfast.keyedEntryName
 import kotlin.time.TimeSource
 
@@ -133,7 +134,7 @@ class DebugTraceMiddleware<V : Store<V>>(
                 context.store.properties.entries
                     .associate { (name, state) -> state to name }
             states.mapNotNullTo(mutableSetOf<String>()) { state -> namesByState[state] ?: state.keyedEntryName() }
-        }.getOrElse { emptySet() }
+        }.onFailure { it.internalRethrowIfFatal() }.getOrElse { emptySet() }
 
     @OptIn(StoreInternalApi::class)
     private fun Transaction.traceParentId(): String? = parent?.id
